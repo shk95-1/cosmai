@@ -36,7 +36,7 @@ options:
   --scope SCOPE         Restrict to one lexicon category.
 
 $ cosmai eval --help
-usage: cosmai eval [-h] [--check-baseline] [--url URL]
+usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
                    {polarity,wish_class,brand_link,product_match}
 
 positional arguments:
@@ -45,6 +45,9 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --check-baseline      Exit 1 when a baseline is missed.
+  --impl IMPL           Registered factory to use, e.g. llm:claude-sonnet-5.
+  --split {tune,holdout}
+                        Only score eval sets of this split.
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai lexicon --help

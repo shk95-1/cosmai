@@ -2,6 +2,8 @@
 
 Predictor 계약(interfaces.md)은 배치 행만 받고 연결은 받지 않는다 — 사전은 스스로 읽는다.
 LEXICON_URL 은 그 연결을 needs_runtime 이 아닌 곳으로 돌리는 유일한 자리다(테스트).
+
+connect_lexicon·category_of·rating_of 는 #6 의 LLM 예측자도 쓴다 — 두 번째 사용처가 생겨 이름을 열었다.
 """
 
 from __future__ import annotations
@@ -23,14 +25,14 @@ LEXICON_URL: str | None = None
 EVAL_DAY = date(2026, 8, 23)
 
 
-def _connect() -> psycopg.Connection[Any]:
+def connect_lexicon() -> psycopg.Connection[Any]:
     from db.runtime import runtime_url
     from db.seed._common import connect
 
     return connect(LEXICON_URL or runtime_url())
 
 
-def _category(row: LabeledRow) -> str | None:
+def category_of(row: LabeledRow) -> str | None:
     named = row.extra.get("category")
     if isinstance(named, str) and named:
         return named
@@ -38,25 +40,25 @@ def _category(row: LabeledRow) -> str | None:
     return SUNCARE_CATEGORY if row.ref.startswith("sun:") else None
 
 
-def _rating(row: LabeledRow) -> float | None:
+def rating_of(row: LabeledRow) -> float | None:
     rating = row.extra.get("rating")
     return float(rating) if isinstance(rating, str | int | float) and str(rating) else None
 
 
 def predict_polarity(rows: Sequence[LabeledRow]) -> Sequence[str]:
     rule = RulePolarity()
-    with _connect() as conn:
+    with connect_lexicon() as conn:
         aspects = {name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)}
     out = []
     for row in rows:
-        category = _category(row)
-        out.append(rule.classify(row.text, _rating(row), category, aspects[ruleset_for(category)]).polarity)
+        category = category_of(row)
+        out.append(rule.classify(row.text, rating_of(row), category, aspects[ruleset_for(category)]).polarity)
     return out
 
 
 def predict_wish_class(rows: Sequence[LabeledRow]) -> Sequence[str]:
     extractor = RuleExtractor()
-    with _connect() as conn:
+    with connect_lexicon() as conn:
         lexicon = load_lexicon(conn)
     out = []
     for row in rows:

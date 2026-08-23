@@ -21,6 +21,7 @@ if TYPE_CHECKING:  # psycopg 를 여기서 import 하면 --help 한 번에도 �
     import psycopg
 
 STAGES = ("link", "polarity", "aggregate", "all")
+SPLITS = ("tune", "holdout")
 KINDS = ("brand", "format", "attribute", "ingredient", "stopword", "alias", "aspect")
 
 
@@ -43,6 +44,8 @@ def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
     p.add_argument("task", choices=TASKS)
     p.add_argument("--check-baseline", action="store_true", help="Exit 1 when a baseline is missed.")
+    p.add_argument("--impl", default=None, help="Registered factory to use, e.g. llm:claude-sonnet-5.")
+    p.add_argument("--split", default=None, choices=SPLITS, help="Only score eval sets of this split.")
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
@@ -108,7 +111,11 @@ def _run_eval(args: argparse.Namespace) -> int:
     from analysis.evaluate import evaluate, record, render
 
     registry.load_implementations()
-    impl = registry.get(args.task)
+    try:
+        impl = registry.build(args.task, args.impl) if args.impl else registry.get(args.task)
+    except LookupError as refused:
+        print(refused)
+        return 2
     if impl is None:
         print(
             f"no implementation registered for {args.task!r}; the unit that owns it calls "
@@ -119,7 +126,7 @@ def _run_eval(args: argparse.Namespace) -> int:
 
     with _connect(args.url) as conn:
         try:
-            results = evaluate(conn, args.task, impl)
+            results = evaluate(conn, args.task, impl, split=args.split)
             print(render(args.task, impl.version, results))
             print(f"analysis_run {record(conn, args.task, impl.version, results)}")
         except (LookupError, psycopg.Error) as unusable:
