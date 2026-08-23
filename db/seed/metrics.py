@@ -8,16 +8,26 @@ from typing import Any, LiteralString
 
 import psycopg
 
-from db.seed._common import LEXICON_VERSION, RUN_NOTE, counts, dec, integer, read_csv, write
+from db.seed._common import LEXICON_VERSION, counts, dec, integer, read_csv, write
 
 TABLES = ("analysis_run", "metrics_need", "metrics_wish")
 
-VERSIONS = {
-    "linker": "slice",
-    "extractor": "slice",
-    "polarity": "rule-v2.1|rule-v2.2",
-    "aggregate": "slice",
-    "lexicon": LEXICON_VERSION,
+
+def _versions(slice_name: str, polarity: str | None) -> dict[str, Any]:
+    return {
+        "linker": slice_name,
+        "extractor": slice_name,
+        "polarity": polarity,
+        "aggregate": slice_name,
+        "lexicon": LEXICON_VERSION,
+    }
+
+
+# One run per source slice: the aggregates of two slices are two measurements, not one.
+RUNS = {
+    "suncare": ("seed:slice-suncare", _versions("slice-suncare", "rule-v2.1")),
+    "p1": ("seed:slice-p1", _versions("slice-p1", "rule-v2.2")),
+    "p9": ("seed:slice-p9", _versions("slice-p9", None)),
 }
 SUNCARE_SCOPE = "선블록"
 # wish_aggregates mixes a cross-tab with its own margins; the PK cannot hold both under one scope.
@@ -45,15 +55,16 @@ SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels,
 """
 
 
-def analysis_run(cur: psycopg.Cursor[Any]) -> int:
+def analysis_run(cur: psycopg.Cursor[Any], key: str) -> int:
     """Found by note, created only when absent -- re-seeding must not pile up runs."""
-    cur.execute("SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1", (RUN_NOTE,))
+    note, versions = RUNS[key]
+    cur.execute("SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1", (note,))
     found = cur.fetchone()
     if found:
         return int(found[0])
     cur.execute(
         "INSERT INTO analysis_run (status, versions, note) VALUES (%s, %s::jsonb, %s) RETURNING run_id",
-        ("seeded", json.dumps(VERSIONS, ensure_ascii=False), RUN_NOTE),
+        ("seeded", json.dumps(versions, ensure_ascii=False), note),
     )
     created = cur.fetchone()
     assert created is not None
@@ -65,7 +76,7 @@ def _ratio(value: str) -> int | None:
     return integer(value.split("/", 1)[0]) if value else None
 
 
-def _need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
+def _suncare_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
     rows: list[tuple[Any, ...]] = []
     for r in read_csv(slices / "slice-suncare" / "metrics.csv"):
         rows.append(
@@ -103,6 +114,11 @@ def _need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 None,
             )
         )
+    return rows
+
+
+def _p1_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
+    rows: list[tuple[Any, ...]] = []
     for r in read_csv(slices / "slice-p1-category-gap" / "metrics_by_category.csv"):
         rows.append(
             (
@@ -165,7 +181,7 @@ def _wish_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
 
 
 def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
-    run_id = analysis_run(cur)
-    write(cur, NEED_SQL, _need_rows(source_dir, run_id))
-    write(cur, WISH_SQL, _wish_rows(source_dir, run_id))
+    write(cur, NEED_SQL, _suncare_need_rows(source_dir, analysis_run(cur, "suncare")))
+    write(cur, NEED_SQL, _p1_need_rows(source_dir, analysis_run(cur, "p1")))
+    write(cur, WISH_SQL, _wish_rows(source_dir, analysis_run(cur, "p9")))
     return counts(cur, TABLES)

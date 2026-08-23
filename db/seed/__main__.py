@@ -26,7 +26,10 @@ def main(argv: list[str] | None = None) -> int:
         "--slices", default=str(DEFAULT_SLICES), help="directory holding slice-*/ (default: %(default)s)"
     )
     parser.add_argument(
-        "--only", default=",".join(GROUP_NAMES), help=f"comma-separated subset of {','.join(GROUP_NAMES)}"
+        "--only",
+        default=",".join(GROUP_NAMES),
+        help=f"comma-separated subset of {','.join(GROUP_NAMES)}; run in that order, "
+        "since mentions reference product_ref and metrics reference analysis_run",
     )
     args = parser.parse_args(argv)
 

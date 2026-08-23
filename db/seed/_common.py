@@ -21,7 +21,6 @@ LEXICON_VERSION = 1
 LABELER = "shk"
 LABELED_AT = date(2026, 8, 23)
 CAPTURED_AT = date(2026, 8, 23)
-RUN_NOTE = "seed:slices-2026-08-23"
 # formats.md: YouTube published_at is restored from relative time, so only recent ones are month-precise.
 YOUTUBE_MONTH_FROM = date(2025, 9, 1)
 
