@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Iterable, Sequence
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, LiteralString
@@ -83,7 +83,10 @@ def as_date(value: str) -> date:
 
 
 def as_timestamp(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+    """Naive input is UTC: the slices write datetime.utcfromtimestamp() and t_change is part of a PK,
+    so leaving the offset to the session TimeZone would shift the instant and duplicate the row."""
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def month_of(day: date) -> str:
