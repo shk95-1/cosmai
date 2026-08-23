@@ -1,0 +1,24 @@
+# 이 레포의 compose — 배선 전부는 여기 하나(README.md "stack/" 절). #11 은
+# portal 서비스만 더한다; 다른 유닛(#13 등)이 shared-postgres·postgrest 등
+# 나머지 서비스를 이 파일에 이어 붙인다. 네트워크 이름 db-net 은
+# service/stack/docker-compose.yml 의 기존 fleet 과 같은 이름을 고정해 둔 것 —
+# 합류 여부는 #13(ops)이 정한다.
+name: cosmai
+
+services:
+  # 백엔드도 DB 자격증명도 없다: 브라우저가 PostgREST(3000)를 직접 부르므로
+  # 이 컨테이너는 정적 파일만 내보낸다(portal/Dockerfile 자신의 주석).
+  portal:
+    build: ../portal
+    image: cosmai-portal
+    restart: unless-stopped
+    ports:
+      # PostgREST 와 같은 노출 범위(로컬 네트워크) — 보여주는 것은 그 API 가
+      # 이미 anon 에 연 데이터뿐이라 새로운 노출을 만들지 않는다.
+      - "${NEEDS_PORTAL_PORT:-3003}:80"
+    networks:
+      - db-net
+
+networks:
+  db-net:
+    name: db-net

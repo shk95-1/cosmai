@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>needs 결과 화면</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>선케어 니즈 지표</h1>
+  <p id="run-caption" class="caption">불러오는 중…</p>
+  <p id="error" class="error" role="alert"></p>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button type="button" data-screen="need" class="on">1. 카테고리 니즈</button>
+  <button type="button" data-screen="wish" class="on-off">2. 위시</button>
+  <button type="button" data-screen="product" class="on-off">3. 제품별 미해결</button>
+</nav>
+
+<section id="screen-need" class="screen">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="need-scope"></select>
+    </label>
+  </div>
+  <h2>불만 vs 만족 (need_key)</h2>
+  <div id="need-chart" class="chart"></div>
+  <div class="chart-pair">
+    <div>
+      <h3>미해결비 (unresolved)</h3>
+      <div id="need-chart-unresolved" class="chart"></div>
+    </div>
+    <div>
+      <h3>모집단 추정 점유율 (%)</h3>
+      <div id="need-chart-population" class="chart"></div>
+    </div>
+  </div>
+  <div class="table-controls">
+    <button type="button" id="need-csv">CSV 다운로드</button>
+  </div>
+  <div id="need-table"></div>
+</section>
+
+<section id="screen-wish" class="screen hidden">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="wish-scope"></select>
+    </label>
+  </div>
+  <div class="chart-triple">
+    <div><h3>상위 format</h3><div id="wish-chart-format" class="chart"></div></div>
+    <div><h3>상위 attribute</h3><div id="wish-chart-attribute" class="chart"></div></div>
+    <div><h3>상위 brand</h3><div id="wish-chart-brand" class="chart"></div></div>
+  </div>
+</section>
+
+<section id="screen-product" class="screen hidden">
+  <h2>제품별 미해결(unresolved)</h2>
+  <div id="product-chart" class="chart"></div>
+  <div id="product-table"></div>
+</section>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
