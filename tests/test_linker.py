@@ -17,7 +17,7 @@ from sqlalchemy import create_engine
 from analysis.lexicon import compile_lexicon
 from analysis.linker import LINKER_VERSION, RuleLinker, accepts, normalize_name, normalized
 from analysis.linker.evaluators import BrandLinkPredictor, ProductMatchPredictor
-from analysis.linker.pipeline import TABLES, run
+from analysis.linker.pipeline import BATCH, TABLES, run
 from analysis.registry import LabeledRow, register, unregister
 from analysis.types import EntitySurface, Lexicon, ProductRow, TextUnit
 from cosmai.cli import main
@@ -289,13 +289,15 @@ def _seed_rows(conn: psycopg.Connection[Any]) -> None:
 
 
 @pytest.mark.postgres
-def test_analyze_link_writes_rows_and_a_second_run_changes_no_count(needs_runtime_url, sources):
+# batch=2 는 네 표 전부에서 배치 경계를 넘긴다 — 커밋으로 쪼갠 실행이 한 덩어리 실행과 같은 결과여야 한다.
+@pytest.mark.parametrize("batch", [2, BATCH])
+def test_analyze_link_writes_rows_and_a_second_run_changes_no_count(needs_runtime_url, sources, batch):
     commerce, youtube = sources
     seed.run_all(needs_runtime_url, only=("lexicon",))
     with connect(needs_runtime_url) as conn:
         _seed_rows(conn)
-        first = run(conn, commerce_schema=commerce, youtube_schema=youtube)
-        second = run(conn, commerce_schema=commerce, youtube_schema=youtube)
+        first = run(conn, commerce_schema=commerce, youtube_schema=youtube, batch=batch)
+        second = run(conn, commerce_schema=commerce, youtube_schema=youtube, batch=batch)
         with conn.cursor() as cur:
             cur.execute("SELECT linker_version, count(*) FROM brand_mention GROUP BY 1 ORDER BY 1")
             versions = cur.fetchall()

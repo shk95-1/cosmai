@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import collections
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from datetime import date
 from typing import Any, LiteralString
 
@@ -20,7 +21,11 @@ from analysis.types import Lexicon, ProductRow, TextUnit
 TABLES = ("product_ref", "product_member", "product_ref_candidate", "brand_mention")
 # formats.md: 유튜브 댓글 시각만 상대시간 복원본이다 — 2025-09 이후만 달 단위로 믿는다.
 COMMENT_MONTH_FROM = date(2025, 9, 1)
-BATCH = 5000
+# needs_runtime 의 timeout 은 "sized per statement not per job" 이다 (db/bootstrap.sql) — 한 실행을
+# 이 크기의 읽기·쓰기 조각으로 쪼개 statement 30s·transaction 60s 안에 각 조각이 끝나게 한다.
+BATCH = 2000
+# 첫 페이지의 시작 키. 빈 문자열은 어떤 키보다 작다.
+FIRST = ""
 
 REF_SQL: LiteralString = """
 INSERT INTO product_ref (product_ref, brand, name_norm, name, n_sites, first_seen, linker_version)
@@ -53,14 +58,17 @@ SET video_id = EXCLUDED.video_id, count = EXCLUDED.count, cooc_count = EXCLUDED.
     observed_at = EXCLUDED.observed_at, observed_at_resolution = EXCLUDED.observed_at_resolution
 """
 
+# 페이징은 전부 키셋이다 — OFFSET 은 페이지마다 앞을 다시 읽어 전체가 O(n²) 가 된다.
 PRODUCTS = pgsql.SQL("""
-SELECT DISTINCT ON (source, product_key) source, product_key, name, brand, volume, first_seen_at::date
-FROM {}.product ORDER BY source, product_key, captured_at DESC
+SELECT source, product_key, name, brand, volume, first_seen_at::date
+FROM {schema}.product WHERE (source, product_key) > (%s, %s)
+ORDER BY source, product_key LIMIT %s
 """)
 TITLES = pgsql.SQL("""
 SELECT DISTINCT ON (video_id) video_id, video_id, title, published_at::date
-FROM {}.video_snapshots WHERE (%s::date IS NULL OR published_at::date >= %s::date)
-ORDER BY video_id, fetched_at DESC
+FROM {schema}.video_snapshots
+WHERE video_id > %s AND (%s::date IS NULL OR published_at::date >= %s::date)
+ORDER BY video_id, fetched_at DESC LIMIT %s
 """)
 TRANSCRIPTS = pgsql.SQL("""
 SELECT DISTINCT ON (t.video_id) t.video_id, t.video_id, t.full_text, v.published_at
@@ -69,101 +77,136 @@ LEFT JOIN LATERAL (
   SELECT max(s.published_at)::date AS published_at FROM {schema}.video_snapshots s
   WHERE s.video_id = t.video_id
 ) v ON true
-WHERE (%s::date IS NULL OR v.published_at >= %s::date)
-ORDER BY t.video_id, t.fetched_at DESC
+WHERE t.video_id > %s AND (%s::date IS NULL OR v.published_at >= %s::date)
+ORDER BY t.video_id, t.fetched_at DESC LIMIT %s
 """)
 COMMENTS = pgsql.SQL("""
-SELECT comment_id, video_id, text, published_at::date FROM {}.comments
-WHERE (%s::date IS NULL OR published_at::date >= %s::date)
+SELECT comment_id, video_id, text, published_at::date FROM {schema}.comments
+WHERE (video_id, comment_id) > (%s, %s)
+  AND (%s::date IS NULL OR published_at::date >= %s::date)
+ORDER BY video_id, comment_id LIMIT %s
 """)
 
 
-def _resolution(src: str, observed_at: date | None) -> str | None:
-    if observed_at is None:
-        return None
-    if src != "comment":
+@dataclass(frozen=True)
+class _Documents:
+    """brand_mention 한 src 의 원천. 행은 (ref_id, video_id, text, observed_at)."""
+
+    src: str
+    sql: pgsql.SQL
+    key_columns: tuple[int, ...]  # 페이지 마지막 행에서 다음 시작 키를 뽑는 자리
+
+
+DOCUMENTS = (
+    _Documents("title", TITLES, (1,)),  # B12: 제목도 링크 대상이다
+    _Documents("transcript", TRANSCRIPTS, (1,)),
+    _Documents("comment", COMMENTS, (1, 0)),  # comments 의 PK 가 (video_id, comment_id) 다
+)
+
+
+def _resolution(src: str, observed_at: date | None) -> str:
+    """링크에 쓴 단위와 저장한 단위가 갈리면 안 된다 — 시각을 모른다는 것은 observed_at NULL 이 말한다."""
+    if src != "comment" or observed_at is None:
         return "day"
     return "month" if observed_at >= COMMENT_MONTH_FROM else "year"
 
 
-def _write(cur: psycopg.Cursor[Any], statement: LiteralString, rows: Sequence[Sequence[Any]]) -> None:
-    for start in range(0, len(rows), BATCH):
-        cur.executemany(statement, rows[start : start + BATCH])
+def _pages(
+    conn: psycopg.Connection[Any],
+    query: pgsql.Composed,
+    key_columns: tuple[int, ...],
+    params: tuple[Any, ...],
+    batch: int,
+) -> Iterator[list[tuple[Any, ...]]]:
+    key: tuple[Any, ...] = (FIRST,) * len(key_columns)
+    while True:
+        with conn.cursor() as cur:
+            cur.execute(query, (*key, *params, batch))
+            page = cur.fetchall()
+        # 읽자마자 닫는다: 링크하는 동안 트랜잭션이 열려 있으면 idle_in_transaction 15s 가 세션을 끊는다.
+        conn.rollback()
+        if not page:
+            return
+        yield page
+        if len(page) < batch:
+            return
+        key = tuple(page[-1][i] for i in key_columns)
 
 
-def _counts(cur: psycopg.Cursor[Any]) -> dict[str, int]:
+def _write(
+    conn: psycopg.Connection[Any], statement: LiteralString, rows: Sequence[Sequence[Any]], batch: int
+) -> None:
+    for start in range(0, len(rows), batch):
+        with conn.cursor() as cur:
+            cur.executemany(statement, rows[start : start + batch])
+        conn.commit()
+
+
+def _counts(conn: psycopg.Connection[Any]) -> dict[str, int]:
     out: dict[str, int] = {}
-    for table in TABLES:
-        cur.execute(pgsql.SQL("SELECT count(*) FROM {}").format(pgsql.Identifier(table)))
-        row = cur.fetchone()
-        out[table] = int(row[0]) if row else 0
+    with conn.cursor() as cur:
+        for table in TABLES:
+            cur.execute(pgsql.SQL("SELECT count(*) FROM {}").format(pgsql.Identifier(table)))
+            row = cur.fetchone()
+            out[table] = int(row[0]) if row else 0
+    conn.rollback()
     return out
 
 
-def _documents(
-    cur: psycopg.Cursor[Any], schema: str, since: date | None
-) -> Iterator[tuple[str, str, str, str, date | None]]:
-    """(src, ref_id, video_id, text, observed_at) — B12: 제목도 링크 대상이다."""
-    for src, query in (
-        ("title", TITLES.format(pgsql.Identifier(schema))),
-        ("transcript", TRANSCRIPTS.format(schema=pgsql.Identifier(schema))),
-        ("comment", COMMENTS.format(pgsql.Identifier(schema))),
-    ):
-        cur.execute(query, (since, since))
-        for ref_id, video_id, text, observed_at in cur.fetchall():
-            yield src, ref_id, video_id, text, observed_at
-
-
-def link_products(conn: psycopg.Connection[Any], linker: RuleLinker, commerce_schema: str) -> None:
+def link_products(
+    conn: psycopg.Connection[Any], linker: RuleLinker, commerce_schema: str, batch: int
+) -> None:
     """--since 를 받지 않는다: 창을 자른 카탈로그는 다른 군집을 만들어 같은 ref 가 흔들린다."""
-    with conn.cursor() as cur:
-        cur.execute(PRODUCTS.format(pgsql.Identifier(commerce_schema)))
-        products = [
-            ProductRow(
-                source=source,
-                product_key=product_key,
-                name=name,
-                brand=brand,
-                volume=volume,
-                first_ranked=first_seen,
-            )
-            for source, product_key, name, brand, volume, first_seen in cur.fetchall()
-        ]
+    query = PRODUCTS.format(schema=pgsql.Identifier(commerce_schema))
+    products = [
+        ProductRow(
+            source=source,
+            product_key=product_key,
+            name=name,
+            brand=brand,
+            volume=volume,
+            first_ranked=first_seen,
+        )
+        for page in _pages(conn, query, (0, 1), (), batch)
+        for source, product_key, name, brand, volume, first_seen in page
+    ]
     match = linker.match_products(products)
-    with conn.cursor() as cur:
-        _write(
-            cur,
-            REF_SQL,
-            [
-                (r.product_ref, r.brand, r.name_norm, r.name, r.n_sites, r.first_seen, r.linker_version)
-                for r in match.refs
-            ],
-        )
-        _write(
-            cur,
-            MEMBER_SQL,
-            [(m.source, m.product_key, m.product_ref, m.role, m.match_score) for m in match.members],
-        )
-        _write(
-            cur,
-            CANDIDATE_SQL,
-            [
-                (
-                    c.src_a,
-                    c.key_a,
-                    c.src_b,
-                    c.key_b,
-                    c.brand,
-                    c.shared_tok,
-                    c.shared_sig,
-                    c.dice,
-                    c.mutual,
-                    linker.version,
-                )
-                for c in match.candidates
-            ],
-        )
-    conn.commit()
+    # ref → member 순서를 지킨다: product_member 가 product_ref 를 참조한다 (001).
+    _write(
+        conn,
+        REF_SQL,
+        [
+            (r.product_ref, r.brand, r.name_norm, r.name, r.n_sites, r.first_seen, r.linker_version)
+            for r in match.refs
+        ],
+        batch,
+    )
+    _write(
+        conn,
+        MEMBER_SQL,
+        [(m.source, m.product_key, m.product_ref, m.role, m.match_score) for m in match.members],
+        batch,
+    )
+    _write(
+        conn,
+        CANDIDATE_SQL,
+        [
+            (
+                c.src_a,
+                c.key_a,
+                c.src_b,
+                c.key_b,
+                c.brand,
+                c.shared_tok,
+                c.shared_sig,
+                c.dice,
+                c.mutual,
+                linker.version,
+            )
+            for c in match.candidates
+        ],
+        batch,
+    )
 
 
 def link_brands(
@@ -172,43 +215,46 @@ def link_brands(
     lexicon: Lexicon,
     youtube_schema: str,
     since: date | None,
+    batch: int,
 ) -> None:
-    rows: list[tuple[Any, ...]] = []
-    with conn.cursor() as cur:
-        for src, ref_id, video_id, text, observed_at in _documents(cur, youtube_schema, since):
-            unit = TextUnit(
-                src=f"yt_{src}",
-                site="youtube",
-                ref=ref_id,
-                text=text,
-                observed_at=observed_at or date(1970, 1, 1),
-                observed_at_resolution=_resolution(src, observed_at) or "day",
-            )
-            hits = collections.Counter[str]()
-            cooc = collections.Counter[str]()
-            # brand_mention 은 브랜드만 센다 — surface_re 는 ingredient 표면까지 문다 (analysis/lexicon.py).
-            for hit in linker.link(unit, lexicon):
-                if hit.kind != "brand":
-                    continue
-                hits[hit.canonical] += 1
-                cooc[hit.canonical] += int(hit.cooc)
-            rows += [
-                (
-                    src,
-                    ref_id,
-                    video_id,
-                    brand,
-                    n,
-                    cooc[brand],
-                    observed_at,
-                    _resolution(src, observed_at),
-                    linker.version,
+    schema = pgsql.Identifier(youtube_schema)
+    for source in DOCUMENTS:
+        query = source.sql.format(schema=schema)
+        for page in _pages(conn, query, source.key_columns, (since, since), batch):
+            rows: list[tuple[Any, ...]] = []
+            for ref_id, video_id, text, observed_at in page:
+                resolution = _resolution(source.src, observed_at)
+                unit = TextUnit(
+                    src=f"yt_{source.src}",
+                    site="youtube",
+                    ref=ref_id,
+                    text=text,
+                    observed_at=observed_at or date(1970, 1, 1),
+                    observed_at_resolution=resolution,
                 )
-                for brand, n in hits.items()
-            ]
-    with conn.cursor() as cur:
-        _write(cur, BRAND_SQL, rows)
-    conn.commit()
+                hits = collections.Counter[str]()
+                cooc = collections.Counter[str]()
+                # brand_mention 은 브랜드만 센다 — surface_re 는 ingredient 표면까지 문다 (lexicon.py).
+                for hit in linker.link(unit, lexicon):
+                    if hit.kind != "brand":
+                        continue
+                    hits[hit.canonical] += 1
+                    cooc[hit.canonical] += int(hit.cooc)
+                rows += [
+                    (
+                        source.src,
+                        ref_id,
+                        video_id,
+                        brand,
+                        n,
+                        cooc[brand],
+                        observed_at,
+                        resolution,
+                        linker.version,
+                    )
+                    for brand, n in hits.items()
+                ]
+            _write(conn, BRAND_SQL, rows, batch)
 
 
 def run(
@@ -217,10 +263,11 @@ def run(
     commerce_schema: str = "trend_radar",
     youtube_schema: str = "tubedepth",
     linker: RuleLinker | None = None,
+    batch: int = BATCH,
 ) -> dict[str, int]:
+    """배치마다 커밋한다 — 중간에 죽어도 자연키 upsert 라 다음 실행이 이어서 같은 결과로 수렴한다."""
     resolved = linker or RuleLinker()
     lexicon = load_lexicon(conn)
-    link_products(conn, resolved, commerce_schema)
-    link_brands(conn, resolved, lexicon, youtube_schema, since)
-    with conn.cursor() as cur:
-        return _counts(cur)
+    link_products(conn, resolved, commerce_schema, batch)
+    link_brands(conn, resolved, lexicon, youtube_schema, since, batch)
+    return _counts(conn)
