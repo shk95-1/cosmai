@@ -6,5 +6,5 @@
 5 2 * * *   cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
 15 4 * * *  cosmai collect commerce --dataset review
-45 4 * * *  cosmai collect commerce --dataset review_stats
+0 4 * * *   cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
