@@ -10,6 +10,7 @@ import os
 import re
 import socket
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -87,3 +88,17 @@ def database_url_for_tests(request: pytest.FixtureRequest) -> Iterator[str]:
         with admin.begin() as conn:
             conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin.dispose()
+
+
+@pytest.fixture
+def needs_schema(database_url_for_tests: str) -> str:
+    """The contract DDL, applied into this test's own schema so the seed can be pointed at it."""
+    ddl = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs" / "001_needs.sql"
+    url = make_url(database_url_for_tests)
+    options = url.query.get("options", "")
+    schema = str(options).split("-csearch_path=", 1)[1].split(",", 1)[0]
+    engine = create_engine(database_url_for_tests)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(ddl.read_text(encoding="utf-8").replace("needs.", f'"{schema}".'))
+    engine.dispose()
+    return database_url_for_tests

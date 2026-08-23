@@ -18,6 +18,7 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]  # `db` and friends are plain packages in the repo root, not installed.
 addopts = "-q -m 'not live' --strict-markers"
 markers = [
     "live: touches the real network; excluded by default",
