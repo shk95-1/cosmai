@@ -30,7 +30,7 @@ DATALAB_BODY = {
         {"title": "밀림", "keywords": ["선크림 밀림"], "data": [{"period": "2016-01-01", "ratio": 5.1}]},
         {"title": "눈시림", "keywords": ["선크림 눈시림"], "data": [{"period": "2016-01-01", "ratio": 33.7}]},
         {"title": "따가움", "keywords": ["선크림 따가움"], "data": [{"period": "2016-01-01", "ratio": 1.1}]},
-        {"title": "건조", "keywords": ["선크림 건조"], "data": [{"period": "2016-01-01", "ratio": 2.0}]},
+        {"title": "끈적임", "keywords": ["선크림 끈적임"], "data": [{"period": "2016-01-01", "ratio": 2.0}]},
     ]
 }
 
@@ -108,7 +108,7 @@ def test_datalab_writes_a_point_per_group_and_month(needs_runtime_url: str, secr
         log_rows = conn.execute(sa.select(sa.func.count()).select_from(naver_fetch_log)).scalar_one()
     engine.dispose()
 
-    assert {r.group_key for r in rows} == {"밀림", "눈시림", "백탁", "따가움", "건조"}
+    assert {r.group_key for r in rows} == {"밀림", "눈시림", "백탁", "따가움", "끈적임"}
     assert run_rows == [("ok", "datalab")]
     assert log_rows == 1
     # one request covers keywords.json's one category -- the vendor's own per-request group cap.

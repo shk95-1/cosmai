@@ -6,7 +6,7 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
   collector ∈ {commerce, youtube, naver}
   commerce datasets: ranking | product | review | review_stats | new_product | review_low
   youtube  datasets: watch | work | flatten | prune  (기존 tubedepth 명령 의미 유지)
-  naver    datasets: datalab | blog   (source 행 id 를 --source 로)
+  naver    datasets: datalab | blog   (source 행 모델 없음 -- cosmai-old 계승 안 함, 원천은 needs.naver_* (004))
 종료 코드: 0 ok · 1 partial(일부 실패·절단) · 2 blocked(차단/거부)   ← trend-radar 관찰 규약 그대로
 ```
 - 수집기는 **자기 스키마의 테이블에만** 쓴다 (`ddl/current`). 다른 스키마 읽기는 reader 롤로만.

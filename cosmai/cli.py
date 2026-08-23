@@ -91,8 +91,7 @@ def _run_collect(args: argparse.Namespace) -> int:
         from collectors.naver.cli import run
 
         return run(args.dataset, board=args.board, since=args.since)
-    print(f"collector {args.collector!r} is not wired yet (see issue #9)")
-    return 2
+    raise AssertionError(f"unreachable: argparse choices are exhausted, got {args.collector!r}")
 
 
 def _run_analyze(args: argparse.Namespace) -> int:

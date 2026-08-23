@@ -10,7 +10,7 @@ EXCLUDED_TERMS = ("순한 선크림", "백탁없는 선크림")
 
 def test_seonbeullok_has_the_five_complaint_groups_in_priority_order():
     groups = keywords.groups("선블록")
-    assert list(groups) == ["밀림", "눈시림", "백탁", "따가움", "건조"]
+    assert list(groups) == ["밀림", "눈시림", "백탁", "따가움", "끈적임"]
 
 
 def test_no_group_carries_a_product_exploration_query():

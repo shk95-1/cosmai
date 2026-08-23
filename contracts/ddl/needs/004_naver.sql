@@ -15,7 +15,8 @@ CREATE TABLE needs.naver_run (
   captured_at        timestamptz NOT NULL,
   started_at         timestamptz NOT NULL,
   finished_at        timestamptz,
-  status             text NOT NULL,          -- running | ok | partial | blocked | failed
+  status             text NOT NULL
+                       CHECK (status IN ('running','ok','partial','blocked','failed')),
   note               text,
   collector_version  text
 );
