@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +38,9 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("stage", choices=STAGES)
     p.add_argument("--since", default=None, help="Only units observed on or after this date.")
     p.add_argument("--scope", default=None, help="Restrict to one lexicon category.")
+    p.add_argument(
+        "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
+    )
 
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
@@ -92,8 +96,21 @@ def _run_collect(args: argparse.Namespace) -> int:
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
-    print(f"analyze {args.stage} is not wired yet (issues #2/#3/#4/#5)")
-    return 2
+    import psycopg
+
+    from analysis.pipeline import run_stage
+
+    try:
+        since = date.fromisoformat(args.since) if args.since else None
+        conn = _connect(args.url)
+    # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
+    except (ValueError, LookupError, psycopg.Error) as refused:
+        print(refused)
+        return 2
+    with conn:
+        outcome = run_stage(conn, args.stage, since=since, scope=args.scope)
+    print(outcome.note)
+    return 0 if outcome.status == "done" else 1
 
 
 def _connect(url: str | None) -> psycopg.Connection[Any]:

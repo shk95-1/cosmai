@@ -21,6 +21,11 @@ requests int, ok int, blocked int, failed int, queued int, p90_ms int
 ```
 P16 의 표가 이 뷰 하나로 나와야 한다.
 
+분석판은 `db/views/analysis_health.sql` 의 `needs.analysis_health` 다: run 별 started/finished/
+status/versions 와 그 run 의 `metrics_need`·`metrics_wish` 행 수. `need_mention`·`wish_mention` 은
+run_id 를 갖지 않으므로(versioning.md A19) 각 단계가 만든 행 수는 `analysis_run.note` 가 이름=값으로
+나른다. `db/migrate.sh` 가 배포마다 다시 적용한다 (CREATE OR REPLACE).
+
 ## 분석
 ```
 cosmai analyze <stage> [--since <date>] [--scope <category>]
@@ -32,7 +37,11 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
 - 산출 행은 반드시 `*_version` 을 가진다 (`versioning.md`).
-- `analyze all` 은 `needs.analysis_run` 행을 만들고 `versions` 에 각 패키지·사전 버전을 기록한다.
+- `analyze all` 은 `needs.analysis_run` 행 하나를 만들고(polarity 가 열고 aggregate 가 그 `run_id` 로
+  metrics 를 쓴다) `versions` 에 linker·extractor·polarity·aggregate 와 `lexicon`(활성 버전 + ruleset)을
+  기록한다. 한 단계라도 실패하면 그 run 은 `status='failed'` + note 로 닫히고 종료 코드는 1 이다.
+- `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
+  같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
 
 ## 스케줄 (stack/crontab, UTC)
 외부를 fetch하는 commerce 줄은 분 0을 쓰지 않는다 (매시 ranking이 분 0에 시작하고 약 74초 걸린다).
