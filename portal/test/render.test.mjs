@@ -17,12 +17,12 @@ function categoryRowsForLatestRun(rows, scope) {
 }
 
 test('metrics_need 픽스처: 최신 run(2)만 카테고리 화면에 남는다', () => {
-  const rows = categoryRowsForLatestRun(needFixture, 'sun');
-  assert.deepEqual(rows.map((r) => [r.run_id, r.need_key, r.neg]), [[2, '밀림', 5]]);
+  const rows = categoryRowsForLatestRun(needFixture, '선블록');
+  assert.deepEqual(rows.map((r) => [r.run_id, r.need_key, r.neg]), [[2, '밀림', 93], [2, '끈적유분', 86]]);
 });
 
 test('renderDivergingBars: need_key 수만큼 neg/pos 막대 쌍을 그린다', () => {
-  const rows = sortRows(categoryRowsForLatestRun(needFixture, 'sun').concat(
+  const rows = sortRows(categoryRowsForLatestRun(needFixture, '선블록').concat(
     { run_id: 2, need_key: '끈적유분', neg: 3, pos: 9, unresolved: 0.25 },
   ), 'unresolved', 'desc');
   const svg = renderDivergingBars(rows);
@@ -41,7 +41,7 @@ test('renderDivergingBars escapes need_key text', () => {
 });
 
 test('renderMagnitudeBars: unresolved 은 blue, population_share_pct 는 amber 클래스를 쓴다', () => {
-  const rows = categoryRowsForLatestRun(needFixture, 'sun');
+  const rows = categoryRowsForLatestRun(needFixture, '선블록');
   const unresolvedSvg = renderMagnitudeBars(rows, { key: 'unresolved', hue: 'blue' });
   const popSvg = renderMagnitudeBars(rows, { key: 'population_share_pct', hue: 'amber' });
   assert.match(unresolvedSvg, /class="bar-magnitude-1"/);

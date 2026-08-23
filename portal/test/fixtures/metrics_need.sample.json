@@ -1,6 +1,7 @@
 [
-  {"run_id": 1, "scope": "sun", "need_key": "밀림", "month": "", "product_ref": "", "neg": 93, "pos": 38, "unresolved": 0.71, "population_share_pct": 0.21},
-  {"run_id": 1, "scope": "sun", "need_key": "끈적유분", "month": "", "product_ref": "", "neg": 86, "pos": 122, "unresolved": 0.41, "population_share_pct": 0.05},
-  {"run_id": 1, "scope": "sun", "need_key": "밀림", "month": "", "product_ref": "oy:A1", "neg": 40, "pos": 10, "unresolved": 0.8, "population_share_pct": 0.1},
-  {"run_id": 2, "scope": "sun", "need_key": "밀림", "month": "", "product_ref": "", "neg": 5, "pos": 5, "unresolved": 0.5, "population_share_pct": 0.1}
+  {"run_id": 1, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 10, "pos": 5, "unresolved": 0.67, "population_share_pct": 0.10},
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 93, "pos": 38, "unresolved": 0.71, "population_share_pct": 0.21},
+  {"run_id": 2, "scope": "선블록", "need_key": "끈적유분", "month": "", "product_ref": "", "neg": 86, "pos": 122, "unresolved": 0.41, "population_share_pct": 0.05},
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "oy:A1", "neg": 40, "pos": 10, "unresolved": 0.8, "population_share_pct": 0.1},
+  {"run_id": 2, "scope": "쿠션", "need_key": "백탁", "month": "", "product_ref": "", "neg": 3, "pos": 20, "unresolved": 0.13, "population_share_pct": 0.02}
 ]

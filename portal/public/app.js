@@ -2,8 +2,9 @@
 // query.js/render.js 의 순수 함수이고, 여기서는 그것을 DOM 과 fetch 에 엮는다 —
 // 그래서 이 파일에는 테스트가 없다(data-portal/public/app.js 와 같은 분리).
 import {
-  buildQuery, latestRunId, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
+  buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
 } from './query.js';
+import { latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption } from './screens.js';
 import { renderDivergingBars, renderMagnitudeBars, renderTopBars } from './render.js';
 
 // PostgREST 는 이 페이지를 서빙한 호스트의 3000 번 — 머신이 바뀌어도 고쳐 쓸 것이 없다.
@@ -28,7 +29,7 @@ async function api(path) {
   return res.json();
 }
 
-const state = { need: [], wish: [], products: [], runId: null };
+const state = { need: [], wish: [], needRunId: null, wishRunId: null };
 
 // ---- 탭 --------------------------------------------------------------
 
@@ -41,12 +42,8 @@ for (const btn of document.querySelectorAll('#tabs button')) {
 
 // ---- 화면 1: 카테고리 니즈 ---------------------------------------------
 
-function needRowsForScope(scope) {
-  return state.need.filter((r) => r.run_id === state.runId && r.product_ref === '' && r.month === '' && r.scope === scope);
-}
-
 function renderNeedScreen(scope) {
-  const rows = sortRows(needRowsForScope(scope), 'unresolved', 'desc');
+  const rows = sortRows(needRowsForScope(state.need, state.needRunId, scope), 'unresolved', 'desc');
   $('need-chart').innerHTML =
     '<div class="legend"><span><span class="swatch neg"></span>불만(neg)</span><span><span class="swatch pos"></span>만족(pos)</span></div>' +
     renderDivergingBars(rows);
@@ -84,7 +81,7 @@ function downloadNeedCsv() {
 // ---- 화면 2: 위시 ------------------------------------------------------
 
 function renderWishScreen(scope) {
-  const rows = state.wish.filter((r) => r.run_id === state.runId && r.scope === scope);
+  const rows = wishRowsForScope(state.wish, state.wishRunId, scope);
   $('wish-chart-format').innerHTML = renderTopBars(topByDimension(rows, 'format'));
   $('wish-chart-attribute').innerHTML = renderTopBars(topByDimension(rows, 'attribute'));
   $('wish-chart-brand').innerHTML = renderTopBars(topByDimension(rows, 'brand'));
@@ -93,10 +90,7 @@ function renderWishScreen(scope) {
 // ---- 화면 3: 제품별 미해결 ----------------------------------------------
 
 function renderProductScreen() {
-  const rows = sortRows(
-    state.need.filter((r) => r.run_id === state.runId && r.product_ref !== ''),
-    'unresolved', 'desc',
-  ).slice(0, 20);
+  const rows = productRows(state.need, state.needRunId, 20);
   $('product-chart').innerHTML = renderMagnitudeBars(rows, { key: 'unresolved', labelKey: 'product_ref', hue: 'blue', fmt: (v) => v.toFixed(2) });
 
   const cols = ['product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'];
@@ -133,20 +127,22 @@ async function boot() {
     const [need, wish] = await Promise.all([api(`/metrics_need?${needQ}`), api(`/metrics_wish?${wishQ}`)]);
     state.need = need;
     state.wish = wish;
-    state.runId = latestRunId(need);
-    $('run-caption').textContent = state.runId === null ? '데이터 없음' : `최신 run: #${state.runId}`;
+    const { needRunId, wishRunId } = latestRuns(need, wish);
+    state.needRunId = needRunId;
+    state.wishRunId = wishRunId;
+    $('run-caption').textContent = runCaption(needRunId, wishRunId);
 
-    const scopes = [...new Set(need.filter((r) => r.run_id === state.runId).map((r) => r.scope))].sort();
-    for (const sel of [$('need-scope'), $('wish-scope')]) {
-      sel.replaceChildren(...scopes.map((s) => new Option(s, s)));
-    }
+    // need·wish는 다른 run(슬라이스별 시드)이라 scope 목록도 표마다 따로 채운다
+    // — 한쪽 표의 scope로 둘 다 채우면 다른 표는 고를 값이 없다(수정 라운드 1 결함 2).
+    const needScopes = scopesForRun(need, needRunId);
+    const wishScopes = scopesForRun(wish, wishRunId);
+    $('need-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
+    $('wish-scope').replaceChildren(...wishScopes.map((s) => new Option(s, s)));
     $('need-scope').onchange = () => renderNeedScreen($('need-scope').value);
     $('wish-scope').onchange = () => renderWishScreen($('wish-scope').value);
 
-    if (scopes.length > 0) {
-      renderNeedScreen(scopes[0]);
-      renderWishScreen(scopes[0]);
-    }
+    if (needScopes.length > 0) renderNeedScreen(needScopes[0]);
+    if (wishScopes.length > 0) renderWishScreen(wishScopes[0]);
     renderProductScreen();
   } catch (e) {
     $('run-caption').textContent = '';
