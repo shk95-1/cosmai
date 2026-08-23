@@ -14,6 +14,12 @@ from db.seed._common import connect
 pytestmark = pytest.mark.postgres
 
 
+@pytest.fixture(autouse=True)
+def harness_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """이 파일은 하네스를 잰다 — 실제 구현체가 import 되면 아래 오라클을 덮어쓴다."""
+    monkeypatch.setattr("analysis.registry.IMPLEMENTATIONS", ())
+
+
 @pytest.fixture
 def labeled(needs_runtime_url: str) -> str:
     seed.run_all(needs_runtime_url, only=("labeled",))
@@ -40,6 +46,7 @@ def oracle() -> Iterator[None]:
 
 
 def test_an_unregistered_task_stops_with_exit_code_2(labeled: str, capsys):
+    unregister("polarity")  # 앞선 테스트가 남긴 등록은 이 테스트의 전제가 아니다
     assert main(["eval", "polarity", "--url", labeled]) == 2
     assert "polarity" in capsys.readouterr().out
 
@@ -137,8 +144,7 @@ def test_the_registry_loads_its_implementation_modules_by_import(monkeypatch):
     """유닛은 IMPLEMENTATIONS 에 한 줄만 더한다 — cli.py 에 import 를 끼우면 넷이 같은 줄에서 충돌한다."""
     import analysis.registry as reg
 
-    assert reg.IMPLEMENTATIONS == ()  # 아직 등록 모듈이 없다: 비어 있어도 조용히 성공해야 한다
-    reg.load_implementations()
+    reg.load_implementations()  # 등록 모듈이 하나도 없어도 조용히 성공해야 한다
     monkeypatch.setattr(reg, "IMPLEMENTATIONS", ("tests.fake_implementation",))
     try:
         reg.load_implementations()
