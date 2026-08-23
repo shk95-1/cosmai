@@ -62,5 +62,31 @@ BASELINES: tuple[EvalSet, ...] = (
 )
 
 
+# 기준선이 없는 관측용 셋. 표는 홀드아웃 두 줄뿐이지만 1차 패스는 튠 셋 점수도 봐야 하고(같은 규칙이
+# 어디에 맞춰졌는지), wish 는 블라인드가 아닌 두 셋과의 차가 곧 과적합의 크기다. 기준선 표의 사본인
+# BASELINES 는 건드리지 않는다 — tests/test_baselines.py 가 표와 행 순서까지 대조한다.
+OBSERVED: tuple[EvalSet, ...] = (
+    EvalSet(task="polarity", name="sun tune 200", split="tune", checks=(), ref_prefix="sun:"),
+    EvalSet(task="polarity", name="p1 crosscat 60", split="tune", checks=(), ref_prefix="p1:"),
+    EvalSet(
+        task="wish_class",
+        name="P9 tune100",
+        split="tune",
+        checks=(),
+        extra_key="set",
+        extra_value="tune100",
+    ),
+    EvalSet(
+        task="wish_class",
+        name="P9 holdout60",
+        split="holdout",
+        checks=(),
+        extra_key="set",
+        extra_value="holdout60",
+    ),
+)
+
+
 def for_task(task: str) -> tuple[EvalSet, ...]:
-    return tuple(b for b in BASELINES if b.task == task)
+    """기준선 셋이 먼저다 — 채택 판정이 관측용 셋에 밀려 뒤에서 읽히지 않도록."""
+    return tuple(b for b in BASELINES + OBSERVED if b.task == task)

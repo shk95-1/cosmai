@@ -10,12 +10,18 @@ import re
 
 import pytest
 
+from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
+from analysis.polarity import VERSION as POLARITY_VERSION
 
 # versioning.md: `rule-vX.Y` 또는 `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
 
-VERSIONS = (("analysis.linker.LINKER_VERSION", LINKER_VERSION),)
+VERSIONS = (
+    ("analysis.linker.LINKER_VERSION", LINKER_VERSION),
+    ("analysis.extractor.VERSION", EXTRACTOR_VERSION),
+    ("analysis.polarity.VERSION", POLARITY_VERSION),
+)
 
 
 @pytest.mark.parametrize(("name", "version"), VERSIONS)
