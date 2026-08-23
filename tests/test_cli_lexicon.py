@@ -9,6 +9,7 @@ import pytest
 from analysis.lexicon import load_aspects, load_lexicon
 from cosmai.cli import main
 from db import seed
+from db.lexicon import diff
 from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
@@ -104,3 +105,27 @@ def test_reloading_version_1_leaves_the_seeded_dictionary_alone(seeded: str, tmp
     with connect(seeded) as conn:
         lex = load_lexicon(conn)
     assert (lex.version, len(lex.surfaces)) == (1, 992)
+
+
+def test_activating_a_version_that_was_never_loaded_is_refused(seeded: str, capsys):
+    # SET active = (version = n) 은 없는 버전을 주면 그 kind 를 통째로 끈다 — 그 전에 막는다.
+    assert main(["lexicon", "activate", "--kind", "brand", "--version", "9", "--url", seeded]) == 2
+    assert "no rows at version 9" in capsys.readouterr().out
+    with connect(seeded) as conn:
+        assert load_lexicon(conn).version == 1
+
+
+def test_the_aspect_diff_keeps_one_key_per_row(seeded: str):
+    # UNIQUE 에 pattern 이 들어 있어서 aspect/scope/category 만으로는 70행이 55키로 뭉친다.
+    with connect(seeded) as conn, conn.cursor() as cur:
+        empty = diff(cur, "aspect", 1, 9)
+        cur.execute("SELECT count(*) FROM aspect_lexicon WHERE version = 1")
+        loaded = cur.fetchone()
+    assert loaded == (70,)
+    assert len(empty.added) == 70
+
+
+def test_a_row_the_ddl_check_refuses_comes_back_as_blocked(seeded: str, tmp_path: Path, capsys):
+    bad = _csv(tmp_path, "aspect_bad.csv", ASPECT_V2.replace("category,선블록", "정체불명,선블록"))
+    assert main(["lexicon", "load", "--kind", "aspect", "--version", "2", bad, "--url", seeded]) == 2
+    assert "aspect_lexicon_scope_check" in capsys.readouterr().out

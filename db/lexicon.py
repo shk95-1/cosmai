@@ -30,13 +30,19 @@ ENTITY_READ: LiteralString = """
 SELECT surface, canonical || '|' || coalesce(tier, '') || '|' || coalesce(source, '')
 FROM entity_lexicon WHERE kind = %s AND version = %s
 """
+# UNIQUE 는 (aspect, scope, category, pattern, version) 이라 pattern 없이는 한 버전 안에서 키가 겹친다
+# (v1 은 70행 → 55키). 구분자는 ' :: ': 카테고리 이름에 '/' 가 들어간다 ('헤어토닉/앰플').
 ASPECT_READ: LiteralString = """
-SELECT aspect || '/' || scope || '/' || category, pattern FROM aspect_lexicon WHERE version = %s
+SELECT aspect || ' :: ' || scope || ' :: ' || category || ' :: ' || pattern,
+       is_neutral_noun::text || ' | ' || priority::text || ' | ' || ruleset
+FROM aspect_lexicon WHERE version = %s
 """
 ENTITY_ACTIVATE: LiteralString = "UPDATE entity_lexicon SET active = (version = %s) WHERE kind = %s"
 ASPECT_ACTIVATE: LiteralString = "UPDATE aspect_lexicon SET active = (version = %s)"
 ENTITY_ACTIVE: LiteralString = "SELECT max(version) FROM entity_lexicon WHERE kind = %s AND active"
 ASPECT_ACTIVE: LiteralString = "SELECT max(version) FROM aspect_lexicon WHERE active"
+ENTITY_COUNT: LiteralString = "SELECT count(*) FROM entity_lexicon WHERE kind = %s AND version = %s"
+ASPECT_COUNT: LiteralString = "SELECT count(*) FROM aspect_lexicon WHERE version = %s"
 
 ASPECT_KIND = "aspect"
 
@@ -72,7 +78,19 @@ def insert_aspects(
     return _write(cur, ASPECT_SQL, [(*row, version, active) for row in rows])
 
 
+def version_rows(cur: psycopg.Cursor[Any], kind: str, version: int) -> int:
+    if kind == ASPECT_KIND:
+        cur.execute(ASPECT_COUNT, (version,))
+    else:
+        cur.execute(ENTITY_COUNT, (kind, version))
+    row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
 def activate(cur: psycopg.Cursor[Any], kind: str, version: int) -> int:
+    """빈 버전을 켜면 SET active = (version = n) 이 그 kind 를 통째로 끄고 아무 오류도 남기지 않는다."""
+    if not version_rows(cur, kind, version):
+        raise LookupError(f"{kind} has no rows at version {version}; nothing to activate")
     if kind == ASPECT_KIND:
         cur.execute(ASPECT_ACTIVATE, (version,))
     else:

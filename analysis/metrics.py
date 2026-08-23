@@ -55,6 +55,9 @@ def score(pairs: Sequence[tuple[str, str]]) -> Scores:
     )
 
 
-def collapsed_accuracy(pairs: Sequence[tuple[str, str]], positive: Collection[str]) -> float:
-    """라벨을 참/거짓으로 접어 재는 정확도 — product_match 의 strict 와 변형허용이 이것 하나로 갈린다."""
-    return _ratio(sum(1 for gold, pred in pairs if (gold in positive) == (pred in positive)), len(pairs))
+def precision_over(
+    pairs: Sequence[tuple[str, str]], accepted: Collection[str], correct: Collection[str]
+) -> float:
+    """예측이 accepted 인 행만 분모로 세는 정밀도 — 분모가 40행이 아니라 채택 집합이다 (interfaces.md)."""
+    chosen = [gold for gold, pred in pairs if pred in accepted]
+    return _ratio(sum(1 for gold in chosen if gold in correct), len(chosen))

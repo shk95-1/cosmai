@@ -6,7 +6,7 @@
 ```python
 # analysis/types.py — contracts/interfaces.md 의 코드 블록과 같아야 한다 (tests/test_contract_types.py).
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -323,6 +323,21 @@ class Aggregator(Protocol):
         self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str
     ) -> list[MetricsNeedRow]: ...
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]: ...
+
+
+# ---------- 평가 ----------
+@dataclass(frozen=True)
+class LabeledRow:  # needs.labeled_set 한 행. eval 하네스가 구현체에 넘기는 유일한 입력
+    task: str
+    ref: str
+    split: str
+    gold: str
+    text: str
+    extra: Mapping[str, object]  # 셋 이름(`set`)·rating·in_final 등 원본 CSV 의 나머지 열
+
+
+class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 길이·순서로 라벨을 돌려준다
+    def __call__(self, rows: Sequence[LabeledRow]) -> Sequence[str]: ...
 ```
 
 ## 수식 (구현이 이 정의를 따른다)
@@ -339,12 +354,19 @@ class Aggregator(Protocol):
 ## 평가 하네스가 대조하는 기준선 (규칙 구현, 2026-08-23 실측)
 | task | 평가셋 | 규칙 기준선 | 채택 조건 (단일 임계값) |
 |---|---|---|---|
-| polarity (선케어 홀드아웃) | sun holdout 100 | acc .77 · 불만 P .89 / R .70 | acc ≥ .77 그리고 불만 P ≥ .89 |
-| polarity (카테고리 횡단) | P1 blind40 (holdout) | acc .47 · 불만 P .67 | acc ≥ .47 그리고 불만 P ≥ .67 |
-| wish_class | P9 blind60_v2 (holdout, 2026-08-23 라벨) | a: P .94 / R .94 (holdout60, 비블라인드) | blind60_v2 에서 a P ≥ .90 |
-| brand_link | P3 120 | 정밀도 119/120 | ≥ .97 |
-| product_match | P2 blind 40 (holdout, `match_check40_v2_blind`) | strict .77 / 변형허용 .95 | holdout 40 에서 strict ≥ .77 |
+| polarity (선케어 홀드아웃) | sun holdout 100 | acc .77 · 불만 P .89 / R .70 | acc ≥ .77 그리고 P:불만 ≥ .89 |
+| polarity (카테고리 횡단) | P1 blind40 (holdout) | acc .47 · 불만 P .67 | acc ≥ .47 그리고 P:불만 ≥ .67 |
+| wish_class | P9 blind60_v2 (holdout, 2026-08-23 라벨) | a: P .94 / R .94 (holdout60, 비블라인드) | blind60_v2 에서 P:a ≥ .90 |
+| brand_link | P3 120 | 정밀도 119/120 | P:OK ≥ .97 |
+| product_match | P2 blind 40 (holdout, `match_check40_v2_blind`) | strict .77 / 변형허용 .95 (채택 39쌍) | 채택 쌍에서 strict ≥ .77 |
 - T10/T11: 채택 조건은 **단일 숫자**다. 구간으로 적힌 기준선은 기계 대조가 불가능하다.
+- 채택 조건의 이름은 하네스가 내는 지표 키 그대로다 — `acc` · `P:<라벨>` · `R:<라벨>` · `strict` · `변형허용`.
+  `tests/test_baselines.py` 가 이 표를 파싱해 `analysis/baselines.py` 의 (이름, 숫자)와 대조한다.
+- **product_match 의 strict / 변형허용은 정확도가 아니라 채택 집합에 대한 정밀도다.** 구현이 행마다 채택(`Y`)·
+  비채택(`N`)을 내고, 분모는 **채택한 쌍의 수**다: `strict = |채택 ∧ gold='Y'| / |채택|`,
+  `변형허용 = |채택 ∧ gold ∈ {'Y','V'}| / |채택|`. 40행 정확도로 재면 같은 구현이 다른 숫자를 낸다.
+  기준선 .77/.95 는 v2 규칙이 채택한 39쌍(`match_check40_v2_blind.csv` 의 `in_final=1`)에서 나온
+  30/39 = .769 · 37/39 = .949 이고, `tests/test_cli_eval.py` 가 그 채택 집합으로 재현을 검사한다.
 - 구현 교체(규칙→LLM, 사전 버전 업)는 이 표를 갱신하는 PR 로만 들어온다.
 
 ## 패스 기준 (2026-08-23 결정: 6단계까지 무정지 → 2차 패스에서 기준선)

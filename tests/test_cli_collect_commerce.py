@@ -1,7 +1,7 @@
 """`python -m cosmai.cli collect commerce --help` -- offline, subprocess (origin: playbook/snippets/
-test_stack_commands_resolve.py). The module form is checked here because cron and compose may run it
-before anything is installed; `uv run cosmai` (the [project.scripts] entry) is covered by the help
-snapshot in tests/test_cli_help.py."""
+test_stack_commands_resolve.py). The module form is checked here because it keeps working with nothing
+installed; the installed `cosmai` console script is run by tests/test_cli_help.py, which is the only
+place that proves [project.scripts] resolves."""
 
 from __future__ import annotations
 

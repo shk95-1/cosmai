@@ -103,6 +103,7 @@ def _run_eval(args: argparse.Namespace) -> int:
     from analysis import registry
     from analysis.evaluate import evaluate, record, render
 
+    registry.load_implementations()
     impl = registry.get(args.task)
     if impl is None:
         print(
@@ -110,14 +111,16 @@ def _run_eval(args: argparse.Namespace) -> int:
             "analysis.registry.register() at import time"
         )
         return 2
+    import psycopg
+
     with _connect(args.url) as conn:
         try:
             results = evaluate(conn, args.task, impl)
-        except LookupError as unusable:
+            print(render(args.task, impl.version, results))
+            print(f"analysis_run {record(conn, args.task, impl.version, results)}")
+        except (LookupError, psycopg.Error) as unusable:
             print(unusable)
             return 2
-        print(render(args.task, impl.version, results))
-        print(f"analysis_run {record(conn, args.task, impl.version, results)}")
     if args.check_baseline:
         misses = [miss for result in results for miss in result.misses]
         for miss in misses:
@@ -160,39 +163,42 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
 
 
 def _run_lexicon(args: argparse.Namespace) -> int:
+    import psycopg
+
     from db.lexicon import ASPECT_KIND, activate, active_version, diff, insert_aspects, insert_entities
 
     with _connect(args.url) as conn, conn.cursor() as cur:
-        if args.action == "load":
-            try:
+        try:
+            if args.action == "load":
                 rows = _csv_rows(args.kind, args.csv)
-            except ValueError as bad_csv:
-                print(bad_csv)
+                insert = insert_aspects if args.kind == ASPECT_KIND else insert_entities
+                # 새 버전은 꺼진 채로 들어온다 — 교체는 activate 가 한다 (formats.md).
+                loaded = insert(cur, rows, args.version, active=False)
+                conn.commit()
+                print(
+                    f"{args.kind} v{args.version}: {len(rows)} in the csv, {loaded} loaded, "
+                    f"{len(rows) - loaded} already there"
+                )
+                return 0
+            if args.action == "activate":
+                touched = activate(cur, args.kind, args.version)
+                conn.commit()
+                print(f"{args.kind} v{args.version} is now the active version ({touched} rows touched)")
+                return 0
+            against = args.against if args.against is not None else active_version(cur, args.kind)
+            if against is None:
+                print(f"{args.kind} has no active version to compare with; pass --against")
                 return 2
-            insert = insert_aspects if args.kind == ASPECT_KIND else insert_entities
-            # 새 버전은 꺼진 채로 들어온다 — 교체는 activate 가 한다 (formats.md).
-            loaded = insert(cur, rows, args.version, active=False)
-            conn.commit()
-            print(
-                f"{args.kind} v{args.version}: {len(rows)} in the csv, {loaded} loaded, "
-                f"{len(rows) - loaded} already there"
-            )
-            return 0
-        if args.action == "activate":
-            touched = activate(cur, args.kind, args.version)
-            conn.commit()
-            print(f"{args.kind} v{args.version} is now the active version ({touched} rows touched)")
-            return 0
-        against = args.against if args.against is not None else active_version(cur, args.kind)
-        if against is None:
-            print(f"{args.kind} has no active version to compare with; pass --against")
+            d = diff(cur, args.kind, args.version, against)
+        # 잘못된 CSV 도 CHECK 위반도 blocked 다 — 트레이스백은 종료 코드 1 이 되어 규약을 깬다.
+        except (ValueError, LookupError, psycopg.Error) as refused:
+            print(refused)
             return 2
-        d = diff(cur, args.kind, args.version, against)
-        print(f"{d.kind} v{d.version} vs v{d.against}: +{len(d.added)} -{len(d.removed)} ~{len(d.changed)}")
-        for mark, keys in (("+", d.added), ("-", d.removed), ("~", d.changed)):
-            for key in keys:
-                print(f"{mark} {key}")
-        return 0
+    print(f"{d.kind} v{d.version} vs v{d.against}: +{len(d.added)} -{len(d.removed)} ~{len(d.changed)}")
+    for mark, keys in (("+", d.added), ("-", d.removed), ("~", d.changed)):
+        for key in keys:
+            print(f"{mark} {key}")
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

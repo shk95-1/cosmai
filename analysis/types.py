@@ -1,6 +1,6 @@
 # analysis/types.py — contracts/interfaces.md 의 코드 블록과 같아야 한다 (tests/test_contract_types.py).
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -73,6 +73,7 @@ class AspectLexicon:
 
     def for_category(self, category: str | None) -> tuple[AspectPattern, ...]:
         """priority 오름차순, 동률은 id — category 전용이 같은 이름의 generic 을 가린다."""
+        # 반환 순서는 patterns 가 이미 (priority, id) 로 실려 온다는 로더의 약속에 기댄다.
         specific = tuple(p for p in self.patterns if p.scope == "category" and p.category == category)
         # 쌍둥이(중립 명사)는 같은 이름을 갖고 따로 살아남아야 하므로 is_neutral_noun 까지 키에 넣는다.
         hidden = {(p.aspect, p.is_neutral_noun) for p in specific}
@@ -326,3 +327,18 @@ class Aggregator(Protocol):
         self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str
     ) -> list[MetricsNeedRow]: ...
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]: ...
+
+
+# ---------- 평가 ----------
+@dataclass(frozen=True)
+class LabeledRow:  # needs.labeled_set 한 행. eval 하네스가 구현체에 넘기는 유일한 입력
+    task: str
+    ref: str
+    split: str
+    gold: str
+    text: str
+    extra: Mapping[str, object]  # 셋 이름(`set`)·rating·in_final 등 원본 CSV 의 나머지 열
+
+
+class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 길이·순서로 라벨을 돌려준다
+    def __call__(self, rows: Sequence[LabeledRow]) -> Sequence[str]: ...

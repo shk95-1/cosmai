@@ -45,15 +45,19 @@ def _polarity(eval_dir: Path) -> list[tuple[Any, ...]]:
 
 
 def _wish(eval_dir: Path) -> list[tuple[Any, ...]]:
-    # blind60_v2 is the never-tuned-on holdout the wish_class baseline is judged against (interfaces.md).
+    # Both wish holdouts sit at split='holdout' and the refs are bare comment ids, so `set` is the only
+    # thing that tells blind60_v2 -- the never-tuned-on set the baseline is judged against -- from the rest.
     return [
-        _row("wish_class", r["comment_id"], split, r["gold"], r["text"], {"like_count": r["like_count"]})
-        for name, split in (
-            ("tune100.csv", "tune"),
-            ("holdout60.csv", "holdout"),
-            ("blind60_v2.csv", "holdout"),
+        _row(
+            "wish_class",
+            r["comment_id"],
+            split,
+            r["gold"],
+            r["text"],
+            {"like_count": r["like_count"], "set": name},
         )
-        for r in read_csv(eval_dir / "wish" / name)
+        for name, split in (("tune100", "tune"), ("holdout60", "holdout"), ("blind60_v2", "holdout"))
+        for r in read_csv(eval_dir / "wish" / f"{name}.csv")
     ]
 
 

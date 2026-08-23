@@ -82,6 +82,9 @@ FILLED = {
     "select count(*) from product_denominator where aggregate_version <> 'slice-p1'": 0,
     "select count(*) from rank_daily where n_present is null or aggregate_version <> 'slice-p2'": 0,
     "select count(*) from price_event where n_pre is null or n_post24 is null": 0,
+    # wish 의 두 holdout 은 split 도 ref 문법도 같다 — extra.set 만이 블라인드 셋을 가른다 (#1 평가 하네스).
+    "select count(*) from labeled_set where extra->>'set' = 'blind60_v2'": 60,
+    "select count(*) from labeled_set where task = 'wish_class' and extra->>'set' is null": 0,
     # A20: 두 언급 테이블이 같은 댓글에 같은 키를 쓴다.
     "select count(*) from wish_mention where ref not like '%/%'": 0,
     # slice-suncare/metrics.csv 15행만 유튜브 집계를 갖는다 (A1).

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from analysis.metrics import Scores, collapsed_accuracy, score
+from analysis.metrics import Scores, precision_over, score
 
 PAIRS = [("불만", "불만"), ("불만", "만족"), ("만족", "만족"), ("중립", "중립"), ("중립", "불만")]
+# (gold, 예측). 채택 = 예측 'Y' 두 행뿐이고 분모는 그 둘이다.
 MATCHES = [("Y", "Y"), ("V", "Y"), ("N", "N"), ("Y", "N")]
 
 
@@ -27,7 +28,9 @@ def test_a_label_nobody_predicted_scores_zero_instead_of_dividing_by_zero():
     assert score([]) == Scores(n=0, accuracy=0.0, classes=())
 
 
-def test_collapsing_to_a_positive_set_is_how_strict_and_lenient_differ():
-    assert collapsed_accuracy(MATCHES, {"Y"}) == 0.5
-    assert collapsed_accuracy(MATCHES, {"Y", "V"}) == 0.75
-    assert collapsed_accuracy([], {"Y"}) == 0.0
+def test_precision_counts_only_the_rows_the_implementation_accepted():
+    assert precision_over(MATCHES, {"Y"}, {"Y"}) == 0.5
+    assert precision_over(MATCHES, {"Y"}, {"Y", "V"}) == 1.0
+    # 아무것도 채택하지 않으면 분모가 0 이다 — 0 으로 나누지 않고 0.0 을 낸다.
+    assert precision_over(MATCHES, {"Z"}, {"Y"}) == 0.0
+    assert precision_over([], {"Y"}, {"Y"}) == 0.0
