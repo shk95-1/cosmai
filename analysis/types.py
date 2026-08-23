@@ -73,11 +73,20 @@ class AspectLexicon:
 
     def for_category(self, category: str | None) -> tuple[AspectPattern, ...]:
         """priority 오름차순, 동률은 id — category 전용이 같은 이름의 generic 을 가린다."""
-        ...
+        specific = tuple(p for p in self.patterns if p.scope == "category" and p.category == category)
+        # 쌍둥이(중립 명사)는 같은 이름을 갖고 따로 살아남아야 하므로 is_neutral_noun 까지 키에 넣는다.
+        hidden = {(p.aspect, p.is_neutral_noun) for p in specific}
+        generic = tuple(
+            p for p in self.patterns if p.scope == "generic" and (p.aspect, p.is_neutral_noun) not in hidden
+        )
+        return specific + generic
 
     def complaint_marker_re(self, category: str | None) -> re.Pattern[str]:
         """담화 표지 | 그 카테고리의 전 패턴."""
-        ...
+        # 카테고리마다 다른 합집합이라 로드 시점에 만들 수 없다 — 부르는 쪽이 카테고리별로 캐시한다.
+        parts = [self.discourse_marker_re.pattern]
+        parts += [p.pattern.pattern for p in self.for_category(category)]
+        return re.compile("|".join(parts))
 
 
 # ---------- 제품 식별 ----------

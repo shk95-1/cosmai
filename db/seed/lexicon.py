@@ -7,6 +7,7 @@ from typing import Any, LiteralString
 
 import psycopg
 
+from db.lexicon import insert_aspects, insert_entities
 from db.seed._common import LEXICON_VERSION, boolean, counts, opt, read_csv, write
 
 TABLES = ("entity_lexicon", "aspect_lexicon", "site_axis_map", "need_key", "category_map")
@@ -14,21 +15,6 @@ TABLES = ("entity_lexicon", "aspect_lexicon", "site_axis_map", "need_key", "cate
 # stoplist.csv tier -> entity_lexicon.tier (the DDL only knows normal | cooc_required | stop).
 TIERS = {"stop": "stop", "retailer": "stop", "cooc": "cooc_required"}
 
-ENTITY_SQL: LiteralString = """
-INSERT INTO entity_lexicon (kind, canonical, surface, tier, source, version, note)
-VALUES (%s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (kind, surface, version) DO NOTHING
-"""
-# ruleset/priority arrived with 002, after v1 was already loaded, so the live rows sit at the DEFAULT ''
-# and a ruleset-filtered loader would read nothing. The WHERE keeps this a one-shot backfill: a row that
-# already carries a ruleset is never rewritten, so dictionary content still changes only by version.
-ASPECT_SQL: LiteralString = """
-INSERT INTO aspect_lexicon (aspect, scope, category, pattern, is_neutral_noun, version, ruleset, priority)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (aspect, scope, category, pattern, version) DO UPDATE
-SET ruleset = EXCLUDED.ruleset, priority = EXCLUDED.priority
-WHERE aspect_lexicon.ruleset = ''
-"""
 NEED_KEY_SQL: LiteralString = """
 INSERT INTO need_key (need_key, canonical, note)
 VALUES (%s, %s, %s)
@@ -63,39 +49,26 @@ def _brand_rows(eval_dir: Path) -> list[tuple[Any, ...]]:
         listed = stop.get(r["canonical"])
         tier = TIERS[listed["tier"]] if listed else "normal"
         note = listed["reason"] if listed else None
-        surfaces.append(
-            ("brand", r["canonical"], r["surface"], tier, opt(r["sources"]), LEXICON_VERSION, note)
-        )
+        surfaces.append(("brand", r["canonical"], r["surface"], tier, opt(r["sources"]), note))
         for alias in filter(None, r["aliases"].split("|")):
             if (r["canonical"], alias) not in dropped:
-                aliases.append(
-                    ("brand", r["canonical"], alias, tier, opt(r["sources"]), LEXICON_VERSION, note)
-                )
+                aliases.append(("brand", r["canonical"], alias, tier, opt(r["sources"]), note))
     # Surfaces first: where an alias repeats another brand's surface, the surface row is the one kept.
     return surfaces + aliases
 
 
 def _ingredient_rows(eval_dir: Path) -> list[tuple[Any, ...]]:
     return [
-        (
-            "ingredient",
-            r["lexicon_key"],
-            surface,
-            None,
-            "paper_lexicon",
-            LEXICON_VERSION,
-            opt(r["canonical_en"]),
-        )
+        ("ingredient", r["lexicon_key"], surface, None, "paper_lexicon", opt(r["canonical_en"]))
         for r in read_csv(eval_dir / "lexicon" / "ingredient_kr_colloquial_v1.csv")
         for surface in filter(None, r["kr_colloquial"].split("|"))
     ]
 
 
 def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
-    write(cur, ENTITY_SQL, _brand_rows(source_dir) + _ingredient_rows(source_dir))
-    write(
+    insert_entities(cur, _brand_rows(source_dir) + _ingredient_rows(source_dir), LEXICON_VERSION)
+    insert_aspects(
         cur,
-        ASPECT_SQL,
         [
             (
                 r["aspect"],
@@ -103,12 +76,12 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
                 r["category"],
                 r["pattern"],
                 boolean(r["is_neutral_noun"]),
-                LEXICON_VERSION,
                 r["ruleset"],
                 int(r["priority"]),
             )
             for r in read_csv(source_dir / "lexicon" / "aspect_lexicon_v1.csv")
         ],
+        LEXICON_VERSION,
     )
     write(
         cur,

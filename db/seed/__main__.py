@@ -1,18 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from urllib.parse import quote
 
-from db import secrets
+from db.runtime import RUNTIME_KEY, runtime_url
 from db.seed import GROUP_NAMES, run_all
 from db.seed._common import DEFAULT_SLICES
-
-RUNTIME_KEY = "NEEDS_DB_RUNTIME"
-RUNTIME_DSN = "postgresql+psycopg://needs_runtime:{password}@127.0.0.1:5434/app"
-
-
-def runtime_url() -> str:
-    return RUNTIME_DSN.format(password=quote(secrets.require([RUNTIME_KEY])[RUNTIME_KEY], safe=""))
 
 
 def main(argv: list[str] | None = None) -> int:
