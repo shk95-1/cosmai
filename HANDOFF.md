@@ -11,7 +11,7 @@
 
 ## 1. 시작 전 확인
 ```
-tool/checks/test          # 7 passed 여야 함 (일회용 postgres:18 기동 → bootstrap → 계약 DDL 적용 → 테스트)
+tool/checks/test          # 29 passed 여야 함 (일회용 postgres:18 → db/migrate.sh 2회 → 테스트)
 git config core.hooksPath # .githooks
 ```
 
@@ -21,8 +21,8 @@ git config core.hooksPath # .githooks
   - trend-radar: 로컬 master에 review_low 머지·크론 복구(03:30 review_low, 04:15 review, 05:00 stats, 05:30 new_product UTC). 첫 review_low ok(3,600행).
   - tubedepth: `watch` 컨테이너 **정지 상태**(팬아웃 상한 전까지), 중복 job 224k 취소, 자막 1,638 enqueue. worker·flatten·api는 Up.
   - cosmai-old: trendradar.rest 스케줄 10초(무의미 재수집) 아직 켜짐, tubedepth.rest 스케줄은 실패로 꺼짐.
-- DB: `shared-postgres` 127.0.0.1:5434, DB `app`(trend_radar·tubedepth), `cosmai`(cosmai). 슈퍼유저 `platform`. 읽기는 `docker exec shared-postgres psql -U platform -d app`. **`needs` 스키마는 아직 실 DB에 없음.**
-- secret: `~/.config/cosmai/env` (키 이름은 `contracts/secrets.md`). 값은 어디에도 쓰지 않는다.
+- DB: `shared-postgres` 127.0.0.1:5434, DB `app`(trend_radar·tubedepth·**needs**), `cosmai`(cosmai). 슈퍼유저 `platform`. 읽기는 `docker exec shared-postgres psql -U platform -d app`. `needs`는 2026-08-23 `db/migrate.sh`로 적용(원장 `needs.schema_migration`)·`python -m db.seed`로 슬라이스 산출물 적재됨(15 테이블, 행 수는 `tests/test_seed.py` EXPECTED).
+- secret: `~/.config/cosmai/env` (키 이름은 `contracts/secrets.md`; `NEEDS_DB_MIGRATOR`·`NEEDS_DB_RUNTIME` 추가됨). 값은 어디에도 쓰지 않는다.
 
 ## 3. 원칙 (짧게)
 - 계약 우선: 인터페이스·DDL은 `contracts/`가 정본. 바꾸려면 계약+구현+테스트가 한 PR.
@@ -32,8 +32,8 @@ git config core.hooksPath # .githooks
 - 커밋은 훅 통과로만(Conventional Commits, 제목 72자). `--no-verify`·force push 금지.
 - 테스트는 실 Postgres·오프라인. 새 수집은 하지 않는다(기존 수집기가 돌고 있음). 분석은 DB를 reader로 읽는다.
 
-## 4. 순서 (REBUILD §4; D3 승인 전제)
-### 1단계 — `needs` 스키마 + 노출 (1일) — 먼저, 단독
+## 4. 순서 (REBUILD §4; D3 승인됨 2026-08-23)
+### 1단계 — `needs` 스키마 + 노출 (1일) — **완료 2026-08-23** (PostgREST 재시작·data-portal 재빌드만 승인 대기)
 - `db/`: bootstrap(`db/bootstrap.sql`, schema=needs)을 `shared-postgres`에 적용하는 스크립트 + needs 롤 비밀번호를 env에 추가(`NEEDS_DB_MIGRATOR`, `NEEDS_DB_RUNTIME`, `.env`는 stack). `001_needs.sql` 적용 (migrator, SET ROLE owner).
 - 적재기: `eval/`·`architect/slice-*/` CSV → `needs.*` (formats.md 매핑). 검증 = 행 수가 슬라이스 README와 일치.
 - 노출: PostgREST `postgrest.env` `PGRST_DB_SCHEMAS`에 `needs` 추가 + anon SELECT는 `metrics_*`, `*_lexicon`, `product_ref`만; data-portal `SCHEMAS += needs`.
@@ -59,5 +59,5 @@ git config core.hooksPath # .githooks
 - secret 값 출력, `.env` 커밋.
 
 ## 6. 미결
-- **D3**: REBUILD §4 순서 승인 — 승인되면 메모리 `cosmai-goal-ladder`의 "대기"를 지운다.
+- ~~D3~~ 승인됨(2026-08-23). 메모리 갱신 완료.
 - 브링그린 알로에처럼 ≤2★가 300건을 넘는 제품은 review_low 6페이지로 부족 → 5단계에서 "3★ 등장까지" 규칙으로.
