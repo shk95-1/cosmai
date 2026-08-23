@@ -9,13 +9,15 @@ require_command uv docker pg_isready
 uv sync --extra dev --frozen
 
 if [ -z "$TEST_POSTGRES_URL" ]; then
-    name=cosmai-test-postgres
+    # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).
+    port=${COSMAI_TEST_PG_PORT:-55432}
+    name=cosmai-test-postgres-$port
     trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
-        -e POSTGRES_DB=fleet -p 55432:5432 postgres:18-alpine >/dev/null
+        -e POSTGRES_DB=fleet -p "$port":5432 postgres:18-alpine >/dev/null
     for _ in $(seq 1 60); do
-        pg_isready -h localhost -p 55432 -U fleet -q 2>/dev/null && break
+        pg_isready -h localhost -p "$port" -U fleet -q 2>/dev/null && break
         sleep 1
     done
     docker exec -i "$name" psql -U fleet -d fleet -v ON_ERROR_STOP=1 \
@@ -27,8 +29,8 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     { printf 'SET ROLE needs_owner;\n'; cat contracts/ddl/needs/001_needs.sql; } \
         | docker exec -i "$name" psql -U needs_migrator -d fleet -v ON_ERROR_STOP=1 -q \
         || { echo "✗ contracts/ddl/needs/001_needs.sql does not apply" >&2; exit 1; }
-    TEST_POSTGRES_URL='postgresql+psycopg://needs_migrator:check@localhost:55432/fleet'
-    TEST_POSTGRES_RUNTIME_URL='postgresql+psycopg://needs_runtime:check-runtime@localhost:55432/fleet'
+    TEST_POSTGRES_URL="postgresql+psycopg://needs_migrator:check@localhost:$port/fleet"
+    TEST_POSTGRES_RUNTIME_URL="postgresql+psycopg://needs_runtime:check-runtime@localhost:$port/fleet"
     export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
 fi
 
