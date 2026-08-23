@@ -20,9 +20,19 @@ from db.seed._common import (
     write,
 )
 
-TABLES = ("product_ref", "product_member", "product_denominator", "rank_daily", "price_event")
+TABLES = (
+    "product_ref",
+    "product_member",
+    "product_ref_candidate",
+    "product_denominator",
+    "rank_daily",
+    "price_event",
+)
 
 SOURCE = "oliveyoung"
+# 슬라이스 이름 = 그 행을 만든 실행. run 을 거치지 않는 테이블은 이 값만이 출처다 (A19).
+P1_VERSION = "slice-p1"
+P2_VERSION = "slice-p2"
 
 REF_SQL: LiteralString = """
 INSERT INTO product_ref (product_ref, brand, name_norm, name, n_sites, first_seen, linker_version)
@@ -38,33 +48,45 @@ VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (source, product_key) DO UPDATE
 SET product_ref = EXCLUDED.product_ref, role = EXCLUDED.role, match_score = EXCLUDED.match_score
 """
+CANDIDATE_SQL: LiteralString = """
+INSERT INTO product_ref_candidate
+  (src_a, key_a, src_b, key_b, brand, shared_tok, shared_sig, dice, mutual, linker_version)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (src_a, key_a, src_b, key_b, linker_version) DO UPDATE
+SET brand = EXCLUDED.brand, shared_tok = EXCLUDED.shared_tok, shared_sig = EXCLUDED.shared_sig,
+    dice = EXCLUDED.dice, mutual = EXCLUDED.mutual
+"""
 DENOMINATOR_SQL: LiteralString = """
 INSERT INTO product_denominator
-  (source, product_key, captured_at, site_review_count, low_collected, low_complete, site_low_est)
-VALUES (%s, %s, %s, %s, %s, %s, %s)
+  (source, product_key, captured_at, category, site_review_count, low_collected, low_complete,
+   site_low_est, aggregate_version)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (source, product_key, captured_at) DO UPDATE
-SET site_review_count = EXCLUDED.site_review_count, low_collected = EXCLUDED.low_collected,
-    low_complete = EXCLUDED.low_complete, site_low_est = EXCLUDED.site_low_est
+SET category = EXCLUDED.category, site_review_count = EXCLUDED.site_review_count,
+    low_collected = EXCLUDED.low_collected, low_complete = EXCLUDED.low_complete,
+    site_low_est = EXCLUDED.site_low_est, aggregate_version = EXCLUDED.aggregate_version
 """
 RANK_SQL: LiteralString = """
 INSERT INTO rank_daily
-  (source, board, category_key, product_key, day_kst, n_snapshots, present_share, rank_mean,
-   rank_min, rank_max, price_mode)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+  (source, board, category_key, product_key, day_kst, n_snapshots, n_present, present_share,
+   rank_mean, rank_min, rank_max, price_mode, aggregate_version)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (source, board, category_key, product_key, day_kst) DO UPDATE
-SET n_snapshots = EXCLUDED.n_snapshots, present_share = EXCLUDED.present_share,
-    rank_mean = EXCLUDED.rank_mean, rank_min = EXCLUDED.rank_min, rank_max = EXCLUDED.rank_max,
-    price_mode = EXCLUDED.price_mode
+SET n_snapshots = EXCLUDED.n_snapshots, n_present = EXCLUDED.n_present,
+    present_share = EXCLUDED.present_share, rank_mean = EXCLUDED.rank_mean,
+    rank_min = EXCLUDED.rank_min, rank_max = EXCLUDED.rank_max, price_mode = EXCLUDED.price_mode,
+    aggregate_version = EXCLUDED.aggregate_version
 """
 PRICE_SQL: LiteralString = """
 INSERT INTO price_event
   (source, product_key, board, t_change, price_before, price_after, pct, direction,
-   rank_pre6, rank_post6, rank_post12, rank_post24)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+   rank_pre6, rank_post6, rank_post12, rank_post24, n_pre, n_post24, aggregate_version)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (source, product_key, board, t_change) DO UPDATE
 SET price_before = EXCLUDED.price_before, price_after = EXCLUDED.price_after, pct = EXCLUDED.pct,
     direction = EXCLUDED.direction, rank_pre6 = EXCLUDED.rank_pre6, rank_post6 = EXCLUDED.rank_post6,
-    rank_post12 = EXCLUDED.rank_post12, rank_post24 = EXCLUDED.rank_post24
+    rank_post12 = EXCLUDED.rank_post12, rank_post24 = EXCLUDED.rank_post24, n_pre = EXCLUDED.n_pre,
+    n_post24 = EXCLUDED.n_post24, aggregate_version = EXCLUDED.aggregate_version
 """
 
 
@@ -128,16 +150,37 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
     write(cur, MEMBER_SQL, sun_members + p2_members)
     write(
         cur,
+        CANDIDATE_SQL,
+        [
+            (
+                r["src_a"],
+                r["key_a"],
+                r["src_b"],
+                r["key_b"],
+                opt(r["brand"]),
+                integer(r["shared_tok"]),
+                integer(r["shared_sig"]),
+                dec(r["dice"]),
+                boolean(r["mutual"]),
+                P2_VERSION,
+            )
+            for r in read_csv(source_dir / "slice-p2-ranking-dynamics" / "product_ref_candidates.csv")
+        ],
+    )
+    write(
+        cur,
         DENOMINATOR_SQL,
         [
             (
                 SOURCE,
                 r["product_key"],
                 CAPTURED_AT,
+                opt(r["category"]),
                 integer(r["site_review_count"]),
                 integer(r["low_collected"]),
                 boolean(r["low_complete"]),
                 dec(r["site_low_est"]),
+                P1_VERSION,
             )
             for r in read_csv(source_dir / "slice-p1-category-gap" / "product_denominator.csv")
         ],
@@ -153,11 +196,13 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
                 r["product_key"],
                 as_date(r["day_kst"]),
                 integer(r["n_snapshots"]),
+                integer(r["n"]),
                 dec(r["present_share"]),
                 dec(r["rank_mean"]),
                 integer(r["rank_min"]),
                 integer(r["rank_max"]),
                 integer(r["price_mode"]),
+                P2_VERSION,
             )
             for r in read_csv(source_dir / "slice-p2-ranking-dynamics" / "rank_daily.csv")
         ],
@@ -179,6 +224,9 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
                 dec(r["rank_post6"]),
                 dec(r["rank_post12"]),
                 dec(r["rank_post24"]),
+                integer(r["n_pre"]),
+                integer(r["n_post24"]),
+                P2_VERSION,
             )
             for r in read_csv(source_dir / "slice-p2-ranking-dynamics" / "price_rank_events.csv")
         ],

@@ -24,9 +24,16 @@ EXPECTED = {
     # AXIS_MAP 25축 × 그 축을 실제로 내놓은 사이트. 올영 25 = slice-p1-category-gap/
     # site_topic_raw.csv 의 topic_group, 다이소 9 = 같은 곳 site_answer_raw.csv 의 question_name.
     "site_axis_map": 34,
-    "labeled_set": 760,  # eval/README.md: polarity 400 + wish 160 + brand_link 120 + product_match 80
+    # 두 슬라이스 어휘의 합집합 = aspect_lexicon 70행의 distinct aspect (A17)
+    "need_key": 38,
+    # p1 extract_candidates.py 의 NAME_CAT 14 + CAT_MAP 6 (A18)
+    "category_map": 20,
+    # eval/README.md: polarity 400 + wish 220(tune100 + holdout60 + blind60_v2)
+    # + brand_link 120 + product_match 80
+    "labeled_set": 820,
     "product_ref": 154,  # slice-suncare 18 + slice-p2 145 − 겹침 9
     "product_member": 348,  # slice-suncare 29 + slice-p2 341 − 같은 (source, product_key) 22
+    "product_ref_candidate": 230,  # slice-p2-ranking-dynamics/product_ref_candidates.csv (A13)
     "product_denominator": 38,  # slice-p1-category-gap/README.md
     "rank_daily": 17948,  # slice-p2-ranking-dynamics/README.md
     "price_event": 363,  # slice-p2-ranking-dynamics/README.md
@@ -58,3 +65,37 @@ def test_seed_loads_the_slice_row_counts_and_is_idempotent(needs_runtime_url: st
     assert first == EXPECTED
     second = seed.run_all(needs_runtime_url, slices=slices)
     assert second == EXPECTED
+
+
+# 002 가 더한 컬럼은 행 수로는 보이지 않는다: 값이 실제로 들어갔는지 따로 센다.
+FILLED = {
+    # aspect_lexicon 70 = p1-v2.2 55 + suncare-v2.2 13 + shared 2 (formats.md §ruleset)
+    "select count(*) from aspect_lexicon where ruleset = ''": 0,
+    "select count(*) from aspect_lexicon where ruleset in ('suncare-v2.2', 'shared')": 15,
+    "select count(*) from aspect_lexicon where ruleset in ('p1-v2.2', 'shared')": 57,
+    "select count(*) from aspect_lexicon where scope = 'category' and priority <> 0": 0,
+    "select count(*) from product_denominator where category is null": 0,
+    "select count(*) from product_denominator where aggregate_version <> 'slice-p1'": 0,
+    "select count(*) from rank_daily where n_present is null or aggregate_version <> 'slice-p2'": 0,
+    "select count(*) from price_event where n_pre is null or n_post24 is null": 0,
+    # A20: 두 언급 테이블이 같은 댓글에 같은 키를 쓴다.
+    "select count(*) from wish_mention where ref not like '%/%'": 0,
+    # slice-suncare/metrics.csv 15행만 유튜브 집계를 갖는다 (A1).
+    "select count(*) from metrics_need where yt_neg is not null": 15,
+    "select count(*) from metrics_need where denom_low is not null": 331,
+    "select count(*) from metrics_need where aspect_scope is not null": 301,
+    "select count(*) from metrics_wish where videos is null or example is null": 0,
+    # suncare 2,266(전부 선블록) + p1 의 lexicon_category 있는 11,537 − UNIQUE 충돌 548 (B10)
+    "select count(*) from need_mention where lexicon_category is not null": 13255,
+}
+
+
+def test_the_seed_fills_the_columns_the_audit_added(needs_runtime_url: str, slices: Path):
+    seed.run_all(needs_runtime_url, slices=slices)
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        got = {}
+        for query, _ in FILLED.items():
+            cur.execute(query)  # type: ignore[arg-type]
+            row = cur.fetchone()
+            got[query] = int(row[0]) if row else -1
+    assert got == FILLED
