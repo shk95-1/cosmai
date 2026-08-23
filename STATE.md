@@ -8,7 +8,7 @@
 2. `contracts/README.md` → `contracts/{entrypoints,interfaces,formats,secrets,versioning}.md` → `contracts/ddl/needs/*.sql`
 3. 이 파일 §2·§3
 4. `gh issue list --label epic` → 에픽 이슈 본문(사전 승인·리뷰 등급·원장 규칙) → `gh issue list --state open` 로 열린 유닛 이슈. 이슈 코멘트가 원장이다.
-5. 서브에이전트는 `.claude/agents/{impl-mechanical,impl,reviewer,reviewer-deep}` 정의로 호출(모델·effort 고정).
+5. 서브에이전트는 `.claude/agents/{impl-mechanical,impl,reviewer,reviewer-deep,judge}` 정의로 호출(모델·effort 고정).
 6. 확인: `tool/checks/test` 녹색(일회용 postgres:18 → `db/migrate.sh` 2회 → 테스트), `git config core.hooksPath` = `.githooks`
 슬라이스 상세(`architect/slice-*/README.md`)는 그 슬라이스를 이식하는 유닛만 읽는다. `playbook/`은 노하우 기록이지 필독이 아니다.
 
