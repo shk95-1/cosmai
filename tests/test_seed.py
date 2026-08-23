@@ -103,3 +103,33 @@ def test_the_seed_fills_the_columns_the_audit_added(needs_runtime_url: str, slic
             row = cur.fetchone()
             got[query] = int(row[0]) if row else -1
     assert got == FILLED
+
+
+# F-1: 사전 v1 은 버전으로만 바뀐다(에픽 판정 9). 재적재가 채우는 것은 002 가 뒤늦게 더한 빈 컬럼뿐이다.
+SENTINEL = "sentinel-not-from-csv"
+
+
+def test_the_seed_backfills_only_the_aspect_rows_that_have_no_ruleset(needs_runtime_url: str, slices: Path):
+    seed.run_all(needs_runtime_url, slices=slices, only=("lexicon",))
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        # 002 이전의 운영 상태: v1 행은 있고 새 두 컬럼만 DEFAULT. 한 행만 사람이 넣은 값을 갖는다.
+        cur.execute("UPDATE aspect_lexicon SET ruleset = '', priority = 0")
+        cur.execute(
+            "UPDATE aspect_lexicon SET ruleset = %s WHERE id = (SELECT min(id) FROM aspect_lexicon)",
+            (SENTINEL,),
+        )
+        conn.commit()
+    seed.run_all(needs_runtime_url, slices=slices, only=("lexicon",))
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT ruleset, count(*) FROM aspect_lexicon GROUP BY ruleset")
+        by_ruleset = dict(cur.fetchall())
+        cur.execute("SELECT count(*) FROM aspect_lexicon WHERE scope = 'generic' AND priority = 1")
+        generic_priority = cur.fetchone()
+        cur.execute("SELECT count(*) FROM entity_lexicon")
+        entities = cur.fetchone()
+    # 비어 있던 69행은 CSV 값으로 채워지고(''는 남지 않는다), 센티널 행은 그대로다.
+    # 첫 행(min(id))은 generic 이라 p1-v2.2 55행 중 하나이고, generic priority 도 그 한 행만큼 덜 채워진다.
+    assert by_ruleset == {"p1-v2.2": 54, "suncare-v2.2": 13, "shared": 2, SENTINEL: 1}
+    assert generic_priority == (19,)
+    # 다른 사전 적재는 이 조작에 영향받지 않는다.
+    assert entities == (992,)
