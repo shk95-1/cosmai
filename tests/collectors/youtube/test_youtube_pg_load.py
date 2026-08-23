@@ -26,7 +26,9 @@ def _load(*parts: str) -> dict:
 
 
 class _FixtureFetcher:
-    """No network: hands back a saved dump per job kind, keyed the way the real sources would ask."""
+    """No network: hands back a saved dump per job kind, keyed the way the real sources would ask.
+    Counts calls per kind -- #8 수정 라운드 2's freshness cache is only provable by counting fetches,
+    not just reading rows back."""
 
     def __init__(self) -> None:
         self._listing = _load("listing", "channel-videos.json")
@@ -37,8 +39,10 @@ class _FixtureFetcher:
             "language": "en",
             "is_automatic": True,
         }
+        self.calls: dict[str, int] = {}
 
     def fetch(self, spec: FetchSpec) -> dict:
+        self.calls[spec.kind] = self.calls.get(spec.kind, 0) + 1
         if spec.kind == "channel.videos":
             return self._listing
         if spec.kind == "video.metadata":
@@ -83,13 +87,13 @@ def test_watch_work_flatten_lands_every_table(tubedepth_schema: str, tmp_path: P
     exit_flatten = run("flatten", database_url=tubedepth_schema, payload_root=payload_root, captured_at=AT)
     assert exit_flatten == 0
 
+    # #8 수정 라운드 2: 3 listing jobs (one per follow-up kind on the one channel+comments line) share
+    # one channel -- the freshness cache (models.FRESHNESS) means only the first actually fetches;
+    # jobs 2 and 3 reuse that artifact. Before the cache: 3 fetches, 6 listing_entries rows.
+    assert fetcher.calls["channel.videos"] == 1
     engine = sa.create_engine(tubedepth_schema)
     with engine.begin() as conn:
-        # 3 listing jobs (one per follow-up kind on the one channel+comments line) each walk the
-        # channel independently and write their own artifact -- #8 does not port the archived
-        # CollectionService's freshness cache (report: an explicit, documented simplification), so
-        # each of the 3 listing artifacts contributes its own 2 listing_entries rows.
-        assert conn.execute(sa.select(sa.func.count()).select_from(listing_entries)).scalar_one() == 6
+        assert conn.execute(sa.select(sa.func.count()).select_from(listing_entries)).scalar_one() == 2
         assert conn.execute(sa.select(sa.func.count()).select_from(video_snapshots)).scalar_one() == 2
         assert conn.execute(sa.select(sa.func.count()).select_from(comments)).scalar_one() == 4
         assert conn.execute(sa.select(sa.func.count()).select_from(transcripts)).scalar_one() == 2

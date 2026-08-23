@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from sqlalchemy import Connection
 
 from collectors.youtube import flatten, queue, sources
-from collectors.youtube.models import Dataset, JobState
+from collectors.youtube.models import FRESHNESS, Dataset, JobState
 from collectors.youtube.payload_store import PayloadStore
 from collectors.youtube.storage import db as storage_db
 from collectors.youtube.storage.tables import artifacts, jobs
@@ -159,51 +159,75 @@ def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
     return conn.execute(stmt).all()
 
 
+def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) -> Any | None:
+    """The newest artifact for (kind, target) still inside its freshness window, or None -- the
+    cache `_collect_one` consults before spending a request. `fresh_until` is stamped at write time
+    (`now + FRESHNESS.get(kind)`), so this is one indexed comparison, not a per-row calculation."""
+    return conn.execute(
+        sa.select(artifacts.c.identifier, artifacts.c.digest, artifacts.c.byte_count)
+        .where(artifacts.c.kind == kind, artifacts.c.target == target, artifacts.c.fresh_until > now)
+        .order_by(artifacts.c.fetched_at.desc())
+        .limit(1)
+    ).first()
+
+
+def _normalize(kind: str, dump: dict[str, Any]) -> Any:
+    if kind in LISTING_KINDS:
+        return sources.normalize_listing(dump, source_kind=kind)
+    if kind == "video.metadata":
+        return sources.normalize_video_metadata(dump)
+    if kind == "video.comments":
+        return sources.normalize_comments(dump)
+    if kind == "video.transcript":
+        return sources.parse_json3_transcript(
+            dump, language=dump.get("language", ""), is_automatic=bool(dump.get("is_automatic"))
+        )
+    raise ValueError(f"no source for job kind {kind!r}")
+
+
 def _collect_one(
     conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
 ) -> bool:
-    try:
-        dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
-        if job.kind in LISTING_KINDS:
-            payload = sources.normalize_listing(dump, source_kind=job.kind)
-        elif job.kind == "video.metadata":
-            payload = sources.normalize_video_metadata(dump)
-        elif job.kind == "video.comments":
-            payload = sources.normalize_comments(dump)
-        elif job.kind == "video.transcript":
-            payload = sources.parse_json3_transcript(
-                dump, language=dump.get("language", ""), is_automatic=bool(dump.get("is_automatic"))
+    cached = _fresh_artifact(conn, kind=job.kind, target=job.target, now=now)
+    if cached is not None:
+        # A fresh artifact already answers this question -- no fetch, no new artifact row. This is
+        # what keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in
+        # one watch pass (#8 수정 라운드 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
+        payload = payloads.get(job.kind, cached.digest)
+        digest, byte_count = cached.digest, cached.byte_count
+    else:
+        try:
+            dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
+            payload = _normalize(job.kind, dump)
+        except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
+            conn.execute(
+                sa.update(jobs)
+                .where(jobs.c.identifier == job.identifier)
+                .values(
+                    state=JobState.FAILED.value,
+                    finished_at=now,
+                    error_code=type(error).__name__,
+                    error_message=str(error),
+                )
             )
-        else:
-            raise ValueError(f"no source for job kind {job.kind!r}")
-    except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
-        conn.execute(
-            sa.update(jobs)
-            .where(jobs.c.identifier == job.identifier)
-            .values(
-                state=JobState.FAILED.value,
-                finished_at=now,
-                error_code=type(error).__name__,
-                error_message=str(error),
-            )
-        )
-        return False
+            return False
 
-    stored = payloads.put(job.kind, payload)
-    artifact_id = uuid.uuid4().hex
-    conn.execute(
-        sa.insert(artifacts).values(
-            identifier=artifact_id,
-            kind=job.kind,
-            target=job.target,
-            fingerprint=f"{job.kind}:{job.target}",
-            digest=stored.digest,
-            byte_count=stored.byte_count,
-            fetched_at=now,
-            fresh_until=now,
-            schema_version="1",
+        stored = payloads.put(job.kind, payload)
+        digest, byte_count = stored.digest, stored.byte_count
+        conn.execute(
+            sa.insert(artifacts).values(
+                identifier=uuid.uuid4().hex,
+                kind=job.kind,
+                target=job.target,
+                fingerprint=f"{job.kind}:{job.target}",
+                digest=digest,
+                byte_count=byte_count,
+                fetched_at=now,
+                fresh_until=now + FRESHNESS.get(job.kind, timedelta(0)),
+                schema_version="1",
+            )
         )
-    )
+
     if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
         video_ids = [v["video_id"] for v in payload["videos"]]
         queue.fan_out_follow_up(conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, now=now)
@@ -214,8 +238,8 @@ def _collect_one(
         .values(
             state=JobState.SUCCEEDED.value,
             finished_at=now,
-            payload_digest=stored.digest,
-            payload_bytes=stored.byte_count,
+            payload_digest=digest,
+            payload_bytes=byte_count,
         )
     )
     return True

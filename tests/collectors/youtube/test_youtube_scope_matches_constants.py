@@ -5,6 +5,7 @@ guard collectors/commerce's test_scope_matches_constants.py gives the ranking/re
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from pathlib import Path
 
 from collectors.youtube import models, queue
@@ -28,3 +29,17 @@ def test_models_constants_are_scope_json_verbatim():
 def test_queue_module_uses_the_same_constants_as_models():
     assert queue.MAX_FOLLOWUPS_PER_VIDEO == models.MAX_FOLLOWUPS_PER_VIDEO
     assert queue.MAX_QUEUE_DEPTH == models.MAX_QUEUE_DEPTH
+
+
+def test_freshness_seconds_are_positive_ints_keyed_by_a_known_kind():
+    on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
+    seconds_by_kind = on_disk["FRESHNESS_SECONDS"]
+    assert seconds_by_kind
+    for kind, seconds in seconds_by_kind.items():
+        assert isinstance(kind, str) and kind
+        assert isinstance(seconds, int) and not isinstance(seconds, bool) and seconds > 0
+
+
+def test_models_freshness_is_scope_json_verbatim_as_timedeltas():
+    on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
+    assert models.FRESHNESS == {k: timedelta(seconds=v) for k, v in on_disk["FRESHNESS_SECONDS"].items()}
