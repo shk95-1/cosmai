@@ -1,0 +1,670 @@
+From b9ffa957a355166d6846ad1789e26c6171df47f7 Mon Sep 17 00:00:00 2001
+From: shk <shkaaang@gmail.com>
+Date: Sun, 23 Aug 2026 16:18:27 +0900
+Subject: [PATCH] feat(oliveyoung): review_low reads one board's low-rated end
+ fully
+
+The `review` walk samples: two products a board, five boards, two sorts, three
+pages. An analysis needs the whole low-rated end of a few products instead --
+RATING_ASC is every one-star, then every two-star, recency as the tiebreak
+within a rating, so read to the end it is the complete low end, and a daily
+re-walk picks up new complaints on a site with no newest-first sort.
+
+`run --dataset review_low`: the suncare board's top 10, each up to six
+RATING_ASC pages of 50 (the cursor walk stops early on hasNext=false), one
+RATING_DESC page as a satisfaction baseline, and the stats request. 81 of the
+budget's 100. Same record types and tables as `review`; scope records it under
+its own name so the two walks' row counts cannot be confused.
+
+The page cap is now carried on the request (`pages` in Fetch.context) instead
+of read from REVIEW_PAGES in `_next_page`: both walks share the endpoint and
+parser and differ in exactly that number. Requests without it default to
+REVIEW_PAGES, so the `review` walk is unchanged. max_depth is the deeper of
+the two walks rather than REVIEW_PAGES.
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ CHANGELOG.md                                  |  14 ++
+ docker/crontab                                |   7 +
+ docs/sources/oliveyoung.md                    |  29 +++
+ scope.lock.json                               |   9 +-
+ src/trend_radar/models.py                     |   7 +
+ src/trend_radar/sources/oliveyoung.py         | 109 ++++++--
+ tests/sources/test_oliveyoung_review_low.py   | 238 ++++++++++++++++++
+ .../test_page_walks_fit_their_policy.py       |   5 +-
+ tests/test_scope_is_declared.py               |   3 +
+ 9 files changed, 405 insertions(+), 16 deletions(-)
+ create mode 100644 tests/sources/test_oliveyoung_review_low.py
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index b65b66c..cab1047 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -9,6 +9,20 @@ and so what a major bump would break — is in `README.md` under *Versioning*.
+ 
+ ## Unreleased
+ 
++### Added
++
++- `run --dataset review_low`: oliveyoung reads one board's low-rated reviews to
++  the end. The `suncare` board's top 10 products each get up to six
++  `RATING_ASC` pages of 50 -- every one-star review, then every two-star, the
++  cursor walk stopping early where the site runs out -- plus one `RATING_DESC`
++  page as a satisfaction baseline and the stats request for the site's own
++  rating distribution. 81 requests a run against the budget of 100. Same
++  `review` and `review_stats` tables as the `review` walk; what differs is
++  which products and how deep, which `scope` records under `review_low`.
++  Recommended cadence is daily: the site has no newest-first sort, and a daily
++  re-walk of the low end is what picks up new complaints. The `review` walk
++  itself is unchanged.
++
+ ## 1.1.0 — 2026-08-21
+ 
+ ### Added
+diff --git a/docker/crontab b/docker/crontab
+index e0e4dd2..31630ea 100644
+--- a/docker/crontab
++++ b/docker/crontab
+@@ -18,3 +18,10 @@
+ # run's nominal 74s and its own nominal 7.5 minutes end well before 03:00,
+ # keeping two runs off the same browser profile at once.
+ 5 2 * * * trend-radar run --dataset product
++
++# Daily, minute 30 of hour 3 UTC: one board's low-rated reviews walked to the
++# end (oliveyoung `review_low`, ~81 requests x 5s = ~7 min). The site has no
++# newest-first sort, so a daily re-walk of RATING_ASC is what picks up new
++# complaints. 03:30 is clear of the 02:05 product walk and of the 03:00 hourly
++# run's 74s, for the same one-browser-profile reason as the line above.
++30 3 * * * trend-radar run --dataset review_low --source oliveyoung
+diff --git a/docs/sources/oliveyoung.md b/docs/sources/oliveyoung.md
+index 90b3e31..392b148 100644
+--- a/docs/sources/oliveyoung.md
++++ b/docs/sources/oliveyoung.md
+@@ -587,6 +587,35 @@ UI 조작으로 잡으려던 시도도 기록해 둔다: 상세 페이지에서
+ **`review_stats`의 자연키에는 `captured_at`이 있다**(MERGE 정책). 그래서 이 실행은
+ 시간당 시계열을 쌓는다 — 본문과 달리 재수집이 무연산이 아니다.
+ 
++### 한 보드의 저평점 끝을 끝까지 읽는다 (`review_low`, 2026-08-23)
++
++`review`는 표본이다 — 보드 5개에서 2개씩, 정렬별 3페이지. 분석 하나가 원한 것은
++**몇 상품의 저평점 리뷰 전체**와 그 옆에 둘 고평점 기준선·사이트 자신의 평점 분포였고,
++그것은 같은 예산으로는 같은 워크에서 나오지 않는다. 그래서 별도 데이터셋이다.
++
++`RATING_ASC`는 1점 전부 → 2점 전부 → 3점… 순이고 평점 안에서는 최신순이다
++(위 표: 200건 중 189건 1점 + 11건 2점). 그러니 끝까지 걸으면 저평점 모집단 전체가 되고,
++**이 사이트에 최신순 정렬이 없어도** 매일 다시 걸으면 새로 들어온 불만이 잡힌다.
++
++| 상수 | 값 | 뜻 |
++| --- | ---: | --- |
++| `LOW_BOARD` | `suncare` | 거는 보드 하나. `_BOARDS`의 이름이어야 한다 |
++| `LOW_PRODUCTS` | 10 | 그 보드 상위 N |
++| `LOW_ASC_PAGES` | 6 | 상품당 `RATING_ASC` 페이지 상한. 6×50 = 300, `hasNext=false`면 먼저 멈춘다 |
++| `LOW_DESC_PAGES` | 1 | 상품당 `RATING_DESC` 1페이지 — 최신 고평점 50건, 만족 기준선 |
++
++요청은 **1 + 10 × (6 + 1 + 1 stats) = 81 / 100**. 요약(`summary`)은 부르지 않는다 —
++모델이 쓴 산문이고 이 워크는 리뷰어가 실제로 쓴 것을 읽으러 간다. 랭킹 행은 쓰지 않는다
++(`review`와 같은 이유).
++
++레코드 타입과 테이블은 `review`와 같다(`review`, `review_stats`). 다른 것은 **어느 상품을
++얼마나 깊이**냐이고, 그것이 `scope`에 `review_low`로 따로 기록된다. 페이지 상한은 요청이
++스스로 들고 다닌다(`Fetch.context`의 `pages`) — 두 워크가 엔드포인트와 파서를 공유하고
++정확히 이 숫자만 다르기 때문이다. `max_depth`는 그래서 `max(REVIEW_PAGES, LOW_ASC_PAGES)`.
++
++주기는 **하루 한 번**(`docker/crontab`, 03:30 UTC): 저평점 끝은 한 시간에 별로 움직이지
++않고, 리뷰 키에 `captured_at`이 없어 재수집은 무연산이다.
++
+ ### 응답 → `ReviewRecord`
+ 
+ `data.goodsReviewList[]`:
+diff --git a/scope.lock.json b/scope.lock.json
+index 341c5a3..a274004 100644
+--- a/scope.lock.json
++++ b/scope.lock.json
+@@ -58,7 +58,7 @@
+       }
+     },
+     "oliveyoung": {
+-      "changed_in": "1.1.0",
++      "changed_in": "Unreleased",
+       "scope": {
+         "ranking": {
+           "boards": 13
+@@ -77,6 +77,13 @@
+         "review_stats": {
+           "review_boards": 5,
+           "review_stats_products": 45
++        },
++        "review_low": {
++          "low_boards": 1,
++          "low_products": 10,
++          "low_asc_pages": 6,
++          "low_desc_pages": 1,
++          "review_page_size": 50
+         }
+       }
+     }
+diff --git a/src/trend_radar/models.py b/src/trend_radar/models.py
+index 6ad2a90..9907e73 100644
+--- a/src/trend_radar/models.py
++++ b/src/trend_radar/models.py
+@@ -44,11 +44,18 @@ class Dataset(StrEnum):
+     ingredients disclosure. `ProductRecord` rows still *also* arrive derived
+     from every ranking response; this dataset is the one that fills the columns
+     a ranking never sees.
++
++    REVIEW_LOW is the same record types as REVIEW -- bodies and the stats --
++    from a different walk: one board, ten products, the low-rated end read to
++    exhaustion rather than sampled. A member of its own because a run collects
++    one dataset and its scope is recorded under that name; folding it into
++    REVIEW would make one `review` row count mean two different walks.
+     """
+ 
+     RANKING = "ranking"
+     PRODUCT = "product"
+     REVIEW = "review"
++    REVIEW_LOW = "review_low"
+     REVIEW_STATS = "review_stats"
+     NEW_PRODUCT = "new_product"
+ 
+diff --git a/src/trend_radar/sources/oliveyoung.py b/src/trend_radar/sources/oliveyoung.py
+index 0748b0d..658bfb6 100644
+--- a/src/trend_radar/sources/oliveyoung.py
++++ b/src/trend_radar/sources/oliveyoung.py
+@@ -208,6 +208,29 @@ REVIEW_STATS_PRODUCTS_PER_BOARD = REVIEW_STATS_PRODUCTS // len(REVIEW_BOARDS)
+ PRODUCT_PRODUCTS = 85
+ PRODUCT_PRODUCTS_PER_BOARD = PRODUCT_PRODUCTS // len(REVIEW_BOARDS)
+ 
++# The low-rated walk (`review_low`): one board's top products, their RATING_ASC
++# reviews read to the end rather than three pages in. RATING_ASC is every
++# one-star, then every two-star, recency as the tiebreak within a rating, so
++# walking it to exhaustion is the whole low end -- and a daily re-walk picks up
++# what arrived since, which is the closest this site gets to newest-first (it
++# has no such sort; see REVIEW_SORTS).
++#
++# One board, not five: the `review` walk spreads its products to keep a
++# population; this one wants every complaint about a few products, and a whole
++# board's low end is what the budget buys. Must be a name in _BOARDS.
++LOW_BOARD = "suncare"
++LOW_BOARDS: tuple[str, ...] = (LOW_BOARD,)
++LOW_PRODUCTS = 10
++# RATING_ASC pages per product. 6 x 50 = 300, and the measured low end of a
++# headline product was 200 (189 one-star + 11 two-star, 2026-08-19); the cursor
++# walk stops early on hasNext=false, so this is a ceiling, not a quota.
++LOW_ASC_PAGES = 6
++# RATING_DESC pages per product: the fifty most recent top-rated reviews, a
++# satisfaction baseline beside the complaints. One page is the point.
++LOW_DESC_PAGES = 1
++# Budget: 1 board page + 10 x (6 + 1 + 1 stats) = 81 of the policy's 100,
++# leaving nineteen attempts of retry room before the lane truncates.
++
+ 
+ _BOARDS: tuple[_Board, ...] = (
+     _Board("sale", None),
+@@ -230,7 +253,13 @@ _BOARDS: tuple[_Board, ...] = (
+ class OliveYoung:
+     key: ClassVar[str] = "oliveyoung"
+     datasets: ClassVar[frozenset[Dataset]] = frozenset(
+-        {Dataset.RANKING, Dataset.PRODUCT, Dataset.REVIEW, Dataset.REVIEW_STATS}
++        {
++            Dataset.RANKING,
++            Dataset.PRODUCT,
++            Dataset.REVIEW,
++            Dataset.REVIEW_LOW,
++            Dataset.REVIEW_STATS,
++        }
+     )
+     # The boards walked, and the review walk hung off one of them. review_sorts
+     # is here because both ends of the rating are asked for and each is its own
+@@ -264,6 +293,18 @@ class OliveYoung:
+                     "review_stats_products": REVIEW_STATS_PRODUCTS,
+                 }
+             ),
++            # Both page caps, because they are what separates this walk from
++            # `review` on the same tables: a reader of the row count needs the
++            # depth, not just the product count.
++            Dataset.REVIEW_LOW: MappingProxyType(
++                {
++                    "low_boards": len(LOW_BOARDS),
++                    "low_products": LOW_PRODUCTS,
++                    "low_asc_pages": LOW_ASC_PAGES,
++                    "low_desc_pages": LOW_DESC_PAGES,
++                    "review_page_size": REVIEW_PAGE_SIZE,
++                }
++            ),
+         }
+     )
+     policy: ClassVar[SourcePolicy] = SourcePolicy(
+@@ -284,8 +325,10 @@ class OliveYoung:
+         # deep walk ends at REVIEW_PAGES. The default of 2 silently swallowed the
+         # third page of every product: the lane dropped those twenty requests
+         # before making them, the reviews that did arrive were all correct, and
+-        # the run reported ok.
+-        max_depth=REVIEW_PAGES,
++        # the run reported ok. The low walk goes LOW_ASC_PAGES deep on the same
++        # policy, so the ceiling is the deeper of the two -- a literal here is
++        # how the third page went missing the first time.
++        max_depth=max(REVIEW_PAGES, LOW_ASC_PAGES),
+         # One hundred and twenty, and two attempts rather than three. The
+         # product of the two bounds a stuck request; it was 180 (60x3, then
+         # 90x2) and is 240 now, decided 2026-08-20 against a measured
+@@ -307,6 +350,10 @@ class OliveYoung:
+     def seeds(self, dataset: Dataset) -> Sequence[Fetch]:
+         if dataset is Dataset.RANKING:
+             return tuple(_seed(board, dataset) for board in _BOARDS)
++        by_name = {board.name: board for board in _BOARDS}
++        if dataset is Dataset.REVIEW_LOW:
++            # One board, read deep. See LOW_BOARD.
++            return tuple(_seed(by_name[name], dataset) for name in LOW_BOARDS)
+         if dataset not in (Dataset.PRODUCT, Dataset.REVIEW, Dataset.REVIEW_STATS):
+             return ()
+         # Reviews, the aggregates and the ingredients walk are all per product,
+@@ -317,7 +364,6 @@ class OliveYoung:
+         # ingredients table, so one protein shake costs a full timeout-and-retry
+         # cycle. They take different numbers of products from those boards,
+         # which is the point of keeping the walks separate.
+-        by_name = {board.name: board for board in _BOARDS}
+         return tuple(_seed(by_name[name], dataset) for name in REVIEW_BOARDS)
+ 
+     def parse(self, payload: Payload) -> Yield:
+@@ -362,6 +408,7 @@ def _parse_ranking(payload: Payload, source: str) -> Yield:
+     # not change meaning under it.
+     category_key = payload.fetch.ctx("category") or board
+     wants_reviews = payload.fetch.dataset is Dataset.REVIEW
++    wants_low = payload.fetch.dataset is Dataset.REVIEW_LOW
+     wants_stats = payload.fetch.dataset is Dataset.REVIEW_STATS
+     wants_products = payload.fetch.dataset is Dataset.PRODUCT
+ 
+@@ -380,13 +427,30 @@ def _parse_ranking(payload: Payload, source: str) -> Yield:
+         if record is None:
+             continue
+         rank += 1
+-        if wants_reviews or wants_stats or wants_products:
++        if wants_reviews or wants_low or wants_stats or wants_products:
+             # No rank rows: this page was fetched to learn which products to ask
+             # about, and writing them would leave a second copy of a ranking the
+             # RANKING dataset already collects.
+             if wants_reviews and rank <= REVIEW_PRODUCTS_PER_BOARD:
+                 for sort in REVIEW_SORTS:
+                     follow.append(_review_fetch(record.product_key, sort))
++            if wants_low and rank <= LOW_PRODUCTS:
++                # The whole low end, one page of the top end, and the site's
++                # own distribution to weigh them against. Not the summary:
++                # that is model prose, and this walk is about what reviewers
++                # actually wrote.
++                key = record.product_key
++                follow.append(
++                    _review_fetch(
++                        key, "RATING_ASC", pages=LOW_ASC_PAGES, dataset=Dataset.REVIEW_LOW
++                    )
++                )
++                follow.append(
++                    _review_fetch(
++                        key, "RATING_DESC", pages=LOW_DESC_PAGES, dataset=Dataset.REVIEW_LOW
++                    )
++                )
++                follow.append(_stats_fetch(key, dataset=Dataset.REVIEW_LOW))
+             if wants_stats and rank <= REVIEW_STATS_PRODUCTS_PER_BOARD:
+                 # One request each, so this walk goes far wider than the body
+                 # walk on the same budget.
+@@ -407,6 +471,11 @@ def _review_fetch(
+     *,
+     page: int = 0,
+     cursor: tuple[object, object] | None = None,
++    # How many pages this walk goes, carried on the request so the next page
++    # knows its own ceiling: the `review` and `review_low` walks share this
++    # endpoint and parser and differ in exactly this number.
++    pages: int = REVIEW_PAGES,
++    dataset: Dataset = Dataset.REVIEW,
+ ) -> Fetch:
+     body: dict[str, object] = {
+         "goodsNumber": goods_number,
+@@ -422,7 +491,7 @@ def _review_fetch(
+         body["cursorId"], body["cursorScore"] = cursor
+     return Fetch(
+         url=REVIEW_ENDPOINT,
+-        dataset=Dataset.REVIEW,
++        dataset=dataset,
+         method="POST",
+         # Explicitly HTTP even though this source's policy says browser: the
+         # review host is not behind the challenge, and a browser navigation
+@@ -442,14 +511,15 @@ def _review_fetch(
+             ("product", goods_number),
+             ("sort", sort),
+             ("page", str(page)),
++            ("pages", str(pages)),
+         ),
+     )
+ 
+ 
+-def _stats_fetch(goods_number: str) -> Fetch:
++def _stats_fetch(goods_number: str, *, dataset: Dataset = Dataset.REVIEW) -> Fetch:
+     return Fetch(
+         url=STATS_ENDPOINT.format(goods=goods_number),
+-        dataset=Dataset.REVIEW,
++        dataset=dataset,
+         transport=Transport.HTTP,
+         headers=(
+             ("Accept", "application/json"),
+@@ -736,22 +806,33 @@ def _next_page(payload: Payload, inner: object, product_key: str) -> tuple[Fetch
+     """The next page of this product's reviews, if the site offers one.
+ 
+     Three things end the walk: the site saying there is no more, the site
+-    claiming more but handing back nothing to continue from, and REVIEW_PAGES.
+-    The middle one matters more than it looks -- without it a truthless hasNext
+-    would re-request page one forever, and every one of those pages would parse
+-    and insert perfectly cleanly.
++    claiming more but handing back nothing to continue from, and the page cap
++    the request carries (REVIEW_PAGES unless the walk that started it said
++    otherwise). The middle one matters more than it looks -- without it a
++    truthless hasNext would re-request page one forever, and every one of those
++    pages would parse and insert perfectly cleanly.
+     """
+     if not isinstance(inner, dict):
+         return ()
+     sort = payload.fetch.ctx("sort")
+     page = _int(payload.fetch.ctx("page")) or 0
++    pages = _int(payload.fetch.ctx("pages")) or REVIEW_PAGES
+     cursor_id = inner.get("nextCursorId")
+     cursor_score = inner.get("nextCursorScore")
+-    if not sort or page + 1 >= REVIEW_PAGES:
++    if not sort or page + 1 >= pages:
+         return ()
+     if inner.get("hasNext") is not True or cursor_id is None or cursor_score is None:
+         return ()
+-    return (_review_fetch(product_key, sort, page=page + 1, cursor=(cursor_id, cursor_score)),)
++    return (
++        _review_fetch(
++            product_key,
++            sort,
++            page=page + 1,
++            cursor=(cursor_id, cursor_score),
++            pages=pages,
++            dataset=payload.fetch.dataset,
++        ),
++    )
+ 
+ 
+ def _int(value: str | None) -> int | None:
+diff --git a/tests/sources/test_oliveyoung_review_low.py b/tests/sources/test_oliveyoung_review_low.py
+new file mode 100644
+index 0000000..ede6500
+--- /dev/null
++++ b/tests/sources/test_oliveyoung_review_low.py
+@@ -0,0 +1,238 @@
++"""One board's low-rated reviews, walked to exhaustion.
++
++The `review` walk reads three pages of each rating end for two products a board,
++which is a sample. This one reads the whole low end of ten products on one
++board: `RATING_ASC` hands back every one-star review, then every two-star,
++recency as the tiebreak within a rating, so six pages of fifty reach the end of
++the complaints for any product measured on 2026-08-19 (189 one-star + 11
++two-star in 200). One `RATING_DESC` page is the satisfaction baseline beside it,
++and the stats request is the site's own distribution to weigh both against.
++
++Same record types, same tables as `review`: what differs is which products and
++how far, which is what `scope` records.
++"""
++
++from __future__ import annotations
++
++import json
++from datetime import UTC, datetime
++from pathlib import Path
++
++from trend_radar.contract import Fetch, Payload, Transport
++from trend_radar.models import Dataset, RankRecord
++from trend_radar.sources.oliveyoung import (
++    _BOARDS,
++    LOW_ASC_PAGES,
++    LOW_BOARD,
++    LOW_DESC_PAGES,
++    LOW_PRODUCTS,
++    REVIEW_ENDPOINT,
++    REVIEW_PAGES,
++    OliveYoung,
++)
++
++AT = datetime(2026, 8, 23, 3, tzinfo=UTC)
++FIXTURES = Path(__file__).parent.parent / "fixtures/oliveyoung"
++GOODS = "A000000223414"
++
++
++def _ranking_out(dataset: Dataset = Dataset.REVIEW_LOW):
++    fetch = OliveYoung().seeds(dataset)[0]
++    payload = Payload(
++        fetch=fetch,
++        status=200,
++        body=(FIXTURES / "ranking/best-skincare.html").read_bytes(),
++        final_url=fetch.url,
++        headers={},
++        elapsed_ms=1,
++        captured_at=AT,
++    )
++    return OliveYoung().parse(payload)  # pyright: ignore[reportArgumentType]
++
++
++def _review_payload(body: dict, *, sort: str, page: int, pages: int) -> Payload:
++    fetch = Fetch(
++        url=REVIEW_ENDPOINT,
++        dataset=Dataset.REVIEW_LOW,
++        method="POST",
++        transport=Transport.HTTP,
++        context=(
++            ("kind", "reviews"),
++            ("product", GOODS),
++            ("sort", sort),
++            ("page", str(page)),
++            ("pages", str(pages)),
++        ),
++    )
++    return Payload(
++        fetch=fetch,
++        status=200,
++        body=json.dumps(body).encode(),
++        final_url=REVIEW_ENDPOINT,
++        headers={},
++        elapsed_ms=1,
++        captured_at=AT,
++    )
++
++
++def _capture() -> dict:
++    return json.loads((FIXTURES / "review/list.json").read_bytes())
++
++
++# --- what the source declares -------------------------------------------------
++
++
++def test_review_low_is_a_dataset_this_source_collects():
++    assert Dataset.REVIEW_LOW in OliveYoung.datasets
++
++
++def test_the_low_board_is_a_board_this_source_walks():
++    assert LOW_BOARD in {board.name for board in _BOARDS}
++
++
++def test_the_low_walk_starts_from_exactly_one_board():
++    seeds = OliveYoung().seeds(Dataset.REVIEW_LOW)
++    assert len(seeds) == 1
++    assert seeds[0].ctx("board") == LOW_BOARD
++    assert seeds[0].dataset is Dataset.REVIEW_LOW
++    assert seeds[0].ctx("kind") == "ranking"
++
++
++def test_the_asc_walk_is_deeper_than_the_review_walk():
++    # The point: the review walk samples, this one exhausts. If this stops
++    # being true the dataset is a second copy of `review` on another board.
++    assert LOW_ASC_PAGES > REVIEW_PAGES
++    assert LOW_DESC_PAGES == 1
++
++
++# --- what the ranking follows -------------------------------------------------
++
++
++def test_a_low_run_writes_no_rank_rows():
++    assert not [r for r in _ranking_out().records if isinstance(r, RankRecord)]
++
++
++def test_the_first_products_get_three_follows_each():
++    follow = _ranking_out().follow
++    products = [f.ctx("product") for f in follow]
++    assert len(set(products)) == LOW_PRODUCTS
++    assert len(follow) == LOW_PRODUCTS * 3
++    for product in set(products):
++        kinds = sorted(f.ctx("kind") or "" for f in follow if f.ctx("product") == product)
++        assert kinds == ["reviews", "reviews", "stats"]
++
++
++def test_products_past_the_cap_are_not_followed():
++    ranking = _ranking_out(Dataset.RANKING)
++    ranked = [r for r in ranking.records if isinstance(r, RankRecord)]
++    assert len(ranked) > LOW_PRODUCTS
++    head = {r.product_key for r in ranked if r.rank <= LOW_PRODUCTS}
++    assert {f.ctx("product") for f in _ranking_out().follow} == head
++
++
++def test_each_review_follow_carries_its_sort_and_its_own_page_cap():
++    reviews = [f for f in _ranking_out().follow if f.ctx("kind") == "reviews"]
++    caps = {(f.ctx("sort"), f.ctx("pages")) for f in reviews}
++    assert caps == {("RATING_ASC", str(LOW_ASC_PAGES)), ("RATING_DESC", str(LOW_DESC_PAGES))}
++    assert all(f.ctx("page") == "0" for f in reviews)
++    assert all(json.loads(f.body or b"{}")["sortType"] == f.ctx("sort") for f in reviews)
++
++
++def test_every_follow_belongs_to_the_low_dataset():
++    # fetch_log records the dataset per request; a low-walk request filed
++    # under `review` would make that column say a run happened that did not.
++    assert {f.dataset for f in _ranking_out().follow} == {Dataset.REVIEW_LOW}
++
++
++def test_the_low_walk_asks_for_stats_but_not_the_summary():
++    kinds = {f.ctx("kind") for f in _ranking_out().follow}
++    assert "stats" in kinds
++    assert "summary" not in kinds
++
++
++def test_the_review_walk_is_untouched():
++    # The existing walk keeps its own cap and its own dataset.
++    from trend_radar.sources.oliveyoung import REVIEW_PRODUCTS_PER_BOARD
++
++    follow = _ranking_out(Dataset.REVIEW).follow
++    assert len(follow) == REVIEW_PRODUCTS_PER_BOARD * 2
++    assert {f.dataset for f in follow} == {Dataset.REVIEW}
++    assert {f.ctx("pages") for f in follow} == {str(REVIEW_PAGES)}
++
++
++# --- the page walk ------------------------------------------------------------
++
++
++def test_an_asc_page_with_more_behind_it_keeps_walking():
++    out = OliveYoung().parse(
++        _review_payload(_capture(), sort="RATING_ASC", page=4, pages=LOW_ASC_PAGES)
++    )
++    assert len(out.follow) == 1
++    nxt = out.follow[0]
++    assert nxt.ctx("page") == "5"
++    assert nxt.ctx("pages") == str(LOW_ASC_PAGES)
++    assert nxt.ctx("sort") == "RATING_ASC"
++    assert nxt.dataset is Dataset.REVIEW_LOW
++
++
++def test_the_asc_walk_stops_at_its_own_cap():
++    out = OliveYoung().parse(
++        _review_payload(_capture(), sort="RATING_ASC", page=LOW_ASC_PAGES - 1, pages=LOW_ASC_PAGES)
++    )
++    assert out.follow == ()
++
++
++def test_the_desc_walk_stops_after_one_page():
++    out = OliveYoung().parse(
++        _review_payload(_capture(), sort="RATING_DESC", page=0, pages=LOW_DESC_PAGES)
++    )
++    assert out.follow == ()
++
++
++def test_the_site_saying_no_more_ends_the_asc_walk_early():
++    # The cap is a ceiling, not a quota: most products run out of one- and
++    # two-star reviews well before six pages.
++    data = _capture()
++    data["data"]["hasNext"] = False
++    out = OliveYoung().parse(_review_payload(data, sort="RATING_ASC", page=1, pages=LOW_ASC_PAGES))
++    assert out.follow == ()
++
++
++def test_a_review_fetch_without_a_cap_still_stops_at_review_pages():
++    # The existing `review` walk's requests carry no `pages`; the default is
++    # what it has always been.
++    fetch = Fetch(
++        url=REVIEW_ENDPOINT,
++        dataset=Dataset.REVIEW,
++        method="POST",
++        transport=Transport.HTTP,
++        context=(
++            ("kind", "reviews"),
++            ("product", GOODS),
++            ("sort", "RATING_ASC"),
++            ("page", str(REVIEW_PAGES - 1)),
++        ),
++    )
++    payload = Payload(
++        fetch=fetch,
++        status=200,
++        body=json.dumps(_capture()).encode(),
++        final_url=REVIEW_ENDPOINT,
++        headers={},
++        elapsed_ms=1,
++        captured_at=AT,
++    )
++    assert OliveYoung().parse(payload).follow == ()
++
++
++# --- the budget ---------------------------------------------------------------
++
++
++def test_the_low_walk_fits_the_run_budget():
++    budget = OliveYoung.policy.max_requests_per_run
++    assert budget is not None
++    seeds = len(OliveYoung().seeds(Dataset.REVIEW_LOW))
++    worst_case = seeds + LOW_PRODUCTS * (LOW_ASC_PAGES + LOW_DESC_PAGES + 1)
++    assert worst_case <= budget, f"{worst_case} > {budget}"
++    # Retry room, same rule as the other walks.
++    assert budget - worst_case >= 5
+diff --git a/tests/sources/test_page_walks_fit_their_policy.py b/tests/sources/test_page_walks_fit_their_policy.py
+index b5b0b45..3782bdb 100644
+--- a/tests/sources/test_page_walks_fit_their_policy.py
++++ b/tests/sources/test_page_walks_fit_their_policy.py
+@@ -17,13 +17,16 @@ import pytest
+ 
+ from trend_radar.sources.daisomall import REVIEW_PAGES as DAISO_PAGES
+ from trend_radar.sources.daisomall import DaisoMall
++from trend_radar.sources.oliveyoung import LOW_ASC_PAGES as OLIVE_LOW_PAGES
+ from trend_radar.sources.oliveyoung import REVIEW_PAGES as OLIVE_PAGES
+ from trend_radar.sources.oliveyoung import OliveYoung
+ 
+ # The ranking is the seed at depth 0, so its review page is depth 1 and each
+-# page after that is one more.
++# page after that is one more. The low walk is the deepest thing on the
++# oliveyoung policy -- it is why max_depth is a max() and not REVIEW_PAGES.
+ WALKS = [
+     pytest.param(OliveYoung, OLIVE_PAGES, id="oliveyoung"),
++    pytest.param(OliveYoung, OLIVE_LOW_PAGES, id="oliveyoung-review_low"),
+     pytest.param(DaisoMall, DAISO_PAGES, id="daisomall"),
+ ]
+ 
+diff --git a/tests/test_scope_is_declared.py b/tests/test_scope_is_declared.py
+index d451be9..022999a 100644
+--- a/tests/test_scope_is_declared.py
++++ b/tests/test_scope_is_declared.py
+@@ -134,6 +134,9 @@ CONSTANT_FOR = {
+     "review_products": "REVIEW_PRODUCTS",
+     "review_pages": "REVIEW_PAGES",
+     "product_products": "PRODUCT_PRODUCTS",
++    "low_products": "LOW_PRODUCTS",
++    "low_asc_pages": "LOW_ASC_PAGES",
++    "low_desc_pages": "LOW_DESC_PAGES",
+     "month_term_months": "MONTH_TERM",
+ }
+ 
+-- 
+2.55.0
+
