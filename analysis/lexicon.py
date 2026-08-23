@@ -70,7 +70,7 @@ def _alternation(surfaces: list[str]) -> str:
     return "|".join(re.escape(s) for s in sorted(set(surfaces), key=lambda s: (-len(s), s)))
 
 
-def _kind_patterns(rows: tuple[EntitySurface, ...], kind: str) -> tuple[tuple[str, re.Pattern[str]], ...]:
+def _kind_patterns(rows: Sequence[EntitySurface], kind: str) -> tuple[tuple[str, re.Pattern[str]], ...]:
     by_canonical: dict[str, list[str]] = {}
     for row in rows:
         if row.kind == kind:
@@ -78,16 +78,9 @@ def _kind_patterns(rows: tuple[EntitySurface, ...], kind: str) -> tuple[tuple[st
     return tuple((c, re.compile(_alternation(s))) for c, s in by_canonical.items())
 
 
-def load_lexicon(conn: psycopg.Connection[Any], version: int | None = None) -> Lexicon:
-    with conn.cursor() as cur:
-        if version is None:
-            cur.execute(ENTITY_ACTIVE)
-        else:
-            cur.execute(ENTITY_ROWS, (version,))
-        rows = cur.fetchall()
-    resolved = _label(rows, version, "entity_lexicon")
-    surfaces = tuple(EntitySurface(*row[:5]) for row in rows)
-
+def compile_lexicon(surfaces: Sequence[EntitySurface], version: int) -> Lexicon:
+    """행 → 컴파일된 사전. DB 없이 사전을 만들 수 있어야 링커·추출기의 규칙을 순수 함수로 검사한다."""
+    surfaces = tuple(surfaces)
     stop = frozenset(s.canonical for s in surfaces if s.tier == "stop")
     linkable = [s.surface for s in surfaces if s.kind not in NOT_LINKABLE and s.canonical not in stop]
     alt = _alternation(linkable)
@@ -101,7 +94,7 @@ def load_lexicon(conn: psycopg.Connection[Any], version: int | None = None) -> L
         to_canonical.setdefault(s.surface, s.canonical)
         to_canonical.setdefault(s.surface.lower(), s.canonical)
     return Lexicon(
-        version=resolved,
+        version=version,
         surfaces=surfaces,
         surface_to_canonical=to_canonical,
         surface_re=surface_re,
@@ -112,6 +105,16 @@ def load_lexicon(conn: psycopg.Connection[Any], version: int | None = None) -> L
         format_patterns=_kind_patterns(surfaces, "format"),
         attribute_patterns=_kind_patterns(surfaces, "attribute"),
     )
+
+
+def load_lexicon(conn: psycopg.Connection[Any], version: int | None = None) -> Lexicon:
+    with conn.cursor() as cur:
+        if version is None:
+            cur.execute(ENTITY_ACTIVE)
+        else:
+            cur.execute(ENTITY_ROWS, (version,))
+        rows = cur.fetchall()
+    return compile_lexicon([EntitySurface(*row[:5]) for row in rows], _label(rows, version, "entity_lexicon"))
 
 
 def load_aspects(conn: psycopg.Connection[Any], ruleset: str, version: int | None = None) -> AspectLexicon:

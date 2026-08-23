@@ -144,7 +144,7 @@ def test_the_registry_loads_its_implementation_modules_by_import(monkeypatch):
     """유닛은 IMPLEMENTATIONS 에 한 줄만 더한다 — cli.py 에 import 를 끼우면 넷이 같은 줄에서 충돌한다."""
     import analysis.registry as reg
 
-    reg.load_implementations()  # 등록 모듈이 하나도 없어도 조용히 성공해야 한다
+    reg.load_implementations()  # 등록 모듈이 없어도(빈 튜플) 있어도 조용히 성공해야 한다
     monkeypatch.setattr(reg, "IMPLEMENTATIONS", ("tests.fake_implementation",))
     try:
         reg.load_implementations()

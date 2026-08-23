@@ -56,7 +56,7 @@ BASELINES: tuple[EvalSet, ...] = (
         task="product_match",
         name="P2 blind 40",
         split="holdout",
-        checks=(Check("strict", 0.77),),
+        checks=(Check("strict", 0.769),),
         ref_prefix="v2:",
     ),
 )

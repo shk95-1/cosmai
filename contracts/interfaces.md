@@ -358,8 +358,11 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
 | polarity (카테고리 횡단) | P1 blind40 (holdout) | acc .47 · 불만 P .67 | acc ≥ .47 그리고 P:불만 ≥ .67 |
 | wish_class | P9 blind60_v2 (holdout, 2026-08-23 라벨) | a: P .94 / R .94 (holdout60, 비블라인드) | blind60_v2 에서 P:a ≥ .90 |
 | brand_link | P3 120 | 정밀도 119/120 | P:OK ≥ .97 |
-| product_match | P2 blind 40 (holdout, `match_check40_v2_blind`) | strict .77 / 변형허용 .95 (채택 39쌍) | 채택 쌍에서 strict ≥ .77 |
+| product_match | P2 blind 40 (holdout, `match_check40_v2_blind`) | strict .77 / 변형허용 .95 (채택 39쌍) | 채택 쌍에서 strict ≥ .769 |
 - T10/T11: 채택 조건은 **단일 숫자**다. 구간으로 적힌 기준선은 기계 대조가 불가능하다.
+  임계값은 반올림이 아니라 규칙 구현이 실제로 낸 값이어야 한다: `규칙 기준선` 칸의 product_match `.77` 은
+  원천 `slice-p2/README.md` 의 반올림 표기이고, 기계 대조는 그 출처인 `30/39 = .769` 로 한다
+  (`.77` 로 두면 기준선을 만든 규칙 자신이 `--check-baseline` 을 통과하지 못한다 — #2 실측).
 - 채택 조건의 이름은 하네스가 내는 지표 키 그대로다 — `acc` · `P:<라벨>` · `R:<라벨>` · `strict` · `변형허용`.
   `tests/test_baselines.py` 가 이 표를 파싱해 `analysis/baselines.py` 의 (이름, 숫자)와 대조한다.
 - **product_match 의 strict / 변형허용은 정확도가 아니라 채택 집합에 대한 정밀도다.** 구현이 행마다 채택(`Y`)·
