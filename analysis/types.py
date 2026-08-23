@@ -1,9 +1,3 @@
-# 분석 패키지 인터페이스 (Python, 타입은 dataclass/Protocol)
-
-`analysis/types.py` 와 이 코드 블록은 **같아야 한다** — `tests/test_contract_types.py` 가 dataclass 필드를 대조한다.
-감사 id(B·A·T)는 2026-08-23 계약 감사(이슈 #17)의 항목 번호다.
-
-```python
 # analysis/types.py — contracts/interfaces.md 의 코드 블록과 같아야 한다 (tests/test_contract_types.py).
 import re
 from collections.abc import Iterable, Mapping
@@ -322,33 +316,3 @@ class Aggregator(Protocol):
         self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str
     ) -> list[MetricsNeedRow]: ...
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]: ...
-```
-
-## 수식 (구현이 이 정의를 따른다)
-
-- **population_share_pct** (`metrics_need`) = `100 * (low_mentioning / denom_low) * site_low_pct`
-  - `low_mentioning` = 그 카테고리의 저평점 전수(`low_complete`) 제품에서 이 need_key 를 언급한 ≤2★ 리뷰 수
-  - `denom_low` = 같은 제품 집합의 `low_collected` 합 · `denom_site` = 같은 집합의 `site_review_count` 합
-  - `site_low_pct` = `(review_stats.pct_1 + review_stats.pct_2) / 100` (사이트가 보고한 저평점 비율)
-  - `low_share` = `low_mentioning / denom_low` (저평점 표본 내 비율)
-  - B7: 시드의 `seed:slice-p1` 행은 이 식이 아니라 수집 표본 근사(`100 * low_mentioning / denom_site`)로 계산된 값이다. 2차 패스 목표는 두 값의 차 ±0.05 이고 골든이 아니다.
-- **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
-- **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — RATING_ASC 표본 안에 3★ 이 섞였거나 ≤2★ 가 150 미만이면 ≤2★ 는 전수다. 150 은 수집 표본 상한(`REVIEW_PAGES 3 x 50`)이고 `collectors/commerce/scope.json`(#7)과 `formats.md` 가 같은 값을 갖는다.
-
-## 평가 하네스가 대조하는 기준선 (규칙 구현, 2026-08-23 실측)
-| task | 평가셋 | 규칙 기준선 | 채택 조건 (단일 임계값) |
-|---|---|---|---|
-| polarity (선케어 홀드아웃) | sun holdout 100 | acc .77 · 불만 P .89 / R .70 | acc ≥ .77 그리고 불만 P ≥ .89 |
-| polarity (카테고리 횡단) | P1 blind40 (holdout) | acc .47 · 불만 P .67 | acc ≥ .47 그리고 불만 P ≥ .67 |
-| wish_class | P9 blind60_v2 (holdout, 2026-08-23 라벨) | a: P .94 / R .94 (holdout60, 비블라인드) | blind60_v2 에서 a P ≥ .90 |
-| brand_link | P3 120 | 정밀도 119/120 | ≥ .97 |
-| product_match | P2 blind 40 (holdout, `match_check40_v2_blind`) | strict .77 / 변형허용 .95 | holdout 40 에서 strict ≥ .77 |
-- T10/T11: 채택 조건은 **단일 숫자**다. 구간으로 적힌 기준선은 기계 대조가 불가능하다.
-- 구현 교체(규칙→LLM, 사전 버전 업)는 이 표를 갱신하는 PR 로만 들어온다.
-
-## 패스 기준 (2026-08-23 결정: 6단계까지 무정지 → 2차 패스에서 기준선)
-| 패스 | 유닛 완료 기준 | 검사 |
-|---|---|---|
-| 1차 | 계약 시그니처 구현 + `cosmai eval <task>`가 그 유닛의 평가셋에서 **점수를 산출**한다(기준선 미달 허용) + `analyze <stage>` 멱등 | eval 출력 행이 `needs.analysis_run.note`에 기록, 점수는 이슈 코멘트 |
-| 2차 | 위 표의 기준선 이상 | 같은 평가셋, 블라인드 홀드아웃 |
-기준선 표는 계약이고, 패스는 순서다. 1차 패스 점수가 기준선을 이미 넘으면 2차는 생략한다.
