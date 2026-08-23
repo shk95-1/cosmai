@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +15,7 @@ from sqlalchemy import create_engine
 
 from analysis.polarity.pipeline import run
 from db import seed
-from db.seed._common import connect
+from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 
 pytestmark = pytest.mark.postgres
 
@@ -26,6 +27,16 @@ SOURCE_TABLES = ("review", "rank_snapshot", "product", *TUBEDEPTH_TABLES)
 CAPTURED = datetime(2026, 8, 23, tzinfo=UTC)
 WRITTEN = datetime(2026, 3, 4, tzinfo=UTC)
 POSTED = datetime(2026, 3, 5, tzinfo=UTC)
+
+# 시드가 이미 담고 있는 행과 자연키가 겹치는 원천 (dev DB 실측: slice-suncare 리뷰 400/400 이 이 규칙으로
+# 같은 (src, ref, need_key, sentence) 를 다시 만든다). 시드 값은 need_mention·wish_mention 에서 그대로 읽었다.
+SEED_NEED = ("glowpick", "146765", "7856759", "146765/7856759", "끈적유분")
+SEED_NEED_SENTENCE = "엄청 끈적이고 잘 안 발리고… 돈 더주고 좋은 거 살걸 그랬어요ㅠㅠ"
+SEED_NEED_AT = datetime(2026, 8, 18, tzinfo=UTC)
+SEED_WISH = ("--5yicxxgp4", "UgxrFMQux3xh1gzOnI94AaABAg")
+SEED_WISH_TEXT = "스킨케어 루틴 찍어주세요"
+SEED_WISH_AT = datetime(2026, 4, 22, tzinfo=UTC)
+SEED_COUNTS = {"need_mention": 15498, "wish_mention": 18489}  # tests/test_seed.py 의 기대값과 같은 출처
 
 REVIEWS = [
     ("oliveyoung", "R1", "P1", 5.0, "백탁이 하나도 없어서 진짜 좋아요", WRITTEN),
@@ -216,3 +227,75 @@ def test_the_source_tables_are_read_as_needs_runtime(loaded: str, _schema_name: 
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         with connect(loaded) as conn, conn.cursor() as cur:
             cur.execute("CREATE TABLE nope (i int)")
+
+
+@pytest.fixture(scope="module")
+def slices() -> Path:
+    """tests/test_seed.py 와 같은 탐색 — 시드 CSV 없이는 충돌을 실물로 재현할 수 없다."""
+    named = os.environ.get("COSMAI_SLICES_DIR")
+    found = [Path(named)] if named else [p for p in (DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect")]
+    for path in found:
+        if path.is_dir():
+            return path
+    return pytest.skip("no slice-*/ next to the repo; pass COSMAI_SLICES_DIR")
+
+
+@pytest.fixture
+def seeded(loaded: str, sources: str, slices: Path) -> Iterator[str]:
+    """시드 언급 전량 + 그 시드 행과 같은 자연키를 만드는 원천 행."""
+    seed.run_all(loaded, slices=slices, only=("products", "mentions"))
+    site, product_key, review_key, _, _ = SEED_NEED
+    video_id, comment_id = SEED_WISH
+    with connect(sources) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO rank_snapshot"
+            " (source, board, category_key, product_key, captured_at, category_name, rank, product_name)"
+            " VALUES (%s, 'best', 'suncare', %s, %s, '선크림', 1, '시드 선크림')",
+            (site, product_key, CAPTURED),
+        )
+        cur.execute(
+            "INSERT INTO review (source, review_key, captured_at, product_key, rating, body, written_at)"
+            " VALUES (%s, %s, %s, %s, 3.0, %s, %s)",
+            (site, review_key, CAPTURED, product_key, SEED_NEED_SENTENCE, SEED_NEED_AT),
+        )
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, like_count, published_at,"
+            " is_hearted_by_uploader, is_pinned, first_seen_at, last_seen_at)"
+            " VALUES (%s, %s, %s, 0, %s, false, false, %s, %s)",
+            (video_id, comment_id, SEED_WISH_TEXT, SEED_WISH_AT, CAPTURED, CAPTURED),
+        )
+        conn.commit()
+    yield loaded
+
+
+def _tagged(url: str, table: str, prefix: str) -> int:
+    query = pgsql.SQL("SELECT count(*) FROM {} WHERE extractor_version LIKE %s").format(
+        pgsql.Identifier(table)
+    )
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(query, (prefix,))
+        row = cur.fetchone()
+    return int(row[0]) if row else 0
+
+
+def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _schema_name: str):
+    """UNIQUE 에 버전이 없어 재추출이 시드와 같은 자연키를 만든다 — UPSERT 가 그 행을 갱신하면 안 된다."""
+    assert {t: _tagged(seeded, t, "slice-%") for t in SEED_COUNTS} == SEED_COUNTS
+    _run(seeded, _schema_name)
+    _, _, _, ref, need_key = SEED_NEED
+    with connect(seeded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT extractor_version, polarity_version FROM need_mention"
+            " WHERE ref = %s AND need_key = %s AND sentence = %s",
+            (ref, need_key, SEED_NEED_SENTENCE),
+        )
+        need = cur.fetchall()
+        cur.execute(
+            "SELECT extractor_version, wish_class FROM wish_mention WHERE src = 'yt_comment' AND ref = %s",
+            ("/".join(SEED_WISH),),
+        )
+        wish = cur.fetchall()
+    # 충돌은 한 행에서 일어난다 — 새 행이 생겨서 시드가 살아남은 것이 아니다.
+    assert need == [("slice-suncare", "rule-v2.1")]
+    assert wish == [("slice-p9", "b")]
+    assert {t: _tagged(seeded, t, "slice-%") for t in SEED_COUNTS} == SEED_COUNTS

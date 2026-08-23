@@ -2,8 +2,10 @@
 
 진입점은 run(conn, ...) 하나다: cosmai/cli.py 의 stage 배선은 #5 가 세 유닛을 한 곳에서 묶는다.
 
-트랜잭션은 src×월로 쪼갠다: needs_runtime 은 statement_timeout 30s · transaction_timeout 60s 다
-(db/bootstrap.sql). 자기 버전 계열(rule-v*)의 옛 행만 지운다 — 시드(slice-*)는 남는다.
+needs_runtime 의 시간 제한(statement_timeout 30s · transaction_timeout 60s ·
+idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징으로, 쓰기는 배치 커밋으로
+쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
+자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다.
 """
 
 from __future__ import annotations
@@ -25,9 +27,16 @@ from analysis.units import CategoryMap, comment_unit, load_category_map, month_o
 
 COMMERCE_SCHEMA = "trend_radar"
 YOUTUBE_SCHEMA = "tubedepth"
-OWN_VERSIONS = "rule-v%"  # 이 유닛이 만든 행만 재생성 대상이다
+BATCH = 2000  # #2 와 같은 값: 한 트랜잭션이 60s 안에 끝나는 크기
+FIRST = ""  # 키셋 페이징의 첫 키 (원천 키는 전부 text 다)
 FIVE = 5.0
 
+REVIEW_COLUMNS = ("source", "product_key", "review_key", "rating", "body", "written_at", "captured_at")
+REVIEW_KEY = ("source", "review_key")  # trend_radar.review 의 PK
+REVIEW_KEY_AT = (0, 2)  # REVIEW_COLUMNS 안에서의 자리
+COMMENT_COLUMNS = ("video_id", "comment_id", "text", "like_count", "published_at", "first_seen_at")
+COMMENT_KEY = ("video_id", "comment_id")  # tubedepth.comments 의 PK
+COMMENT_KEY_AT = (0, 1)
 
 RUN_START: LiteralString = "INSERT INTO analysis_run (versions, note) VALUES (%s::jsonb, %s) RETURNING run_id"
 RUN_END: LiteralString = (
@@ -41,6 +50,8 @@ WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
 """
+# DO UPDATE 의 WHERE 가 없으면 자연키가 겹치는 시드 행(slice-*)의 버전 태그가 이 실행 것으로 바뀐다.
+# 삭제만 막는 NEED_DELETE 의 LIKE 필터는 삽입 충돌 경로를 지나가지 않는다.
 NEED_UPSERT: LiteralString = """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, aspect_scope,
@@ -56,6 +67,7 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
+WHERE need_mention.extractor_version LIKE 'rule-v%%'
 """
 WISH_UPSERT: LiteralString = """
 INSERT INTO wish_mention
@@ -70,6 +82,7 @@ SET video_id = EXCLUDED.video_id, channel_id = EXCLUDED.channel_id, product_ref 
     format = EXCLUDED.format, attribute = EXCLUDED.attribute, marker = EXCLUDED.marker,
     sentence = EXCLUDED.sentence, like_count = EXCLUDED.like_count,
     extractor_version = EXCLUDED.extractor_version
+WHERE wish_mention.extractor_version LIKE 'rule-v%%'
 """
 
 
@@ -106,6 +119,7 @@ def _exists(conn: psycopg.Connection[Any], schema: str, table: str) -> bool:
     with conn.cursor() as cur:
         cur.execute("SELECT to_regclass(%s) IS NOT NULL", (f"{schema}.{table}",))
         row = cur.fetchone()
+    conn.rollback()
     return bool(row and row[0])
 
 
@@ -123,28 +137,50 @@ def _months(
     query = pgsql.SQL("SELECT DISTINCT {m} FROM {t} {w} ORDER BY 1").format(m=month, t=table, w=where)
     with conn.cursor() as cur:
         cur.execute(query, (since,) if since else ())
-        return [r[0] for r in cur.fetchall() if r[0]]
+        found = [r[0] for r in cur.fetchall() if r[0]]
+    conn.rollback()
+    return found
 
 
-def _rows(
+def _pages(
     conn: psycopg.Connection[Any],
     table: pgsql.Composed,
     columns: Sequence[str],
+    key: Sequence[str],
+    key_at: Sequence[int],
     observed: str,
     fallback: str,
     month: str,
     since: date | None,
-) -> list[tuple[Any, ...]]:
+    batch: int,
+) -> Iterator[list[tuple[Any, ...]]]:
+    """한 달치를 PK 키셋으로 잘라 읽는다 — 한 달이 통째로 30s 안에 들어온다는 보장이 없다."""
     selected = pgsql.SQL(", ").join(pgsql.Identifier(c) for c in columns)
-    where = pgsql.SQL("{} = %s").format(_month(observed, fallback))
+    ordering = pgsql.SQL(", ").join(pgsql.Identifier(c) for c in key)
+    where = pgsql.SQL("({}) > ({}) AND {} = %s").format(
+        ordering, pgsql.SQL(", ").join(pgsql.SQL("%s") for _ in key), _month(observed, fallback)
+    )
     if since:
         where = pgsql.SQL("{} AND coalesce({}, {})::date >= %s").format(
             where, pgsql.Identifier(observed), pgsql.Identifier(fallback)
         )
-    query = pgsql.SQL("SELECT {c} FROM {t} WHERE {w}").format(c=selected, t=table, w=where)
-    with conn.cursor() as cur:
-        cur.execute(query, (month, since) if since else (month,))
-        return cur.fetchall()
+    query = pgsql.SQL("SELECT {c} FROM {t} WHERE {w} ORDER BY {o} LIMIT %s").format(
+        c=selected, t=table, w=where, o=ordering
+    )
+    cursor: tuple[Any, ...] = (FIRST,) * len(key)
+    while True:
+        params = (*cursor, month, since, batch) if since else (*cursor, month, batch)
+        with conn.cursor() as cur:
+            cur.execute(query, params)
+            page = cur.fetchall()
+        # 읽자마자 닫는다: 판정하는 동안 열려 있으면 idle_in_transaction 15s 가 세션을 끊는다.
+        conn.rollback()
+        if not page:
+            return
+        yield page
+        if len(page) < batch:
+            return
+        cursor = tuple(page[-1][i] for i in key_at)
 
 
 def _product_facts(
@@ -163,6 +199,7 @@ def _product_facts(
                 ).format(_table(schema, "rank_snapshot"))
             )
             categories = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+        conn.rollback()
     if _exists(conn, schema, "product"):
         with conn.cursor() as cur:
             cur.execute(
@@ -172,6 +209,7 @@ def _product_facts(
                 ).format(_table(schema, "product"))
             )
             names = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+        conn.rollback()
     return categories, names
 
 
@@ -185,14 +223,17 @@ def _channels(conn: psycopg.Connection[Any], schema: str) -> dict[str, tuple[str
                 "ORDER BY video_id, fetched_at DESC"
             ).format(_table(schema, "video_snapshots"))
         )
-        return {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        found = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+    conn.rollback()
+    return found
 
 
 class PolarityStage:
     """사전·규칙을 한 번만 만들고 src×월 배치를 돌린다."""
 
-    def __init__(self, conn: psycopg.Connection[Any]) -> None:
+    def __init__(self, conn: psycopg.Connection[Any], batch: int = BATCH) -> None:
         self.conn = conn
+        self.batch = batch
         self.extractor = RuleExtractor()
         self.rule = RulePolarity()
         self.aspects: dict[str, AspectLexicon] = {
@@ -200,6 +241,7 @@ class PolarityStage:
         }
         self.lexicon: Lexicon = load_lexicon(conn)
         self.categories: CategoryMap = load_category_map(conn)
+        conn.rollback()
 
     def versions(self) -> dict[str, Any]:
         return {
@@ -253,11 +295,10 @@ class PolarityStage:
         found = self.extractor.wishes(unit, self.lexicon)
         if found is None:
             return None
-        video_id = unit.ref.split("/", 1)[0]
         return WishMentionRow(
             src=unit.src,
             ref=unit.ref,
-            video_id=video_id,
+            video_id=unit.ref.split("/", 1)[0],
             channel_id=unit.channel_id,
             channel_is_brand_owner=None,  # 브랜드 채널 판정은 링커(#2)의 브랜드 사전이 필요하다
             product_ref=None,
@@ -274,21 +315,26 @@ class PolarityStage:
             extractor_version=RuleExtractor.version,
         )
 
-    def write(
-        self, src: str, month: str, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]
-    ) -> int:
+    def replace_stale(self, src: str, month: str) -> int:
+        """자기 버전 계열의 옛 행만 지운다 — 그 자체로 한 트랜잭션이다."""
         with self.conn.cursor() as cur:
             cur.execute(NEED_DELETE, (src, month, RuleExtractor.version, RulePolarity.version))
             replaced = cur.rowcount
             cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
             replaced += cur.rowcount
-            if needs:
-                # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md).
-                cur.executemany(NEED_UPSERT, [astuple(r) for r in needs])
-            if wishes:
-                cur.executemany(WISH_UPSERT, [astuple(r) for r in wishes])
         self.conn.commit()
         return replaced
+
+    def _write(self, statement: LiteralString, rows: Sequence[Any]) -> None:
+        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md).
+        for start in range(0, len(rows), self.batch):
+            with self.conn.cursor() as cur:
+                cur.executemany(statement, [astuple(r) for r in rows[start : start + self.batch]])
+            self.conn.commit()
+
+    def flush(self, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]) -> None:
+        self._write(NEED_UPSERT, needs)
+        self._write(WISH_UPSERT, wishes)
 
 
 def run(
@@ -298,8 +344,9 @@ def run(
     scope: str | None = None,
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
+    batch: int = BATCH,
 ) -> StageResult:
-    stage = PolarityStage(conn)
+    stage = PolarityStage(conn, batch)
     with conn.cursor() as cur:
         cur.execute(
             RUN_START,
@@ -310,83 +357,92 @@ def run(
     conn.commit()
 
     months = units = need_rows = wish_rows = replaced = fallbacks = 0
+
     if _exists(conn, commerce_schema, "review"):
         categories, names = _product_facts(conn, commerce_schema)
         table = _table(commerce_schema, "review")
         for month in _months(conn, table, "written_at", "captured_at", since):
-            needs: list[NeedMentionRow] = []
-            found = _rows(
+            months += 1
+            replaced += stage.replace_stale("review", month)
+            for page in _pages(
                 conn,
                 table,
-                ("source", "product_key", "review_key", "rating", "body", "written_at", "captured_at"),
+                REVIEW_COLUMNS,
+                REVIEW_KEY,
+                REVIEW_KEY_AT,
                 "written_at",
                 "captured_at",
                 month,
                 since,
-            )
-            for source, product_key, review_key, rating, body, written_at, captured_at in found:
-                fallbacks += written_at is None
-                unit = review_unit(
-                    source=source,
-                    product_key=product_key,
-                    review_key=review_key,
-                    body=body,
-                    rating=rating,
-                    written_at=written_at,
-                    captured_at=captured_at,
-                    category=categories.get((source, product_key)),
-                )
-                lexicon_category = stage.categories.lexicon_category(
-                    source, unit.category, names.get((source, product_key))
-                )
-                if scope and lexicon_category != scope:
-                    continue
-                units += 1
-                needs.extend(stage.need_rows(unit, lexicon_category))
-            months += 1
-            need_rows += len(needs)
-            replaced += stage.write("review", month, needs, ())
+                batch,
+            ):
+                needs: list[NeedMentionRow] = []
+                for source, product_key, review_key, rating, body, written_at, captured_at in page:
+                    fallbacks += written_at is None
+                    unit = review_unit(
+                        source=source,
+                        product_key=product_key,
+                        review_key=review_key,
+                        body=body,
+                        rating=rating,
+                        written_at=written_at,
+                        captured_at=captured_at,
+                        category=categories.get((source, product_key)),
+                    )
+                    lexicon_category = stage.categories.lexicon_category(
+                        source, unit.category, names.get((source, product_key))
+                    )
+                    if scope and lexicon_category != scope:
+                        continue
+                    units += 1
+                    needs.extend(stage.need_rows(unit, lexicon_category))
+                need_rows += len(needs)
+                stage.flush(needs, ())
 
     if _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
-            needs = []
-            wishes: list[WishMentionRow] = []
-            found = _rows(
+            months += 1
+            replaced += stage.replace_stale("yt_comment", month)
+            for page in _pages(
                 conn,
                 table,
-                ("video_id", "comment_id", "text", "like_count", "published_at", "first_seen_at"),
+                COMMENT_COLUMNS,
+                COMMENT_KEY,
+                COMMENT_KEY_AT,
                 "published_at",
                 "first_seen_at",
                 month,
                 since,
-            )
-            for video_id, comment_id, text, like_count, published_at, first_seen_at in found:
-                fallbacks += published_at is None
-                channel_id, view_count = videos.get(video_id, (None, None))
-                unit = comment_unit(
-                    video_id=video_id,
-                    comment_id=comment_id,
-                    text=text,
-                    like_count=like_count,
-                    published_at=published_at,
-                    first_seen_at=first_seen_at,
-                    channel_id=channel_id,
-                    view_count=view_count,
-                )
-                # 댓글에는 제품 카테고리가 없다 — 카테고리 사전 없이 generic 규칙만 돈다.
-                if scope:
-                    continue
-                units += 1
-                needs.extend(stage.need_rows(unit, None))
-                wish = stage.wish_row(unit)
-                if wish is not None:
-                    wishes.append(wish)
-            months += 1
-            need_rows += len(needs)
-            wish_rows += len(wishes)
-            replaced += stage.write("yt_comment", month, needs, wishes)
+                batch,
+            ):
+                needs = []
+                wishes: list[WishMentionRow] = []
+                for video_id, comment_id, text, like_count, published_at, first_seen_at in page:
+                    fallbacks += published_at is None
+                    channel_id, view_count = videos.get(video_id, (None, None))
+                    unit = comment_unit(
+                        video_id=video_id,
+                        comment_id=comment_id,
+                        text=text,
+                        like_count=like_count,
+                        published_at=published_at,
+                        first_seen_at=first_seen_at,
+                        channel_id=channel_id,
+                        view_count=view_count,
+                    )
+                    # 댓글에는 제품 카테고리가 없다 — 카테고리 사전 없이 generic 규칙만 돈다.
+                    if scope:
+                        continue
+                    units += 1
+                    needs.extend(stage.need_rows(unit, None))
+                    wish = stage.wish_row(unit)
+                    if wish is not None:
+                        wishes.append(wish)
+                need_rows += len(needs)
+                wish_rows += len(wishes)
+                stage.flush(needs, wishes)
 
     result = StageResult(
         run_id=run_id,
