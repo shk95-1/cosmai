@@ -19,13 +19,15 @@ INSERT INTO entity_lexicon (kind, canonical, surface, tier, source, version, not
 VALUES (%s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (kind, surface, version) DO NOTHING
 """
-# ruleset/priority arrived with 002, after v1 was already loaded: DO NOTHING would leave the live rows
-# at the DEFAULT '' and the ruleset-filtered loader would then read nothing. The labels themselves stay put.
+# ruleset/priority arrived with 002, after v1 was already loaded, so the live rows sit at the DEFAULT ''
+# and a ruleset-filtered loader would read nothing. The WHERE keeps this a one-shot backfill: a row that
+# already carries a ruleset is never rewritten, so dictionary content still changes only by version.
 ASPECT_SQL: LiteralString = """
 INSERT INTO aspect_lexicon (aspect, scope, category, pattern, is_neutral_noun, version, ruleset, priority)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (aspect, scope, category, pattern, version) DO UPDATE
 SET ruleset = EXCLUDED.ruleset, priority = EXCLUDED.priority
+WHERE aspect_lexicon.ruleset = ''
 """
 NEED_KEY_SQL: LiteralString = """
 INSERT INTO need_key (need_key, canonical, note)
@@ -33,10 +35,11 @@ VALUES (%s, %s, %s)
 ON CONFLICT (need_key) DO UPDATE SET canonical = EXCLUDED.canonical, note = EXCLUDED.note
 """
 CATEGORY_MAP_SQL: LiteralString = """
-INSERT INTO category_map (site, source_category, lexicon_category, method)
-VALUES (%s, %s, %s, %s)
+INSERT INTO category_map (site, source_category, lexicon_category, method, priority)
+VALUES (%s, %s, %s, %s, %s)
 ON CONFLICT (site, source_category) DO UPDATE
-SET lexicon_category = EXCLUDED.lexicon_category, method = EXCLUDED.method
+SET lexicon_category = EXCLUDED.lexicon_category, method = EXCLUDED.method,
+    priority = EXCLUDED.priority
 """
 # site_axis_map carries no version, so DO NOTHING would leave it frozen at whatever loaded first.
 AXIS_SQL: LiteralString = """
@@ -127,7 +130,7 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
         cur,
         CATEGORY_MAP_SQL,
         [
-            (r["site"], r["source_category"], r["lexicon_category"], r["method"])
+            (r["site"], r["source_category"], r["lexicon_category"], r["method"], int(r["priority"]))
             for r in read_csv(source_dir / "lexicon" / "category_map_v1.csv")
         ],
     )

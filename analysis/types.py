@@ -25,8 +25,9 @@ class TextUnit:  # 분석 입력의 최소 단위
 
 # ---------- 사전 ----------
 @dataclass(frozen=True)
-class EntitySurface:
-    kind: str  # brand | format | attribute | ingredient | stopword | alias | product_line
+class EntitySurface:  # 사전 한 행 = entity_lexicon
+    # product_line 은 여기 없다: 라인은 표제어가 아니라 brand + line_tokens 로 합성된다 (A14).
+    kind: str  # brand | format | attribute | ingredient | stopword | alias (001 의 CHECK 와 같은 어휘)
     canonical: str
     surface: str
     tier: str | None  # brand: normal | cooc_required | stop
@@ -127,7 +128,7 @@ class ProductCandidateRow:  # → needs.product_ref_candidate (A13: 사람 검�
     key_a: str
     src_b: str
     key_b: str
-    brand: str
+    brand: str | None
     shared_tok: int
     shared_sig: int
     dice: float

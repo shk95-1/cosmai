@@ -1,10 +1,10 @@
 -- app.needs 계약 보강 — 2026-08-23 계약 감사 51건 (이슈 #17 조정자 판정). 감사 id 를 각 줄에 남긴다.
 -- 추가만: CREATE TABLE / ADD COLUMN 뿐이고 001 은 손대지 않는다 (tests/test_ddl_additive_only.py 가 강제).
--- 주석에도 백분율 기호를 쓰지 않는다: 테스트 하네스가 이 파일을 psycopg 로 실행하고 그 문자를 파라미터 자리로 읽는다.
 
 -- ---------- 사전 ----------
 -- B4: 두 규칙 사전(suncare-v2.2 / p1-v2.2)이 한 테이블에 섞여 어느 쪽도 재현되지 않았다.
 -- 값: suncare-v2.2 | p1-v2.2 | shared(두 사전에 동일한 행). 로더는 ruleset IN (<요청>, 'shared') 로 읽는다.
+-- CHECK 로 묶지 않는다: 값이 사전 버전마다 늘어나므로(suncare-v2.3 …) 어휘를 DDL 에 박으면 사전 개정마다 마이그레이션이 필요해진다.
 ALTER TABLE needs.aspect_lexicon ADD COLUMN ruleset text NOT NULL DEFAULT '';
 -- B5: 규칙 출력이 매칭 순서에 의존한다. 오름차순, 동률은 id (formats.md).
 ALTER TABLE needs.aspect_lexicon ADD COLUMN priority int NOT NULL DEFAULT 0;
@@ -22,6 +22,8 @@ CREATE TABLE needs.category_map (
   source_category text NOT NULL,             -- method=rank_snapshot: 사이트 카테고리 leaf / method=name_keyword: 제품명 정규식
   lexicon_category text NOT NULL,            -- aspect_lexicon.category 어휘
   method          text NOT NULL CHECK (method IN ('rank_snapshot','name_keyword')),
+  -- B5 와 같은 이유: name_keyword 정규식은 서로 겹치고(선크림 vs 크림) 먼저 맞는 것이 이긴다. 테이블은 파일 순서를 모른다.
+  priority        int  NOT NULL DEFAULT 0,
   PRIMARY KEY (site, source_category)
 );
 

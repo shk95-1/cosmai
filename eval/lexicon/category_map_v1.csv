@@ -1,21 +1,21 @@
-site,source_category,lexicon_category,method
-glowpick,선크림|썬크림|선스크린|선블록|선쿠션|선스틱|선세럼|선 ?젤,선블록,name_keyword
-glowpick,쿠션,쿠션,name_keyword
-glowpick,파운데이션|파데,쿠션,name_keyword
-glowpick,틴트|립 ?글로스|립스틱|립밤,립틴트/라커,name_keyword
-glowpick,마스크|팩$|팩 ,시트팩,name_keyword
-glowpick,샴푸,샴푸,name_keyword
-glowpick,트리트먼트|헤어 ?마스크|헤어팩,헤어트리트먼트,name_keyword
-glowpick,클렌징|클렌저|폼,클렌징폼,name_keyword
-glowpick,세럼|에센스|앰플,에센스,name_keyword
-glowpick,크림,크림,name_keyword
-glowpick,토너|스킨,스킨/토너,name_keyword
-glowpick,패드,패드,name_keyword
-glowpick,섀도|쉐도,아이섀도우,name_keyword
-glowpick,블러셔|블러쉬,블러셔,name_keyword
-*,선크림,선블록,rank_snapshot
-*,페이셜클렌저,클렌징폼,rank_snapshot
-*,에센스/세럼,에센스,rank_snapshot
-*,시트마스크,시트팩,rank_snapshot
-*,파운데이션,쿠션,rank_snapshot
-*,BB/CC,BB/CC,rank_snapshot
+site,source_category,lexicon_category,method,priority
+glowpick,선크림|썬크림|선스크린|선블록|선쿠션|선스틱|선세럼|선 ?젤,선블록,name_keyword,1
+glowpick,쿠션,쿠션,name_keyword,2
+glowpick,파운데이션|파데,쿠션,name_keyword,3
+glowpick,틴트|립 ?글로스|립스틱|립밤,립틴트/라커,name_keyword,4
+glowpick,마스크|팩$|팩 ,시트팩,name_keyword,5
+glowpick,샴푸,샴푸,name_keyword,6
+glowpick,트리트먼트|헤어 ?마스크|헤어팩,헤어트리트먼트,name_keyword,7
+glowpick,클렌징|클렌저|폼,클렌징폼,name_keyword,8
+glowpick,세럼|에센스|앰플,에센스,name_keyword,9
+glowpick,크림,크림,name_keyword,10
+glowpick,토너|스킨,스킨/토너,name_keyword,11
+glowpick,패드,패드,name_keyword,12
+glowpick,섀도|쉐도,아이섀도우,name_keyword,13
+glowpick,블러셔|블러쉬,블러셔,name_keyword,14
+*,선크림,선블록,rank_snapshot,15
+*,페이셜클렌저,클렌징폼,rank_snapshot,16
+*,에센스/세럼,에센스,rank_snapshot,17
+*,시트마스크,시트팩,rank_snapshot,18
+*,파운데이션,쿠션,rank_snapshot,19
+*,BB/CC,BB/CC,rank_snapshot,20
