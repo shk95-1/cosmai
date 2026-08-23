@@ -33,8 +33,10 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_twenty_contract_tables():
-    assert len(declared_tables()) == 20
+def test_the_ddl_declares_the_twentyfour_contract_tables():
+    # 20 from 001/002 + 4 from 004_naver.sql (issue #9: naver_run, naver_fetch_log,
+    # naver_datalab_point, naver_blog_post -- 003 is #6's, skipped by this repo's own numbering rule).
+    assert len(declared_tables()) == 24
 
 
 def test_every_declared_table_exists_in_the_database():

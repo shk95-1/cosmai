@@ -87,6 +87,10 @@ def _run_collect(args: argparse.Namespace) -> int:
         from collectors.youtube.cli import run
 
         return run(args.dataset, board=args.board, since=args.since)
+    if args.collector == "naver":
+        from collectors.naver.cli import run
+
+        return run(args.dataset, board=args.board, since=args.since)
     print(f"collector {args.collector!r} is not wired yet (see issue #9)")
     return 2
 

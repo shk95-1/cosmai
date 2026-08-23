@@ -9,3 +9,6 @@
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
+# naver datalab: monthly (키워드 사전 기준, contracts/entrypoints.md), day 1. 06:10 clears every
+# commerce time above (02:05/03:30/04:15/04:45/05:30) and avoids minute 0 like they do.
+10 6 1 * *  cosmai collect naver --dataset datalab
