@@ -22,7 +22,7 @@ from analysis.types import (
     TextUnit,
 )
 
-LINKER_VERSION = "rule-v1"
+LINKER_VERSION = "rule-v1.0"
 
 # 판정 3: 계약 예시가 'oy:' 다. p2 의 source[:2] 규칙에 올리브영만 예외를 둔다.
 SOURCE_PREFIX = {"oliveyoung": "oy"}
