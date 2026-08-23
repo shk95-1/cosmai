@@ -10,11 +10,15 @@ import pytest
 from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.postgres
-DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs" / "001_needs.sql"
+DDL_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs"
 
 
 def declared_tables() -> set[str]:
-    return set(re.findall(r"CREATE TABLE needs\.(\w+)", DDL.read_text(encoding="utf-8")))
+    # sorted(): same filename order db/migrate.sh's `for file in .../*.sql` glob applies them in.
+    tables: set[str] = set()
+    for path in sorted(DDL_DIR.glob("*.sql")):
+        tables |= set(re.findall(r"CREATE TABLE needs\.(\w+)", path.read_text(encoding="utf-8")))
+    return tables
 
 
 def test_the_ddl_declares_the_seventeen_contract_tables():
