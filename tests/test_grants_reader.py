@@ -23,8 +23,24 @@ def test_every_granted_table_exists_in_the_current_dumps():
     assert granted <= _dumped_tables(), sorted(granted - _dumped_tables())
 
 
+# 이 파일은 migrate.sh 가 슈퍼유저로 실행한다 — SELECT 아닌 것이 섞이면 막을 것이 아무것도 없다.
+FORBIDDEN = re.compile(
+    r"\b(GRANT\s+(INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER|CREATE|CONNECT|TEMP\w*|EXECUTE|ALL)"
+    r"|GRANT\s+\w+\s+TO\b"  # 롤 멤버십 부여
+    r"|DEFAULT\s+PRIVILEGES|ALTER|CREATE|DROP|INSERT\s+INTO|UPDATE\s+\S+\s+SET|DELETE\s+FROM"
+    r"|TRUNCATE|COPY|SET\s+ROLE|REASSIGN)\b",
+    re.IGNORECASE,
+)
+
+
 def test_the_reader_role_gets_select_and_nothing_else():
     # 주석은 뺀다: 부여하지 않는 이유를 적은 줄이 부여로 읽히면 안 된다.
     body = re.sub(r"--[^\n]*", "", GRANTS.read_text(encoding="utf-8"))
-    assert not re.search(r"GRANT\s+(INSERT|UPDATE|DELETE|TRUNCATE|CREATE|ALL)\b", body, re.IGNORECASE)
-    assert "DEFAULT PRIVILEGES" not in body
+    hits = [m.group(0) for m in FORBIDDEN.finditer(body)]
+    assert not hits, hits
+
+
+def test_the_guard_catches_a_membership_grant():
+    assert FORBIDDEN.search("GRANT needs_owner TO needs_runtime;")
+    assert FORBIDDEN.search("ALTER DEFAULT PRIVILEGES IN SCHEMA trend_radar GRANT SELECT ON TABLES TO x;")
+    assert not FORBIDDEN.search("GRANT SELECT ON trend_radar.review TO needs_runtime;")

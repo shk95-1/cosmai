@@ -74,6 +74,10 @@ FILLED = {
     "select count(*) from aspect_lexicon where ruleset in ('suncare-v2.2', 'shared')": 15,
     "select count(*) from aspect_lexicon where ruleset in ('p1-v2.2', 'shared')": 57,
     "select count(*) from aspect_lexicon where scope = 'category' and priority <> 0": 0,
+    "select count(*) from aspect_lexicon where scope = 'generic' and priority <> 1": 0,
+    # 파일 순서가 테이블에 남아야 name_keyword 정규식의 우선순위가 재현된다 (A18)
+    "select count(distinct priority) from category_map": 20,
+    "select count(*) from category_map where priority = 0": 0,
     "select count(*) from product_denominator where category is null": 0,
     "select count(*) from product_denominator where aggregate_version <> 'slice-p1'": 0,
     "select count(*) from rank_daily where n_present is null or aggregate_version <> 'slice-p2'": 0,
