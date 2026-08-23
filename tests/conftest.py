@@ -12,6 +12,7 @@ import socket
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import psycopg
 import pytest
@@ -34,12 +35,26 @@ def snapshot_update(request: pytest.FixtureRequest) -> bool:
 
 
 _real_connect = socket.socket.connect
+_real_connect_ex = socket.socket.connect_ex
+_real_create_connection = socket.create_connection
 _real_psycopg_connect = psycopg.connect
 
 
 def _allowed_port() -> int | None:
     url = os.environ.get(TEST_DB_URL_ENV)
     return (make_url(url).port or 5432) if url else None
+
+
+def _socket_ports(request: pytest.FixtureRequest) -> frozenset[int]:
+    """The throwaway Postgres, plus -- for `local_llm` only -- the local ollama the #6 plumbing test
+    round-trips against. ollama is another process on this host, not the network the guard is about,
+    and it is the only way to exercise the LLM code path without spending money at Anthropic."""
+    ports = {port} if (port := _allowed_port()) is not None else set()
+    if request.node.get_closest_marker("local_llm"):
+        from analysis.polarity.ollama import ollama_url
+
+        ports.add(urlparse(ollama_url()).port or 11434)
+    return frozenset(ports)
 
 
 def _psycopg_dsn_target(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[str | None, int | None]:
@@ -70,24 +85,38 @@ def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
         yield
         return
     port = _allowed_port()
+    open_ports = _socket_ports(request)
 
-    def refuse(self: socket.socket, address: object) -> object:
+    def _open(address: object) -> bool:
         host, p = (address[0], address[1]) if isinstance(address, tuple) else (address, None)
-        if host in LOCAL_HOSTS and p is not None and p == port:
-            return _real_connect(self, address)  # type: ignore[arg-type]
-        raise RuntimeError(
+        return host in LOCAL_HOSTS and p is not None and p in open_ports
+
+    def _refuse(address: object) -> RuntimeError:
+        return RuntimeError(
             f"{request.node.nodeid} tried to open a socket to {address!r}. Tests are offline by "
             "construction; mark it `live` if it genuinely needs the network, or use a fixture."
         )
 
-    def refuse_plain(*args: object, **kwargs: object) -> object:
-        raise RuntimeError(
-            f"{request.node.nodeid} tried to open a socket. Tests are offline by construction."
-        )
+    def refuse(self: socket.socket, address: object) -> object:
+        if _open(address):
+            return _real_connect(self, address)  # type: ignore[arg-type]
+        raise _refuse(address)
+
+    def refuse_connect_ex(self: socket.socket, address: object) -> object:
+        if _open(address):
+            return _real_connect_ex(self, address)  # type: ignore[arg-type]
+        raise _refuse(address)
+
+    # http.client (and so urllib, and so the ollama plumbing) opens its socket here, not via
+    # socket.socket.connect -- an all-refusing stub would make an allowed port unreachable anyway.
+    def refuse_create_connection(address: object, *args: object, **kwargs: object) -> object:
+        if _open(address):
+            return _real_create_connection(address, *args, **kwargs)  # type: ignore[arg-type]
+        raise _refuse(address)
 
     monkeypatch.setattr(socket.socket, "connect", refuse)
-    monkeypatch.setattr(socket.socket, "connect_ex", refuse_plain)
-    monkeypatch.setattr(socket, "create_connection", refuse_plain)
+    monkeypatch.setattr(socket.socket, "connect_ex", refuse_connect_ex)
+    monkeypatch.setattr(socket, "create_connection", refuse_create_connection)
 
     # libpq opens its socket in C, below `socket.socket.connect` entirely -- the guard above never
     # sees a psycopg connection at all (coordinator-confirmed, issue #8 수정 라운드 1 F-1: an
