@@ -170,6 +170,13 @@ class Candidate:  # extractor 출력 (문장 단위)
 
 
 @dataclass(frozen=True)
+class PolarityRequest:  # classify_many 한 건. classify 의 인자를 그대로 묶은 것이다
+    sentence: str
+    rating: float | None = None
+    category: str | None = None
+
+
+@dataclass(frozen=True)
 class PolarityResult:
     aspect: str | None  # B8: 없음은 need_key='' 로 저장한다
     polarity: str  # 불만 | 만족 | 중립
@@ -314,6 +321,9 @@ class Polarity(Protocol):  # ← LLM 삽입점. 규칙 구현과 LLM 구현이 �
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
     ) -> PolarityResult: ...  # category 는 lexicon_category 다 (사이트 원문 아님)
+    def classify_many(
+        self, items: Sequence[PolarityRequest], aspects: AspectLexicon
+    ) -> list[PolarityResult]: ...  # 배치 API 를 가진 구현(#6)만 이득이다. 입력과 같은 길이·순서
 
 
 class Aggregator(Protocol):

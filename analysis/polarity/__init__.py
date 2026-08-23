@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from analysis.polarity.many import SingleCallPolarity
 from analysis.types import AspectLexicon, AspectPattern, PolarityResult
 
 VERSION = "rule-v2.2"
@@ -97,7 +98,7 @@ def _first(*groups: list[_Hit]) -> str | None:
     return None
 
 
-class RulePolarity:
+class RulePolarity(SingleCallPolarity):  # classify_many 는 단건 반복 — 배치 API 가 없다
     version = VERSION
 
     def __init__(self) -> None:

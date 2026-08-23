@@ -33,8 +33,8 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_twenty_contract_tables():
-    assert len(declared_tables()) == 20
+def test_the_ddl_declares_the_twentyone_contract_tables():
+    assert len(declared_tables()) == 21
 
 
 def test_every_declared_table_exists_in_the_database():
