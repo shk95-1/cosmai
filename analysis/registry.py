@@ -14,7 +14,7 @@ TASKS = ("polarity", "wish_class", "brand_link", "product_match")
 
 # 구현체를 등록하는 모듈 경로. 유닛은 여기에 자기 줄 하나만 더한다 — cli.py 에 import 를 끼워 넣으면
 # 네 유닛이 같은 줄에서 충돌하고, 그 충돌을 없애는 것이 이 이슈의 목적이었다.
-IMPLEMENTATIONS: tuple[str, ...] = ()
+IMPLEMENTATIONS: tuple[str, ...] = ("analysis.linker.evaluators",)
 
 
 @dataclass(frozen=True)
