@@ -11,8 +11,11 @@ import re
 import socket
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
@@ -31,11 +34,34 @@ def snapshot_update(request: pytest.FixtureRequest) -> bool:
 
 
 _real_connect = socket.socket.connect
+_real_psycopg_connect = psycopg.connect
 
 
 def _allowed_port() -> int | None:
     url = os.environ.get(TEST_DB_URL_ENV)
     return (make_url(url).port or 5432) if url else None
+
+
+def _psycopg_dsn_target(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[str | None, int | None]:
+    """The host/port one `psycopg.connect(...)` call is aimed at, from either calling convention this
+    repo's code uses -- kwargs (db/seed/_common.py, storage/db.py's runtime_url via SQLAlchemy: every
+    caller we found builds host=/port=/... kwargs, never a bare DSN string) or a libpq conninfo string
+    (psycopg's own retry loop inside the real connect() builds one of these, and a caller elsewhere
+    could pass one directly), parsed the same way psycopg itself parses it."""
+    if "host" in kwargs or "port" in kwargs or "hostaddr" in kwargs:
+        host = kwargs.get("hostaddr") or kwargs.get("host")
+        port = kwargs.get("port")
+        return host, (int(port) if port is not None else None)
+    conninfo = kwargs.get("conninfo")
+    if conninfo is None and args and isinstance(args[0], str):
+        conninfo = args[0]
+    if isinstance(conninfo, str) and conninfo:
+        parsed = conninfo_to_dict(conninfo)
+        raw_host = parsed.get("hostaddr") or parsed.get("host")
+        raw_port = parsed.get("port")
+        host = str(raw_host) if raw_host is not None else None
+        return host, (int(raw_port) if raw_port is not None else None)
+    return None, None
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +88,23 @@ def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", refuse_plain)
     monkeypatch.setattr(socket, "create_connection", refuse_plain)
+
+    # libpq opens its socket in C, below `socket.socket.connect` entirely -- the guard above never
+    # sees a psycopg connection at all (coordinator-confirmed, issue #8 수정 라운드 1 F-1: an
+    # unguarded psycopg call reached real PostgreSQL and failed only at password auth, proving the
+    # socket patch was bypassed, not that it worked). `_allowed_port`/`LOCAL_HOSTS` above still guard
+    # every pure-Python socket path; this is the psycopg-specific half of the same rule.
+    def refuse_psycopg(*args: object, **kwargs: object) -> object:
+        host, p = _psycopg_dsn_target(args, kwargs)  # type: ignore[arg-type]
+        if host in LOCAL_HOSTS and port is not None and p == port:
+            return _real_psycopg_connect(*args, **kwargs)  # type: ignore[arg-type]
+        raise RuntimeError(
+            f"{request.node.nodeid} tried to open a psycopg connection to {host!r}:{p!r}. Tests are "
+            "offline by construction; mark it `live` if it genuinely needs the network, or use a fixture."
+        )
+
+    monkeypatch.setattr(psycopg, "connect", refuse_psycopg)
+    monkeypatch.setattr(psycopg.Connection, "connect", refuse_psycopg)
     yield
 
 

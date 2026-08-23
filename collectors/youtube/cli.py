@@ -136,16 +136,27 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
 
 
 def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
-    rows = conn.execute(
-        sa.select(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind)
+    """One atomic statement, not select-then-update: two `work` passes overlapping (a slow cron tick
+    still running when the next fires, or a live worker daemon started alongside the batch CLI --
+    #10) raced select-then-update at READ COMMITTED and could both pick up the same queued row before
+    either's UPDATE landed. `FOR UPDATE SKIP LOCKED` on the candidate CTE is the archived
+    `JobRepository.claim`'s own fix for exactly this (worker.py), applied here as one UPDATE .. FROM
+    a locked subquery so no other connection can see this batch as still queued in between."""
+    candidates = (
+        sa.select(jobs.c.identifier)
         .where(jobs.c.state == JobState.QUEUED.value)
         .order_by(jobs.c.scheduled_at, jobs.c.created_at)
         .limit(limit)
-    ).all()
-    if rows:
-        ids = [row.identifier for row in rows]
-        conn.execute(sa.update(jobs).where(jobs.c.identifier.in_(ids)).values(state=JobState.RUNNING.value))
-    return rows
+        .with_for_update(skip_locked=True)
+        .cte("claim_candidates")
+    )
+    stmt = (
+        sa.update(jobs)
+        .where(jobs.c.identifier.in_(sa.select(candidates.c.identifier)))
+        .values(state=JobState.RUNNING.value)
+        .returning(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind)
+    )
+    return conn.execute(stmt).all()
 
 
 def _collect_one(
