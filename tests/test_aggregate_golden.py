@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from analysis.aggregate import WISH_SCOPES, RuleAggregator
-from analysis.aggregate.run import load_denominators, load_needs, load_wishes
+from analysis.aggregate.pipeline import load_denominators, load_needs, load_wishes
 from db import seed
 from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 

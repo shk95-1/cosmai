@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from analysis.aggregate.pipeline import run
 from analysis.aggregate.ranking import run_ranking
-from analysis.aggregate.run import run_aggregate
 from db import seed
 from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 
@@ -83,6 +83,8 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
         events = _dump(cur, "price_event", "product_key, board, t_change, direction, n_pre, n_post24")
         denoms = _dump(cur, "product_denominator", "product_key, category, low_collected, low_complete")
 
+        # 두 번째 실행은 stage 진입점을 통해 돈다 — 파생은 run() 안에서도 같은 행을 다시 쓴다.
+        run(conn, commerce_schema="", captured_at=CAPTURED_AT)
         second = run_ranking(conn, VERSION, CAPTURED_AT, source_schema="")
         assert first == second
         assert _dump(cur, "rank_daily", "product_key, day_kst, n_snapshots, n_present, rank_min") == daily
@@ -99,7 +101,7 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
 def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str, slices: Path):
     seed.run_all(needs_runtime_url, slices=slices)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
-        run_id = run_aggregate(conn)
+        run_id = run(conn)
         cur.execute(
             "SELECT status, finished_at IS NOT NULL, versions->>'aggregate' FROM analysis_run "
             "WHERE run_id = %s",
@@ -109,7 +111,7 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str,
         needs = _dump(cur, "metrics_need", "scope, need_key, month, product_ref, neg, pos")
         wishes = _dump(cur, "metrics_wish", "scope, format, attribute, brand, mentions")
 
-        assert run_aggregate(conn) == run_id
+        assert run(conn) == run_id
         assert _dump(cur, "metrics_need", "scope, need_key, month, product_ref, neg, pos") == needs
         assert _dump(cur, "metrics_wish", "scope, format, attribute, brand, mentions") == wishes
         # 분석은 새 run 을 만든다 — 시드 run 의 행은 손대지 않는다 (1단계 판정 4).
@@ -117,3 +119,19 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str,
         assert cur.fetchone() == (SEEDED_METRICS_NEED,)
         cur.execute("SELECT count(*) FROM metrics_wish WHERE run_id <> %s", (run_id,))
         assert cur.fetchone() == (SEEDED_METRICS_WISH,)
+        cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s", (run_id,))
+        mine = cur.fetchone()
+
+        # #5 의 `analyze all` 은 run 을 스스로 만들고 넘긴다: 그 run 에 쓰되 상태는 #5 가 닫는다.
+        cur.execute(
+            "INSERT INTO analysis_run (status, versions, note) "
+            "VALUES ('running', '{}'::jsonb, 'all') RETURNING run_id"
+        )
+        borrowed = cur.fetchone()
+        assert borrowed is not None
+        conn.commit()
+        assert run(conn, run_id=borrowed[0]) == borrowed[0]
+        cur.execute("SELECT status, finished_at FROM analysis_run WHERE run_id = %s", (borrowed[0],))
+        assert cur.fetchone() == ("running", None)
+        cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s", (borrowed[0],))
+        assert cur.fetchone() == mine

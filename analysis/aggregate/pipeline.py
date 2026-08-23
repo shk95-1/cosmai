@@ -1,16 +1,18 @@
-"""`analyze aggregate` 단계: needs 스키마 읽기 → RuleAggregator → analysis_run 과 metrics_* 쓰기."""
+"""`analyze aggregate` 단계의 진입점. #5 의 `analyze all` 이 run(conn, ...) 한 줄로 부른다."""
 
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any, LiteralString
 
 import psycopg
 
 from analysis.aggregate import ROLLUP_SCOPE, WISH_SCOPES, RuleAggregator
+from analysis.aggregate.ranking import run_ranking
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
-__all__ = ["load_denominators", "load_needs", "load_wishes", "run_aggregate"]
+__all__ = ["load_denominators", "load_needs", "load_wishes", "run"]
 
 NEED_COLUMNS = (
     "src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, "
@@ -165,15 +167,26 @@ def _wish_values(row: MetricsWishRow, run_id: int) -> tuple[Any, ...]:
     )  # fmt: skip
 
 
-def run_aggregate(conn: psycopg.Connection[Any], scope: str | None = None) -> int:
+def run(
+    conn: psycopg.Connection[Any],
+    scope: str | None = None,
+    run_id: int | None = None,
+    commerce_schema: str | None = None,
+    captured_at: date | None = None,
+) -> int:
+    """run_id 를 주면 그 run 에 쓰고 상태는 두 번 건드리지 않는다 — #5 가 세 stage 를 한 run 으로 묶는다."""
     aggregator = RuleAggregator()
+    if commerce_schema is not None:
+        run_ranking(conn, aggregator.version, captured_at or date.today(), commerce_schema)
     with conn.cursor() as cur:
         mentions = load_needs(cur)
         wishes = load_wishes(cur)
         denominators = load_denominators(cur)
         aggregator = RuleAggregator(canonical=load_canonical(cur))
-        note = f"aggregate:{aggregator.version}:{scope or ROLLUP_SCOPE}"
-        run_id = _run_id(cur, note, _versions(aggregator, cur))
+        owned = run_id is None
+        if run_id is None:
+            note = f"aggregate:{aggregator.version}:{scope or ROLLUP_SCOPE}"
+            run_id = _run_id(cur, note, _versions(aggregator, cur))
 
         scopes = [scope] if scope else sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
         need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
@@ -181,12 +194,14 @@ def run_aggregate(conn: psycopg.Connection[Any], scope: str | None = None) -> in
 
         # 이 run 의 행은 전부 이 실행이 만든다 — 지우고 다시 넣어야 사라진 키가 남지 않는다.
         cur.execute("DELETE FROM metrics_need WHERE run_id = %s", (run_id,))
-        cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))
         cur.executemany(NEED_SQL, [_need_values(r, run_id) for r in need_rows])
         if not scope:
+            cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))
             cur.executemany(WISH_SQL, [_wish_values(r, run_id) for r in wish_rows])
-        cur.execute(
-            "UPDATE analysis_run SET status = 'done', finished_at = now() WHERE run_id = %s", (run_id,)
-        )
+        if owned:
+            cur.execute(
+                "UPDATE analysis_run SET status = 'done', finished_at = now() WHERE run_id = %s",
+                (run_id,),
+            )
     conn.commit()
     return run_id
