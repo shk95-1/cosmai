@@ -6,6 +6,7 @@
 |---|---|---|
 | `ddl/current/*.sql` | 2026-08-23 현재 DB의 실제 스키마 덤프 (app.trend_radar 13 · app.tubedepth 13 · cosmai.cosmai 12 테이블). 수집기 이식 후에도 **이 테이블 모양을 유지**해야 한다 | `pg_dump --schema-only` 재덤프 → diff |
 | `ddl/needs/001_needs.sql` | 신규 `app.needs` 스키마 (17 테이블) | 마이그레이션 적용 후 `information_schema` 대조 테스트 |
+| `ddl/needs/*.sql` | (위와 같은 디렉터리) | 적용 경로는 `db/migrate.sh` 하나 (운영·테스트 공용); 적용 여부는 원장 `needs.schema_migration`에 기록 |
 | `entrypoints.md` | CLI 진입점·종료 코드·run/fetch_log 공통 뷰 | CLI `--help` 스냅샷 + 뷰 존재 테스트 |
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입, 평가 하네스가 넘어야 할 기준선 | `eval run <task>` 가 기준선과 비교 |
 | `formats.md` | 사전·평가셋 CSV/테이블 포맷 | 적재 스크립트가 검증 |

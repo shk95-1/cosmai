@@ -1,7 +1,7 @@
 #!/bin/sh
 # Tests against a real Postgres. A throwaway postgres:18 is started only when TEST_POSTGRES_URL
-# is unset, bootstrapped with the SAME db/bootstrap.sql production will run (schema `needs`),
-# then contracts/ddl/needs/001_needs.sql is applied as the migrator. Removed on exit.
+# is unset, then db/migrate.sh -- the SAME script production runs -- applies db/bootstrap.sql,
+# the needs migration ledger and contracts/ddl/needs/*.sql. Removed on exit.
 set -e
 . tool/checks/prerequisite
 require_command uv docker pg_isready
@@ -12,7 +12,8 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).
     port=${COSMAI_TEST_PG_PORT:-55432}
     name=cosmai-test-postgres-$port
-    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    secret_file=$(mktemp)
+    trap 'rm -f "$secret_file"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
     docker rm -f "$name" >/dev/null 2>&1 || true
     docker run -d --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
         -e POSTGRES_DB=fleet -p "$port":5432 postgres:18-alpine >/dev/null
@@ -20,15 +21,14 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
         pg_isready -h localhost -p "$port" -U fleet -q 2>/dev/null && break
         sleep 1
     done
-    docker exec -i "$name" psql -U fleet -d fleet -v ON_ERROR_STOP=1 \
-        -v schema=needs -v migrator_password=check -v runtime_password=check-runtime \
-        -v database=fleet -q < db/bootstrap.sql
+    # Test-only dummy values, not secrets -- matches TEST_POSTGRES_URL/TEST_POSTGRES_RUNTIME_URL below.
+    printf 'NEEDS_DB_MIGRATOR=check\nNEEDS_DB_RUNTIME=check-runtime\n' > "$secret_file"
+    # Run twice: production and the test harness both re-run this on every deploy, so it must be
+    # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version).
+    COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
     # Harness only: the per-test schema fixture needs CREATE on the database.
     docker exec "$name" psql -U fleet -d fleet -q -c 'GRANT CREATE ON DATABASE fleet TO needs_migrator'
-    # The contract DDL must apply cleanly as the migrator (SET ROLE owner) -- that is contract test #1.
-    { printf 'SET ROLE needs_owner;\n'; cat contracts/ddl/needs/001_needs.sql; } \
-        | docker exec -i "$name" psql -U needs_migrator -d fleet -v ON_ERROR_STOP=1 -q \
-        || { echo "✗ contracts/ddl/needs/001_needs.sql does not apply" >&2; exit 1; }
+    COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
     TEST_POSTGRES_URL="postgresql+psycopg://needs_migrator:check@localhost:$port/fleet"
     TEST_POSTGRES_RUNTIME_URL="postgresql+psycopg://needs_runtime:check-runtime@localhost:$port/fleet"
     export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
