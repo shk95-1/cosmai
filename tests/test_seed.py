@@ -21,9 +21,9 @@ EXPECTED = {
     "entity_lexicon": 992,
     # aspects_generic.py GENERIC 20 + polarity.py ASPECTS 15 + SPECIFIC 37 − 선블록 중복 2
     "aspect_lexicon": 70,
-    # AXIS_MAP 25축 × 그 축을 실제로 내놓은 사이트: 올영 12(site_axis_map_seed.csv site_axes_all)
-    # + 다이소 9(slice-p1 README 설문 축). 양쪽 3축은 2행, 어느 쪽에도 없는 7축은 0행.
-    "site_axis_map": 21,
+    # AXIS_MAP 25축 × 그 축을 실제로 내놓은 사이트. 올영 25 = slice-p1-category-gap/
+    # site_topic_raw.csv 의 topic_group, 다이소 9 = 같은 곳 site_answer_raw.csv 의 question_name.
+    "site_axis_map": 34,
     "labeled_set": 760,  # eval/README.md: polarity 400 + wish 160 + brand_link 120 + product_match 80
     "product_ref": 154,  # slice-suncare 18 + slice-p2 145 − 겹침 9
     "product_member": 348,  # slice-suncare 29 + slice-p2 341 − 같은 (source, product_key) 22
