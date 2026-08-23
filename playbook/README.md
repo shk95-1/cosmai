@@ -19,7 +19,7 @@
 | [03-scope-policy-locks.md](03-scope-policy-locks.md) | scope.lock, 정책 매니페스트, service-db.json, 실측 근거 있는 상수 | 8 |
 | [04-ops-deploy.md](04-ops-deploy.md) | systemd, compose, 3롤 DB bootstrap, 비밀 저장소, 헬스체크, 크론 | 9 |
 | [05-docs-decisions.md](05-docs-decisions.md) | AGENTS.md 구조, 결정 기록, judgment-debt, NOTES.local, 실험 템플릿, 주석 목소리 | 12 |
-| [06-agent-collaboration.md](06-agent-collaboration.md) | AGENTS/CLAUDE가 에이전트에게 요구한 것과 git 이력상 실제 준수 | 12 |
+| [06-agent-collaboration.md](06-agent-collaboration.md) | AGENTS/CLAUDE가 에이전트에게 요구한 것과 git 이력상 실제 준수 (+A13 배칭→이슈→클리어, 신규) | 13 |
 | [metrics.md](metrics.md) | 산문/코드 비율, 문서 분량, 테스트 수·시간, 메타테스트 수, 훅·커밋 형태, 드리프트 목록 | — |
 
 ## 등급 요약 (70항목: 채택 41 · 변형 21 · 제외 8)
@@ -31,7 +31,7 @@
 | 03 범위·정책 | S02 scope 파생·run 저장 · S04 SourcePolicy+실측 상수 · S05 enum 멤버=수집기 · S06 걷기≤깊이 · S07 정직한 UA · S08 예산 의미 선언 | S01 scope.lock · S03 service-db.json+policy.py | — |
 | 04 운영·배포 | O01 3롤 bootstrap · O02 멱등 init · O03 compose 한 파일 · O05 비밀 트리 밖 · O06 헬스체크 · O07 supercronic UTC | O04 systemd 유닛 · O09 이관 스크립트 | O08 flake.nix |
 | 05 문서·결정 | D02 judgment-debt 세 통 · D03 NOTES.local · D10 troubleshooting grep · D12 "강제되는가" 표 | D01 AGENTS.md 구조 · D04 소스 관측 노트 · D05 결정 기록(yt형) · D07 주석 목소리 · D08 증거 라벨 | D05 DP 템플릿 · D06 실험 템플릿 · D09 status/plan 보존 · D11 번역 쌍 |
-| 06 에이전트 협업 | A01 CLAUDE→AGENTS · A03 관찰 가능한 완료 · A06 요청 시 커밋 · A07 BLOCKED · A09 규칙은 검사로 · A10 관례≠통제 · A12 분류 후 수정/호출자 | A02 세션 시작 · A05 attacker · A08 프로젝트 지식만 · A11 세션 기록 격리 | A04 역할 분리+패킷 |
+| 06 에이전트 협업 | A01 CLAUDE→AGENTS · A03 관찰 가능한 완료 · A06 요청 시 커밋 · A07 BLOCKED · A09 규칙은 검사로 · A10 관례≠통제 · A12 분류 후 수정/호출자 · A13 배칭→이슈→클리어 | A02 세션 시작 · A05 attacker · A08 프로젝트 지식만 · A11 세션 기록 격리 | A04 역할 분리+패킷 |
 
 ## 추천 최소 세트 — 새 프로젝트에 첫날 넣을 10개
 
