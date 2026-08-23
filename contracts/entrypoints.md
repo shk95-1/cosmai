@@ -24,10 +24,12 @@ P16 의 표가 이 뷰 하나로 나와야 한다.
 ## 분석
 ```
 cosmai analyze <stage> [--since <date>] [--scope <category>]
-  stage ∈ {link, extract, polarity, aggregate, all}
-cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match, aspect}
+  stage ∈ {link, polarity, aggregate, all}
+cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
 cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 ```
+- T14: `extract` 는 단독 stage 가 아니다 — 후보만 만들고 아무 행도 쓰지 않아 멱등을 관측할 수 없다. 추출은 `polarity` 안에서 돈다(`Extractor` 프로토콜은 그대로).
+- B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
 - 산출 행은 반드시 `*_version` 을 가진다 (`versioning.md`).
 - `analyze all` 은 `needs.analysis_run` 행을 만들고 `versions` 에 각 패키지·사전 버전을 기록한다.

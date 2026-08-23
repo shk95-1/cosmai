@@ -8,7 +8,7 @@ from typing import Any, LiteralString
 
 import psycopg
 
-from db.seed._common import LEXICON_VERSION, counts, dec, integer, read_csv, write
+from db.seed._common import LEXICON_VERSION, counts, dec, integer, opt, read_csv, write
 
 TABLES = ("analysis_run", "metrics_need", "metrics_wish")
 
@@ -36,22 +36,33 @@ FORMAT_ATTR_SEP = " × "
 
 NEED_SQL: LiteralString = """
 INSERT INTO metrics_need
-  (run_id, scope, need_key, month, product_ref, neg, pos, unresolved, low_share,
-   population_share_pct, strength_low_rating_ratio, persist_months, persist_products)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+  (run_id, scope, need_key, month, product_ref, neg, pos, yt_neg, yt_pos, unresolved,
+   unresolved_new, low_share, population_share_pct, low_mentioning, denom_low, denom_site,
+   strength_mean, strength_low_rating_ratio, persist_months, persist_months_total,
+   persist_products, persist_products_total, aspect_scope)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (run_id, scope, need_key, month, product_ref) DO UPDATE
-SET neg = EXCLUDED.neg, pos = EXCLUDED.pos, unresolved = EXCLUDED.unresolved,
+SET neg = EXCLUDED.neg, pos = EXCLUDED.pos, yt_neg = EXCLUDED.yt_neg, yt_pos = EXCLUDED.yt_pos,
+    unresolved = EXCLUDED.unresolved, unresolved_new = EXCLUDED.unresolved_new,
     low_share = EXCLUDED.low_share, population_share_pct = EXCLUDED.population_share_pct,
+    low_mentioning = EXCLUDED.low_mentioning, denom_low = EXCLUDED.denom_low,
+    denom_site = EXCLUDED.denom_site, strength_mean = EXCLUDED.strength_mean,
     strength_low_rating_ratio = EXCLUDED.strength_low_rating_ratio,
-    persist_months = EXCLUDED.persist_months, persist_products = EXCLUDED.persist_products
+    persist_months = EXCLUDED.persist_months, persist_months_total = EXCLUDED.persist_months_total,
+    persist_products = EXCLUDED.persist_products,
+    persist_products_total = EXCLUDED.persist_products_total, aspect_scope = EXCLUDED.aspect_scope
 """
+# like_cap_sum 은 비운다: 상한 규칙(interfaces.md LIKE_CAP=100)은 계약에만 있고 슬라이스 집계에는 없다.
 WISH_SQL: LiteralString = """
 INSERT INTO metrics_wish
-  (run_id, scope, format, attribute, brand, mentions, channels, months_present, like_sum)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+  (run_id, scope, format, attribute, brand, mentions, channels, videos, months_present,
+   first_month, last_month, like_sum, max_like, example)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (run_id, scope, format, attribute, brand) DO UPDATE
-SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels,
-    months_present = EXCLUDED.months_present, like_sum = EXCLUDED.like_sum
+SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels, videos = EXCLUDED.videos,
+    months_present = EXCLUDED.months_present, first_month = EXCLUDED.first_month,
+    last_month = EXCLUDED.last_month, like_sum = EXCLUDED.like_sum, max_like = EXCLUDED.max_like,
+    example = EXCLUDED.example
 """
 
 
@@ -76,6 +87,11 @@ def _ratio(value: str) -> int | None:
     return integer(value.split("/", 1)[0]) if value else None
 
 
+def _total(value: str) -> int | None:
+    """A2: the denominator of the same '19/39'. p1 prints months as a bare count, so it has none."""
+    return integer(value.split("/", 1)[1]) if "/" in value else None
+
+
 def _suncare_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
     rows: list[tuple[Any, ...]] = []
     for r in read_csv(slices / "slice-suncare" / "metrics.csv"):
@@ -88,12 +104,22 @@ def _suncare_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 "",
                 integer(r["neg"]),
                 integer(r["pos"]),
+                integer(r["yt_neg"]),
+                integer(r["yt_pos"]),
                 dec(r["unresolved_ratio"]),
+                dec(r["unresolved_ratio_new2026"]),
                 None,
                 None,
+                None,
+                None,
+                None,
+                dec(r["strength_mean"]),
                 dec(r["strength_low_rating_ratio"]),
                 _ratio(r["persist_months"]),
+                _total(r["persist_months"]),
                 _ratio(r["persist_products"]),
+                _total(r["persist_products"]),
+                None,
             )
         )
     for r in read_csv(slices / "slice-suncare" / "metrics_population.csv"):
@@ -107,8 +133,18 @@ def _suncare_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 integer(r["complaint_reviews_in_low"]),
                 0,
                 None,
+                None,
+                None,
+                None,
                 dec(r["ratio_in_low"]),
                 dec(r["pop_share_pct"]),
+                integer(r["complaint_reviews_in_low"]),
+                integer(r["low_sample"]),
+                integer(r["site_review_count"]),
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -129,12 +165,23 @@ def _p1_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 "",
                 integer(r["neg"]),
                 integer(r["pos"]),
+                None,
+                None,
                 dec(r["unresolved"]),
+                None,
                 dec(r["low_share"]),
                 dec(r["population_share_pct"]),
+                integer(r["low_reviews_mentioning"]),
+                integer(r["cat_low_total"]),
+                integer(r["cat_site_total"]),
+                None,
                 None,
                 _ratio(r["months_neg"]),
+                _total(r["months_neg"]),
                 _ratio(r["products_neg"]),
+                _total(r["products_neg"]),
+                # need_mention.aspect_scope 와 같은 어휘를 쓴다 (A5).
+                "category" if r["scope"] == "specific" else opt(r["scope"]),
             )
         )
     return rows
@@ -173,8 +220,13 @@ def _wish_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 brand,
                 integer(r["mentions"]),
                 integer(r["channels"]),
+                integer(r["videos"]),
                 integer(r["months_present"]),
+                opt(r["first"]),
+                opt(r["last"]),
                 integer(r["likes"]),
+                integer(r["max_like"]),
+                opt(r["example"]),
             )
         )
     return rows

@@ -13,6 +13,18 @@ pytestmark = pytest.mark.postgres
 DDL_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs"
 
 
+def declared_columns() -> dict[str, set[str]]:
+    # Only the ALTER TABLE ... ADD COLUMN of the later migrations: 001's own columns are covered by
+    # every seed INSERT, while an added column has no such witness until a loader fills it.
+    added: dict[str, set[str]] = {}
+    for path in sorted(DDL_DIR.glob("*.sql")):
+        for table, column in re.findall(
+            r"ALTER TABLE needs\.(\w+)\s+ADD COLUMN (\w+)", path.read_text(encoding="utf-8")
+        ):
+            added.setdefault(table, set()).add(column)
+    return added
+
+
 def declared_tables() -> set[str]:
     # sorted(): same filename order db/migrate.sh's `for file in .../*.sql` glob applies them in.
     tables: set[str] = set()
@@ -21,8 +33,8 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_seventeen_contract_tables():
-    assert len(declared_tables()) == 17
+def test_the_ddl_declares_the_twenty_contract_tables():
+    assert len(declared_tables()) == 20
 
 
 def test_every_declared_table_exists_in_the_database():
@@ -33,3 +45,24 @@ def test_every_declared_table_exists_in_the_database():
         present = {r[0] for r in rows}
     engine.dispose()
     assert declared_tables() <= present, sorted(declared_tables() - present)
+
+
+def test_every_added_column_exists_in_the_database():
+    url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
+    engine = create_engine(url)
+    with engine.connect() as conn:
+        # pg_catalog, not information_schema: the latter hides columns of tables this role holds no
+        # privilege on, and needs_migrator holds them only under SET ROLE needs_owner.
+        rows = conn.execute(
+            text(
+                "select c.relname, a.attname from pg_attribute a join pg_class c on c.oid = a.attrelid "
+                "join pg_namespace n on n.oid = c.relnamespace "
+                "where n.nspname = 'needs' and a.attnum > 0 and not a.attisdropped"
+            )
+        )
+        present: dict[str, set[str]] = {}
+        for table, column in rows:
+            present.setdefault(table, set()).add(column)
+    engine.dispose()
+    missing = {t: sorted(c - present.get(t, set())) for t, c in declared_columns().items()}
+    assert not any(missing.values()), missing

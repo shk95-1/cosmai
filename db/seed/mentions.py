@@ -28,10 +28,10 @@ FIVE = Decimal(5)
 # reviews slice-suncare had already extracted.
 NEED_SQL: LiteralString = """
 INSERT INTO need_mention
-  (src, site, ref, product_ref, source_product_key, category, need_key, aspect_scope, polarity,
-   strength, rating, observed_at, observed_at_resolution, month, sentence, extractor_version,
-   polarity_version)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+  (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key,
+   aspect_scope, polarity, strength, rating, observed_at, observed_at_resolution, month, sentence,
+   extractor_version, polarity_version)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (src, ref, need_key, sentence) DO NOTHING
 """
 WISH_SQL: LiteralString = """
@@ -69,6 +69,8 @@ def _suncare_need(slices: Path) -> list[tuple[Any, ...]]:
                 opt(r["product_ref"]),
                 r["text_ref"].split("/", 1)[0] if review else None,
                 "선블록",
+                # B10: 이 슬라이스는 선블록 사전 하나로만 판정했으므로 사이트 원문과 사전 카테고리가 같다.
+                "선블록",
                 r["need_key"],
                 None,
                 r["polarity"],
@@ -98,6 +100,7 @@ def _p1_need(slices: Path) -> list[tuple[Any, ...]]:
                 None,
                 r["product_key"],
                 opt(r["category"]),
+                opt(r["lexicon_category"]),
                 r["need_key"],
                 # aspect_lexicon.scope is generic|category; slice-p1 spells the second one "specific".
                 "category" if r["aspect_scope"] == "specific" else opt(r["aspect_scope"]),
@@ -123,7 +126,8 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
         [
             (
                 "yt_comment",
-                r["comment_id"],
+                # A20: 같은 댓글이 need_mention 과 같은 키를 갖도록 video_id/comment_id 로 적는다.
+                f"{r['video_id']}/{r['comment_id']}",
                 opt(r["video_id"]),
                 None,
                 as_date(r["published_at"]),
