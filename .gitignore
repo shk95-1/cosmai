@@ -9,3 +9,4 @@ data/
 var/
 .pytest_cache/
 .ruff_cache/
+.superpowers/
