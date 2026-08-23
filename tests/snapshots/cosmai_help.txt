@@ -1,0 +1,100 @@
+$ cosmai --help
+usage: cosmai [-h] {collect,analyze,eval,lexicon} ...
+
+positional arguments:
+  {collect,analyze,eval,lexicon}
+    collect             Run one collector's dataset for one hour.
+    analyze             Run one analysis stage over the needs schema.
+    eval                Score one task against needs.labeled_set.
+    lexicon             Load, compare and activate a dictionary version.
+
+options:
+  -h, --help            show this help message and exit
+
+$ cosmai collect --help
+usage: cosmai collect [-h] --dataset DATASET [--board BOARD] [--since SINCE]
+                      {commerce,youtube,naver}
+
+positional arguments:
+  {commerce,youtube,naver}
+
+options:
+  -h, --help            show this help message and exit
+  --dataset DATASET     Which dataset to collect.
+  --board BOARD         commerce review_low only: which board to walk.
+  --since SINCE         Accepted for shape; unused by every dataset today.
+
+$ cosmai analyze --help
+usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] {link,polarity,aggregate,all}
+
+positional arguments:
+  {link,polarity,aggregate,all}
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         Only units observed on or after this date.
+  --scope SCOPE         Restrict to one lexicon category.
+
+$ cosmai eval --help
+usage: cosmai eval [-h] [--check-baseline] [--url URL]
+                   {polarity,wish_class,brand_link,product_match}
+
+positional arguments:
+  {polarity,wish_class,brand_link,product_match}
+
+options:
+  -h, --help            show this help message and exit
+  --check-baseline      Exit 1 when a baseline is missed.
+  --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
+
+$ cosmai lexicon --help
+usage: cosmai lexicon [-h] {load,diff,activate} ...
+
+positional arguments:
+  {load,diff,activate}
+    load                Load one CSV as version n; a version already loaded is a no-op.
+    diff                Show what version n adds, drops and rewrites against another version.
+    activate            Make version n the active one and deactivate the rest of that kind.
+
+options:
+  -h, --help            show this help message and exit
+
+$ cosmai lexicon load --help
+usage: cosmai lexicon load [-h] --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                           --version VERSION [--url URL]
+                           csv
+
+positional arguments:
+  csv                   CSV in the shape contracts/formats.md gives for this kind.
+
+options:
+  -h, --help            show this help message and exit
+  --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                        Which dictionary.
+  --version VERSION     The dictionary version to act on.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai lexicon diff --help
+usage: cosmai lexicon diff [-h] --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                           --version VERSION [--url URL] [--against AGAINST]
+
+options:
+  -h, --help            show this help message and exit
+  --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                        Which dictionary.
+  --version VERSION     The dictionary version to act on.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+  --against AGAINST     Version to compare with (default: active).
+
+$ cosmai lexicon activate --help
+usage: cosmai lexicon activate [-h]
+                               --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                               --version VERSION [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
+                        Which dictionary.
+  --version VERSION     The dictionary version to act on.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+

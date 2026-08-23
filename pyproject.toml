@@ -12,6 +12,19 @@ dependencies = [
     "selectolax>=0.3,<1",
 ]
 
+[project.scripts]
+cosmai = "cosmai.cli:main"
+
+# 콘솔 스크립트를 실제로 깔려면 프로젝트가 패키지여야 한다. 평평한 레이아웃 그대로 네 모듈만 담고,
+# uv sync 는 editable 로 넣으므로 작업 트리가 계속 정본이다 (python -m cosmai.cli 도 그대로 돈다).
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+module-name = ["cosmai", "analysis", "collectors", "db"]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",

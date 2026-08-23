@@ -1,7 +1,7 @@
 """`python -m cosmai.cli collect commerce --help` -- offline, subprocess (origin: playbook/snippets/
-test_stack_commands_resolve.py). The console-script name is checked by name only; there is no
-[project.scripts] entry yet (nothing installs this package), so the module form is the one this repo
-can run today."""
+test_stack_commands_resolve.py). The module form is checked here because cron and compose may run it
+before anything is installed; `uv run cosmai` (the [project.scripts] entry) is covered by the help
+snapshot in tests/test_cli_help.py."""
 
 from __future__ import annotations
 

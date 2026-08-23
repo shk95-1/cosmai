@@ -18,6 +18,17 @@ from sqlalchemy.engine import make_url
 
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+SNAPSHOT_UPDATE = "--snapshot-update"
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(SNAPSHOT_UPDATE, action="store_true", help="Rewrite CLI snapshots instead of comparing.")
+
+
+@pytest.fixture
+def snapshot_update(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption(SNAPSHOT_UPDATE))
+
 
 _real_connect = socket.socket.connect
 

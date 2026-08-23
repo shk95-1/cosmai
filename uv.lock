@@ -35,7 +35,7 @@ wheels = [
 [[package]]
 name = "cosmai"
 version = "0.0.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
