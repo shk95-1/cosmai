@@ -1,0 +1,11 @@
+# 정적 페이지를 nginx 이미지에 그대로 굽는다. 빌드 단계가 없다는 것이 이
+# 프로젝트의 성질이다 — 번들러도 트랜스파일러도 없고 public/ 이 곧 브라우저가
+# 실행하는 것이다(data-portal/Dockerfile 과 같은 이유, 그 레포를 고치지 않고 다시 씀).
+FROM nginx:alpine
+
+# 기본 문서 루트. index.html·app.js·query.js·render.js·style.css 가 평평하게
+# 놓인다('./query.js' import 가 웹 루트 기준으로 풀리는 이유다).
+COPY public/ /usr/share/nginx/html/
+
+# 이 컨테이너에는 DB 자격증명도 백엔드도 없다 — 브라우저가 PostgREST(3000)를 직접 부른다.
+EXPOSE 80

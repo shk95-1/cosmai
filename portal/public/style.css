@@ -1,0 +1,98 @@
+/* 색은 dataviz 스킬의 검증된 기본 팔레트(references/palette.md) 값 그대로다 —
+   브랜드가 정해지기 전 자리표시자이며, 라이트/다크 둘 다 이 파일 한 곳에서만 갈린다. */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --page: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --border: rgba(11,11,11,0.10);
+  --diverging-neg: #e34948;  /* red — 불만 */
+  --diverging-pos: #2a78d6;  /* blue — 만족 */
+  --seq-1: #2a78d6;          /* sequential blue — unresolved */
+  --seq-2: #eb6834;          /* 두 번째 순차 맥락은 다음 카테고리 슬롯(orange) */
+  --status-critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --border: rgba(255,255,255,0.10);
+    --diverging-neg: #e66767;
+    --diverging-pos: #3987e5;
+    --seq-1: #3987e5;
+    --seq-2: #d95926;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --page: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --gridline: #2c2c2a;
+  --border: rgba(255,255,255,0.10);
+  --diverging-neg: #e66767;
+  --diverging-pos: #3987e5;
+  --seq-1: #3987e5;
+  --seq-2: #d95926;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header { padding: 16px 20px 0; }
+h1 { font-size: 18px; margin: 0 0 4px; }
+h2 { font-size: 15px; margin: 20px 0 8px; }
+h3 { font-size: 13px; margin: 0 0 6px; color: var(--text-secondary); }
+.caption { color: var(--text-secondary); margin: 0 0 8px; }
+.error { color: var(--diverging-neg); white-space: pre-wrap; }
+
+.tabs { display: flex; gap: 8px; padding: 0 20px; border-bottom: 1px solid var(--border); }
+.tabs button {
+  border: none; background: none; padding: 10px 4px; cursor: pointer;
+  color: var(--text-secondary); border-bottom: 2px solid transparent;
+}
+.tabs button.on { color: var(--text-primary); border-bottom-color: var(--diverging-pos); }
+
+.screen { padding: 16px 20px 40px; }
+.screen.hidden { display: none; }
+
+.controls { margin-bottom: 12px; }
+.controls select { font-size: 14px; padding: 4px 6px; }
+
+.chart { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+.chart-pair, .chart-triple { display: grid; gap: 16px; margin: 8px 0 16px; }
+.chart-pair { grid-template-columns: 1fr 1fr; }
+.chart-triple { grid-template-columns: 1fr 1fr 1fr; }
+
+svg.viz-root { width: 100%; height: auto; }
+.viz-label { fill: var(--text-secondary); font-size: 11px; dominant-baseline: middle; }
+.viz-value { fill: var(--text-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.bar-neg { fill: var(--diverging-neg); }
+.bar-pos { fill: var(--diverging-pos); }
+.bar-magnitude-1 { fill: var(--seq-1); }
+.bar-magnitude-2 { fill: var(--seq-2); }
+
+.legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
+.legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+.legend .swatch.neg { background: var(--diverging-neg); }
+.legend .swatch.pos { background: var(--diverging-pos); }
+
+.table-controls { margin: 12px 0 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--gridline); }
+th { color: var(--text-secondary); cursor: pointer; user-select: none; }
+td { font-variant-numeric: tabular-nums; }
