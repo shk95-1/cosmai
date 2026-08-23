@@ -1,0 +1,4 @@
+# cosmai collect youtube --dataset watch reads this file (collectors/youtube/watchlist.py DIRECTIVES).
+# Placeholder: no real targets are named here in #8 -- watch is not being run in production (watch
+# 재가동 is issue #10's decision, not this issue's), so a live list is #10's job to fill in, not this
+# file's. See watchlist.py's docstring for the directive syntax.

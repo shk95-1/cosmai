@@ -1,0 +1,17 @@
+{
+  "_comment": "Fan-out caps (contracts/entrypoints.md 수집기 절 팜아웃 상한). Circuit breakers, not throughput targets -- the failure they guard against already happened once in production: watch re-enqueued a follow-up job per video on every hourly sweep with no natural-key check, which reached 224,036 duplicate video.* jobs before they were bulk-cancelled (error_code='cancelled_duplicate', issue #8/#16 REBUILD §3 P16).",
+  "MAX_FOLLOWUPS_PER_VIDEO": 3,
+  "MAX_FOLLOWUPS_PER_VIDEO_note": "video.metadata + video.comments + video.transcript -- every follow-up kind a watchlist directive can name today (collectors/youtube/watchlist.py DIRECTIVES). One video reaching this many *active* (queued or running) follow-up jobs at once means something is re-fanning it faster than work() drains it, which is exactly the shape of the 224k incident.",
+  "MAX_QUEUE_DEPTH": 5000,
+  "MAX_QUEUE_DEPTH_note": "queued+running rows allowed system-wide before watch refuses to enqueue more and exits 1 (partial). Two orders of magnitude below the 224,036 duplicates actually observed -- a breaker meant to trip long before a runaway sweep gets anywhere near that scale, not a capacity plan.",
+  "FRESHNESS_SECONDS": {
+    "channel.videos": 21600,
+    "search.videos": 21600,
+    "playlist.items": 21600,
+    "trending.videos": 21600,
+    "video.metadata": 21600,
+    "video.comments": 86400,
+    "video.transcript": 2592000
+  },
+  "FRESHNESS_SECONDS_note": "#8 수정 라운드 2: how long a stored artifact answers a re-observation of the same target without a re-fetch -- values copied verbatim from the archived sources' default_freshness (service/yt-scrapper/src/tubedepth/sources/{listings,video_metadata,comments,transcript}.py), not re-derived. Listing kinds and video.metadata: 21600s = 6h (new uploads/reordering/counts move hourly, cheap to refresh). video.comments: 86400s = 24h (the expensive kind -- roughly one request per twenty comments). video.transcript: 2592000s = 30d (captions change only on re-upload). Without this, a directive naming N follow-up kinds re-walks the same listing N times per watch pass -- see the 3-fetch/6-row measurement in the #8 issue report, which is exactly what this cap exists to prevent from compounding."
+}

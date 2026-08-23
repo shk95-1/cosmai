@@ -34,7 +34,8 @@ def test_an_unknown_dataset_is_refused_with_exit_code_2():
 
 
 def test_an_unwired_collector_is_refused_with_exit_code_2():
+    """`youtube` wired up in #8 -- `naver` (#9) is the one still refused this way."""
     from cosmai.cli import main
 
-    code = main(["collect", "youtube", "--dataset", "watch"])
+    code = main(["collect", "naver", "--dataset", "datalab"])
     assert code == 2

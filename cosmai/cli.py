@@ -2,7 +2,7 @@
 `--help` is checkable offline in a subprocess without an installed console script (playbook
 snippets/test_stack_commands_resolve.py).
 
-Only `collect commerce` is wired for #7; `youtube`/`naver` are #8/#9 and refuse cleanly until then --
+`collect commerce`/`youtube` are wired (#7, #8); `naver` is #9 and refuses cleanly until then --
 declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
 checked against, per contracts/entrypoints.md's collector list.
 """
@@ -79,12 +79,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_collect(args: argparse.Namespace) -> int:
-    if args.collector != "commerce":
-        print(f"collector {args.collector!r} is not wired yet (see issue #8/#9)")
-        return 2
-    from collectors.commerce.cli import run
+    if args.collector == "commerce":
+        from collectors.commerce.cli import run
 
-    return run(args.dataset, board=args.board, since=args.since)
+        return run(args.dataset, board=args.board, since=args.since)
+    if args.collector == "youtube":
+        from collectors.youtube.cli import run
+
+        return run(args.dataset, board=args.board, since=args.since)
+    print(f"collector {args.collector!r} is not wired yet (see issue #9)")
+    return 2
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
