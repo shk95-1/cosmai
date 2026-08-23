@@ -42,3 +42,19 @@ def test_psycopg_connection_connect_classmethod_is_also_refused():
     classmethod directly -- both names must be guarded, not just the one this repo happens to use."""
     with pytest.raises(RuntimeError, match="offline by construction"):
         psycopg.Connection.connect(host="127.0.0.1", port=1, dbname="whatever")
+
+
+def test_sqlalchemy_engine_connect_to_a_non_test_port_is_also_refused():
+    """#8 마무리 라운드 G-3: the round-0 incident happened through this exact path -- SQLAlchemy's
+    psycopg dialect resolves `psycopg.connect` from the module at connect time, not the plain
+    `psycopg.connect(...)` call the tests above exercise directly. Port 1, not 5434: the guard must
+    refuse before anything is dialed, so this proves the refusal without needing production reachable
+    or even real."""
+    import sqlalchemy as sa
+
+    engine = sa.create_engine("postgresql+psycopg://user:pw@127.0.0.1:1/whatever")
+    try:
+        with pytest.raises(RuntimeError, match="offline by construction"):
+            engine.connect()
+    finally:
+        engine.dispose()

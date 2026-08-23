@@ -44,6 +44,10 @@ jobs = Table(
     sa.Column("payload_bytes", sa.Integer),
     sa.Column("error_code", sa.String(64)),
     sa.Column("error_message", sa.Text),
+    # Written on every enqueue (watchlist.py, queue.enqueue) but read by nothing in this
+    # package -- #8 수정 라운드 2 made freshness (artifacts.fresh_until) the sole re-fetch
+    # decision. Kept as a column (not dropped) only because the DDL diff-0 bar this issue is
+    # held to forbids removing a column the archived schema still has.
     sa.Column("refresh", sa.Boolean, nullable=False, default=False),
     sa.Index("ix_job_claimable", "state", "scheduled_at", "created_at"),
     sa.Index("ix_job_lease", "state", "lease_expires_at"),

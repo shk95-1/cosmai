@@ -110,8 +110,10 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
     queued = 0
     for directive in directives:
         # A job carries exactly one follow_up_kind, so a directive naming several is several listing
-        # jobs -- same rule the archived cli._watch_pass used. Only the first is forced (refresh=True):
-        # forcing every one would re-run the same enumeration once per follow-up kind.
+        # jobs -- same rule the archived cli._watch_pass used. `refresh` (index == 0) is written for
+        # shape parity with the archived Job.refresh column but read by nothing here: since the #8
+        # 수정 라운드 2 freshness cache, whether a listing actually re-fetches is decided entirely by
+        # `_fresh_artifact`'s `fresh_until > now`, not by which enqueue set this flag.
         for index, follow_up in enumerate(directive.follow_ups or (None,)):
             outcome = queue.enqueue(
                 conn,
