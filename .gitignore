@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+.env
+*.env
+data/
+var/
+.pytest_cache/
+.ruff_cache/
