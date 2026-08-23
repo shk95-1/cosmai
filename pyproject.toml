@@ -7,6 +7,9 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "sqlalchemy>=2.0",
     "pydantic>=2",
+    # collectors/commerce (#7): oliveyoung's ranking/detail pages are HTML, parsed offline against
+    # saved fixtures -- selectolax brings no network dependency with it.
+    "selectolax>=0.3,<1",
 ]
 
 [project.optional-dependencies]

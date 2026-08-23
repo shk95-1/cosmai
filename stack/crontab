@@ -1,0 +1,10 @@
+# UTC. commerce times from contracts/entrypoints.md §스케줄 where it names one; review/new_product
+# times are absent there but declared in issue #7's own "운영 크론(참고)" note, added here because
+# playbook 02-test-discipline.md T10 records a real outage from exactly this gap (a dataset with a
+# collector and no cron line) -- every commerce Dataset member gets a line, per S05.
+0 * * * *   cosmai collect commerce --dataset ranking
+5 2 * * *   cosmai collect commerce --dataset product
+30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
+15 4 * * *  cosmai collect commerce --dataset review
+45 4 * * *  cosmai collect commerce --dataset review_stats
+30 5 * * *  cosmai collect commerce --dataset new_product

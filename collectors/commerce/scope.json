@@ -1,0 +1,44 @@
+{
+  "_comment": "How much of each site a run walks, counted from source constants (contracts/entrypoints.md: 'scope.lock의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사'). Not a lock file: the run row's own scope jsonb + collector_version already answer 'what did that hour actually walk'.",
+  "oliveyoung": {
+    "ranking": { "boards": 13 },
+    "product": { "boards": 5, "product_products": 85 },
+    "review": {
+      "review_boards": 5,
+      "review_products": 10,
+      "review_pages": 3,
+      "review_page_size": 50,
+      "review_sorts": 2
+    },
+    "review_stats": { "review_boards": 5, "review_stats_products": 45 },
+    "review_low": {
+      "_comment": "Generalized in #7 from a single hardcoded 'suncare' board to any board named here. RATING_ASC now reads until a 3-star review appears (the low end's provable boundary) instead of a fixed page count; low_asc_pages_max is a safety ceiling, not the stop condition.",
+      "boards": ["suncare"],
+      "low_boards": 1,
+      "low_products": 10,
+      "low_asc_pages_max": 7,
+      "low_desc_pages": 1,
+      "review_page_size": 50,
+      "low_complete_threshold": 150
+    }
+  },
+  "glowpick": {
+    "ranking": { "boards": 12, "month_term_months": 24 },
+    "review": { "boards": 12, "month_term_months": 24 },
+    "new_product": { "new_product_boards": 2 }
+  },
+  "daisomall": {
+    "ranking": { "boards": 4, "page_size": 100 },
+    "review": {
+      "boards": 1,
+      "page_size": 100,
+      "review_products": 10,
+      "review_pages": 2,
+      "review_page_size": 100
+    },
+    "new_product": { "new_product_boards": 3, "page_size": 100 }
+  },
+  "hwahae": {
+    "ranking": { "boards": 4 }
+  }
+}

@@ -128,3 +128,34 @@ def needs_runtime_url(needs_schema: str, _schema_name: str) -> str:
         pytest.skip(f"set {TEST_RUNTIME_DB_URL_ENV}, or run tool/checks/test")
     url = make_url(runtime_url).update_query_dict({"options": f"-csearch_path={_schema_name},pg_catalog"})
     return url.render_as_string(hide_password=False)
+
+
+TREND_RADAR_DDL = (
+    Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.trend_radar.sql"
+)
+
+
+@pytest.fixture
+def trend_radar_schema(database_url_for_tests: str, _schema_name: str) -> str:
+    """collectors/commerce's DDL applied straight from contracts/ddl/current/app.trend_radar.sql -- the
+    one authority for that schema's shape (#7's completion bar is diff = 0 against this exact file, so
+    the fixture must apply it verbatim rather than a hand-written CREATE TABLE).
+
+    No role switch, unlike `needs_schema`: `trend_radar` predates the needs-style owner/runtime split
+    (contracts/README.md) and is already live in production without one, so the per-test schema is
+    applied and read back as the same role that created it.
+    """
+    schema = _schema_name
+    engine = create_engine(database_url_for_tests)
+    lines = [
+        ln
+        for ln in TREND_RADAR_DDL.read_text(encoding="utf-8").splitlines()
+        if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
+    ]
+    # The per-test schema already exists (database_url_for_tests); the dump's own CREATE SCHEMA would
+    # collide with it, and every object in the file is qualified with the schema name it is renaming.
+    ddl = "\n".join(lines).replace("CREATE SCHEMA trend_radar;", "").replace("trend_radar.", f'"{schema}".')
+    with engine.begin() as conn:
+        conn.exec_driver_sql(ddl)
+    engine.dispose()
+    return database_url_for_tests

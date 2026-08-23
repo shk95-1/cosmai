@@ -1,0 +1,1029 @@
+{
+ "status": "SUCCESS",
+ "code": 200,
+ "message": "요청에 성공하였습니다.",
+ "pagination": null,
+ "data": {
+  "goodsReviewList": [
+   {
+    "reviewId": 63502810,
+    "content": "메디힐 세라마이드 보습장벽 마스크팩이라 \r\n🧴 세라마이드가 피부 장벽을 보호하고 수분 손실을 줄이는 데 도움을 줍니다.",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "004",
+     "legacyGoodsNumber": "8809936742112",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "세라마이드 보습장벽 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 10476.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/34bb32ac3f304f2683b9b70000a032231785430540143.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/7b1ebf8ecac940b3a510d9d53c8cb7131785430544904.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/b15bf36cc421419b8e39f1ccaa38a44e1785430550028.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer01",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-01",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 27,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63499479,
+    "content": "여드름이 진정된 뒤 붉은 흔적이 신경 쓰일 때\r\n피부가 예민하고 자극을 받은 날 케어해주기 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 10476.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/32cf874cc9584874b27c1f18ea1bd3b41785425069575.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/557da671b34e4ca290fcb9515bb530811785425077707.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/155051303a4e4ccd97e3e25672dd8e4d1785425085555.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer02",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-02",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 27,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63500044,
+    "content": "탄력이 떨어졌다고 느끼는 피부\r\n건조하고 피부결이 거친 피부\r\n중요한 일정 전 피부 컨디션을 끌어올리고 싶은 경우 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "002",
+     "legacyGoodsNumber": "8809936744055",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "콜라겐 코어탄력 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 10116.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/34277102d8dc442aa734711e4d6e7f1f1785425598140.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/ccdb28c2fef441e9a9a0326f68072dbf1785425605360.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/0bce25aefdf148c88a07a3a7f2d93db61785425613003.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer03",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-03",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 26,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63502663,
+    "content": "메디힐 비타민씨 잡티토닝 마스크팩이라 \r\n🍊 잡티·칙칙함 케어: 꾸준히 사용하면 피부 톤을 균일하게 관리하는 데 도움을 줍니다.",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "003",
+     "legacyGoodsNumber": "8809936744017",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "비타민씨 잡티토닝 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 9756.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/95c540aabbd34c3693a2ccdd238486f51785430259971.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/060e03d4ed3e4055b464a05c3603a29f1785430268095.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/2cb2237f96f74063bc73cb39e034320c1785430274940.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer04",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-04",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 25,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63502475,
+    "content": "티트리 진정수분 마스크팩이러 갑자기 피부가 예민해졌을 때\r\n붉은기와 열감이 느껴질 때 사용해주면 좋아요 ~~",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "001",
+     "legacyGoodsNumber": "8809936743959",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": " 티트리 진정수분 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 9756.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/a3bb66b12d6942c8a28a0bee5524a91f1785430146671.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/e12e63f0496d41599a1b2531a56958ce1785430159653.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/f8c2221ac150493e9a7d6300833aa9911785430167920.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer05",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-05",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 25,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63499415,
+    "content": "💧 에센스가 풍부한 편\r\n✨ 촉촉하고 윤기 있는 마무리\r\n🪞 메이크업 전이나 중요한 일정 전 사용하기 좋음",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "002",
+     "legacyGoodsNumber": "8809936744055",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "콜라겐 코어탄력 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 9756.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/d1e5112e071c4de190037a8a9cef5d131785424855294.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/93a33a794de74a28b102c048e254041e1785424863250.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/9953ec3bbbbb4c08b4d0c439c0dac0951785424874494.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer06",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-06",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 25,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 63499373,
+    "content": "💧 촉촉하지만 무겁지 않은 에센스 타입\r\n🌿 산뜻하게 흡수되어 끈적임이 적은 편\r\n😌 민감한 피부도 비교적 부담 없이 사용하기 좋음",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 9756.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/31/4707181c4c6b4e3ea5ee8b22a727df1f1785424928882.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/31/b4cbbe0408104cb88bde1d940abc67f81785424938157.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/31/fba9b881d78b4fb59b3613c47950783b1785424948716.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer07",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-07",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.31",
+    "recommendCount": 25,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62751786,
+    "content": "메디힐 비타민씨 에센셜 마스크_잡티 토닝 #순도99%순수비타민C #수분토닝 #3중톤업 각종 잡티와 칙칙한 피부톤을 고르게 밝히고 수분을 채워줘서 자주구매해요 ~~",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "003",
+     "legacyGoodsNumber": "8809936744017",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "비타민씨 잡티토닝 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 5418.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/13/61e105d8e3694c6eb2348403eca6a2fa1783930042725.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/13/89992db6d4344e45bf70740d25fd0ef71783930046655.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/13/e076871699ff4d1c9b02e983c066173a1783930054126.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer08",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-08",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.13",
+    "recommendCount": 28,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62357391,
+    "content": "메디힐 에센셜 마스크팩 \r\n마데카소사이드 흔적리페어\r\n수분 잡티흔적 진정 ~~~에 좋아요 ~~",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 5058.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/05/e0f0a48b4c5d457481497145057b1a9d1783237600411.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/05/5ab6637b0da64d538f93ddb35d8526e41783237604173.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/05/51572a46e45b4513b5b26180fba68f341783237607944.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer09",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-09",
+     "skinType": "A04",
+     "skinTone": "B04",
+     "skinTrouble": [
+      "C04"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.05",
+    "recommendCount": 46,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62357115,
+    "content": "메디힐 에센셜 마스크팩\r\n콜라겐 코어탄력 마스크팩이라 탄력 ~~ 케어에 좋고 탱탱하고 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "002",
+     "legacyGoodsNumber": "8809936744055",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "콜라겐 코어탄력 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": true,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 5058.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/05/72073fc3008c4a06898a0ba7960c83661783237145540.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/05/0708ea0a1bd24c62ae69304ceae7ef5d1783237149562.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/05/da6984538bfd487e80c83d959de49d781783237152761.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer10",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-10",
+     "skinType": "A04",
+     "skinTone": "B04",
+     "skinTrouble": [
+      "C04"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.05",
+    "recommendCount": 44,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62048889,
+    "content": "집중 진정 효과\r\n민감 피부 30초 초속 진정+열 자극 진정+광 자극 진정+급속 피부 쿨링\r\n진정에 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "001",
+     "legacyGoodsNumber": "8809936743959",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": " 티트리 진정수분 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 5058.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/19cf5d7fb7ab4047a2a386991d18e8981782699943858.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/b7b93097ee544175a4682761874c28c41782699952737.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/f954d3bb1fd74611a63c53aaf5499b091782699958009.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer11",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-11",
+     "skinType": "A01",
+     "skinTone": "B01",
+     "skinTrouble": [
+      "C01"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 56,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62752442,
+    "content": "4중 집중 진정 효과\r\n민감 피부 30초 초속 진정+열 자극 진정+광 자극 진정+급속 피부 쿨링되어 좋아요 ~~",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "001",
+     "legacyGoodsNumber": "8809936743959",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": " 티트리 진정수분 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/13/67e1d5fdc64043a9b50de2373dd7ab911783930619705.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/13/1c75e11e849d4a5dbe12a9fa6bb16ad81783930624880.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/13/81588d42064948fea0a293973ebb96aa1783930628682.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer12",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-12",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.13",
+    "recommendCount": 25,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62054579,
+    "content": "메디힐 에센셜 마스크팩 마데카소사이드 흔적리페어 \r\n흔적케어에 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/79cf4191e5ba4defbe3efacea53d12eb1782711252258.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/61a133d92d1d45d4a2b139b96ab8c86e1782711263879.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/e4e5ff1cc4f34d6f986e3bf4a543050c1782711269374.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer13",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-13",
+     "skinType": "A03",
+     "skinTone": "B03",
+     "skinTrouble": [],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 55,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62050798,
+    "content": "피부 겉속탄력 개선 효과 있어서\r\n볼륨감 넘치는 피부로 케어해주기 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "002",
+     "legacyGoodsNumber": "8809936744055",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "콜라겐 코어탄력 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/e09e328310d04452a750f6fe5bbb945e1782703955988.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/21996d8c8843404f927123ae320ca83d1782703960512.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/37365870e96d46d78643febd53f229621782703965528.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer14",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-14",
+     "skinType": "A03",
+     "skinTone": "B03",
+     "skinTrouble": [],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 53,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62050505,
+    "content": "메디힐 에센셜 마스크팩 \r\n비타민씨 잡티토닝이라 미백에 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "003",
+     "legacyGoodsNumber": "8809936744017",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "비타민씨 잡티토닝 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/168325025e114d2abda33b46ed89b0711782703131906.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/d2b52fe31f2348e1af1a1c87e24f6f011782703137437.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/d1b71a4678db420e919dc55ccda0c7321782703145054.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer15",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-15",
+     "skinType": "A03",
+     "skinTone": "B03",
+     "skinTrouble": [],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 52,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62050287,
+    "content": "메디힐 에센셜 마스크팩 티트리 진정수분 마스크팩이라 진정에 좋아요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "001",
+     "legacyGoodsNumber": "8809936743959",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": " 티트리 진정수분 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/372b7c9c44e047afa09ad63607bc27061782703036094.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/9dcc4e40f80e476995fd184afa1a597f1782703041340.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/77bc39eb88bf461e98979c5bc299ebfc1782703047821.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer16",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-16",
+     "skinType": "A03",
+     "skinTone": "B03",
+     "skinTrouble": [],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 52,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62048933,
+    "content": "색소침착 개선 효과 울긋불긋한 흔적 진정 효과\r\n눈에 띄게 줄어든 멜라닌 면적으로 균일해진 피부 톤 케어에 좋아서 자주 구매해요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/140aab7f3a1248a4a46786226f775ca31782700176604.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/af5559df0ab0451493add2997d104f9c1782700181616.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/05df57b940394e6c9784530e49f7f0331782700189769.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer17",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-17",
+     "skinType": "A01",
+     "skinTone": "B01",
+     "skinTrouble": [
+      "C01"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 57,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62048700,
+    "content": "피부 겉속탄력 개선 효과\r\n피부 깊은 곳부터 차오르는 꽉 찬 피부 탄력\r\n피부 결 밀도 개선 효과에 자주 구매해요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "002",
+     "legacyGoodsNumber": "8809936744055",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "콜라겐 코어탄력 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/e57dbe1ba4b4498b81a9a1a65032cb321782700079745.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/c0f934a1485641ed842333ae9ebced641782700083315.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/e92d979c815348aca8f7640af57945b71782700087904.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer18",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-18",
+     "skinType": "A01",
+     "skinTone": "B01",
+     "skinTrouble": [
+      "C01"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 58,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62048670,
+    "content": "환한 피부의 밑바탕이 되는 촉촉한 수분량 개선 효능 기미, 주근깨, 멜라닌, 색소침착을 개선해 잡티 없이 맑고 투명한 피부에 도움을 줘요",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "003",
+     "legacyGoodsNumber": "8809936744017",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "비타민씨 잡티토닝 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4878.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/06/29/a618dac62cf24f4a839dc0bfbf63dc031782699885379.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/06/29/f16b8a44cb3b41869d63b79726c930a21782699889269.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/06/29/96a9927949e04c6b8b114baf44bb81e91782699894641.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer19",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-19",
+     "skinType": "A01",
+     "skinTone": "B01",
+     "skinTrouble": [
+      "C01"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.06.29",
+    "recommendCount": 57,
+    "isMyReview": false,
+    "isRecommended": false
+   },
+   {
+    "reviewId": 62752465,
+    "content": "흔적장벽 미백 기능성 화장품 피부 흔적을 말끔하게 지워주고 수분 장벽을 탄탄하게 채워주어 투명하고 촉촉한 피부로 만들어줘서 좋아요 ~~",
+    "goodsDto": {
+     "goodsNumber": "A000000217620",
+     "itemNumber": "005",
+     "legacyGoodsNumber": "8809936742938",
+     "goodsName": "[15년연속 1위] 메디힐 에센셜 마스크팩 1매 고기능 7종 골라담기",
+     "optionName": "마데카소사이드 흔적리페어 1매"
+    },
+    "reviewScore": 5,
+    "hasPhoto": true,
+    "isRepurchase": false,
+    "isMonthUseReview": false,
+    "isMonthOverReview": false,
+    "reviewType": "OFFLINE",
+    "usefulPoint": 4698.0,
+    "photoReviewList": [
+     {
+      "imageSequence": 1,
+      "imagePath": "2026/07/13/eacd100b28d344229dd8e7e5e5fe01d41783930710004.png"
+     },
+     {
+      "imageSequence": 2,
+      "imagePath": "2026/07/13/205153e0004348029d7d91d0c2d1fa9a1783930714293.png"
+     },
+     {
+      "imageSequence": 3,
+      "imagePath": "2026/07/13/2c05ed6084f845adaae69adbdf69ceed1783930718709.png"
+     }
+    ],
+    "profileDto": {
+     "memberNickname": "reviewer20",
+     "profileImageUrl": "scrubbed/profile.png",
+     "isShutterbrity": false,
+     "isTopReviewer": false,
+     "reviewerRank": null,
+     "profileKey": "SCRUBBED-PROFILE-KEY-20",
+     "skinType": "A02",
+     "skinTone": "B02",
+     "skinTrouble": [
+      "C02"
+     ],
+     "isSkinTypeMatched": false,
+     "isSkinToneMatched": false
+    },
+    "createdDateTime": "2026.07.13",
+    "recommendCount": 24,
+    "isMyReview": false,
+    "isRecommended": false
+   }
+  ],
+  "nextCursorId": 62752465,
+  "nextCursorScore": 4698.0,
+  "nextCursorCount": null,
+  "hasNext": true,
+  "loginRequired": false
+ },
+ "totalCnt": null,
+ "pageData": null
+}
