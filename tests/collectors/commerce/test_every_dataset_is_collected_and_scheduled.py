@@ -44,11 +44,6 @@ def _entrypoints_schedule_block() -> str:
 CONTRACT_TIMES = _cron_times_by_dataset(_entrypoints_schedule_block())
 CRONTAB_TIMES = _cron_times_by_dataset(CRONTAB.read_text(encoding="utf-8"))
 
-# entrypoints.md §스케줄 names a time for these four only; review and new_product are scheduled (every
-# Dataset member must be, per test_every_dataset_is_scheduled_in_the_commerce_crontab below) but the
-# contract does not pin a time for them, so there is nothing here to check them against.
-DATASETS_WITHOUT_A_CONTRACT_TIME = frozenset({"review", "new_product"})
-
 
 def test_there_are_sources_and_datasets():
     assert SOURCES and list(Dataset)
@@ -76,15 +71,14 @@ def test_every_dataset_is_scheduled_in_the_commerce_crontab(dataset: Dataset):
     )
 
 
-def test_the_contract_names_a_time_for_every_dataset_except_the_documented_gap():
-    # If entrypoints.md §스케줄 starts or stops naming a dataset's time, this must be updated
-    # deliberately -- it is the thing that stops the crontab-time check below from silently covering
-    # nothing (or missing a dataset it now could check).
+def test_the_contract_names_a_time_for_every_dataset():
+    # If entrypoints.md §스케줄 stops naming a dataset's time, this fails loudly instead of letting
+    # the crontab-time check below silently start covering fewer datasets than it should.
     named = set(CONTRACT_TIMES)
     all_commerce = {d.value for d in Dataset}
-    assert all_commerce - named == DATASETS_WITHOUT_A_CONTRACT_TIME, (
-        "contracts/entrypoints.md §스케줄's named datasets changed; update "
-        "DATASETS_WITHOUT_A_CONTRACT_TIME to match"
+    assert named == all_commerce, (
+        f"contracts/entrypoints.md §스케줄 names times for {sorted(named)}, "
+        f"but every commerce dataset is {sorted(all_commerce)}"
     )
 
 
@@ -95,3 +89,13 @@ def test_crontab_time_matches_the_contract(dataset: str):
         f"stack/crontab schedules {dataset} at {' '.join(CRONTAB_TIMES[dataset])}, "
         f"contracts/entrypoints.md §스케줄 says {' '.join(CONTRACT_TIMES[dataset])}"
     )
+
+
+@pytest.mark.parametrize("dataset", sorted(set(CONTRACT_TIMES) - {"ranking"}), ids=lambda d: d)
+def test_no_daily_commerce_dataset_starts_on_minute_zero(dataset: str):
+    # Minute 0 is the hourly ranking walk's own start (~74s runtime) -- ranking is the anchor this
+    # rule protects, not subject to it. Every *daily* commerce walk must clear that minute: sharing
+    # it would run two walks against one source at once, halving the 5s pace each is spaced to
+    # protect (see stack/crontab's header and contracts/entrypoints.md §스케줄).
+    minute = CONTRACT_TIMES[dataset][0]
+    assert minute != "0", f"{dataset} starts on minute 0, the same minute as the hourly ranking walk"

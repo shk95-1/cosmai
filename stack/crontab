@@ -1,10 +1,11 @@
-# UTC. commerce times from contracts/entrypoints.md §스케줄 where it names one; review/new_product
-# times are absent there but declared in issue #7's own "운영 크론(참고)" note, added here because
-# playbook 02-test-discipline.md T10 records a real outage from exactly this gap (a dataset with a
-# collector and no cron line) -- every commerce Dataset member gets a line, per S05.
+# UTC. commerce times from contracts/entrypoints.md §스케줄, which now names all six -- every
+# commerce Dataset member gets a line, per S05 (playbook 02-test-discipline.md T10 records a real
+# outage from a dataset with a collector and no cron line). No commerce line uses minute 0: the
+# hourly ranking run starts there and takes ~74s, and two walks on one source at once would halve
+# the 5s pace the daily walks are spaced to protect (each is ~7 min).
 0 * * * *   cosmai collect commerce --dataset ranking
 5 2 * * *   cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
 15 4 * * *  cosmai collect commerce --dataset review
-0 4 * * *   cosmai collect commerce --dataset review_stats
+45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product

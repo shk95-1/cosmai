@@ -35,11 +35,16 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - `analyze all` 은 `needs.analysis_run` 행을 만들고 `versions` 에 각 패키지·사전 버전을 기록한다.
 
 ## 스케줄 (stack/crontab, UTC)
+외부를 fetch하는 commerce 줄은 분 0을 쓰지 않는다 (매시 ranking이 분 0에 시작하고 약 74초 걸린다).
+각 일별 걷기는 약 7분이므로 서로 최소 그만큼 떨어뜨린다. `analyze all`은 외부 fetch가 없는 DB 전용
+작업이라 매시 실행과 겹쳐도 무해하므로 이 규칙에서 제외된다.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
 5 2 * * *   cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare   (보드는 scope.json 목록으로 확장)
-0 4 * * *   cosmai collect commerce --dataset review_stats
+15 4 * * *  cosmai collect commerce --dataset review
+45 4 * * *  cosmai collect commerce --dataset review_stats
+30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
 youtube: watch 1h · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
 naver:   datalab 월 1회 (키워드 사전 기준)
