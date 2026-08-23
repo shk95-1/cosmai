@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT
+from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 
 pytestmark = pytest.mark.postgres
 
@@ -48,8 +48,13 @@ def slices() -> Path:
     return found[0]
 
 
-def test_seed_loads_the_slice_row_counts_and_is_idempotent(needs_schema: str, slices: Path):
-    first = seed.run_all(needs_schema, slices=slices)
+def test_seed_loads_the_slice_row_counts_and_is_idempotent(needs_runtime_url: str, slices: Path):
+    # Production loads as needs_runtime, not needs_migrator -- prove the seed runs under that role too.
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT current_user")
+        row = cur.fetchone()
+    assert row == ("needs_runtime",)
+    first = seed.run_all(needs_runtime_url, slices=slices)
     assert first == EXPECTED
-    second = seed.run_all(needs_schema, slices=slices)
+    second = seed.run_all(needs_runtime_url, slices=slices)
     assert second == EXPECTED

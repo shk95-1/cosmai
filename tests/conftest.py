@@ -55,6 +55,7 @@ def _no_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
 
 
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
+TEST_RUNTIME_DB_URL_ENV = "TEST_POSTGRES_RUNTIME_URL"
 PREFIX = "nd"
 
 
@@ -66,13 +67,19 @@ def _schema_name_for(nodeid: str) -> str:
 
 
 @pytest.fixture
-def database_url_for_tests(request: pytest.FixtureRequest) -> Iterator[str]:
+def _schema_name(request: pytest.FixtureRequest) -> str:
+    """One source of truth for the per-test schema name, so downstream fixtures don't re-derive it."""
+    return _schema_name_for(request.node.nodeid)
+
+
+@pytest.fixture
+def database_url_for_tests(_schema_name: str) -> Iterator[str]:
     """The one place the suite names a database. Schema per test, dropped on teardown."""
     server_url = os.environ.get(TEST_DB_URL_ENV)
     if not server_url:
         pytest.skip(f"set {TEST_DB_URL_ENV}, or run tool/checks/test")
 
-    schema = _schema_name_for(request.node.nodeid)
+    schema = _schema_name
     admin = create_engine(server_url)
     with admin.begin() as conn:
         conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
@@ -91,14 +98,33 @@ def database_url_for_tests(request: pytest.FixtureRequest) -> Iterator[str]:
 
 
 @pytest.fixture
-def needs_schema(database_url_for_tests: str) -> str:
-    """The contract DDL, applied into this test's own schema so the seed can be pointed at it."""
-    ddl = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs" / "001_needs.sql"
-    url = make_url(database_url_for_tests)
-    options = url.query.get("options", "")
-    schema = str(options).split("-csearch_path=", 1)[1].split(",", 1)[0]
+def needs_schema(database_url_for_tests: str, _schema_name: str) -> str:
+    """DDL applied as needs_owner (table ownership matches production) then opened to needs_runtime the
+    way bootstrap.sql opens `needs`. The schema itself stays migrator-owned, so needs_owner needs an
+    explicit CREATE grant to build tables in it, and the schema-level USAGE grant to needs_runtime runs
+    while migrator (the actual owner) is still the active role, before SET ROLE hands off to needs_owner."""
+    ddl_dir = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs"
+    schema = _schema_name
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        conn.exec_driver_sql(ddl.read_text(encoding="utf-8").replace("needs.", f'"{schema}".'))
+        conn.exec_driver_sql(f'GRANT USAGE, CREATE ON SCHEMA "{schema}" TO needs_owner')
+        conn.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{schema}" TO needs_runtime')
+        conn.exec_driver_sql("SET ROLE needs_owner")
+        for path in sorted(ddl_dir.glob("*.sql")):
+            conn.exec_driver_sql(path.read_text(encoding="utf-8").replace("needs.", f'"{schema}".'))
+        conn.exec_driver_sql(
+            f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "{schema}" TO needs_runtime'
+        )
+        conn.exec_driver_sql(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema}" TO needs_runtime')
     engine.dispose()
     return database_url_for_tests
+
+
+@pytest.fixture
+def needs_runtime_url(needs_schema: str, _schema_name: str) -> str:
+    """Same schema as needs_schema but as needs_runtime -- the role and timeouts production uses."""
+    runtime_url = os.environ.get(TEST_RUNTIME_DB_URL_ENV)
+    if not runtime_url:
+        pytest.skip(f"set {TEST_RUNTIME_DB_URL_ENV}, or run tool/checks/test")
+    url = make_url(runtime_url).update_query_dict({"options": f"-csearch_path={_schema_name},pg_catalog"})
+    return url.render_as_string(hide_password=False)
