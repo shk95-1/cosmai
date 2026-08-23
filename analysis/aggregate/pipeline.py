@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import date
 from typing import Any, LiteralString
 
@@ -12,7 +13,7 @@ from analysis.aggregate import ROLLUP_SCOPE, WISH_SCOPES, RuleAggregator
 from analysis.aggregate.ranking import run_ranking
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
-__all__ = ["load_denominators", "load_needs", "load_wishes", "run"]
+__all__ = ["load_denominators", "load_needs", "load_wishes", "population_of", "run"]
 
 NEED_COLUMNS = (
     "src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, "
@@ -64,11 +65,11 @@ def _float(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def load_needs(cur: psycopg.Cursor[Any], extractor: str | None = None) -> list[NeedMentionRow]:
-    where = "WHERE extractor_version = %s" if extractor else ""
+def load_needs(cur: psycopg.Cursor[Any], population: Sequence[str]) -> list[NeedMentionRow]:
     cur.execute(
-        f"SELECT {NEED_COLUMNS} FROM need_mention {where} ORDER BY mention_id",  # noqa: S608 - 컬럼은 상수다
-        (extractor,) if extractor else (),
+        f"SELECT {NEED_COLUMNS} FROM need_mention "  # noqa: S608 - 컬럼은 이 모듈의 상수다
+        "WHERE extractor_version = ANY(%s) ORDER BY mention_id",
+        (list(population),),
     )
     return [
         NeedMentionRow(
@@ -82,8 +83,12 @@ def load_needs(cur: psycopg.Cursor[Any], extractor: str | None = None) -> list[N
     ]  # fmt: skip
 
 
-def load_wishes(cur: psycopg.Cursor[Any]) -> list[WishMentionRow]:
-    cur.execute(f"SELECT {WISH_COLUMNS} FROM wish_mention ORDER BY mention_id")  # noqa: S608
+def load_wishes(cur: psycopg.Cursor[Any], population: Sequence[str]) -> list[WishMentionRow]:
+    cur.execute(
+        f"SELECT {WISH_COLUMNS} FROM wish_mention "  # noqa: S608
+        "WHERE extractor_version = ANY(%s) ORDER BY mention_id",
+        (list(population),),
+    )
     return [
         WishMentionRow(
             src=r[0], ref=r[1], video_id=r[2], channel_id=r[3], channel_is_brand_owner=r[4],
@@ -111,16 +116,43 @@ def load_canonical(cur: psycopg.Cursor[Any]) -> dict[str, str]:
     return dict(cur.fetchall())
 
 
-def _versions(aggregator: RuleAggregator, cur: psycopg.Cursor[Any]) -> dict[str, Any]:
+def population_of(cur: psycopg.Cursor[Any], extractors: Sequence[str] | None) -> tuple[str, ...]:
+    """무엇을 집계했는지가 run 에 남아야 한다 — 두 추출 버전을 한 scope 에 조용히 섞지 않는다."""
+    cur.execute(
+        "SELECT extractor_version FROM need_mention "
+        "UNION SELECT extractor_version FROM wish_mention ORDER BY 1"
+    )
+    available = [v for (v,) in cur.fetchall()]
+    if extractors is None:
+        if len(available) > 1:
+            raise ValueError(
+                f"need_mention holds {len(available)} extractor_version(s) ({', '.join(available)}); "
+                "name the population with extractors=(...)"
+            )
+        return tuple(available)
+    unknown = sorted(set(extractors) - set(available))
+    if unknown:
+        raise LookupError(f"no mentions with extractor_version {', '.join(unknown)}")
+    return tuple(sorted(set(extractors)))
+
+
+def _versions(
+    aggregator: RuleAggregator, cur: psycopg.Cursor[Any], population: Sequence[str]
+) -> dict[str, Any]:
     """versions 는 이 run 이 실제로 읽은 산출물의 버전이다 — 분석 재현의 유일한 단서 (versioning.md)."""
-    cur.execute("SELECT DISTINCT extractor_version, polarity_version FROM need_mention")
+    cur.execute(
+        "SELECT DISTINCT extractor_version, polarity_version FROM need_mention "
+        "WHERE extractor_version = ANY(%s)",
+        (list(population),),
+    )
     pairs = sorted(cur.fetchall())
     cur.execute("SELECT max(version) FROM entity_lexicon")
     lexicon = cur.fetchone()
     cur.execute("SELECT DISTINCT linker_version FROM product_ref")
     return {
         "linker": ";".join(sorted(v for (v,) in cur.fetchall())) or None,
-        "extractor": ";".join(sorted({e for e, _ in pairs})) or None,
+        # 이 run 이 고른 모집단 그대로다 — 나중에 "무엇을 집계했나"를 이 값 하나로 답한다.
+        "extractor": ";".join(population) or None,
         "polarity": ";".join(sorted({p for _, p in pairs})) or None,
         "aggregate": aggregator.version,
         "lexicon": lexicon[0] if lexicon else None,
@@ -173,31 +205,33 @@ def run(
     run_id: int | None = None,
     commerce_schema: str | None = None,
     captured_at: date | None = None,
+    extractors: Sequence[str] | None = None,
 ) -> int:
     """run_id 를 주면 그 run 에 쓰고 상태는 두 번 건드리지 않는다 — #5 가 세 stage 를 한 run 으로 묶는다."""
-    aggregator = RuleAggregator()
+    with conn.cursor() as cur:
+        aggregator = RuleAggregator(canonical=load_canonical(cur))
+        population = population_of(cur, extractors)
     if commerce_schema is not None:
         run_ranking(conn, aggregator.version, captured_at or date.today(), commerce_schema)
     with conn.cursor() as cur:
-        mentions = load_needs(cur)
-        wishes = load_wishes(cur)
+        mentions = load_needs(cur, population)
+        wishes = load_wishes(cur, population)
         denominators = load_denominators(cur)
-        aggregator = RuleAggregator(canonical=load_canonical(cur))
         owned = run_id is None
         if run_id is None:
-            note = f"aggregate:{aggregator.version}:{scope or ROLLUP_SCOPE}"
-            run_id = _run_id(cur, note, _versions(aggregator, cur))
+            note = f"aggregate:{aggregator.version}:{scope or ROLLUP_SCOPE}:{'+'.join(population)}"
+            run_id = _run_id(cur, note, _versions(aggregator, cur, population))
 
         scopes = [scope] if scope else sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
         need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
+        # wish scope 는 카테고리 축이 아니다 — --scope 로 좁혀도 같은 세 scope 를 그대로 낸다.
         wish_rows = [r for s in WISH_SCOPES for r in aggregator.wish_metrics(wishes, s)]
 
         # 이 run 의 행은 전부 이 실행이 만든다 — 지우고 다시 넣어야 사라진 키가 남지 않는다.
         cur.execute("DELETE FROM metrics_need WHERE run_id = %s", (run_id,))
+        cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))
         cur.executemany(NEED_SQL, [_need_values(r, run_id) for r in need_rows])
-        if not scope:
-            cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))
-            cur.executemany(WISH_SQL, [_wish_values(r, run_id) for r in wish_rows])
+        cur.executemany(WISH_SQL, [_wish_values(r, run_id) for r in wish_rows])
         if owned:
             cur.execute(
                 "UPDATE analysis_run SET status = 'done', finished_at = now() WHERE run_id = %s",

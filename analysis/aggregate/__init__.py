@@ -65,13 +65,14 @@ class RuleAggregator:
         months_total = len({m.month for m in reviews})
         # B6: 언급 0건 제품은 분모에만 있다. 분모가 없을 때만 언급에서 제품 모집단을 복원한다.
         products_total = (
-            len({d.product_key for d in denoms}) or None
+            len({(d.source, d.product_key) for d in denoms}) or None
             if denoms
             else len({_product(m) for m in reviews if _product(m)}) or None
         )
 
         complete = [d for d in denoms if d.low_complete]
-        complete_keys = {d.product_key for d in complete}
+        # 제품 키는 사이트 안에서만 유일하다 — source 를 떼면 다른 사이트의 같은 키가 섞인다.
+        complete_keys = {(d.source, d.product_key) for d in complete}
         # 전수 제품이 하나도 없는 카테고리의 분모는 결측이 아니라 0 이다 — 분모를 준 쪽만 None 을 받는다.
         denom_low = sum(d.low_collected or 0 for d in complete) if denoms else None
         denom_site = sum(d.site_review_count or 0 for d in complete) if denoms else None
@@ -79,7 +80,9 @@ class RuleAggregator:
         low_rated = [
             m
             for m in rows
-            if m.rating is not None and m.rating <= LOW_RATING and m.source_product_key in complete_keys
+            if m.rating is not None
+            and m.rating <= LOW_RATING
+            and (m.site, m.source_product_key) in complete_keys
         ]
 
         out: list[MetricsNeedRow] = []

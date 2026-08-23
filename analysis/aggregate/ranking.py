@@ -282,6 +282,19 @@ SET category = EXCLUDED.category, site_review_count = EXCLUDED.site_review_count
 """
 
 
+# 런타임 롤의 제한은 statement 단위로 잡힌 값이고(db/bootstrap.sql) 60s transaction_timeout 을 넘기면
+# 부분 진행 없이 전부 롤백된다 — 17,948행 rank_daily 를 한 트랜잭션에 담지 않는다.
+WRITE_BATCH = 2000
+
+
+def _write(conn: psycopg.Connection[Any], statement: LiteralString, rows: list[tuple[Any, ...]]) -> int:
+    for start in range(0, len(rows), WRITE_BATCH):
+        with conn.cursor() as cur:
+            cur.executemany(statement, rows[start : start + WRITE_BATCH])
+        conn.commit()
+    return len(rows)
+
+
 def _from(schema: str, table: str) -> pgsql.Identifier:
     """운영은 trend_radar 스키마를, 테스트는 검사용 스키마 하나를 쓴다 (tests/conftest.py)."""
     return pgsql.Identifier(schema, table) if schema else pgsql.Identifier(table)
@@ -321,13 +334,15 @@ def run_ranking(
         )
         stats = [ReviewStatsRow(*row) for row in cur.fetchall()]
 
-        # 리뷰 행에는 카테고리가 없다 — 사이트가 그 제품을 걸어 둔 보드 이름이 유일한 출처다 (B6).
-        categories = {(s.source, s.product_key): s.category_name for s in snapshots if s.category_name}
-        daily = rank_daily(snapshots, version)
-        events = price_events(prices, snapshots, version)
-        denoms = denominators(reviews, stats, categories, captured_at, version)
-        cur.executemany(RANK_SQL, [astuple(r) for r in daily])
-        cur.executemany(PRICE_SQL, [astuple(r) for r in events])
-        cur.executemany(DENOMINATOR_SQL, [(*astuple(r), version) for r in denoms])
     conn.commit()
-    return {"rank_daily": len(daily), "price_event": len(events), "product_denominator": len(denoms)}
+
+    # 리뷰 행에는 카테고리가 없다 — 사이트가 그 제품을 걸어 둔 보드 이름이 유일한 출처다 (B6).
+    categories = {(s.source, s.product_key): s.category_name for s in snapshots if s.category_name}
+    daily = rank_daily(snapshots, version)
+    events = price_events(prices, snapshots, version)
+    denoms = denominators(reviews, stats, categories, captured_at, version)
+    return {
+        "rank_daily": _write(conn, RANK_SQL, [astuple(r) for r in daily]),
+        "price_event": _write(conn, PRICE_SQL, [astuple(r) for r in events]),
+        "product_denominator": _write(conn, DENOMINATOR_SQL, [(*astuple(r), version) for r in denoms]),
+    }

@@ -115,10 +115,10 @@ def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime
     aggregator = RuleAggregator()
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         denominators = load_denominators(cur)
-        suncare = load_needs(cur, "slice-suncare")
+        suncare = load_needs(cur, ("slice-suncare",))
         # slice-p1 은 분모가 있는 올리브영만 집계했다; 다른 사이트의 같은 카테고리명은 골든에 없다.
-        p1 = [m for m in load_needs(cur, "slice-p1") if m.site == "oliveyoung"]
-        wishes = load_wishes(cur)
+        p1 = [m for m in load_needs(cur, ("slice-p1",)) if m.site == "oliveyoung"]
+        wishes = load_wishes(cur, ("slice-p9",))
 
         goldens = {
             "suncare": (
