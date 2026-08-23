@@ -1,0 +1,35 @@
+#!/bin/sh
+# Tests against a real Postgres. A throwaway postgres:18 is started only when TEST_POSTGRES_URL
+# is unset, bootstrapped with the SAME db/bootstrap.sql production will run (schema `needs`),
+# then contracts/ddl/needs/001_needs.sql is applied as the migrator. Removed on exit.
+set -e
+. tool/checks/prerequisite
+require_command uv docker pg_isready
+
+uv sync --extra dev --frozen
+
+if [ -z "$TEST_POSTGRES_URL" ]; then
+    name=cosmai-test-postgres
+    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker run -d --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
+        -e POSTGRES_DB=fleet -p 55432:5432 postgres:18-alpine >/dev/null
+    for _ in $(seq 1 60); do
+        pg_isready -h localhost -p 55432 -U fleet -q 2>/dev/null && break
+        sleep 1
+    done
+    docker exec -i "$name" psql -U fleet -d fleet -v ON_ERROR_STOP=1 \
+        -v schema=needs -v migrator_password=check -v runtime_password=check-runtime \
+        -v database=fleet -q < db/bootstrap.sql
+    # Harness only: the per-test schema fixture needs CREATE on the database.
+    docker exec "$name" psql -U fleet -d fleet -q -c 'GRANT CREATE ON DATABASE fleet TO needs_migrator'
+    # The contract DDL must apply cleanly as the migrator (SET ROLE owner) -- that is contract test #1.
+    { printf 'SET ROLE needs_owner;\n'; cat contracts/ddl/needs/001_needs.sql; } \
+        | docker exec -i "$name" psql -U needs_migrator -d fleet -v ON_ERROR_STOP=1 -q \
+        || { echo "✗ contracts/ddl/needs/001_needs.sql does not apply" >&2; exit 1; }
+    TEST_POSTGRES_URL='postgresql+psycopg://needs_migrator:check@localhost:55432/fleet'
+    TEST_POSTGRES_RUNTIME_URL='postgresql+psycopg://needs_runtime:check-runtime@localhost:55432/fleet'
+    export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
+fi
+
+uv run pytest

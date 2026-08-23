@@ -1,0 +1,21 @@
+#!/bin/sh
+# origin: service/trend-radar/tool/checks/lint
+# reuse: copy; swap basedpyright for your type checker. Keep `standard`, not `strict` (see comment).
+# Static analysis: ruff for the lint rules, basedpyright for types.
+#
+# basedpyright is what makes the source registry safe. Every source declares
+# `key`, `policy` and `datasets` as ClassVars that the engine reads by name, and
+# a source that forgets one is an AttributeError inside a worker in the middle
+# of an hourly run — at which point the failure is a log line nobody is reading.
+# Here it is a red check with a file and a line number.
+#
+# `standard` rather than `strict`, matching the sibling repositories: strict
+# spends most of its findings on the untyped third-party surface (playwright and
+# selectolax ship little or nothing) rather than on ours.
+
+set -e
+. tool/checks/prerequisite
+require_command uv
+
+uv run ruff check .
+uv run basedpyright

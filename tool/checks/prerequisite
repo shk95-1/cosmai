@@ -1,0 +1,28 @@
+# origin: service/trend-radar/tool/checks/prerequisite
+# reuse: copy as-is; source it from every tool/checks/* script. Exit 69 = unverified, 1 = broken.
+#
+# A host that has no uv cannot run any of these, and letting the shell's
+# "command not found" surface as a failure reports a check this host could never
+# run as a check that ran and found a problem. Those are different states and
+# the difference matters: the first is "unknown", the second is "broken", and a
+# push blocked by the wrong one teaches people to reach for --no-verify.
+#
+# Exit status 69 is the unverified state. REQUIRE_NATIVE=1 turns it back into a
+# failure, and CI sets that so the merge gate never accepts an unchecked change.
+
+require_command() {
+  require_missing=
+  for require_name in "$@"; do
+    command -v "$require_name" >/dev/null 2>&1 \
+      || require_missing="$require_missing $require_name"
+  done
+  [ -n "$require_missing" ] || return 0
+
+  if [ "${REQUIRE_NATIVE:-0}" = 1 ]; then
+    printf '\033[31m✗ required tooling is missing:%s\033[0m\n' "$require_missing" >&2
+    exit 1
+  fi
+
+  printf '· unverified: this host has no%s\n' "$require_missing" >&2
+  exit 69
+}

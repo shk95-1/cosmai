@@ -2,7 +2,7 @@
 -- 근거: architect/REBUILD.md §2 (슬라이스 7개 요구사항 매트릭스). 컬럼은 slice-*/ 산출 CSV의 합집합.
 -- 규칙: 자연키 upsert, 모든 파생 행에 *_version, 시간 컬럼은 observed_at + observed_at_resolution.
 
-CREATE SCHEMA IF NOT EXISTS needs;
+-- 스키마·롤 생성은 db/bootstrap.sql 의 책임 (psql -v schema=needs). 이 파일은 owner 롤로 테이블만 만든다.
 
 -- 롤 4종 (기존 패턴과 동일). 비밀번호는 init 스크립트가 env에서 주입.
 -- needs_owner: DDL 소유 / needs_migrator: 마이그레이션 (SET ROLE needs_owner) / needs_runtime: DML / needs_reader: SELECT
@@ -53,20 +53,20 @@ CREATE TABLE needs.aspect_lexicon (
   id              bigserial PRIMARY KEY,
   aspect          text NOT NULL,             -- need_key
   scope           text NOT NULL CHECK (scope IN ('generic','category')),
-  category        text,                      -- scope=category 일 때
+  category        text NOT NULL DEFAULT '', -- scope=category 일 때; generic 은 ''
   pattern         text NOT NULL,             -- 정규식
   is_neutral_noun boolean NOT NULL DEFAULT false,
   version         int  NOT NULL,
   active          boolean NOT NULL DEFAULT true,
-  UNIQUE (aspect, scope, coalesce(category,''), pattern, version)
+  UNIQUE (aspect, scope, category, pattern, version)
 );
 CREATE TABLE needs.site_axis_map (            -- 사이트 제공 토픽축 ↔ need_key (P1: 25 항목)
   site            text NOT NULL,
-  category        text,
+  category        text NOT NULL DEFAULT '',
   site_axis       text NOT NULL,
   need_key        text,                      -- null = 대응 없음
   note            text,
-  PRIMARY KEY (site, coalesce(category,''), site_axis)
+  PRIMARY KEY (site, category, site_axis)
 );
 
 -- ---------- 평가셋 (1급 자산) ----------
@@ -195,8 +195,8 @@ CREATE TABLE needs.metrics_need (
   run_id          bigint NOT NULL REFERENCES needs.analysis_run,
   scope           text NOT NULL,             -- category 이름 또는 'all'
   need_key        text NOT NULL,
-  month           text,                      -- null = 전체 기간
-  product_ref     text,                      -- null = 카테고리 합
+  month           text NOT NULL DEFAULT '', -- '' = 전체 기간
+  product_ref     text NOT NULL DEFAULT '', -- '' = 카테고리 합
   neg int NOT NULL, pos int NOT NULL,
   unresolved      numeric,                   -- neg/(neg+pos)
   low_share       numeric,                   -- 저평점 표본 내 비율
@@ -204,11 +204,11 @@ CREATE TABLE needs.metrics_need (
   strength_low_rating_ratio numeric,
   persist_months  int,
   persist_products int,
-  PRIMARY KEY (run_id, scope, need_key, coalesce(month,''), coalesce(product_ref,''))
+  PRIMARY KEY (run_id, scope, need_key, month, product_ref)
 );
 CREATE TABLE needs.metrics_wish (
   run_id bigint NOT NULL REFERENCES needs.analysis_run,
-  scope text NOT NULL, format text, attribute text, brand text,
+  scope text NOT NULL, format text NOT NULL DEFAULT '', attribute text NOT NULL DEFAULT '', brand text NOT NULL DEFAULT '',
   mentions int NOT NULL, channels int, months_present int, like_sum int, like_cap_sum numeric,
-  PRIMARY KEY (run_id, scope, coalesce(format,''), coalesce(attribute,''), coalesce(brand,''))
+  PRIMARY KEY (run_id, scope, format, attribute, brand)
 );

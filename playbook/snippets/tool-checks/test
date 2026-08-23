@@ -24,7 +24,7 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
         sleep 1
     done
     docker exec -i "$name" psql -U fleet -d fleet -v ON_ERROR_STOP=1 \
-        -v schema=app_schema -v migrator_password="'check'" -v runtime_password="'check-runtime'" \
+        -v schema=app_schema -v migrator_password=check -v runtime_password=check-runtime \
         -v database=fleet -q < db/bootstrap.sql
     # Harness only: the per-test schema fixture needs CREATE on the database.
     docker exec "$name" psql -U fleet -d fleet -q \

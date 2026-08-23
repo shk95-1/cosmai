@@ -1,0 +1,38 @@
+[project]
+name = "cosmai"
+version = "0.0.1"
+description = "화장품 소비자 니즈 분석 시스템 — 수집·정규화·분석 모노레포"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0",
+    "pydantic>=2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.9",
+    "basedpyright>=1.29",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q -m 'not live' --strict-markers"
+markers = [
+    "live: touches the real network; excluded by default",
+    "postgres: needs the real roles from db/bootstrap.sql (tool/checks/test provides them)",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = ["analysis/slices", "playbook"]  # 참조용 원본: 이식 시 패키지로 옮기며 검사 대상이 된다
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+include = ["tests", "analysis", "collectors", "db"]
+exclude = ["analysis/slices", "playbook"]

@@ -3,65 +3,84 @@
 ```python
 # analysis/types.py
 @dataclass(frozen=True)
-class TextUnit:            # 분석 입력의 최소 단위
-    src: str               # review | yt_comment | yt_transcript | naver_blog
+class TextUnit:  # 분석 입력의 최소 단위
+    src: str  # review | yt_comment | yt_transcript | naver_blog
     site: str
-    ref: str               # 안정 키 (review: product_key/review_key, comment: video_id/comment_id)
+    ref: str  # 안정 키 (review: product_key/review_key, comment: video_id/comment_id)
     text: str
     observed_at: date
-    observed_at_resolution: str   # day | month | year
+    observed_at_resolution: str  # day | month | year
     rating: float | None = None
     like_count: int | None = None
     product_key: str | None = None
     category: str | None = None
     channel_id: str | None = None
 
-@dataclass(frozen=True)
-class EntityHit:           # linker 출력
-    kind: str              # brand | format | attribute | ingredient | product_line
-    canonical: str
-    surface: str
-    start: int; end: int
-    cooc: bool             # 제품어 공기 여부
 
 @dataclass(frozen=True)
-class Candidate:           # extractor 출력 (문장 단위)
+class EntityHit:  # linker 출력
+    kind: str  # brand | format | attribute | ingredient | product_line
+    canonical: str
+    surface: str
+    start: int
+    end: int
+    cooc: bool  # 제품어 공기 여부
+
+
+@dataclass(frozen=True)
+class Candidate:  # extractor 출력 (문장 단위)
     unit_ref: str
     sentence: str
-    kind: str              # complaint | wish | low_rating
+    kind: str  # complaint | wish | low_rating
     marker: str
+
 
 @dataclass(frozen=True)
 class PolarityResult:
     aspect: str | None
-    polarity: str          # 불만 | 만족 | 중립
+    polarity: str  # 불만 | 만족 | 중립
     reason: str
-    version: str           # rule-v2.2 | llm-<model>-<date>
+    version: str  # rule-v2.2 | llm-<model>-<date>
+
 
 @dataclass(frozen=True)
 class WishResult:
-    wish_class: str        # a | b | c | n
-    brand: str | None; format: str | None; attribute: str | None; marker: str | None
+    wish_class: str  # a | b | c | n
+    brand: str | None
+    format: str | None
+    attribute: str | None
+    marker: str | None
 ```
 
 ```python
 class Linker(Protocol):
     version: str
+
     def link(self, unit: TextUnit, lexicon: Lexicon) -> list[EntityHit]: ...
     def match_products(self, products: Iterable[ProductRow]) -> list[ProductRefRow]: ...  # 사이트 간 식별
 
+
 class Extractor(Protocol):
     version: str
+
     def candidates(self, unit: TextUnit, aspects: AspectLexicon) -> list[Candidate]: ...
     def wishes(self, unit: TextUnit, lexicon: Lexicon) -> WishResult | None: ...
 
-class Polarity(Protocol):            # ← LLM 삽입점. 규칙 구현과 LLM 구현이 같은 시그니처
+
+class Polarity(Protocol):  # ← LLM 삽입점. 규칙 구현과 LLM 구현이 같은 시그니처
     version: str
-    def classify(self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon) -> PolarityResult: ...
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult: ...
+
 
 class Aggregator(Protocol):
     version: str
-    def need_metrics(self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str) -> list[MetricsNeedRow]: ...
+
+    def need_metrics(
+        self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str
+    ) -> list[MetricsNeedRow]: ...
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]: ...
 ```
 
