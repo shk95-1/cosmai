@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from sqlalchemy import Connection, create_engine, text
 
 pytestmark = pytest.mark.postgres
 
+MIGRATIONS = sorted(
+    p.stem for p in (Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs").glob("*.sql")
+)
 WHITELIST = ["metrics_need", "metrics_wish", "entity_lexicon", "aspect_lexicon", "product_ref"]
 NOT_WHITELISTED = ["need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member"]
 
@@ -26,9 +30,10 @@ def conn() -> Iterator[Connection]:
     engine.dispose()  # needs_migrator has CONNECTION LIMIT 2 -- always release, pass or fail.
 
 
-def test_the_ledger_has_exactly_one_row_for_001_needs(conn: Connection):
+@pytest.mark.parametrize("version", MIGRATIONS)
+def test_the_ledger_has_exactly_one_row_per_migration(conn: Connection, version: str):
     n = conn.execute(
-        text("select count(*) from needs.schema_migration where version = '001_needs'")
+        text("select count(*) from needs.schema_migration where version = :v"), {"v": version}
     ).scalar_one()
     assert n == 1
 

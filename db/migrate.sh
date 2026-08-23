@@ -78,4 +78,9 @@ done
 docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
     < db/grants/postgrest_anon_needs.sql
 
+# e. analysis reader: SELECT on the source schemas. Superuser, not migrator -- needs_migrator owns
+# neither trend_radar nor tubedepth, and the file no-ops where those schemas are absent.
+docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
+    < db/grants/needs_runtime_reader.sql
+
 echo "needs: $applied migration(s) applied, $present already present"
