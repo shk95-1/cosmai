@@ -1,0 +1,33 @@
+lexicon_key,category,kr_colloquial,canonical_en
+ZINC_OXIDE,uv_filter,징크옥사이드|징크|무기자차|산화아연,zinc oxide
+TITANIUM_DIOXIDE,uv_filter,티타늄디옥사이드|이산화티탄|무기자차,titanium dioxide
+OCTOCRYLENE,uv_filter,옥토크릴렌,octocrylene
+AVOBENZONE,uv_filter,아보벤존,avobenzone
+OXYBENZONE,uv_filter,옥시벤존,oxybenzone
+SPF,spec,자차수치|에스피에프,sun protection factor
+UVA_PROTECTION,spec,피에이|자외선a,UVA protection
+UVB,spec,자외선b,UVB radiation
+ULTRAVIOLET,spec,자외선,ultraviolet radiation
+PHOTOPROTECTION,mechanism,광보호,photoprotection
+HYALURONIC_ACID,ingredient,히알루론산|히알루론,hyaluronic acid
+NIACINAMIDE,ingredient,나이아신아마이드|나이아신,niacinamide
+NICOTINAMIDE,ingredient,,nicotinamide
+RETINOL,ingredient,레티놀,retinol
+RETINOID,ingredient,레티노이드,retinoid
+SUPEROXIDE_DISMUTASE,enzyme,,superoxide dismutase
+EGF,peptide,이지에프|성장인자,epidermal growth factor
+PDRN,peptide,피디알엔|연어주사,polydeoxyribonucleotide
+ANTIOXIDANT,mechanism,항산화,antioxidant
+ANTI_AGING,claim,안티에이징|노화,anti-aging
+NANOPARTICLE,formulation,나노입자,nanoparticle
+LIPOSOME,formulation,리포좀,liposome
+STRATUM_CORNEUM,anatomy,각질층,stratum corneum
+SKIN_BARRIER,mechanism,피부장벽|장벽,skin barrier
+MELANIN,mechanism,멜라닌,melanin
+TYROSINASE,enzyme,,tyrosinase
+CERAMIDE,ingredient,세라마이드,ceramide
+PEPTIDE,ingredient,펩타이드,peptide
+CENTELLA,ingredient,시카|센텔라|병풀,Centella asiatica
+MICROBIOME,mechanism,마이크로바이옴,skin microbiome
+CORAL_TOXICITY,regulatory,,coral reef toxicity
+ENDOCRINE_DISRUPTION,regulatory,내분비계 교란,endocrine disruption
