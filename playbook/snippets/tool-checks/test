@@ -1,0 +1,37 @@
+#!/bin/sh
+# origin: service/yt-scrapper/tool/checks/test (container section) + trend-radar tool/checks/test
+# reuse: set TEST_POSTGRES_URL to skip the container; replace db/bootstrap.sql path and role names.
+#
+# --frozen: the lock file is under test too. -m "not live" comes from pyproject addopts.
+# A throwaway Postgres is started only when nothing already names one, bootstrapped with the
+# SAME SQL production runs, and removed on exit. Poll readiness from the host, not via
+# `docker exec pg_isready` -- initdb's temporary server answers ready on the unix socket only.
+
+set -e
+. tool/checks/prerequisite
+require_command uv docker pg_isready
+
+uv sync --extra dev --frozen
+
+if [ -z "$TEST_POSTGRES_URL" ]; then
+    name=cosmai-test-postgres
+    trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker run -d --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
+        -e POSTGRES_DB=fleet -p 55432:5432 postgres:18-alpine >/dev/null
+    for _ in $(seq 1 60); do
+        pg_isready -h localhost -p 55432 -U fleet -q 2>/dev/null && break
+        sleep 1
+    done
+    docker exec -i "$name" psql -U fleet -d fleet -v ON_ERROR_STOP=1 \
+        -v schema=app_schema -v migrator_password="'check'" -v runtime_password="'check-runtime'" \
+        -v database=fleet -q < db/bootstrap.sql
+    # Harness only: the per-test schema fixture needs CREATE on the database.
+    docker exec "$name" psql -U fleet -d fleet -q \
+        -c 'GRANT CREATE ON DATABASE fleet TO app_schema_migrator'
+    TEST_POSTGRES_URL='postgresql+psycopg://app_schema_migrator:check@localhost:55432/fleet'
+    TEST_POSTGRES_RUNTIME_URL='postgresql+psycopg://app_schema_runtime:check-runtime@localhost:55432/fleet'
+    export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
+fi
+
+uv run pytest

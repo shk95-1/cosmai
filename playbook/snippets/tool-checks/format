@@ -1,0 +1,15 @@
+#!/bin/sh
+# origin: service/trend-radar/tool/checks/format
+# reuse: copy as-is (ruff format --check).
+# Formatting, checked rather than applied.
+#
+# ruff's formatter, because ruff is already the linter here and a second tool
+# would have to earn its place. Not black.
+#
+# Fix what this reports with: uv run ruff format .
+
+set -e
+. tool/checks/prerequisite
+require_command uv
+
+uv run ruff format --check .

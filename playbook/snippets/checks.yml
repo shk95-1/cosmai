@@ -1,0 +1,47 @@
+# origin: service/trend-radar/.github/workflows/checks.yml (scope-lock base-ref step removed; skip-detection kept)
+# reuse: the workflow runs the same tool/checks/* the hooks run; REQUIRE_NATIVE=1 turns exit 69 into a failure on the merge gate.
+name: checks
+on: [push, pull_request]
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  REQUIRE_NATIVE: 1                      # missing tooling is a hard failure here, not "unverified"
+  TEST_POSTGRES_URL: postgresql+psycopg://app_schema_migrator:check@localhost:5432/fleet
+  TEST_POSTGRES_RUNTIME_URL: postgresql+psycopg://app_schema_runtime:check-runtime@localhost:5432/fleet
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine        # matches the stack; the db tests replay real migrations against it
+        env: { POSTGRES_USER: fleet, POSTGRES_PASSWORD: fleet, POSTGRES_DB: fleet }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U fleet" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with: { fetch-depth: 0 }         # the secret scan looks at what landed, not at the working tree
+      - name: gitleaks                   # before the dependency install: no .venv to scan
+        run: |
+          set -euo pipefail
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact --no-banner
+      - uses: astral-sh/setup-uv@v7
+        with: { enable-cache: true }
+      - run: uv python install 3.12      # the floor from requires-python, not the newest
+      - run: uv sync --extra dev --frozen
+      - name: bootstrap the test database the way production is bootstrapped
+        run: |
+          psql postgresql://fleet:fleet@localhost:5432/fleet -v ON_ERROR_STOP=1 -v schema=app_schema -v database=fleet \
+               -v migrator_password="'check'" -v runtime_password="'check-runtime'" -f db/bootstrap.sql
+          psql postgresql://fleet:fleet@localhost:5432/fleet -c 'GRANT CREATE ON DATABASE fleet TO app_schema_migrator'
+      - run: tool/checks/format
+      - run: tool/checks/lint
+      - run: tool/checks/test
+      - name: the database tests really ran
+        # A misconfigured URL makes every db test skip and the suite passes quietly smaller. Not -q: addopts has one already.
+        run: |
+          set -euo pipefail
+          uv run --frozen pytest -m postgres -rs | tee db.log
+          grep -q "is not set" db.log && { echo "::error::db tests skipped"; exit 1; }
+          grep -Eq "^[0-9]+ passed" db.log || { echo "::error::no db test ran"; exit 1; }

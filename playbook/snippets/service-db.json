@@ -1,0 +1,29 @@
+{
+  "_origin": "service/trend-radar/service-db.json + service/yt-scrapper/service-db.json, one entry per schema for a monorepo",
+  "_reuse": "edit schemas[*]; keep connection_budget arithmetic closed (tests/test_connection_budget_adds_up.py); max_connections on the server must be >= sum of totals + reserve",
+  "manifest_version": 2,
+  "database": "app",
+  "schemas": {
+    "trend_radar": {
+      "roles": {"owner": "trend_radar_owner", "migrator": "trend_radar_migrator", "runtime": "trend_radar_runtime", "reader": "trend_radar_reader"},
+      "connection_budget": {"total": 12, "runtime": {"instances": 2, "pool_size": 4, "max_overflow": 0}, "reader": {"instances": 1, "pool_size": 2, "max_overflow": 0}, "migration": 1, "spare": 1},
+      "session_defaults": {"timezone": "UTC", "statement_timeout": "30s", "lock_timeout": "5s", "idle_in_transaction_session_timeout": "15s", "transaction_timeout": "60s"},
+      "external_object_stores": [],
+      "cross_schema_reads": []
+    },
+    "tubedepth": {
+      "roles": {"owner": "tubedepth_owner", "migrator": "tubedepth_migrator", "runtime": "tubedepth_runtime"},
+      "connection_budget": {"total": 32, "runtime": {"instances": 1, "pool_size": 12, "max_overflow": 12}, "migration": 1, "spare": 7},
+      "session_defaults": {"timezone": "UTC", "statement_timeout": "15s", "lock_timeout": "3s", "idle_in_transaction_session_timeout": "30s", "transaction_timeout": "60s"},
+      "external_object_stores": [{"kind": "filesystem", "path": "${TUBEDEPTH_DATA_DIR}/payloads", "write_protocol": "content-addressed, write-then-record", "referenced_by": "artifacts.digest"}],
+      "cross_schema_reads": []
+    },
+    "needs": {
+      "roles": {"owner": "needs_owner", "migrator": "needs_migrator", "runtime": "needs_runtime", "reader": "needs_reader"},
+      "connection_budget": {"total": 8, "runtime": {"instances": 1, "pool_size": 4, "max_overflow": 0}, "reader": {"instances": 1, "pool_size": 2, "max_overflow": 0}, "migration": 1, "spare": 1},
+      "session_defaults": {"timezone": "UTC", "statement_timeout": "120s", "lock_timeout": "5s", "idle_in_transaction_session_timeout": "15s", "transaction_timeout": "300s"},
+      "external_object_stores": [],
+      "cross_schema_reads": ["trend_radar", "tubedepth", "cosmai"]
+    }
+  }
+}

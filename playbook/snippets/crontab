@@ -1,0 +1,16 @@
+# origin: service/trend-radar/docker/crontab (comment discipline) + the 2026-08-23 outage (three datasets had no line here)
+# reuse: mount into the collector container for supercronic; one line per Dataset member; tests/test_every_enum_member_is_collected.py checks that.
+#
+# UTC on purpose (no TZ in the image): the same clock captured_at buckets on, so "one run per hour" and "one
+# snapshot per hour" are the same statement. Minute 0: the bucket is the run start truncated to the hour, so a
+# re-run inside the same hour is a no-op upsert. Exit 1 = partial, 2 = refused; supercronic logs both and the
+# next tick runs regardless. Do NOT restart the stack at :00 — it cuts the run (seen 2026-08-21 07:00).
+#
+# min hour dom mon dow  command                                   why this cadence (measured)
+0   *    *   *   *    cosmai collect --dataset ranking           # hourly: rank variance is 76% intra-day noise → rank_daily derives from it
+15  */6  *   *   *    cosmai collect --dataset review            # 6h: oliveyoung review API p50 52ms, 100 req budget per run
+30  2    *   *   *    cosmai collect --dataset review_low        # daily: full low-rated end of one board, RATING_ASC until 3★ appears
+45  2    *   *   *    cosmai collect --dataset review_stats      # daily: site's own sentiment split, oliveyoung only
+5   3    *   *   *    cosmai collect --dataset product           # daily: ingredients do not change by the hour; product key has no captured_at
+20  3    *   *   *    cosmai collect --dataset new_product       # daily
+0   4    *   *   *    cosmai analyze --grain month               # after all collectors: linker → extractor → polarity → aggregate

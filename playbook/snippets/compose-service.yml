@@ -1,0 +1,43 @@
+# origin: service/stack/docker-compose.yml:120-176 (patterns only) + yt-scrapper deploy/docker-compose.yml:210-212
+# reuse: one compose file for the whole repo; every path literal is ${VAR:-default}; secrets via ${VAR:?}; loopback by default.
+services:
+  postgres:
+    image: postgres:18.1-alpine            # pin the tag; `postgres:18` moved under the stack once already
+    volumes:
+      - ${SERVICE_DATA_DIR:-../service-data}/postgres:/var/lib/postgresql   # not .../data: pg18 image refuses it
+      - ./db/init.sh:/docker-entrypoint-initdb.d/10-bootstrap.sh:ro         # first boot only; re-run by hand, it is idempotent
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U platform -d app"], interval: 5s, timeout: 3s, retries: 10 }
+    ports: ["127.0.0.1:${POSTGRES_PORT:-5434}:5432"]
+    networks: [db-net]
+
+  migrate:                                 # one-shot; everything else waits for it
+    build: ..
+    image: cosmai
+    command: ["cosmai", "migrate"]
+    environment:
+      COSMAI_MIGRATOR_URL: postgresql://needs_migrator:${NEEDS_MIGRATOR_PASSWORD:?}@postgres:5432/app
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [db-net]
+
+  collector:
+    image: cosmai
+    command: ["supercronic", "/etc/crontab"]
+    restart: unless-stopped
+    volumes: ["./crontab:/etc/crontab:ro"]   # wiring lives in stack/, not in the image
+    environment:
+      COSMAI_DATABASE_URL: postgresql://needs_runtime:${NEEDS_RUNTIME_PASSWORD:?}@postgres:5432/app
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [db-net]
+
+  api:
+    image: cosmai
+    command: ["cosmai", "serve", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    # No HEALTHCHECK in the image on purpose: compose decides what healthy means here.
+    healthcheck: { test: ["CMD-SHELL", "wget -qO- http://localhost:8000/healthz || exit 1"], interval: 10s, timeout: 3s, retries: 5 }
+    ports: ["127.0.0.1:${API_PORT:-8000}:8000"]   # no auth → loopback; widening is a decision, so only a variable opens it
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [db-net]
+
+networks:
+  db-net: {}

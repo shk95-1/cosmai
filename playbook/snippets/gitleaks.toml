@@ -1,0 +1,16 @@
+# origin: service/yt-scrapper/.gitleaks.toml
+# reuse: keep useDefault; add one rule per secret shape this project actually handles; allowlist only fixture paths with obviously fake values.
+title = "cosmai"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "cosmai-secret-store-value"
+description = "A COSMAI_SRC_* or *_PASSWORD key with a real-looking value (the repo holds names only)"
+regex = '''(?im)^\s*(COSMAI_SRC_[A-Z0-9_]+|[A-Z0-9_]+_PASSWORD)\s*=\s*[^\s<]{8,}'''
+tags = ["key", "cosmai"]
+
+  [rules.allowlist]
+  description = "env.example carries placeholders in angle brackets, never values"
+  paths = ['''env\.example$''', '''tests/fixtures/.*''']
