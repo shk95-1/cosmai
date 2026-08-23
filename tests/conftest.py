@@ -170,3 +170,29 @@ def trend_radar_schema(database_url_for_tests: str, _schema_name: str) -> str:
         conn.exec_driver_sql(ddl)
     engine.dispose()
     return database_url_for_tests
+
+
+TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"
+TUBEDEPTH_NEEDS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "tubedepth"
+
+
+@pytest.fixture
+def tubedepth_schema(database_url_for_tests: str, _schema_name: str) -> str:
+    """#8's tubedepth DDL applied to a throwaway schema: the current 13-table dump verbatim (same
+    substitution `trend_radar_schema` uses), then every additive file in contracts/ddl/tubedepth/ on
+    top -- op §승인 경계: production `tubedepth` gets none of this, only the test schema does.
+    """
+    schema = _schema_name
+    engine = create_engine(database_url_for_tests)
+    lines = [
+        ln
+        for ln in TUBEDEPTH_DDL.read_text(encoding="utf-8").splitlines()
+        if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
+    ]
+    ddl = "\n".join(lines).replace("CREATE SCHEMA tubedepth;", "").replace("tubedepth.", f'"{schema}".')
+    with engine.begin() as conn:
+        conn.exec_driver_sql(ddl)
+        for path in sorted(TUBEDEPTH_NEEDS_DIR.glob("*.sql")):
+            conn.exec_driver_sql(path.read_text(encoding="utf-8").replace("tubedepth.", f'"{schema}".'))
+    engine.dispose()
+    return database_url_for_tests

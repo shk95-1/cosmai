@@ -1,0 +1,28 @@
+{
+  "id": "UUsome_channel_id",
+  "title": "Uploads from a beauty channel",
+  "entries": [
+    {
+      "id": "dQw4w9WgXcQ",
+      "title": "First video",
+      "duration": 212,
+      "view_count": 1000,
+      "channel": "A Beauty Channel",
+      "channel_id": "UUsome_channel_id",
+      "timestamp": 1755561600
+    },
+    {
+      "id": "nfgdJyL-Jmg",
+      "title": "Second video",
+      "duration": 480,
+      "view_count": 2000,
+      "channel": "A Beauty Channel",
+      "channel_id": "UUsome_channel_id",
+      "timestamp": 1755648000
+    },
+    {
+      "id": "private",
+      "title": null
+    }
+  ]
+}

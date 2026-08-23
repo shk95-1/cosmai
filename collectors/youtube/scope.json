@@ -1,0 +1,7 @@
+{
+  "_comment": "Fan-out caps (contracts/entrypoints.md 수집기 절 팜아웃 상한). Circuit breakers, not throughput targets -- the failure they guard against already happened once in production: watch re-enqueued a follow-up job per video on every hourly sweep with no natural-key check, which reached 224,036 duplicate video.* jobs before they were bulk-cancelled (error_code='cancelled_duplicate', issue #8/#16 REBUILD §3 P16).",
+  "MAX_FOLLOWUPS_PER_VIDEO": 3,
+  "MAX_FOLLOWUPS_PER_VIDEO_note": "video.metadata + video.comments + video.transcript -- every follow-up kind a watchlist directive can name today (collectors/youtube/watchlist.py DIRECTIVES). One video reaching this many *active* (queued or running) follow-up jobs at once means something is re-fanning it faster than work() drains it, which is exactly the shape of the 224k incident.",
+  "MAX_QUEUE_DEPTH": 5000,
+  "MAX_QUEUE_DEPTH_note": "queued+running rows allowed system-wide before watch refuses to enqueue more and exits 1 (partial). Two orders of magnitude below the 224,036 duplicates actually observed -- a breaker meant to trip long before a runaway sweep gets anywhere near that scale, not a capacity plan."
+}

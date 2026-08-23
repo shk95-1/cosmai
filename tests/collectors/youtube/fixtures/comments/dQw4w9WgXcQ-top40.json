@@ -1,0 +1,26 @@
+{
+  "comments": [
+    {
+      "id": "UgzTop1",
+      "parent": "root",
+      "text": "great video",
+      "author": "@viewer1",
+      "author_id": "UC1",
+      "like_count": 5,
+      "is_favorited": false,
+      "is_pinned": false,
+      "timestamp": 1755600000
+    },
+    {
+      "id": "UgzReply1",
+      "parent": "UgzTop1",
+      "text": "agreed",
+      "author": "@viewer2",
+      "author_id": "UC2",
+      "like_count": 1,
+      "is_favorited": true,
+      "is_pinned": false,
+      "timestamp": 1755600100
+    }
+  ]
+}
