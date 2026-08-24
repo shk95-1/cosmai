@@ -20,6 +20,17 @@ failure(order:4/7, GFP_NOFS) → VM 강제 종료 2회. 수정은 `c29af7b`(rm -
 
 ## 1. 기준 상태 (전부 검증된 값)
 
+**재부팅 후 사전 점검 완료 (2026-08-24 저녁, shutdown 이후 이 세션에서 직접 확인):**
+- 구 스택 13개 컨테이너 전부 Up, `shared-postgres` healthy. collector 는 config-hash `771c9934…` 로
+  **override 포함** 재기동(크론탭 마운트 생존) — restart 정책이 알아서 올렸다.
+- DB 생존: `metrics_need` 1,381행 · `analysis_run` max 9. 디스크 123G/13%(정리 유지), docker 볼륨 0.
+- **ollama 는 죽어 있다** (connection refused — Windows 앱이 재부팅 후 자동 시작 안 됨). 재개 순서 1–3 은
+  무관하지만 **4(튜닝) 전에 사용자가 Windows 에서 Ollama 를 켜야 한다.** 켜진 뒤 `curl -s localhost:11434/api/tags` 로 확인.
+- 만약 `shared-postgres` 가 없으면: 데이터는 볼륨이 아니라 bind mount(`Main/service/service-data/postgres`)라
+  안전하다. `cd Main/service/stack && docker compose up -d shared-postgres` — **`-f` 를 붙이지 마라**
+  (기본 탐색을 꺼서 override 가 빠진 채 recreate 된다, C1 참조). initdb 스크립트가 돈다면 데이터가
+  사라졌다는 뜻이니 즉시 멈추고 사용자에게.
+
 - **main = origin/main = `c29af7b`** · 615 passed, 1 deselected, 2 xfailed (66s, tmpfs 로 빨라짐)
 - 운영: 구 스택 무정지(컷오버 안 함). `analysis_run` 9 ok clean. LLM 지출 $1.24/$10, 미정산 0.
 - production DB 접근·secret 은 세션만(서브에이전트 금지) — STATE.md §3 그대로.
