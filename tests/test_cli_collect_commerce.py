@@ -33,9 +33,11 @@ def test_an_unknown_dataset_is_refused_with_exit_code_2():
     assert code == 2
 
 
-def test_an_unwired_collector_is_refused_with_exit_code_2():
-    """`youtube` wired up in #8 -- `naver` (#9) is the one still refused this way."""
+def test_naver_with_an_unknown_dataset_is_refused_with_exit_code_2():
+    """naver wired up in #9 (youtube in #8) -- an unknown dataset name is refused before either
+    collector's run() touches a secret or a connection, matching test_an_unknown_dataset_is_refused
+    above. A real dataset name is exercised offline in tests/collectors/naver/test_naver_cli.py."""
     from cosmai.cli import main
 
-    code = main(["collect", "naver", "--dataset", "datalab"])
+    code = main(["collect", "naver", "--dataset", "not-a-real-dataset"])
     assert code == 2

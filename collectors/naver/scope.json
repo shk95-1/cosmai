@@ -1,0 +1,13 @@
+{
+  "_comment": "How much of each naver dataset a run walks (contracts/entrypoints.md: 'scope.lock의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사', #7의 collectors/commerce/scope.json과 같은 형태). datalab.window_start is Search Trend's earliest useful year (architect/slice-suncare's 10-year pull starts 2016); datalab requests every keywords.json group for one category in one call (max_groups_per_request), matching the vendor's documented cap. blog.pages_max keeps one run's request spend bounded per query term -- natural-key upsert on post_id makes a shorter walk safe to widen later without a migration.",
+  "datalab": {
+    "window_start": "2016-01-01",
+    "time_unit": "month",
+    "max_groups_per_request": 5
+  },
+  "blog": {
+    "display": 100,
+    "pages_max": 3,
+    "sort": "date"
+  }
+}
