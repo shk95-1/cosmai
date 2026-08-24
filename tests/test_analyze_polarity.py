@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import urllib.error
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 
 from analysis import predictors, registry
+from analysis.pipeline import run_stage
 from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
@@ -457,3 +459,30 @@ def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
     # 판정에 쓴 시간이 압축한 한도를 크게 넘었어야 재현이다 (넘지 않으면 통과가 무의미하다).
     assert calls * SLOW_CALL_S > 1.0
     assert found.need_rows == calls and found.polarity_version.startswith("llm-ollama-gemma4")
+
+
+UNREACHABLE = "ollama 가 응답하지 않는다"
+
+
+def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+):
+    """왕복 실패(URLError·TimeoutError)는 OSError 라 analysis/pipeline.py 의 FAILURES 밖이다 — 감싸지
+    않으면 단계가 트레이스백으로 끝나고 polarity 가 연 run 이 'running' 인 채 영원히 열린 채로 남는다
+    (analysis_health 가 그 run 을 도는 중이라고 계속 보고한다). 유료 경로는 _Blocking 이 그 자리를 막는다.
+    """
+
+    def refuse(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:
+        raise urllib.error.URLError(UNREACHABLE)
+
+    monkeypatch.setattr(OllamaPolarity, "_post", refuse)
+    monkeypatch.setattr(predictors, "LEXICON_URL", loaded)
+    registry.load_implementations()
+    with registry.open_classifier("polarity", "ollama:gemma4:latest") as polarity, connect(loaded) as conn:
+        found = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, polarity=polarity
+        )
+    assert found.status == "failed" and UNREACHABLE in found.detail
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, finished_at IS NOT NULL FROM analysis_run")
+        assert cur.fetchall() == [("failed", True)]

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import http.client
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 
@@ -87,9 +88,16 @@ def build_ollama(model: str) -> Implementation:
     return Implementation(version=OllamaPolarity(model).version, predict=_ollama_predictor(model))
 
 
+# 왕복 고장의 표면 그대로다: urlopen 은 URLError·TimeoutError(둘 다 OSError)를 내고, getresponse() 는
+# RemoteDisconnected·IncompleteRead 를 그대로 흘린다. 여기서 넓히면 안 된다 — AttributeError 같은
+# 프로그래밍 실수까지 삼키면 run 이 조용히 failed 로 닫히고 버그가 note 한 줄로 숨는다.
+UNREACHABLE = (OSError, http.client.HTTPException)
+
+
 class _Blocking:
-    """예산 하드스톱을 단계가 잡는 예외로 바꾼다 — BudgetExceeded(RuntimeError)는 analysis/pipeline.py 의
-    FAILURES 밖이라 run 을 'running' 인 채 트레이스백으로 끝낸다."""
+    """이 판정자를 멈추게 하는 것들을 단계가 잡는 예외로 바꾼다 — 예산 하드스톱(BudgetExceeded,
+    RuntimeError)도 왕복 실패(URLError 등, OSError)도 analysis/pipeline.py 의 FAILURES 밖이라, 그대로
+    새면 단계가 트레이스백으로 끝나고 polarity 가 연 run 이 'running' 인 채 영원히 열려 있다."""
 
     def __init__(self, inner: Polarity) -> None:
         self.inner = inner
@@ -105,6 +113,8 @@ class _Blocking:
             return self.inner.classify_many(items, aspects)
         except BudgetExceeded as blocked:
             raise LookupError(str(blocked)) from blocked
+        except UNREACHABLE as unreachable:
+            raise LookupError(f"{type(unreachable).__name__}: {unreachable}") from unreachable
 
 
 @contextmanager
@@ -128,7 +138,7 @@ def open_ollama(model: str) -> Iterator[Polarity]:
         raise LookupError("--impl ollama:<model> needs a model, e.g. ollama:gemma4:latest")
     with connect_lexicon() as conn:
         conn.autocommit = True
-        yield OllamaPolarity(model, UsageLedger(conn))
+        yield _Blocking(OllamaPolarity(model, UsageLedger(conn)))
 
 
 register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
