@@ -1,0 +1,5 @@
+# UTC. analyze all is DB-only (no external fetch), so contracts/entrypoints.md §스케줄 exempts it from
+# the gap rule the commerce walks follow -- which is also why it is not in the commerce container:
+# nothing it does competes for a host budget, and a commerce collector stopped for a rollback must not
+# take the analysis of already-collected rows down with it.
+0 5 * * *   cosmai analyze all
