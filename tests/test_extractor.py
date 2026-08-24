@@ -155,6 +155,20 @@ def test_a_hope_that_less_of_something_appears_is_a_plain_hope_not_a_launch(text
     assert found is not None and found.wish_class == "c"
 
 
+@pytest.mark.parametrize(
+    ("text", "wish_class"),
+    [
+        ("올영에도 리쥬란이 들어와 있지만 백화점과는 차이가 있네요", None),
+        ("한국에도 정식 출시해주세요", "a"),
+        ("올영에도없고 판매하는 곳을 찾기 힘드네요", "a"),
+    ],
+)
+def test_a_place_marker_counts_only_where_the_product_is_asked_for(text: str, wish_class: str | None):
+    """'올영에도' 는 그 자리에 없다/내달라일 때만 출시 요청이다 — 있다는 서술은 요청이 아니다."""
+    found = RuleExtractor().wishes(comment(text), LEXICON)
+    assert (found.wish_class if found else None) == wish_class
+
+
 def test_a_comment_with_no_wish_at_all_is_not_a_wish_row():
     assert RuleExtractor().wishes(comment("항상 잘 보고 있습니다 감사합니다"), LEXICON) is None
 
