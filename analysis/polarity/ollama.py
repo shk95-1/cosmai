@@ -12,9 +12,9 @@ import urllib.request
 from collections.abc import Sequence
 from typing import Any
 
+from analysis.polarity.fewshot import FEWSHOT_TAG, shots_for
 from analysis.polarity.llm import (
     NEUTRAL,
-    PROMPT_DATE,
     SCHEMA,
     parse_answer,
     version_for,
@@ -27,6 +27,11 @@ OLLAMA_URL_KEY = "OLLAMA_URL"  # contracts/secrets.md
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "gemma4:latest"  # 2026-08-23 /api/tags 확인 (8B Q4_K_M)
 CHAT_PATH = "/api/chat"
+# 프롬프트 판본은 Claude 경로(llm.PROMPT_DATE)와 갈라져 있다: few-shot 은 여기에만 걸리므로 공유
+# 상수를 쓰면 interfaces.md 에 이미 기록된 Sonnet/Opus 숫자와 같은 판본을 주장하게 된다.
+OLLAMA_PROMPT_DATE = "20260824"
+# gemma4 의 사고 토큰은 호출당 6~9s 인데 eval_count 에 안 잡힌다 — few-shot 이 그 자리를 대신한다.
+THINK = False
 TIMEOUT_SECONDS = 180.0
 LEDGER_PREFIX = "ollama:"
 
@@ -41,10 +46,12 @@ def chat_payload(
     return {
         "model": model,
         "stream": False,
+        "think": THINK,
         "format": SCHEMA,  # ollama 의 구조화 출력도 같은 JSON 스키마를 받는다
         "options": {"temperature": 0},
         "messages": [
             {"role": "system", "content": system_prompt(aspects)},
+            *shots_for(aspects.ruleset),
             {"role": "user", "content": user_prompt(sentence, rating, category)},
         ],
     }
@@ -57,14 +64,14 @@ class OllamaPolarity:
         ledger: UsageLedger | None = None,
         *,
         base_url: str | None = None,
-        prompt_date: str = PROMPT_DATE,
+        prompt_date: str = OLLAMA_PROMPT_DATE,
         timeout_seconds: float = TIMEOUT_SECONDS,
     ) -> None:
         self.model = model
         self.ledger = ledger
         self.base_url = (base_url or ollama_url()).rstrip("/")
         self.timeout_seconds = timeout_seconds
-        self.version = version_for(f"ollama-{model}", prompt_date)
+        self.version = version_for(f"ollama-{model}-{FEWSHOT_TAG}", prompt_date)
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         request = urllib.request.Request(
