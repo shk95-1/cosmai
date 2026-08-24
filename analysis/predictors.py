@@ -1,9 +1,11 @@
 """registry.IMPLEMENTATIONS 가 import 하는 유닛 #3 의 예측자: polarity · wish_class.
 
 Predictor 계약(interfaces.md)은 배치 행만 받고 연결은 받지 않는다 — 사전은 스스로 읽는다.
-LEXICON_URL 은 그 연결을 needs_runtime 이 아닌 곳으로 돌리는 유일한 자리다(테스트).
+LEXICON_URL 은 그 연결을 needs_runtime 이 아닌 곳으로 돌리는 유일한 자리다: `cosmai eval --url` 도,
+테스트도 여기로 들어온다. **등록된 모든 예측자가 이 한 자리를 거쳐야 한다** — 예측자가 자기 URL 을
+따로 들면 --url 이 닿지 않아 그 예측자만 조용히 운영 DB 를 읽는다(linker 계열이 그랬다).
 
-connect_lexicon·category_of·rating_of 는 #6 의 LLM 예측자도 쓴다 — 두 번째 사용처가 생겨 이름을 열었다.
+connect_lexicon·category_of·rating_of 는 #6 의 LLM 예측자와 #4 의 linker 예측자도 쓴다.
 """
 
 from __future__ import annotations

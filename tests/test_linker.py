@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ import psycopg
 import pytest
 from sqlalchemy import create_engine
 
+from analysis import predictors
 from analysis.lexicon import compile_lexicon
 from analysis.linker import LINKER_VERSION, RuleLinker, accepts, normalize_name, normalized
 from analysis.linker.evaluators import BrandLinkPredictor, ProductMatchPredictor
@@ -327,13 +329,17 @@ def test_since_leaves_the_older_documents_out(needs_runtime_url, sources):
 
 
 @pytest.fixture
-def registered(needs_runtime_url: str) -> Iterator[str]:
-    """등록된 기본 구현체는 운영 URL 로 사전을 읽는다 — 테스트에서는 같은 규칙을 테스트 URL 에 묶는다."""
-    register("brand_link", LINKER_VERSION, BrandLinkPredictor(url=needs_runtime_url))
+def registered(needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """기본 구현체는 --url 이 없으면 운영에서 사전을 읽는다 — 그 한 자리를 테스트 URL 로 돌린다."""
+    monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
+    register("brand_link", LINKER_VERSION, BrandLinkPredictor())
     register("product_match", LINKER_VERSION, ProductMatchPredictor())
     yield needs_runtime_url
     unregister("brand_link")
     unregister("product_match")
+    # 등록 모듈은 import 캐시라 load_implementations() 가 기본 등록을 되찾아 주지 않는다 — 여기서
+    # 되돌리지 않으면 뒤에 도는 파일이 '등록 없음'(exit 2)을 만난다.
+    importlib.reload(importlib.import_module("analysis.linker.evaluators"))
 
 
 @pytest.mark.postgres

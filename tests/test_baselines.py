@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import importlib
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -133,27 +132,19 @@ def test_the_rule_implementations_pass_check_baseline_on_the_holdout_sets(
 ):
     """RULE_RAW 는 손으로 옮긴 숫자다 — 실제 구현을 돌려 그 숫자가 아직 현실인지 여기서 못 박는다."""
     from analysis import predictors
-    from analysis.linker import LINKER_VERSION
-    from analysis.linker.evaluators import BrandLinkPredictor
-    from analysis.registry import register
     from cosmai.cli import main
     from db import seed
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
-    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 — 등록된 기본값은 운영 URL 이라
-    # 두 구현체를 테스트 URL 에 묶는다 (tests/test_polarity.py · tests/test_linker.py 와 같은 손질).
+    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 — 그 목적지 한 자리를 돌리면
+    # 네 예측자 모두 따라온다 (tests/test_eval_lexicon_url.py 가 그 성질을 지킨다).
     monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
-    register("brand_link", LINKER_VERSION, BrandLinkPredictor(url=needs_runtime_url))
     gate = ["--url", needs_runtime_url, "--split", "holdout", "--check-baseline"]
-    try:
-        for task in ("polarity", "brand_link", "product_match"):
-            assert main(["eval", task, *gate]) == 0, f"{task}: {capsys.readouterr().out}"
-        # wish 규칙은 blind60_v2 에서 실제로 진다 (KNOWN_MISS) — 반올림이 아니라 성능이라 여기서 안 고친다.
-        assert main(["eval", "wish_class", *gate]) == 1
-        assert "P9 blind60_v2: P:a" in capsys.readouterr().out
-    finally:
-        # 등록 모듈은 import 캐시라 load_implementations() 가 기본 등록을 되돌려 주지 않는다.
-        importlib.reload(importlib.import_module("analysis.linker.evaluators"))
+    for task in ("polarity", "brand_link", "product_match"):
+        assert main(["eval", task, *gate]) == 0, f"{task}: {capsys.readouterr().out}"
+    # wish 규칙은 blind60_v2 에서 실제로 진다 (KNOWN_MISS) — 반올림이 아니라 성능이라 여기서 안 고친다.
+    assert main(["eval", "wish_class", *gate]) == 1
+    assert "P9 blind60_v2: P:a" in capsys.readouterr().out
 
 
 def test_a_threshold_is_read_at_the_precision_it_is_written_to():
