@@ -98,6 +98,11 @@ RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, float]]] = {
 }
 
 
+def meets(metric: float, threshold: float) -> bool:
+    """지표가 임계값을 넘었는가. 게이트의 비교는 여기 한 곳이다 — 두 표가 같은 자를 쓰게 하려고 모았다."""
+    return metric >= threshold
+
+
 def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tuple[str, ...]:
     """규칙에 못 미친 칸. 빈 튜플이어야 교체다 — 셋이 통째로 빠진 실행은 판정이 아니라 오류다."""
     wanted = RULE_MEASURED.get(task, {})
@@ -108,7 +113,7 @@ def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tup
         f"{name}: {metric} {scores[name].get(metric, 0.0):.3f} < rule {want:.3f}"
         for name, wants in wanted.items()
         for metric, want in wants.items()
-        if scores[name].get(metric, 0.0) < want
+        if not meets(scores[name].get(metric, 0.0), want)
     )
 
 
