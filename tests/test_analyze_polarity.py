@@ -160,7 +160,7 @@ def test_the_run_is_recorded_with_its_versions_and_the_captured_at_fallback_coun
     assert row is not None
     status, versions, note = row
     assert status == "ok"
-    assert versions["extractor"] == "rule-v2.2" and versions["polarity"] == "rule-v2.2"
+    assert versions["extractor"] == "rule-v2.3" and versions["polarity"] == "rule-v2.2"
     assert versions["lexicon"] == {"entity": 1, "aspect": 1}
     assert "captured_at_fallback=1" in note
 
@@ -321,7 +321,7 @@ def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _sche
     # 시드가 살아남는 방식이 바뀌었다: UPSERT 의 WHERE 가 아니라 자연키가 행을 갈라놓는다. 이 리뷰는
     # slice-p1 도 다시 뽑은 548건 중 하나라 세 버전이 나란히 남는다(전에는 suncare 하나에 흡수됐다).
     assert need == [
-        ("rule-v2.2", "rule-v2.2"),
+        ("rule-v2.3", "rule-v2.2"),
         ("slice-p1", "rule-v2.2"),
         ("slice-suncare", "rule-v2.1"),
     ]
@@ -354,7 +354,7 @@ def test_the_implementation_the_run_was_given_is_the_version_it_records(loaded: 
         stamped = cur.fetchall()
     assert row is not None
     versions, note = row
-    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.2"
+    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.3"
     assert f"analyze:polarity:{StubPolarity.version}" in note
     assert stamped == [(StubPolarity.version, "중립")]
 

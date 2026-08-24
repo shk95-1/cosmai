@@ -130,6 +130,18 @@ def test_the_wish_classes_the_p9_rules_separate(text: str, wish_class: str):
     assert found.sentence and found.marker
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "요즘 많이 나오길래 저도 하나 사봤어요",
+        "쿠팡입점해있는 업체가 엄청 많다고 들었어요",
+    ],
+)
+def test_a_launch_marker_buried_in_another_word_is_not_a_request(text: str):
+    """'나오길래'·'입점해있는' 은 출시 요청이 아니라 서술이다 — 표지가 낱말 안에 박혔을 뿐이다."""
+    assert RuleExtractor().wishes(comment(text), LEXICON) is None
+
+
 def test_a_comment_with_no_wish_at_all_is_not_a_wish_row():
     assert RuleExtractor().wishes(comment("항상 잘 보고 있습니다 감사합니다"), LEXICON) is None
 
@@ -149,4 +161,4 @@ def test_format_and_attribute_stay_empty_while_those_lexicon_kinds_have_no_rows(
 def test_the_rule_extractor_is_the_contract_protocol():
     """candidates 의 lexicon_category 는 기본값이 있는 추가 인자다 — Protocol 호출은 그대로 맞는다."""
     found: Extractor = RuleExtractor()
-    assert found.version == "rule-v2.2"
+    assert found.version == "rule-v2.3"
