@@ -209,8 +209,9 @@ class TestAgainstAFakeClient:
     ):
         client = FakeClient([_answer("불만")])
         with connect(needs_runtime_url) as conn:
-            ledger = UsageLedger(conn)
-            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999
+            # LLM_BUDGET_USD 와 별개인 좁은 예산을 줘서, 그 상수가 얼마든 경계 검사가 계속 뜻을 갖게 한다.
+            ledger = UsageLedger(conn, budget=Decimal("7.00"))
+            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999, $0.001 남음
             with pytest.raises(BudgetExceeded):
                 LLMPolarity("claude-sonnet-5", ledger, client=client).classify(SENTENCE, None, None, SUN)
         assert client.messages.calls == []  # 호출 자체가 없었다

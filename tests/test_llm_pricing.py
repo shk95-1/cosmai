@@ -1,4 +1,4 @@
-"""가격표와 $7 하드스톱. 돈이 걸린 유일한 기계 검사이므로 가짜 usage 로 누적과 차단을 함께 잰다."""
+"""가격표와 LLM_BUDGET_USD 하드스톱. 돈이 걸린 유일한 기계 검사라 가짜 usage 로 누적과 차단을 함께 잰다."""
 
 from __future__ import annotations
 
@@ -73,14 +73,18 @@ class TestTheLedger:
     def test_the_hard_stop_refuses_before_the_call_that_would_cross_the_budget(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
             ledger = UsageLedger(conn)
-            # $6.99 이미 씀: 남은 $0.01 로는 100만 출력 토큰짜리 호출을 시작할 수 없다.
-            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_000))
-            assert ledger.spent() == Decimal("6.99")
+            # LLM_BUDGET_USD 값이 바뀌어도 거짓 통과하지 않도록 상수에서 토큰 수를 역산한다:
+            # 예산 바로 아래까지 쓰고 나면 남은 돈으로는 100만 출력 토큰짜리 호출을 시작할 수 없다.
+            sonnet_output_rate = PRICES["claude-sonnet-5"].output_usd
+            tokens_just_under_budget = int(LLM_BUDGET_USD / sonnet_output_rate * ONE_MILLION) - 1
+            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=tokens_just_under_budget))
+            spent = ledger.spent()
+            assert spent < LLM_BUDGET_USD
             with pytest.raises(BudgetExceeded) as blocked:
                 ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=ONE_MILLION))
-            assert "7.00" in str(blocked.value)
+            assert f"{LLM_BUDGET_USD:.2f}" in str(blocked.value)
             # 거절은 원장을 늘리지 않는다 — 호출이 없었기 때문이다.
-            assert ledger.spent() == Decimal("6.99")
+            assert ledger.spent() == spent
 
     def test_a_call_that_fits_in_what_is_left_is_let_through(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
@@ -95,11 +99,12 @@ class TestTheLedger:
     ):
         """타임아웃·Ctrl-C 로 응답을 못 받아도 청구는 일어난다 — 예약이 남아야 다음 실행이 그것을 본다."""
         with connect(needs_runtime_url) as conn:
-            ledger = UsageLedger(conn)
+            # LLM_BUDGET_USD 와 별개인 좁은 예산을 줘서, 그 상수가 얼마든 경계 검사가 계속 뜻을 갖게 한다.
+            ledger = UsageLedger(conn, budget=Decimal("7.00"))
             ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=400_000))  # $6.00
             assert ledger.spent() == Decimal("6.00")
             with pytest.raises(BudgetExceeded):
-                ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=100_000))  # $1.50
+                ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=100_000))  # $1.50 > $1.00 남음
 
     def test_settling_replaces_the_reservation_instead_of_adding_a_second_row(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:

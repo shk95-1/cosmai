@@ -1,4 +1,4 @@
-"""모델별 단가와 $7.00 하드스톱. 누적은 needs.llm_usage(DDL 003)이고 차단은 호출 *전*이다.
+"""모델별 단가와 $10.00 하드스톱. 누적은 needs.llm_usage(DDL 003)이고 차단은 호출 *전*이다.
 
 호출 후에 세면 이미 나간 돈은 돌아오지 않는다. 그래서 reserve() 가 한 트랜잭션 안에서 잠그고·읽고·
 견적 행을 쓰고 커밋한다: 그 뒤 응답이 오지 않아도(타임아웃·Ctrl-C·예외) 예약분은 원장에 남아 다음
@@ -22,7 +22,9 @@ import psycopg
 PRICES_SOURCE_DATE = "2026-08-24"
 PER_MILLION = Decimal(1_000_000)
 BATCH_DISCOUNT = Decimal("0.5")  # Batches API 는 모든 토큰이 50%
-LLM_BUDGET_USD = Decimal("7.00")  # contracts/secrets.md · 이슈 #6 사전 승인
+# 선블록(lexicon_category='선블록') 9,653문장 전량이 Batches 로 캐시 없이 $17.8·캐시 있으면 $6.0
+# (2026-08-24 프로브 5회 실측 단가) — $7 은 캐시 의존 여유가 $1뿐이라 사용자가 $10 으로 승인.
+LLM_BUDGET_USD = Decimal("10.00")  # contracts/secrets.md · 이슈 #6 사전 승인, 2026-08-24 $10 승인
 OLLAMA_PREFIX = "ollama:"
 
 

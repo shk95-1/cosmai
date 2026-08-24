@@ -1,7 +1,7 @@
 """Claude API 극성 구현 — 규칙(analysis/polarity/__init__.py)과 같은 시그니처, 같은 400문장.
 
 돈이 나가는 유일한 경로다. 모든 호출은 UsageLedger 의 예약(reserve)을 지난 뒤에 나가고, 응답이 오면
-같은 행을 실측으로 정산(settle)한다 — 응답이 오지 않아도 예약분이 원장에 남아 다음 실행의 $7 에서
+같은 행을 실측으로 정산(settle)한다 — 응답이 오지 않아도 예약분이 원장에 남아 다음 실행의 예산에서
 빠진다. 출력은 structured output(`output_config.format`)으로 {aspect, polarity, reason} 에 고정하고,
 세 라벨 밖의 답은 한 번 더 물은 뒤 중립으로 접는다 (이슈 #6).
 """
