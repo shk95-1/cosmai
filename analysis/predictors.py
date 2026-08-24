@@ -32,6 +32,13 @@ def connect_lexicon() -> psycopg.Connection[Any]:
     return connect(LEXICON_URL or runtime_url())
 
 
+def set_lexicon_url(url: str | None) -> None:
+    """`cosmai eval --url` 훅: 사전 접속도 같은 DB 로 보내(또는 --url 없으면 운영 폴백으로 되돌려)
+    한 번의 eval 이 두 DB 에 걸치지 않게 한다."""
+    global LEXICON_URL
+    LEXICON_URL = url
+
+
 def category_of(row: LabeledRow) -> str | None:
     named = row.extra.get("category")
     if isinstance(named, str) and named:

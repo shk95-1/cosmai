@@ -140,6 +140,27 @@ def test_a_prediction_of_the_wrong_length_is_refused(labeled, capsys):
     assert "returned 1 prediction(s) for 100 row(s)" in capsys.readouterr().out
 
 
+def test_url_flag_also_points_the_lexicon_connection_at_that_same_db(labeled, oracle, monkeypatch):
+    """`--url` 은 labeled_set/analysis_run 만이 아니라 사전 커넥션도 같은 DB 로 보내야 한다(#12 회귀)."""
+    from analysis import predictors
+
+    monkeypatch.setattr(
+        "db.runtime.runtime_url",
+        lambda: (_ for _ in ()).throw(AssertionError("must not touch prod runtime_url")),
+    )
+    assert main(["eval", "polarity", "--url", labeled]) == 0
+    assert predictors.LEXICON_URL == labeled
+
+
+def test_without_url_flag_lexicon_url_stays_none_for_the_runtime_fallback():
+    """--url 없는 호출은 사전 접속을 건드리지 않아야 한다 -- 그래야 운영 폴백이 남아 있다."""
+    from analysis import predictors
+
+    unregister("polarity")  # 등록이 없으면 _connect/runtime_url 에 닿기 전에 exit 2 로 멈춘다
+    assert main(["eval", "polarity"]) == 2
+    assert predictors.LEXICON_URL is None
+
+
 def test_the_registry_loads_its_implementation_modules_by_import(monkeypatch):
     """유닛은 IMPLEMENTATIONS 에 한 줄만 더한다 — cli.py 에 import 를 끼우면 넷이 같은 줄에서 충돌한다."""
     import analysis.registry as reg

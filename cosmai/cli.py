@@ -127,10 +127,13 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 
 
 def _run_eval(args: argparse.Namespace) -> int:
-    from analysis import registry
+    from analysis import predictors, registry
     from analysis.baselines import adoption_misses
     from analysis.evaluate import evaluate, record, render
 
+    # 예측자의 사전 커넥션은 registry 와 무관한 별도 전역(analysis/predictors.py) -- --url 을 안 따라가면
+    # eval 한 번이 두 DB(지정한 곳과 운영)에 걸친다. predict 가 열리기 전인 지금 세팅해야 한다.
+    predictors.set_lexicon_url(args.url)
     registry.load_implementations()
     try:
         impl = registry.build(args.task, args.impl) if args.impl else registry.get(args.task)
