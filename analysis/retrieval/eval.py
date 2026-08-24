@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 
 import psycopg
 
@@ -120,6 +121,7 @@ def run(
     *,
     engine: str = "bm25",
     sources: tuple[str, ...] | None = None,
+    store: Path | None = None,
     k: int = K,
 ) -> list[Row]:
     """질의마다 한 행. 색인은 heldout 의 정답 계산에도 쓰이므로 엔진과 무관하게 항상 만든다."""
@@ -145,7 +147,7 @@ def run(
         if not gold:
             continue  # 정답이 없는 질의는 점수를 정의할 수 없다
         # 후보는 줄이지 않는다. 두 검색기가 같은 후보·같은 정답으로 겨뤄야 점수를 비교할 수 있다.
-        hits = ranked_chunks(conn, query, engine=engine, top=k * 4, sources=sources)
+        hits = ranked_chunks(conn, query, engine=engine, top=k * 4, sources=sources, store=store)
         ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)
         rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit))

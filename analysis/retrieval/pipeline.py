@@ -10,6 +10,7 @@ import hashlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 import psycopg
 
@@ -129,6 +130,7 @@ def ranked_chunks(
     engine: str = "bm25",
     top: int = 10,
     sources: tuple[str, ...] | None = None,
+    store: Path | None = None,
 ) -> list[tuple[str, float]]:
     """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
 
@@ -141,14 +143,15 @@ def ranked_chunks(
 
     from analysis.retrieval import embed, vectors
 
+    out = store or vectors.DEFAULT_STORE
+    loaded = vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
+    query_vector = embed.encode_query(query, out=out)
     if engine == "vector":
-        return vectors.search(conn, embed.encode_query(query), top=top, sources=sources)
+        return vectors.search(loaded, query_vector, top=top, sources=sources)
     if engine == "hybrid":
         index, _ = load_index(conn, sources)
         lexical = [c for c, _ in index.search(query, k=top * 4)]
-        semantic = [
-            c for c, _ in vectors.search(conn, embed.encode_query(query), top=top * 4, sources=sources)
-        ]
+        semantic = [c for c, _ in vectors.search(loaded, query_vector, top=top * 4, sources=sources)]
         fused = vectors.rrf(lexical, semantic)[:top]
         # 융합 결과의 점수는 순위 자체다. 두 스케일을 섞어 적으면 읽는 쪽이 오해한다.
         return [(chunk_id, float(rank)) for rank, chunk_id in enumerate(fused, 1)]
@@ -162,9 +165,10 @@ def search(
     engine: str = "bm25",
     top: int = 10,
     sources: tuple[str, ...] | None = None,
+    store: Path | None = None,
 ) -> list[tuple[str, float, str]]:
     """(chunk_id, 점수, 본문)."""
-    hits = ranked_chunks(conn, query, engine=engine, top=top, sources=sources)
+    hits = ranked_chunks(conn, query, engine=engine, top=top, sources=sources, store=store)
     if not hits:
         return []
     with conn.cursor() as cur:

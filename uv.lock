@@ -118,6 +118,7 @@ embed = [
 ]
 retrieval = [
     { name = "kiwipiepy" },
+    { name = "numpy" },
 ]
 
 [package.metadata]
@@ -126,6 +127,7 @@ requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.29" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "kiwipiepy", marker = "extra == 'retrieval'", specifier = ">=0.20" },
+    { name = "numpy", marker = "extra == 'retrieval'", specifier = ">=2" },
     { name = "playwright", specifier = ">=1.47" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2" },

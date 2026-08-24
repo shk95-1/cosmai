@@ -25,12 +25,6 @@ SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', :'schema') \gexec
 -- Without this the schema split is a naming convention, not a boundary.
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
--- pgvector. public 에 두는 것은 확장의 기본 자리이고, 스키마를 옮기면 타입 이름을 쓰는 모든
--- DDL 이 그 스키마를 알아야 한다. runtime 의 search_path 에는 public 이 없으므로 타입과
--- 연산자는 `public.vector` · `OPERATOR(public.<=>)` 로 한정해서 쓴다 (#28 단계 4).
--- 슈퍼유저가 실행한다 -- 확장 설치는 owner 권한으로 안 된다. 이미 있으면 아무 일도 안 한다.
-CREATE EXTENSION IF NOT EXISTS vector;
-
 -- Runtime: DML only. DEFAULT PRIVILEGES are not optional -- without them a table the NEXT migration
 -- creates is unreachable by runtime, and it fails at the first request after the deploy.
 SELECT format('GRANT USAGE ON SCHEMA %I TO %I', :'schema', :'schema' || '_runtime') \gexec

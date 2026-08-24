@@ -2,8 +2,12 @@
 
 나눠서 인코딩하면 모델 리비전 · 프리픽스 · L2 정규화 · dtype · 텍스트 정규화 · 입력 필드
 **여섯 개가 하나만 어긋나도** 벡터를 합칠 수 없다. 그런데 어긋나도 **오류가 안 난다** --
-코사인 유사도는 숫자가 나오고 순위만 조용히 엉뚱해진다. ydc 는 그것을 매니페스트 파일로 막았고,
-여기서는 행마다 model · revision · doc_prefix · l2_normalized 를 같이 적어 막는다.
+코사인 유사도는 숫자가 나오고 순위만 조용히 엉뚱해진다. 그래서 설정을 전부 매니페스트에 적고
+읽을 때 대조한다(vectors.load).
+
+증분이 아니라 **전량이다.** 청크가 늘면 처음부터 다시 태운다 -- 파일 저장이라 일부만 덧붙이면
+행렬과 id 의 순서 대응을 손으로 지켜야 하고, 그 대응이 깨져도 오류가 안 난다. 벡터를 DB 로
+옮기는 날 증분이 의미를 갖는다.
 
 성분·식약처 텍스트는 인코딩하지 않는다. `에칠헥실트리아존` 을 벡터에 넣으면
 `에칠헥실메톡시신나메이트` 도 비슷하다고 나오는데, 성분이 다른데 비슷하다고 하면 그건 순위
@@ -17,13 +21,24 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 import psycopg
 
-from analysis.retrieval.vectors import DIM, DOC_PREFIX, MODEL, QUERY_PREFIX, require_extension
+from analysis.retrieval.vectors import (
+    DEFAULT_STORE,
+    DIM,
+    DOC_PREFIX,
+    MODEL,
+    QUERY_PREFIX,
+    load,
+    save,
+)
 
 BATCH = 256
 READ_BATCH = 2000
+# 인코딩 대상. 성분 계열이 소스로 붙는 날 여기 한 줄로 제외한다.
+ENCODED_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
 
 
 @dataclass(frozen=True)
@@ -31,10 +46,11 @@ class EmbedOutcome:
     model: str
     revision: str
     encoded: int
+    out: Path
 
     @property
     def note(self) -> str:
-        return f"{self.model}@{self.revision[:12]} · 청크 {self.encoded:,}개 인코딩"
+        return f"{self.model}@{self.revision[:12]} · 청크 {self.encoded:,}개 -> {self.out}.npy"
 
 
 def model_revision(model: str) -> str:
@@ -50,88 +66,98 @@ def model_revision(model: str) -> str:
 def load_encoder(model: str = MODEL, device: str | None = None):
     """sentence-transformers 를 여기서만 부른다. 없으면 무엇을 깔아야 하는지 말한다."""
     try:
-        from sentence_transformers import SentenceTransformer  # pyright: ignore[reportMissingImports]
+        from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+            SentenceTransformer,
+        )
     except ImportError as missing:  # pragma: no cover - 무거운 의존이라 테스트에서 부르지 않는다
         raise RuntimeError("uv sync --extra embed 로 sentence-transformers 를 깔아야 한다") from missing
     return SentenceTransformer(model, device=device)
 
 
-def pending(conn: psycopg.Connection, model: str, revision: str) -> Iterator[tuple[str, str]]:
-    """아직 이 모델·리비전으로 안 태운 청크. 성분 소스는 애초에 대상이 아니다."""
-    with conn.cursor(name="retrieval_pending") as cur:
+def chunks_to_encode(
+    conn: psycopg.Connection, sources: tuple[str, ...] = ENCODED_SOURCES
+) -> Iterator[tuple[str, str, str]]:
+    """(chunk_id, source, text). chunk_id 순으로 -- 다시 태워도 행 순서가 같아야 대조가 된다."""
+    with conn.cursor(name="retrieval_encode") as cur:  # 서버 커서: 30만 행을 한꺼번에 물지 않는다
         cur.itersize = READ_BATCH
         cur.execute(
-            "SELECT c.chunk_id, c.text FROM retrieval_chunk c "
-            "LEFT JOIN retrieval_embedding e ON e.chunk_id = c.chunk_id "
-            "  AND e.model = %s AND e.revision = %s "
-            "WHERE e.chunk_id IS NULL ORDER BY c.chunk_id",
-            (model, revision),
+            "SELECT chunk_id, source, text FROM retrieval_chunk WHERE source = ANY(%s) ORDER BY chunk_id",
+            (list(sources),),
         )
         yield from cur
 
 
-def to_literal(vector) -> str:
-    """pgvector 의 텍스트 표기. psycopg 에 어댑터를 등록하지 않고 캐스트로 넘긴다."""
-    values = list(vector)
-    if len(values) != DIM:
-        raise ValueError(f"벡터가 {DIM} 차원이 아니다: {len(values)}")
-    return "[" + ",".join(repr(float(v)) for v in values) + "]"
-
-
-UPSERT = """
-INSERT INTO retrieval_embedding
-  (chunk_id, model, revision, doc_prefix, l2_normalized, embedding)
-VALUES (%s, %s, %s, %s, true, %s::public.vector)
-ON CONFLICT (chunk_id) DO UPDATE SET
-  model = EXCLUDED.model, revision = EXCLUDED.revision, doc_prefix = EXCLUDED.doc_prefix,
-  l2_normalized = EXCLUDED.l2_normalized, embedding = EXCLUDED.embedding, embedded_at = now()
-"""
-
-
 def run(
-    conn: psycopg.Connection, *, model: str = MODEL, device: str | None = None, batch: int = BATCH
+    conn: psycopg.Connection,
+    *,
+    out: Path = DEFAULT_STORE,
+    model: str = MODEL,
+    device: str | None = None,
+    batch: int = BATCH,
+    sources: tuple[str, ...] = ENCODED_SOURCES,
 ) -> EmbedOutcome:
-    """안 태운 청크만 태운다. 배치마다 커밋한다 -- 30만 청크를 한 트랜잭션에 담을 수 없다."""
-    require_extension(conn)
+    """청크를 전량 태워 한 벌로 저장한다."""
+    import numpy as np
+
     revision = model_revision(model)
     encoder = load_encoder(model, device)
 
-    encoded = 0
-    pack: list[tuple[str, str]] = []
+    rows: list[tuple[str, str]] = []
+    blocks: list = []
+    pack: list[str] = []
 
     def flush() -> None:
-        nonlocal encoded
         if not pack:
             return
         # e5 계열은 문서에 `passage: ` 를 붙여야 한다. 안 붙이면 에러 없이 성능만 떨어진다.
-        matrix = encoder.encode(
-            [DOC_PREFIX + text for _, text in pack],
-            batch_size=batch,
-            normalize_embeddings=True,
-            show_progress_bar=False,
-        )
-        with conn.cursor() as cur:
-            cur.executemany(
-                UPSERT,
-                [
-                    (chunk_id, model, revision, DOC_PREFIX, to_literal(row))
-                    for (chunk_id, _), row in zip(pack, matrix, strict=True)
-                ],
+        blocks.append(
+            np.asarray(
+                encoder.encode(
+                    [DOC_PREFIX + text for text in pack],
+                    batch_size=batch,
+                    normalize_embeddings=True,
+                    show_progress_bar=False,
+                ),
+                dtype="float32",
             )
-        conn.commit()
-        encoded += len(pack)
+        )
         pack.clear()
 
-    for chunk_id, text in pending(conn, model, revision):
-        pack.append((chunk_id, text))
+    for chunk_id, source, text in chunks_to_encode(conn, sources):
+        rows.append((chunk_id, source))
+        pack.append(text)
         if len(pack) >= batch:
             flush()
     flush()
-    return EmbedOutcome(model, revision, encoded)
+
+    matrix = np.vstack(blocks) if blocks else np.zeros((0, DIM), dtype="float32")
+    if matrix.shape[1:] != (DIM,):
+        raise ValueError(f"모델이 {DIM} 차원을 내지 않는다: {matrix.shape}")
+    save(
+        out,
+        matrix,
+        rows,
+        {
+            "model": model,
+            "revision": revision,
+            "doc_prefix": DOC_PREFIX,
+            "query_prefix": QUERY_PREFIX,
+            "l2_normalized": True,
+            "dtype": "float32",
+            "dim": DIM,
+            "batch": batch,
+            "sources": list(sources),
+        },
+    )
+    return EmbedOutcome(model, revision, len(rows), out)
 
 
-def encode_query(query: str, *, model: str = MODEL, device: str | None = None) -> list[float]:
-    """질의에는 `query: ` 를 붙인다. 문서 프리픽스와 짝이 안 맞으면 순위가 조용히 틀어진다."""
-    encoder = load_encoder(model, device)
-    vector = encoder.encode([QUERY_PREFIX + query], normalize_embeddings=True, show_progress_bar=False)[0]
+def encode_query(query: str, *, out: Path = DEFAULT_STORE, device: str | None = None) -> list[float]:
+    """질의 벡터. **모델과 프리픽스는 매니페스트에서 읽는다** -- 문서를 태운 것과 짝이 안 맞으면
+    순위가 조용히 틀어지고, 기본값을 여기 다시 적으면 그 순간 정본이 두 벌이 된다."""
+    store = load(out)
+    encoder = load_encoder(store.model or MODEL, device)
+    vector = encoder.encode([store.query_prefix + query], normalize_embeddings=True, show_progress_bar=False)[
+        0
+    ]
     return [float(v) for v in vector]

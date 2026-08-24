@@ -13,9 +13,9 @@ uv sync --extra dev --extra retrieval --frozen
 if [ -z "$TEST_POSTGRES_URL" ]; then
     # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).
     port=${COSMAI_TEST_PG_PORT:-55432}
-    # 공식 postgres 위에 pgvector 파일만 얹은 이미지다 -- 같은 PostgreSQL 18 이고, 확장을
-    # 못 만들면 needs.retrieval_embedding 의 DDL 이 여기서 서지 않는다 (#28 단계 4).
-    image=${COSMAI_TEST_PG_IMAGE:-pgvector/pgvector:pg18}
+    # 벡터는 지금 파일에 있으므로 확장이 필요 없다. pgvector 로 옮기는 날 이 기본값을
+    # pgvector/pgvector:pg18 로 바꾸면 된다 (#28 후속).
+    image=${COSMAI_TEST_PG_IMAGE:-postgres:18-alpine}
     name=cosmai-test-postgres-$port
     secret_file=$(mktemp)
     # rm -v: postgres 이미지의 익명 볼륨까지 제거 (없으면 실행마다 ~1GB 볼륨이 누수됨)

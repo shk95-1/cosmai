@@ -46,7 +46,7 @@ positional arguments:
     chunk               Load needs.retrieval_chunk from the source schemas.
     search              Rank chunks against a query.
     eval                Score the retriever against the topic dictionary.
-    embed               Encode chunks into needs.retrieval_embedding.
+    embed               Encode chunks into a vector store on disk.
 
 options:
   -h, --help            show this help message and exit
@@ -66,7 +66,7 @@ options:
 $ cosmai retrieval search --help
 usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25,vector,hybrid}]
                                [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
-                               [--top TOP] [--url URL]
+                               [--top TOP] [--vectors VECTORS] [--url URL]
 
 options:
   -h, --help            show this help message and exit
@@ -75,12 +75,13 @@ options:
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --top TOP             How many chunks to print.
+  --vectors VECTORS     Vector store path; default var/retrieval/...
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval eval --help
 usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25,vector,hybrid}]
                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
-                             [--out OUT] [--url URL]
+                             [--out OUT] [--vectors VECTORS] [--url URL]
 
 options:
   -h, --help            show this help message and exit
@@ -89,16 +90,19 @@ options:
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --out OUT             Write one row per query to this CSV.
+  --vectors VECTORS     Vector store path; default var/retrieval/...
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval embed --help
-usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH] [--url URL]
+usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH] [--out OUT]
+                              [--url URL]
 
 options:
   -h, --help       show this help message and exit
   --model MODEL    Sentence-transformers model; default is e5-base.
   --device DEVICE  cuda, cpu, ...; default is what torch picks.
   --batch BATCH    Texts per forward pass.
+  --out OUT        Vector store path; default var/retrieval/...
   --url URL        SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help

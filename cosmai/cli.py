@@ -67,6 +67,7 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
         "--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable."
     )
     search.add_argument("--top", type=int, default=10, help="How many chunks to print.")
+    search.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     search.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
     ev = actions.add_parser("eval", help="Score the retriever against the topic dictionary.")
@@ -74,12 +75,14 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     ev.add_argument("--engine", default="bm25", choices=RETRIEVAL_ENGINES)
     ev.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
     ev.add_argument("--out", default=None, help="Write one row per query to this CSV.")
+    ev.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     ev.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    emb = actions.add_parser("embed", help="Encode chunks into needs.retrieval_embedding.")
+    emb = actions.add_parser("embed", help="Encode chunks into a vector store on disk.")
     emb.add_argument("--model", default=None, help="Sentence-transformers model; default is e5-base.")
     emb.add_argument("--device", default=None, help="cuda, cpu, ...; default is what torch picks.")
     emb.add_argument("--batch", type=int, default=256, help="Texts per forward pass.")
+    emb.add_argument("--out", default=None, help="Vector store path; default var/retrieval/...")
     emb.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
@@ -163,6 +166,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     import psycopg
 
     from analysis.retrieval import corpus, pipeline
+    from analysis.retrieval.vectors import StoreMissing
 
     try:
         since = date.fromisoformat(args.since) if getattr(args, "since", None) else None
@@ -172,19 +176,27 @@ def _run_retrieval(args: argparse.Namespace) -> int:
         return 2
 
     sources = tuple(args.source) if args.source else corpus.SOURCES
-    with conn:
-        if args.action == "chunk":
-            outcome = pipeline.run(conn, since=since, sources=sources)
-            print(outcome.note)
-            for problem in outcome.problems[:10]:
-                print(f"  {problem}")
-            # 계약 위반은 적재를 막지 않지만 조용히 넘어가서도 안 된다.
-            return 0 if not outcome.problems else 1
-        if args.action == "eval":
-            return _run_retrieval_eval(conn, args, sources)
-        if args.action == "embed":
-            return _run_retrieval_embed(conn, args)
-        hits = pipeline.search(conn, args.query, top=args.top, sources=sources)
+    store = Path(args.vectors) if getattr(args, "vectors", None) else None
+    try:
+        with conn:
+            if args.action == "chunk":
+                outcome = pipeline.run(conn, since=since, sources=sources)
+                print(outcome.note)
+                for problem in outcome.problems[:10]:
+                    print(f"  {problem}")
+                # 계약 위반은 적재를 막지 않지만 조용히 넘어가서도 안 된다.
+                return 0 if not outcome.problems else 1
+            if args.action == "eval":
+                return _run_retrieval_eval(conn, args, sources, store)
+            if args.action == "embed":
+                return _run_retrieval_embed(conn, args)
+            hits = pipeline.search(
+                conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
+            )
+    # 벡터 파일이 없는 것은 실패가 아니라 막힘이다 -- embed 를 아직 안 돌렸다는 뜻이다.
+    except StoreMissing as blocked:
+        print(blocked)
+        return 2
     if not hits:
         print("결과 없음")
         return 1
@@ -206,12 +218,14 @@ def _run_retrieval_embed(conn: Any, args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_retrieval_eval(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:
+def _run_retrieval_eval(
+    conn: Any, args: argparse.Namespace, sources: tuple[str, ...], store: Path | None
+) -> int:
     import csv
 
     from analysis.retrieval import eval as retrieval_eval
 
-    rows = retrieval_eval.run(conn, args.mode, engine=args.engine, sources=sources)
+    rows = retrieval_eval.run(conn, args.mode, engine=args.engine, sources=sources, store=store)
     print(retrieval_eval.summary(rows))
     if args.out:
         with Path(args.out).open("w", encoding="utf-8", newline="") as handle:
