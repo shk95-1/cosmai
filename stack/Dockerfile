@@ -1,7 +1,12 @@
-# The scheduled runner behind stack/crontab: `cosmai` on PATH plus the checkout db/migrate.sh reads.
+# The scheduled runner behind stack/crontab.d/: `cosmai` on PATH plus the checkout db/migrate.sh reads.
 #
-# Built from the repo root, not from stack/: `docker build -f stack/Dockerfile -t cosmai .`
-# (.dockerignore sits at that root because that is the only place docker reads it from).
+# Built from the repo root, not from stack/, and both steps at once with `tool/stack-build`:
+#     docker build -f stack/Dockerfile -t cosmai-needs:local .
+# (.dockerignore sits at that root because that is the only place docker reads it from.)
+#
+# The tag is `cosmai-needs:local`, not `cosmai`. On the deploy host `cosmai` is already the archived
+# fleet's app image and three shared-db containers are running it -- building over that tag would
+# take them with it, and a `compose build` that skipped this step would silently use it as the base.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # db/migrate.sh resolves contracts/ddl/needs/*.sql and db/views/*.sql against the working directory,

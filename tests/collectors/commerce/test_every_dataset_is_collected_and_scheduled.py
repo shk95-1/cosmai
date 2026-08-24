@@ -1,7 +1,7 @@
 """origin: playbook/snippets/test_every_enum_member_is_collected.py (service/trend-radar
 tests/test_every_dataset_has_a_collector.py). A member with a collector and no schedule is a real
 recorded outage (playbook 02-test-discipline.md T10), so every commerce Dataset gets both -- and where
-contracts/entrypoints.md §스케줄 names a time, stack/crontab has to actually run at it (review round 1,
+contracts/entrypoints.md §스케줄 names a time, stack/crontab.d has to actually run at it (review round 1,
 #7: review_stats drifted to 04:45 with nothing checking it)."""
 
 from __future__ import annotations
@@ -16,13 +16,23 @@ from collectors.commerce.models import Dataset
 from collectors.commerce.registry import SOURCES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CRONTAB = REPO_ROOT / "stack" / "crontab"
+CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
 ENTRYPOINTS_MD = REPO_ROOT / "contracts" / "entrypoints.md"
+
+
+def crontab_text() -> str:
+    """Every scheduled line in the stack, whichever container's file it sits in.
+
+    stack/crontab became stack/crontab.d/<compose service> when the schedule was split across
+    supercronic containers. Reading the whole directory rather than one named file is what keeps
+    moving a line between containers from silently emptying these checks.
+    """
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
 
 
 def _cron_times_by_dataset(text: str) -> dict[str, tuple[str, ...]]:
     """`{dataset: (minute, hour, dom, month, dow)}` for every `cosmai collect commerce --dataset X`
-    line in `text` -- works on both stack/crontab and the fenced block in entrypoints.md's §스케줄,
+    line in `text` -- works on both a stack/crontab.d file and the fenced block in entrypoints.md's §스케줄,
     since both spell a cron line the same way."""
     out: dict[str, tuple[str, ...]] = {}
     for raw in text.splitlines():
@@ -43,7 +53,7 @@ def _entrypoints_schedule_block() -> str:
 
 
 CONTRACT_TIMES = _cron_times_by_dataset(_entrypoints_schedule_block())
-CRONTAB_TIMES = _cron_times_by_dataset(CRONTAB.read_text(encoding="utf-8"))
+CRONTAB_TIMES = _cron_times_by_dataset(crontab_text())
 
 
 def test_there_are_sources_and_datasets():
@@ -64,9 +74,7 @@ def test_every_collector_of_it_has_a_seed(dataset: Dataset):
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)
 def test_every_dataset_is_scheduled_in_the_commerce_crontab(dataset: Dataset):
-    lines = [
-        ln for ln in CRONTAB.read_text(encoding="utf-8").splitlines() if ln.strip() and not ln.startswith("#")
-    ]
+    lines = [ln for ln in crontab_text().splitlines() if ln.strip() and not ln.startswith("#")]
     assert any("cosmai collect commerce" in ln and f"--dataset {dataset.value}" in ln for ln in lines), (
         f"{dataset.value} has a collector and no cron line"
     )
@@ -85,9 +93,9 @@ def test_the_contract_names_a_time_for_every_dataset():
 
 @pytest.mark.parametrize("dataset", sorted(CONTRACT_TIMES), ids=lambda d: d)
 def test_crontab_time_matches_the_contract(dataset: str):
-    assert dataset in CRONTAB_TIMES, f"{dataset} is scheduled in the contract but not in stack/crontab"
+    assert dataset in CRONTAB_TIMES, f"{dataset} is scheduled in the contract but not in stack/crontab.d"
     assert CRONTAB_TIMES[dataset] == CONTRACT_TIMES[dataset], (
-        f"stack/crontab schedules {dataset} at {' '.join(CRONTAB_TIMES[dataset])}, "
+        f"stack/crontab.d schedules {dataset} at {' '.join(CRONTAB_TIMES[dataset])}, "
         f"contracts/entrypoints.md §스케줄 says {' '.join(CONTRACT_TIMES[dataset])}"
     )
 
@@ -183,7 +191,7 @@ def _run_seconds(line: _Line, *, capped: bool) -> float:
     return total
 
 
-CRON_LINES = _commerce_cron_lines(CRONTAB.read_text(encoding="utf-8"))
+CRON_LINES = _commerce_cron_lines(crontab_text())
 # Every start time in one day, in order -- the hourly ranking line contributes 24 of them.
 OCCURRENCES: tuple[tuple[int, _Line], ...] = tuple(
     sorted(((start, line) for line in CRON_LINES for start in line.starts), key=lambda p: p[0])

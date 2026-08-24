@@ -1,0 +1,16 @@
+# UTC. flatten 15m and prune 1d, from contracts/entrypoints.md §스케줄. These two share a container
+# because neither makes an external request -- flatten reads stored payloads into the snapshot tables
+# and prune deletes aged rows, so they have no budget to be throttled apart by, unlike watch and work.
+#
+# Phase 7, so the quarter-hour ticks land at :07/:22/:37/:52 instead of :00/:15/:30/:45. Same reason
+# as the work line: nothing here competes with commerce for a host, but :00 is where the hourly
+# ranking walk and (at 05:00) analyze all already start, and there is no reason to add a third
+# process to that boundary every hour.
+7-59/15 * * * *   cosmai collect youtube --dataset flatten
+# 02:59: as far from a flatten tick as the phase above allows (02:52 behind, 03:07 ahead), because
+# supercronic starts an overlapping line rather than skipping it and there is no reason to run two
+# statements against the same tables at once. The two do not contend over rows in normal operation --
+# flatten.run reads only artifacts newer than its stored cursor and prune's cutoff is 30 days
+# (PRUNE_MAX_AGE_DAYS), so the windows do not meet. The direction that does bite is the other one: a
+# flatten stalled for more than 30 days has its unflattened artifacts pruned out from under it.
+59 2 * * *       cosmai collect youtube --dataset prune

@@ -5,19 +5,13 @@
 # times how many requests they make. No runtime is written down here -- the test computes it from those
 # policy constants so it follows them (contracts/entrypoints.md §스케줄).
 0 * * * *   cosmai collect commerce --dataset ranking
-5 2 * * *   cosmai collect commerce --dataset product
+# 2026-08-24: was `5 2`. The new engine walks a dataset's sources one after another
+# (engine.collect's `for source in sources`) where the archived collector overlapped them, so the
+# hourly ranking walk measured 202s against the old 90s -- and one 403/429 widens daisomall's
+# interval 30s->60s (Gate._back_off), which makes it 292s. 02:05 left 98s of clearance, then 8s.
+# 02:10 leaves 398s, and product's own budget-tier runtime still clears review_low at 03:30.
+10 2 * * *  cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
-# analyze all is DB-only (no external fetch), so contracts/entrypoints.md §스케줄 exempts it from the
-# gap rule the commerce walks follow.
-0 5 * * *   cosmai analyze all
-# naver datalab: monthly (키워드 사전 기준, contracts/entrypoints.md), day 1. 06:10 clears every
-# commerce time above (02:05/03:30/04:15/04:45/05:30); naver walks a different host, so the commerce
-# gap rule does not bind it.
-10 6 1 * *  cosmai collect naver --dataset datalab
-# naver blog: monthly too -- every run re-walks all 15 keyword-group terms from scratch (no
-# cursor; natural-key upsert on post_id makes that safe), so once a month is enough spend.
-# 06:40 clears datalab (06:10), analyze all (05:00, entrypoints.md §스케줄) and every commerce time.
-40 6 1 * *  cosmai collect naver --dataset blog

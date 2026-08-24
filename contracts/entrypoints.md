@@ -78,12 +78,12 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
 
-## 스케줄 (stack/crontab, UTC)
+## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
 순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
 소요도 둘이다: `seeds()` 길이만 도는 **씨드 기준**과 `max_requests_per_run`까지 차는 **예산 기준**. 예산 기준으로는
-매시 ranking이 한 시간의 절반 가까이를 점유해 02:05 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
+매시 ranking이 한 시간의 절반 가까이를 점유해 02:10 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
 풀 겹침이 아니라 어드바이저리 락(#10 §A-8-1)이 닫을 겹침이라, 그때까지
 `tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`가 씨드 기준은 항상 검사하고
 예산 기준은 xfail(strict)로 붙들어 둔다.
@@ -94,14 +94,19 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 씨드 수로만 계산된다. 그러니 이 숫자는 "적어도 이만큼"이지 "많아야 이만큼"이 아니다. 겹치지 않는다는 보장은
 간격이 아니라 락이 준다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
 무해하므로 이 규칙에서 제외된다.
+
+youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋만 있었고 큐를 비우는 줄이
+없었다). 상주 데몬이 아니라 크론인 이유는 `collectors/youtube/cli.py:_run_work` 가 한 번에
+`DEFAULT_WORK_BATCH` 만큼만 claim 하고 끝나는 배치이기 때문이다 — 반복은 바깥이 준다. 겹쳐 떠도
+안전하다: `_claim` 이 `FOR UPDATE SKIP LOCKED` 한 문장으로 집는다.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
-5 2 * * *   cosmai collect commerce --dataset product
+10 2 * * *  cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare   (보드는 scope.json 목록으로 확장)
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
-youtube: watch 1h · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
+youtube: watch 1h · work 5m · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
 naver:   datalab 월 1회 (키워드 사전 기준)
 ```

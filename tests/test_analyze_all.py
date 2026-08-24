@@ -30,7 +30,7 @@ pytestmark = pytest.mark.postgres
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DUMPS = REPO_ROOT / "contracts" / "ddl" / "current"
 VIEW = REPO_ROOT / "db" / "views" / "analysis_health.sql"
-CRONTAB = REPO_ROOT / "stack" / "crontab"
+CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
 ENTRYPOINTS_MD = REPO_ROOT / "contracts" / "entrypoints.md"
 
 CAPTURED = datetime(2026, 8, 23, tzinfo=UTC)
@@ -350,7 +350,10 @@ def test_the_crontab_schedules_analyze_all_at_the_time_the_contract_names():
 
     contract = _time(ENTRYPOINTS_MD.read_text(encoding="utf-8"))
     assert contract, "contracts/entrypoints.md §스케줄 names no time for `analyze all`"
-    assert _time(CRONTAB.read_text(encoding="utf-8")) == contract
+    # The whole directory, not one file: which supercronic container carries this line is a wiring
+    # decision (stack/docker-compose.yml), and it must not decide whether this check sees the line.
+    scheduled = "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
+    assert _time(scheduled) == contract
 
 
 def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime():

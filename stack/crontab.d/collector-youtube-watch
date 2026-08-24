@@ -1,0 +1,15 @@
+# UTC. watch 1h, from contracts/entrypoints.md §스케줄. Alone in its own container because it is the
+# only line an operator has to be able to hold back: it is the fan-out source, issue #10 절차 3 turns
+# it on only after the queue depth is confirmed under MAX_QUEUE_DEPTH (collectors/youtube/scope.json),
+# and supercronic can only be stopped a container at a time.
+#
+# It enqueues, it never fetches -- the request budget is spent by collector-youtube-work, which is why
+# these two are not one container: a YouTube quota problem stops work and leaves watch alone, and this
+# gate stops watch and leaves work draining.
+#
+# Minute 55, not 0. youtube walks a different host from the four commerce sites, so the §스케줄 gap
+# rule does not bind it; what it does share is this machine and this database, so an hourly line is
+# placed off the two minutes something heavy already starts on -- :00 (the hourly commerce ranking
+# walk, 202s and 292s after one back-off) and 05:00 (analyze all). :55 also clears review_stats
+# (04:45 + ~458s) and new_product (05:30).
+55 * * * *   cosmai collect youtube --dataset watch
