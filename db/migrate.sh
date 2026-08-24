@@ -11,7 +11,8 @@ usage() {
     cat <<'EOF'
 usage: db/migrate.sh [--container NAME] [--db NAME] [--superuser NAME]
 
-Applies db/bootstrap.sql, contracts/ddl/needs/*.sql, db/grants/*.sql and db/views/*.sql to
+Applies db/bootstrap.sql, contracts/ddl/needs/*.sql, the two named grants files
+(db/grants/postgrest_anon_needs.sql, db/grants/needs_runtime_reader.sql) and db/views/*.sql to
 $container/$db through `docker exec`. Every path is repo-relative: run it from the repo root
 (the image's WORKDIR is that root -- stack/Dockerfile).
 
