@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from collectors.commerce.contract import Fetch, Payload, Source, SourcePolicy, narrowed
 from collectors.commerce.gate import Gate
@@ -59,8 +59,24 @@ class ChallengeBlocked(TransportError):
     """The site refused outright (a WAF challenge, a hard 403). Halts the source; exit code 2."""
 
 
+@runtime_checkable
 class Fetcher(Protocol):
     def fetch(self, fetch: Fetch) -> Payload: ...
+
+
+class FetcherFor(Protocol):
+    """Builds the fetcher one source gets, when a single one will not do.
+
+    A live transport is a property of the source, not of the run: `SourcePolicy` carries the
+    timeout and the user agent the requests go out with, and `SourcePolicy.transport` decides
+    whether they go out over httpx or through a Chromium holding that source's own profile. So
+    `collect` takes either one ready-made `Fetcher` -- what every test injects -- or this, which it
+    calls once per source it actually walks. Once per source and not once per request: building it
+    lazily is the transport's own job (collectors/commerce/transport/factory.py), and a source that
+    is skipped or blocked never reaches here at all.
+    """
+
+    def __call__(self, source: Source) -> Fetcher: ...
 
 
 LOCK_HELD_ELSEWHERE = (
@@ -451,8 +467,9 @@ class _Lane:
         one was. Reading the count and spending it happen inside a single hold of `_lock` on purpose:
         with the check and the increment in separate holds, every worker sitting on `budget - 1`
         passes before any of them writes and a source at concurrency N sends N - 1 requests it had no
-        budget for. Nothing shipped is above one worker *and* budgeted -- hwahae is the only source
-        at concurrency 2 and it declares no budget -- which is the only reason that has never bitten.
+        budget for. That race is shipped now: hwahae runs two workers and, since #10, a budget of 20,
+        so this hold is the only thing between it and 21 requests.
+        `tests/collectors/commerce/test_rate_policy_is_enforced.py` puts workers in that window.
 
         Booked inside the gate, one step before the request goes out, so the count cannot run ahead
         of the journal.
@@ -471,7 +488,7 @@ def collect(
     dataset: Dataset,
     sink: Sink,
     captured_at: datetime,
-    fetcher: Fetcher,
+    fetcher: Fetcher | FetcherFor,
     journal: Journal | None = None,
     board: str | None = None,
     *,
@@ -505,7 +522,10 @@ def collect(
                 continue
             lane = _Lane(
                 source=source,
-                fetcher=fetcher,
+                # `Fetcher` is runtime-checkable and has one member, so this asks the plain
+                # question "did the caller hand us something that can fetch": a factory cannot,
+                # and nothing that can is ever called as one.
+                fetcher=fetcher if isinstance(fetcher, Fetcher) else fetcher(source),
                 sink=sink,
                 dataset=dataset,
                 captured_at=captured_at,

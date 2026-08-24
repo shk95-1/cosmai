@@ -1,5 +1,9 @@
-"""`cosmai collect commerce` -- wired for #7. Real network transport is #10's job ("라이브 수집 없음"
-here); `fetcher` is the seam #10 plugs a real `Fetcher` into, and tests plug a fixture-backed fake into.
+"""`cosmai collect commerce` -- wired for #7, given a live transport for #10.
+
+Until #10 the default fetcher was a `_RaisingFetcher`: every scheduled run ended in
+NotImplementedError, and stack/docker-compose.yml said so in a comment. It is now
+`collectors/commerce/transport`, built per source. `fetcher` stays the injection seam -- tests hand
+in a fixture-backed fake, and anything passed there is used instead of opening a socket.
 """
 
 from __future__ import annotations
@@ -9,13 +13,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from collectors.commerce import sources as _sources  # noqa: F401 -- import registers every source
-from collectors.commerce.contract import Payload
 from collectors.commerce.engine import Fetcher, RunReport, collect, exit_code_for
 from collectors.commerce.models import Dataset, hour_bucket
 from collectors.commerce.registry import SOURCES
 from collectors.commerce.storage import db as storage_db
 from collectors.commerce.storage.db import PostgresJournal, RunLog, create_engine
 from collectors.commerce.storage.locks import PostgresSourceLock
+from collectors.commerce.transport import LiveFetchers
 
 SCOPE_PATH = Path(__file__).resolve().parent / "scope.json"
 
@@ -34,14 +38,14 @@ def review_low_boards() -> list[str]:
     return sorted(boards)
 
 
-class _RaisingFetcher:
-    """The default fetcher: fails loudly rather than opening a real socket. #10 replaces this."""
+def live_fetchers() -> LiveFetchers:
+    """The transport a scheduled run gets: httpx for three sources, a Chromium for oliveyoung.
 
-    def fetch(self, fetch: object) -> Payload:  # pragma: no cover - exercised only if actually called
-        raise NotImplementedError(
-            "collectors.commerce has no live transport yet; see issue #10 (cutover). "
-            "Tests inject a fixture-backed fetcher instead of calling the CLI's default."
-        )
+    A function rather than a literal at the call site so a test can ask what the default is without
+    running a collection, and so the browser profile directory has one place to move to when a
+    deployment wants it somewhere other than `transport.DEFAULT_PROFILE_DIR`.
+    """
+    return LiveFetchers()
 
 
 def run(
@@ -81,7 +85,7 @@ def run(
         log = RunLog(engine)
         run_id = log.start(when, [s.key for s in chosen], [wanted.value])
 
-        active_fetcher = fetcher or _RaisingFetcher()
+        active_fetcher = fetcher or live_fetchers()
         journal = PostgresJournal(engine, run_id)
 
         try:
@@ -100,6 +104,11 @@ def run(
         except BaseException as exc:
             log.finish(run_id, status="failed", note=f"{type(exc).__name__}: {exc}")
             raise
+        finally:
+            # A Chromium is a process tree and an httpx client holds sockets; neither is reaped by
+            # the run ending, and a caller that injected its own fetcher owns closing that one.
+            if fetcher is None:
+                active_fetcher.close()  # pyright: ignore[reportAttributeAccessIssue]
 
         log.record_sources(run_id, report.sources)
         status = "blocked" if report.blocked else ("ok" if report.ok else "partial")

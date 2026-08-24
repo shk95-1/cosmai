@@ -11,6 +11,11 @@ dependencies = [
     # saved fixtures -- selectolax brings no network dependency with it.
     "selectolax>=0.3,<1",
     "anthropic>=1.0",
+    # collectors/commerce's live transport (#10). Two, because one source is not reachable over
+    # plain HTTP: oliveyoung answers it with a Cloudflare challenge, so its ranking is rendered by a
+    # real Chromium while its POST-only review API still goes out over httpx.
+    "httpx>=0.28,<1",
+    "playwright>=1.47",
 ]
 
 [project.scripts]
