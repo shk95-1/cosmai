@@ -121,8 +121,9 @@ def open_llm(model: str) -> Iterator[Polarity]:
 
 @contextmanager
 def open_ollama(model: str) -> Iterator[Polarity]:
-    """`analyze --impl ollama:<model>`. 무료 경로라 reserve() 의 커밋이 없다 — 그 커밋이 부수적으로
-    막아 주던 idle_in_transaction 15s 를 autocommit 이 대신 막는다 (eval 쪽 f8aff76 과 같은 이유)."""
+    """`analyze --impl ollama:<model>`. autocommit 은 "왕복을 트랜잭션 안에서 기다리지 않는다" 를 이
+    커넥션의 성질로 만든다 — 오늘 안전한 이유는 record() 가 스스로 커밋한다는 우연뿐이고, eval 이 같은
+    자리에서 죽은 것(f8aff76)은 사전 로드가 트랜잭션 하나를 열어 둔 채였기 때문이다."""
     if not model:
         raise LookupError("--impl ollama:<model> needs a model, e.g. ollama:gemma4:latest")
     with connect_lexicon() as conn:

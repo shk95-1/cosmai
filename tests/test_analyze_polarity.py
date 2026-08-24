@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +13,10 @@ import psycopg
 import pytest
 from psycopg import sql as pgsql
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 
+from analysis import predictors, registry
+from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -403,3 +407,53 @@ def test_an_unscoped_rerun_still_replaces_this_units_own_stale_rows(
     """스코프가 없으면 전량을 다시 쓴다 — 그때는 옛 버전 행을 치우는 것이 여전히 이 단계의 몫이다."""
     _run(with_other_scopes, _schema_name, polarity=StubPolarity())
     assert _refs(with_other_scopes, "need_mention") == []
+
+
+# needs_runtime 의 두 한도(db/bootstrap.sql: 60s · 15s)를 몇 초 안에 넘기도록 압축한 것.
+# tests/test_ollama_predictor_connection.py 와 같은 관용구다.
+SQUEEZED_TIMEOUTS = "-c transaction_timeout=400ms -c idle_in_transaction_session_timeout=200ms"
+EFFECTIVE_TIMEOUTS = (
+    "SELECT current_setting('transaction_timeout'), current_setting('idle_in_transaction_session_timeout')"
+)
+SLOW_CALL_S = 0.5  # 압축한 두 한도보다 한참 길다 — 왕복을 트랜잭션 안에서 기다리면 여기서 죽는다
+OLLAMA_ANSWER = '{"aspect": "백탁", "polarity": "불만", "reason": "stub"}'
+
+
+def _squeezed(base_url: str) -> str:
+    url = make_url(base_url)
+    existing = url.query.get("options", "")
+    return url.update_query_dict({"options": f"{existing} {SQUEEZED_TIMEOUTS}".strip()}).render_as_string(
+        hide_password=False
+    )
+
+
+def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+):
+    """ollama 는 문장마다 수백 ms~수 초를 기다린다(analysis/polarity/ollama.py). 그 기다림이 열린
+    트랜잭션 안에 있으면 단계의 커넥션도 판정자의 원장 커넥션도 첫 페이지에서 끊긴다 — 압축한 한도로
+    그것을 몇 초 안에 재현한다. ollama·GPU 는 필요 없다: 왕복만 스텁이다.
+    """
+    squeezed = _squeezed(loaded)
+    # 압축이 실제로 먹었는지 먼저 확인한다 — 안 그러면 아래 단언이 공짜로 통과한다.
+    with connect(squeezed) as probe, probe.cursor() as cur:
+        cur.execute(EFFECTIVE_TIMEOUTS)
+        assert cur.fetchone() == ("400ms", "200ms")
+
+    calls = 0
+
+    def slow_post(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        time.sleep(SLOW_CALL_S)
+        return {"message": {"content": OLLAMA_ANSWER}, "prompt_eval_count": 7, "eval_count": 3}
+
+    monkeypatch.setattr(OllamaPolarity, "_post", slow_post)
+    monkeypatch.setattr(predictors, "LEXICON_URL", squeezed)  # 원장 커넥션도 압축한 곳으로 보낸다
+    registry.load_implementations()
+
+    with registry.open_classifier("polarity", "ollama:gemma4:latest") as polarity:
+        found = _run(squeezed, _schema_name, polarity=polarity)
+    # 판정에 쓴 시간이 압축한 한도를 크게 넘었어야 재현이다 (넘지 않으면 통과가 무의미하다).
+    assert calls * SLOW_CALL_S > 1.0
+    assert found.need_rows == calls and found.polarity_version.startswith("llm-ollama-gemma4")
