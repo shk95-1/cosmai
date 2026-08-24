@@ -90,6 +90,27 @@ services:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-commerce"]
     profiles: ["commerce"]
+    # #27 round 2: the bind-mounted profile below is host uid 1000 (user1's), and stack/Dockerfile
+    # declares no USER -- every *cron container is root by default. Root can write it regardless of
+    # ownership, but the files it creates then belong to root, and the next host-side `uv run cosmai
+    # login` (uid 1000, not root) cannot touch them. Pinning only this service to the host's uid/gid
+    # keeps every other *cron service on the anchor's root default -- they only touch named volumes
+    # (youtube-payloads), where no host-owned file is ever read back by a non-root process.
+    user: "1000:1000"
+    environment:
+      # `<<:` replaces the anchor's environment: wholesale too (the same trap volumes: has below),
+      # so every key the anchor set has to be repeated -- dropping one here is silent until whichever
+      # knob it was turns out unset at 03:00.
+      COSMAI_DB_HOST: shared-postgres
+      COSMAI_DB_PORT: "5432"
+      COSMAI_SECRET_FILE: /run/cosmai/env
+      PYTHONUNBUFFERED: "1"
+      TZ: UTC
+      # uid 1000 has no /etc/passwd entry in this image (no useradd ran for it), so Chromium's
+      # search for a home directory fails unless $HOME is set directly -- and it needs one writable,
+      # for its own cache/config dirs beside the profile's user_data_dir. /tmp is world-writable
+      # (sticky bit) in the bookworm-slim base by default.
+      HOME: /tmp
     volumes:
       # `<<:` replaces the anchor's volumes: rather than adding to them (collector-youtube-work/
       # -flatten below hit the same trap), so the secret mount has to be repeated here.
