@@ -4,7 +4,7 @@
 여기에 적지 않는 것: 완료 기준(→ `contracts/interfaces.md`), 왜 이렇게 하기로 했나(→ `architect/REBUILD.md` §2–§4, private), 다음 할 일의 세부(→ GitHub 이슈).
 
 ## 1. 부팅 (이 순서, 이것만)
-1. 메모리(자동 로드): `rebuild-plan-state`, `working-style-preferences`, `ops-steps-run-in-session`
+1. 메모리: 자동 로드되는 것은 **인덱스(한 줄 훅)뿐**이다 — 본문은 다음 셋을 Read 한다: `rebuild-plan-state`, `working-style-preferences`, `ops-steps-run-in-session`
 2. `contracts/README.md` → `contracts/{entrypoints,interfaces,formats,secrets,versioning}.md` → `contracts/ddl/needs/*.sql`
 3. 이 파일 §2·§3
 4. `gh issue view 16`(에픽: 사전 승인·순서·리뷰 등급·판정·원장 규칙) → `gh issue list --state open`. **유닛 이슈는 본문 + 코멘트를 함께 읽는다**(#17 판정 코멘트가 본문보다 우선). 이슈 코멘트가 원장이다.
