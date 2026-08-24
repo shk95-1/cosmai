@@ -22,6 +22,9 @@ if TYPE_CHECKING:  # psycopg 를 여기서 import 하면 --help 한 번에도 �
     import psycopg
 
 STAGES = ("link", "polarity", "aggregate", "all")
+# analysis.retrieval.corpus.SOURCES 와 같은 값. 여기서 다시 적는 이유는 `--help` 한 번에
+# psycopg 를 딸려 오게 하지 않으려는 것이고, tests/retrieval 이 둘이 같은지 검사한다.
+RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
 SPLITS = ("tune", "holdout")
 KINDS = ("brand", "format", "attribute", "ingredient", "stopword", "alias", "aspect")
 
@@ -42,6 +45,27 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
+
+
+def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("retrieval", help="Build the search corpus and query it.")
+    actions = p.add_subparsers(dest="action", required=True)
+
+    chunk = actions.add_parser("chunk", help="Load needs.retrieval_chunk from the source schemas.")
+    chunk.add_argument("--since", default=None, help="Only source rows observed on or after this date.")
+    chunk.add_argument(
+        "--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable."
+    )
+    chunk.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+    search = actions.add_parser("search", help="Rank chunks against a query.")
+    search.add_argument("--query", required=True, help="What to search for.")
+    search.add_argument("--engine", default="bm25", choices=["bm25"], help="Vector arrives with #28-4.")
+    search.add_argument(
+        "--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable."
+    )
+    search.add_argument("--top", type=int, default=10, help="How many chunks to print.")
+    search.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
@@ -80,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_collect(subparsers)
     _add_analyze(subparsers)
+    _add_retrieval(subparsers)
     _add_eval(subparsers)
     _add_lexicon(subparsers)
     return parser
@@ -117,6 +142,36 @@ def _run_analyze(args: argparse.Namespace) -> int:
         outcome = run_stage(conn, args.stage, since=since, scope=args.scope)
     print(outcome.note)
     return 0 if outcome.status == "ok" else 1
+
+
+def _run_retrieval(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from analysis.retrieval import corpus, pipeline
+
+    try:
+        since = date.fromisoformat(args.since) if getattr(args, "since", None) else None
+        conn = _connect(args.url)
+    except (ValueError, LookupError, psycopg.Error) as refused:
+        print(refused)
+        return 2
+
+    sources = tuple(args.source) if args.source else corpus.SOURCES
+    with conn:
+        if args.action == "chunk":
+            outcome = pipeline.run(conn, since=since, sources=sources)
+            print(outcome.note)
+            for problem in outcome.problems[:10]:
+                print(f"  {problem}")
+            # 계약 위반은 적재를 막지 않지만 조용히 넘어가서도 안 된다.
+            return 0 if not outcome.problems else 1
+        hits = pipeline.search(conn, args.query, top=args.top, sources=sources)
+    if not hits:
+        print("결과 없음")
+        return 1
+    for chunk_id, score, text in hits:
+        print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
+    return 0
 
 
 def _connect(url: str | None) -> psycopg.Connection[Any]:
@@ -254,6 +309,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_collect(args)
     if args.command == "analyze":
         return _run_analyze(args)
+    if args.command == "retrieval":
+        return _run_retrieval(args)
     if args.command == "eval":
         return _run_eval(args)
     if args.command == "lexicon":

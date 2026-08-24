@@ -6,7 +6,9 @@ set -e
 . tool/checks/prerequisite
 require_command uv docker pg_isready
 
-uv sync --extra dev --frozen
+# retrieval: analysis/retrieval 의 형태소 분석기(kiwipiepy). 빠지면 BM25 테스트가 통째로
+# ModuleNotFoundError 가 되고, 그것은 "사전이 안 얹혔다"와 구분되지 않는다 (#28).
+uv sync --extra dev --extra retrieval --frozen
 
 if [ -z "$TEST_POSTGRES_URL" ]; then
     # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).

@@ -1,10 +1,11 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,analyze,eval,lexicon} ...
+usage: cosmai [-h] {collect,analyze,retrieval,eval,lexicon} ...
 
 positional arguments:
-  {collect,analyze,eval,lexicon}
+  {collect,analyze,retrieval,eval,lexicon}
     collect             Run one collector's dataset for one hour.
     analyze             Run one analysis stage over the needs schema.
+    retrieval           Build the search corpus and query it.
     eval                Score one task against needs.labeled_set.
     lexicon             Load, compare and activate a dictionary version.
 
@@ -36,6 +37,43 @@ options:
   --since SINCE         Only units observed on or after this date.
   --scope SCOPE         Restrict to one lexicon category.
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
+
+$ cosmai retrieval --help
+usage: cosmai retrieval [-h] {chunk,search} ...
+
+positional arguments:
+  {chunk,search}
+    chunk         Load needs.retrieval_chunk from the source schemas.
+    search        Rank chunks against a query.
+
+options:
+  -h, --help      show this help message and exit
+
+$ cosmai retrieval chunk --help
+usage: cosmai retrieval chunk [-h] [--since SINCE]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         Only source rows observed on or after this date.
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval search --help
+usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25}]
+                               [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                               [--top TOP] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         What to search for.
+  --engine {bm25}       Vector arrives with #28-4.
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --top TOP             How many chunks to print.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
