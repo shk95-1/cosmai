@@ -24,15 +24,15 @@ TABLES = ("need_mention", "wish_mention", "brand_mention")
 
 FIVE = Decimal(5)
 
-# The brief keeps colliding sentences out rather than rewriting them: slice-p1 re-extracted
-# reviews slice-suncare had already extracted.
+# 005 로 extractor_version 이 자연키에 들어가, slice-suncare 가 이미 뽑은 리뷰를 slice-p1 이 다시
+# 뽑은 행도 이제 흡수되지 않고 각자 남는다 — DO NOTHING 이 막는 것은 같은 슬라이스의 재적재뿐이다.
 NEED_SQL: LiteralString = """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key,
    aspect_scope, polarity, strength, rating, observed_at, observed_at_resolution, month, sentence,
    extractor_version, polarity_version)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (src, ref, need_key, sentence) DO NOTHING
+ON CONFLICT (src, ref, need_key, extractor_version, md5(sentence)) DO NOTHING
 """
 WISH_SQL: LiteralString = """
 INSERT INTO wish_mention

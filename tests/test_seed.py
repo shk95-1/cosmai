@@ -37,7 +37,9 @@ EXPECTED = {
     "product_denominator": 38,  # slice-p1-category-gap/README.md
     "rank_daily": 17948,  # slice-p2-ranking-dynamics/README.md
     "price_event": 363,  # slice-p2-ranking-dynamics/README.md
-    "need_mention": 15498,  # slice-suncare 2,266 + slice-p1 13,780 − UNIQUE 충돌 548
+    # 005 로 extractor_version 이 자연키에 들어간 뒤 두 슬라이스는 서로 흡수되지 않는다:
+    # slice-suncare 2,266 + slice-p1 13,780, 충돌 0 (전에는 548행이 suncare 행에 흡수됐다).
+    "need_mention": 16046,
     "wish_mention": 18489,  # slice-p9-wish-mining/README.md
     "brand_mention": 48481,  # slice-p3-youtube-brand-link/README.md
     "analysis_run": 3,  # 슬라이스마다 run 하나: seed:slice-{suncare,p1,p9}
@@ -92,8 +94,8 @@ FILLED = {
     "select count(*) from metrics_need where denom_low is not null": 331,
     "select count(*) from metrics_need where aspect_scope is not null": 301,
     "select count(*) from metrics_wish where videos is null or example is null": 0,
-    # suncare 2,266(전부 선블록) + p1 의 lexicon_category 있는 11,537 − UNIQUE 충돌 548 (B10)
-    "select count(*) from need_mention where lexicon_category is not null": 13255,
+    # suncare 2,266(전부 선블록) + p1 의 lexicon_category 있는 11,537, 충돌 0 (B10 · 005)
+    "select count(*) from need_mention where lexicon_category is not null": 13803,
 }
 
 

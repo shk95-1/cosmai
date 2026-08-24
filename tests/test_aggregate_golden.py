@@ -31,24 +31,15 @@ WISH_COLUMNS = (
     "max_like", "example",
 )  # fmt: skip
 
-# 1차 패스 실측(2026-08-24). 줄어들면 2차 패스가 전진한 것이고, 늘어나면 회귀다.
+# 1차 패스 실측(2026-08-24, 005 적용 후 재측정). 줄어들면 2차 패스가 전진한 것이고, 늘어나면 회귀다.
 EXPECTED: Mapping[str, Mapping[str, int]] = {
     # unresolved_new 는 제품의 first_seen 을 요구하는데 Aggregator 는 그것을 받지 못한다 (보고서 참조).
     "suncare": {"missing": 0, "extra": 0, "unresolved_new": 15},
-    # neg/pos/persist_* 의 9행은 전부 '선블록' 이다: p1 이 재추출한 리뷰 548건이 need_mention 의
-    # UNIQUE (src, ref, need_key, sentence) 에서 slice-suncare 행에 흡수되어 입력에 없다.
-    # low_* 는 그 위에, 골든이 세는 중립 극성 언급이 need_mention 에 저장되지 않아 더 벌어진다.
-    "p1": {
-        "missing": 0,
-        "extra": 0,
-        "neg": 9,
-        "pos": 9,
-        "unresolved": 9,
-        "persist_months": 9,
-        "persist_products": 3,
-        "low_mentioning": 93,
-        "low_share": 69,
-    },
+    # 005 전에는 neg/pos/persist_* 도 9행씩 어긋났다: p1 이 재추출한 리뷰 548건이 옛 자연키
+    # UNIQUE (src, ref, need_key, sentence) 에서 slice-suncare 행에 흡수되어 입력에 없었다.
+    # 그 548건이 돌아오면서 그 넷은 0이 되고 low_* 만 남는다 — 골든이 세는 중립 극성 언급이
+    # need_mention 에 저장되지 않는, 005 와 무관한 두 번째 차이다.
+    "p1": {"missing": 0, "extra": 0, "low_mentioning": 86, "low_share": 61},
     # 시드가 wish_mention.channel_id 를 채우지 않는다 — 채널 수는 입력에 존재하지 않는다.
     "p9": {"missing": 0, "extra": 0, "channels": 601},
 }

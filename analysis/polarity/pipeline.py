@@ -5,7 +5,8 @@
 needs_runtime 의 시간 제한(statement_timeout 30s · transaction_timeout 60s ·
 idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징으로, 쓰기는 배치 커밋으로
 쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
-자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다.
+자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
+(삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
 """
 
 from __future__ import annotations
@@ -50,15 +51,15 @@ WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
 """
-# DO UPDATE 의 WHERE 가 없으면 자연키가 겹치는 시드 행(slice-*)의 버전 태그가 이 실행 것으로 바뀐다.
-# 삭제만 막는 NEED_DELETE 의 LIKE 필터는 삽입 충돌 경로를 지나가지 않는다.
+# 005 로 extractor_version 이 자연키에 들어간 뒤로 시드 행(slice-*)은 이 INSERT 와 애초에 충돌하지
+# 않는다 — 충돌하는 행은 반드시 이 실행과 같은 버전이므로 DO UPDATE 에 버전 필터가 필요 없다.
 NEED_UPSERT: LiteralString = """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, aspect_scope,
    polarity, strength, rating, observed_at, observed_at_resolution, month, sentence, kind, marker,
    polarity_reason, extractor_version, polarity_version)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (src, ref, need_key, sentence) DO UPDATE
+ON CONFLICT (src, ref, need_key, extractor_version, md5(sentence)) DO UPDATE
 SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     source_product_key = EXCLUDED.source_product_key, category = EXCLUDED.category,
     lexicon_category = EXCLUDED.lexicon_category, aspect_scope = EXCLUDED.aspect_scope,
@@ -67,7 +68,6 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
-WHERE need_mention.extractor_version LIKE 'rule-v%%'
 """
 WISH_UPSERT: LiteralString = """
 INSERT INTO wish_mention
