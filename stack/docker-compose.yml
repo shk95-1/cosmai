@@ -79,6 +79,10 @@ services:
   # **프로필 뒤에 있으므로 `docker compose up -d` 로는 뜨지 않는다** — 라이브 트랜스포트가 붙어 있어
   # 뜨는 순간부터 실제 요청이 나가고, 언제 처음 나갈지는 #10 조건 3(그림자 실행)에서 사람이 고르는
   # 시각이다. 조건 5(컷오버)에서 상시로 켜는 것도 같은 명령이다.
+  # 이 게이트가 막는 것은 인자 없는 `up -d` 뿐이다 — 서비스명을 직접 지정한 `up -d collector-commerce`나
+  # `run --rm collector-commerce`는 Compose 의 표준 동작(이름을 직접 부르면 그 서비스의 프로필이 자동
+  # 활성)으로 프로필 없이도 뜬다(collector-youtube-watch 도 같은 한계를 가진 기존 패턴이라 회귀는 아님).
+  # "실수로 수집이 시작되는 일은 없다"로 읽으면 안 된다.
   # 켜기: docker compose --profile commerce up -d collector-commerce
   # 끄기: docker compose stop collector-commerce
   # (stack/rollback.sh 는 이 프로필을 이미 켜고 부른다 — 안 그러면 롤백이 이 컨테이너를 못 세운다.)

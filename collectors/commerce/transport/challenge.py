@@ -39,8 +39,10 @@ CHALLENGE_MARKERS = TITLE_MARKERS + BODY_MARKERS
 
 # A challenge is a document. An XHR endpoint answering `application/json` is not one, and reading its
 # prose for a Korean phrase is how a shopping review ends up halting a source that was never refused
-# (review round 1, #10). Absent is scanned: a rendered page from the browser transport carries no
-# response content-type of its own, and it is HTML by construction.
+# (review round 1, #10). Absent is scanned too: the browser transport passes through Playwright's own
+# `response.all_headers()` (transport/browser.py), so it usually does carry a real content-type -- but
+# a navigation that produced no response leaves headers empty, and treating that as HTML is the safe
+# assumption since it came from a page render.
 HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
