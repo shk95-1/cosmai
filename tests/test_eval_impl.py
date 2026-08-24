@@ -61,6 +61,18 @@ def test_building_the_ollama_impl_does_not_open_a_connection_or_call_anything():
     assert registry.build("polarity", "ollama:gemma4:latest") is not None
 
 
+@pytest.mark.parametrize("spec", ["llm:", "ollama:", "ollama"])
+def test_building_without_a_model_is_refused_by_the_factory_not_the_registry(spec: str):
+    """#6: 뮤테이션이 이 가드 두 줄을 지워도 죽는 테스트가 0개였다 — 예외 타입만 보면 가드를 지워도
+    registry.build 의 "no implementation factory" LookupError 로 통과할 수 있으니, 모델 이름을
+    요구하는 메시지인지까지 단언해야 한다."""
+    registry.load_implementations()
+    with pytest.raises(LookupError) as missing_model:
+        registry.build("polarity", spec)
+    assert "no implementation factory" not in str(missing_model.value)
+    assert "needs a model" in str(missing_model.value)
+
+
 def test_an_unknown_impl_stops_with_exit_code_2_before_anything_is_spent(capsys):
     assert main(["eval", "polarity", "--impl", "gpt:whatever"]) == 2
     assert "gpt:whatever" in capsys.readouterr().out
