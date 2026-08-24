@@ -6,8 +6,9 @@ snippets/test_stack_commands_resolve.py).
 declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
 checked against, per contracts/entrypoints.md's collector list.
 
-`login` (#27) is the one place a person clears a browser source's challenge by hand -- run from
-inside `collector-commerce` so its profile directory is the one the collector itself resolves.
+`login` (#27) is the one place a person clears a browser source's challenge by hand -- run on the
+HOST from the repo root (not inside a container -- WSL2 needs no display forwarding that way), so
+its profile directory is the one collector-commerce's bind mount reads.
 """
 
 from __future__ import annotations

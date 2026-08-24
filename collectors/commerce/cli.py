@@ -27,6 +27,12 @@ from collectors.commerce.transport.browser import DEFAULT_PROFILE_DIR
 from collectors.commerce.transport.factory import build_fetcher as _build_fetcher
 
 SCOPE_PATH = Path(__file__).resolve().parent / "scope.json"
+# #27 round 1: `login` moved from "run inside collector-commerce" to "run on the host, from the repo
+# root" (WSL2 needs no display forwarding that way -- WSLg already shows the window). Both
+# DEFAULT_PROFILE_DIR (relative to cwd) and stack/docker-compose.yml's bind-mount default
+# (../var/browser-profiles, relative to stack/) resolve to this directory, so login has to check
+# it is actually running from here rather than silently authorising some other var/browser-profiles.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _scope() -> dict:
@@ -70,12 +76,22 @@ def login(
     `collectors/commerce/transport/browser.py` uses, waits while a person signs in or clears
     whatever is in the way, and leaves the cookies on disk for the next scheduled run to find.
 
-    The profile directory is `transport.browser.DEFAULT_PROFILE_DIR` and is deliberately not a CLI
-    knob: it is a relative path resolved from cwd, and the collector reaches the same default the
-    same way, so the two agree only when both run from the image's WORKDIR -- i.e. inside the
-    `collector-commerce` container (`docker compose run --rm collector-commerce ... login ...`),
-    never from an arbitrary host shell.
+    Run this from the repo root on the HOST, not inside a container: WSL2 shows the browser window
+    (WSLg) without any display forwarding to wire up, and stack/docker-compose.yml's bind mount for
+    collector-commerce reads the very directory this creates. A host checkout also needs Chromium
+    installed once -- the image carries it, a bare host clone does not:
+
+        uv run playwright install chromium
+
+    The profile directory is `transport.browser.DEFAULT_PROFILE_DIR`, still not a CLI knob: it is a
+    relative path resolved from cwd, and the bind mount's default host path is the repo root's
+    `var/browser-profiles` too -- the two agree only when this runs from the repo root, which is
+    why a different cwd is refused below rather than silently writing somewhere the collector never
+    reads.
     """
+    if Path.cwd() != REPO_ROOT:
+        print(f"cosmai login must run from the repo root ({REPO_ROOT}); this cwd is {Path.cwd()}")
+        return 2
     try:
         cls = SOURCES[source]
     except KeyError:

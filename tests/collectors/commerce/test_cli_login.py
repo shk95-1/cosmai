@@ -81,6 +81,18 @@ def test_login_refuses_an_unknown_source():
     assert code != 0
 
 
+def test_login_refuses_when_cwd_is_not_the_repo_root(tmp_path, monkeypatch):
+    # #27 round 1: login now runs on the HOST from the repo root (not inside the container), because
+    # DEFAULT_PROFILE_DIR is relative to cwd and the bind mount's default host path
+    # (stack/docker-compose.yml's COMMERCE_BROWSER_PROFILE_DIR) is the repo root's var/browser-profiles.
+    # A different cwd would silently authorise a profile the collector never mounts.
+    calls: list[dict] = []
+    monkeypatch.chdir(tmp_path)
+    code = cli.login("oliveyoung", fetcher_factory=_factory(calls))
+    assert code != 0
+    assert calls == [], "a wrong-cwd refusal must not open a browser at the wrong profile"
+
+
 def test_login_refusal_never_builds_a_fetcher():
     calls: list[dict] = []
     code = cli.login("hwahae", fetcher_factory=_factory(calls))

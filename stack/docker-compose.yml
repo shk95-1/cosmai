@@ -94,11 +94,17 @@ services:
       # `<<:` replaces the anchor's volumes: rather than adding to them (collector-youtube-work/
       # -flatten below hit the same trap), so the secret mount has to be repeated here.
       - ${COSMAI_SECRET_FILE_HOST:?stack-env-example 참고 - ~/.config/cosmai/env 의 호스트 절대경로}:/run/cosmai/env:ro
-      # #27: a person authorises this by hand with `cosmai login --source <s>`, run inside this
-      # container so DEFAULT_PROFILE_DIR (a path relative to the image's WORKDIR) resolves to the
-      # same place the collector reads. Without this the profile lives in the writable layer and a
-      # rebuild throws away every cookie condition 3's baseline depends on.
-      - commerce-browser-profiles:/srv/cosmai/var/browser-profiles
+      # #27: a bind mount, not a named volume -- a person authorises this by hand from the HOST with
+      # `uv run cosmai login --source <s>` (repo root), the way the old stack's
+      # TREND_RADAR_PROFILE_DIR did (service/stack/docker-compose.yml:156) and for the same reason: a
+      # named volume would force the login window through the container, which on WSL2 means wiring
+      # up display forwarding a person does not already have. The relative default resolves against
+      # this file's own directory (stack/), so `../var/browser-profiles` is the repo root's
+      # `var/browser-profiles` -- the same place `collectors/commerce/transport/browser.py`'s
+      # DEFAULT_PROFILE_DIR resolves to when `cosmai login`/`cosmai collect` run from the repo root
+      # on the host. Read-write: oliveyoung refreshes session cookies mid-run, so read-only would
+      # make every run after the first one collect against a stale session.
+      - ${COMMERCE_BROWSER_PROFILE_DIR:-../var/browser-profiles}:/srv/cosmai/var/browser-profiles
 
   # 네이버 API Hub. 커머스와 다른 호스트·다른 키(contracts/secrets.md 의 COSMA_SRC_NAVER_BLOG_*)라
   # 예산도 따로다 — 네이버 쿼터가 막혔다고 커머스를 멈출 이유가 없다.
@@ -163,9 +169,6 @@ volumes:
   # 이름 있는 볼륨: 호스트 배치를 이 파일이 정하지 않는다. 안에 있는 것은 재취득 가능한 payload 뿐이라
   # 백업 대상이 아니고, artifacts 행과의 짝은 DB 쪽 digest 가 쥔다.
   youtube-payloads:
-  # 여기 있는 쿠키는 payload 와 달리 사람이 손으로 다시 만들어야 한다 (`cosmai login`) -- 지워지면
-  # 재취득 가능이 아니라 조건 3의 기준선 재현이 사람 1회 작업으로 되돌아간다는 뜻이다 (#27).
-  commerce-browser-profiles:
 
 networks:
   db-net:

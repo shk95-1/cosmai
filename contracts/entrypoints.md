@@ -10,8 +10,10 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
 종료 코드: 0 ok · 1 partial(일부 실패·절단) · 2 blocked(차단/거부)   ← trend-radar 관찰 규약 그대로
 cosmai login --source <source>
   <source> 가 registry 에 없거나 브라우저 트랜스포트(Transport.BROWSER)가 아니면 종료 코드 2 로 거절.
-  headless=False 로 실제 창을 띄우고, 프로필은 `collector-commerce` 컨테이너 안에서 실행했을 때만
-  수집기와 같은 디렉터리(DEFAULT_PROFILE_DIR)를 본다 (#27).
+  headless=False 로 실제 창을 띄우고, **호스트에서 레포 루트 기준으로 실행**한다(컨테이너 안이 아님 --
+  WSL2 는 WSLg 로 창을 그대로 띄우고, cwd 가 레포 루트가 아니면 종료 코드 2 로 거절한다). 그 cwd 가
+  `stack/docker-compose.yml` 의 `COMMERCE_BROWSER_PROFILE_DIR` 기본값과 같은 디렉터리로 풀리는 이유다
+  (#27). 호스트에 Chromium 이 없으면 최초 1회 `uv run playwright install chromium`.
 ```
 - 수집기는 **자기 스키마의 테이블에만** 쓴다 (`ddl/current`). 다른 스키마 읽기는 reader 롤로만.
 - 표본 설계는 상수로 세고 `collectors/<c>/scope.json` 에 기록한다 (scope.lock 의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사).
