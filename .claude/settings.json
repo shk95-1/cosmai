@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker exec shared-postgres psql:*)",
+      "Bash(docker exec -i shared-postgres psql:*)"
+    ]
+  }
+}
