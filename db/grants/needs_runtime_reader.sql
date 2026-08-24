@@ -26,7 +26,24 @@ FROM (VALUES
 ) v(t)
 WHERE to_regclass(t) IS NOT NULL \gexec
 
+-- 두 번째 수혜 롤: 5단계 운영 뷰 needs.collector_health (db/views/collector_health.sql).
+-- db/migrate.sh (f) 가 그 뷰를 SET ROLE needs_owner 로 만들고 뷰는 소유자 권한으로 돌기 때문에,
+-- 원천을 읽어야 하는 롤은 needs_runtime 이 아니라 needs_owner 다 (needs_runtime 은 뷰만 읽는다).
+
+SELECT format('GRANT USAGE ON SCHEMA %I TO needs_owner', n)
+FROM (VALUES ('trend_radar')) v(n)
+WHERE EXISTS (SELECT FROM pg_namespace WHERE nspname = n) \gexec
+
+SELECT format('GRANT SELECT ON %s TO needs_owner', t)
+FROM (VALUES
+    ('trend_radar.run'),        -- commerce 팔의 run_id/started_at/finished_at/status
+    ('trend_radar.fetch_log')   -- 같은 팔의 dataset/requests/ok/blocked/failed/p90_ms (status,error,elapsed_ms)
+) v(t)
+WHERE to_regclass(t) IS NOT NULL \gexec
+
 -- 미래 테이블까지 자동으로 열리게 하지 않는다: DEFAULT PRIVILEGES 는 일부러 부여하지 않는다.
 -- 새 원천 테이블을 읽어야 하면 여기 한 줄을 더하고 근거(슬라이스 file:line)를 주석에 남긴다.
--- 읽지 않는 것(근거): trend_radar.review_summary · run/run_source/fetch_log(5단계 운영 뷰)
+-- 읽지 않는 것(근거): needs_runtime 은 trend_radar.run/fetch_log 에 직접 닿지 않는다 -- 그 둘은
+-- needs_owner 가 뷰를 통해서만 읽는다 · trend_radar.review_summary · trend_radar.run_source(뷰가
+-- 쓰지 않는다) · tubedepth 전부(운영 뷰의 youtube 팔은 3단계에서 빠졌다, contracts/entrypoints.md)
 -- · tubedepth.channel_snapshots · tubedepth 수집기 내부 상태 테이블 · cosmai.* 전부.
