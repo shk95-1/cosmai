@@ -66,7 +66,9 @@ class RuleAggregator:
         self, mentions: Iterable[NeedMentionRow], denominators: Iterable[DenominatorRow], scope: str
     ) -> list[MetricsNeedRow]:
         rollup = scope == ROLLUP_SCOPE
-        rows = [m for m in mentions if rollup or (m.category or "") == scope]
+        # B8: aspect 를 못 정한 행의 need_key='' 센티널은 집계 전에 빠진다 — 분모까지 세면
+        # 어떤 need_key 도 닿을 수 없는 달·제품이 persist_*_total 에 들어간다 (formats.md).
+        rows = [m for m in mentions if m.need_key and (rollup or (m.category or "") == scope)]
         denoms = [d for d in denominators if rollup or (d.category or "") == scope]
 
         def key(need_key: str) -> str:

@@ -177,6 +177,22 @@ def test_the_all_rollup_folds_synonyms_onto_the_canonical_need_key():
     assert rows["끈적유분"].neg == 2
 
 
+def test_the_aspectless_sentinel_is_excluded_from_the_need_metrics():
+    """B8: need_key='' 는 need_mention 에 남지만 metrics_need 집계에서 빠진다 (formats.md)."""
+    mentions = [
+        need("밀림", "불만", ref="a/1", product="oy:a", month="2026-01"),
+        need("", "불만", ref="b/1", product="oy:b", month="2026-02", rating=1),
+        need("", "만족", ref="b/2", product="oy:b", month="2026-02"),
+    ]
+    rows = RuleAggregator().need_metrics(mentions, [], "선블록")
+    assert [r.need_key for r in rows] == ["밀림"]
+    # 센티널은 집합 전체를 세는 분모에도 들어가지 않는다 — 어떤 분자도 닿지 못하는 달·제품이다.
+    assert (rows[0].persist_months_total, rows[0].persist_products_total) == (1, 1)
+    # 롤업의 canonical 접기도 센티널을 되살리지 않는다.
+    rollup = RuleAggregator(canonical={"밀림": "밀림들뜸"}).need_metrics(mentions, [], "all")
+    assert [r.need_key for r in rollup] == ["밀림들뜸"]
+
+
 def test_wish_metrics_splits_the_cross_tab_from_its_margins():
     wishes = [
         wish("a", ref="v/1", fmt="쿠션", attribute="지속력", like=5),
