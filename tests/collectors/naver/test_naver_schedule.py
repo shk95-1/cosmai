@@ -1,4 +1,4 @@
-"""stack/crontab actually schedules every naver Dataset (playbook T10: a collector with no cron
+"""stack/crontab.d actually schedules every naver Dataset (playbook T10: a collector with no cron
 line is a real recorded outage), on a minute that isn't 0 and a time that doesn't collide with any
 other collector's line -- same concern as tests/collectors/commerce/
 test_every_dataset_is_collected_and_scheduled.py (#7), kept in this file per F-4 (수정 라운드 1)
@@ -13,20 +13,23 @@ import pytest
 from collectors.naver.models import Dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CRONTAB = REPO_ROOT / "stack" / "crontab"
+# stack/crontab became one file per supercronic container. Reading the directory keeps the collision
+# check below looking at the whole schedule, not just the container naver happens to live in today.
+CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
 
 
 def _lines() -> list[str]:
     return [
-        ln.split("#", 1)[0].strip()
-        for ln in CRONTAB.read_text(encoding="utf-8").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
+        stripped
+        for path in sorted(p for p in CRONTAB_D.iterdir() if p.is_file())
+        for ln in path.read_text(encoding="utf-8").splitlines()
+        if (stripped := ln.split("#", 1)[0].strip())
     ]
 
 
 def _times_by_dataset() -> dict[str, tuple[str, ...]]:
     """`{dataset: (minute, hour, dom, month, dow)}` for every `cosmai collect naver --dataset X`
-    line in stack/crontab."""
+    line in stack/crontab.d."""
     out: dict[str, tuple[str, ...]] = {}
     for ln in _lines():
         if "cosmai collect naver" not in ln or "--dataset" not in ln:
@@ -52,7 +55,7 @@ def _all_collector_times() -> list[tuple[str, tuple[str, ...]]]:
 
 def test_there_is_something_to_check():
     assert list(Dataset)
-    assert CRONTAB.is_file()
+    assert _lines()
 
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)
