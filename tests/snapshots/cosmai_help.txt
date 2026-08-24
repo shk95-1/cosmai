@@ -25,7 +25,8 @@ options:
   --since SINCE         Accepted for shape; unused by every dataset today.
 
 $ cosmai analyze --help
-usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] {link,polarity,aggregate,all}
+usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] [--url URL]
+                      {link,polarity,aggregate,all}
 
 positional arguments:
   {link,polarity,aggregate,all}
@@ -34,6 +35,7 @@ options:
   -h, --help            show this help message and exit
   --since SINCE         Only units observed on or after this date.
   --scope SCOPE         Restrict to one lexicon category.
+  --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--url URL]

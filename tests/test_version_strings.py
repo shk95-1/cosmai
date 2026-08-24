@@ -10,6 +10,7 @@ import re
 
 import pytest
 
+from analysis.aggregate import AGGREGATE_VERSION
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import VERSION as POLARITY_VERSION
@@ -21,6 +22,7 @@ VERSIONS = (
     ("analysis.linker.LINKER_VERSION", LINKER_VERSION),
     ("analysis.extractor.VERSION", EXTRACTOR_VERSION),
     ("analysis.polarity.VERSION", POLARITY_VERSION),
+    ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
 )
 
 

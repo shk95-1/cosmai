@@ -10,7 +10,7 @@ from typing import Any, LiteralString
 import psycopg
 
 from analysis.aggregate import ROLLUP_SCOPE, WISH_SCOPES, RuleAggregator
-from analysis.aggregate.ranking import run_ranking
+from analysis.aggregate.ranking import WRITE_BATCH, run_ranking
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
 __all__ = ["load_denominators", "load_needs", "load_wishes", "population_of", "run"]
@@ -199,6 +199,16 @@ def _wish_values(row: MetricsWishRow, run_id: int) -> tuple[Any, ...]:
     )  # fmt: skip
 
 
+def _write(
+    conn: psycopg.Connection[Any], statement: LiteralString, rows: list[tuple[Any, ...]], batch: int
+) -> None:
+    """ranking.py 의 _write 와 같은 모양 — 한 번의 executemany 로 전 scope 를 밀면 60s 를 넘긴다."""
+    for start in range(0, len(rows), batch):
+        with conn.cursor() as cur:
+            cur.executemany(statement, rows[start : start + batch])
+        conn.commit()
+
+
 def run(
     conn: psycopg.Connection[Any],
     scope: str | None = None,
@@ -206,36 +216,50 @@ def run(
     commerce_schema: str | None = None,
     captured_at: date | None = None,
     extractors: Sequence[str] | None = None,
+    batch: int = WRITE_BATCH,
 ) -> int:
     """run_id 를 주면 그 run 에 쓰고 상태는 두 번 건드리지 않는다 — #5 가 세 stage 를 한 run 으로 묶는다."""
     with conn.cursor() as cur:
         aggregator = RuleAggregator(canonical=load_canonical(cur))
         population = population_of(cur, extractors)
+    conn.rollback()
     if commerce_schema is not None:
         run_ranking(conn, aggregator.version, captured_at or date.today(), commerce_schema)
+    # 한 표씩 읽고 바로 닫는다: fetchall 뒤의 행 조립도 트랜잭션 안이고, 그 동안 세션은 idle in
+    # transaction 이다 (db/bootstrap.sql 의 15s 는 job 이 아니라 statement 크기에 맞춘 값이다).
     with conn.cursor() as cur:
         mentions = load_needs(cur, population)
+    conn.commit()
+    with conn.cursor() as cur:
         wishes = load_wishes(cur, population)
+    conn.commit()
+    with conn.cursor() as cur:
         denominators = load_denominators(cur)
-        owned = run_id is None
-        if run_id is None:
+    conn.commit()
+    owned = run_id is None
+    if run_id is None:
+        with conn.cursor() as cur:
             note = f"aggregate:{aggregator.version}:{scope or ROLLUP_SCOPE}:{'+'.join(population)}"
             run_id = _run_id(cur, note, _versions(aggregator, cur, population))
+        conn.commit()
 
-        scopes = [scope] if scope else sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
-        need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
-        # wish scope 는 카테고리 축이 아니다 — --scope 로 좁혀도 같은 세 scope 를 그대로 낸다.
-        wish_rows = [r for s in WISH_SCOPES for r in aggregator.wish_metrics(wishes, s)]
+    scopes = [scope] if scope else sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
+    need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
+    # wish scope 는 카테고리 축이 아니다 — --scope 로 좁혀도 같은 세 scope 를 그대로 낸다.
+    wish_rows = [r for s in WISH_SCOPES for r in aggregator.wish_metrics(wishes, s)]
 
-        # 이 run 의 행은 전부 이 실행이 만든다 — 지우고 다시 넣어야 사라진 키가 남지 않는다.
+    # 이 run 의 행은 전부 이 실행이 만든다 — 지우고 다시 넣어야 사라진 키가 남지 않는다.
+    with conn.cursor() as cur:
         cur.execute("DELETE FROM metrics_need WHERE run_id = %s", (run_id,))
         cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))
-        cur.executemany(NEED_SQL, [_need_values(r, run_id) for r in need_rows])
-        cur.executemany(WISH_SQL, [_wish_values(r, run_id) for r in wish_rows])
-        if owned:
+    conn.commit()
+    _write(conn, NEED_SQL, [_need_values(r, run_id) for r in need_rows], batch)
+    _write(conn, WISH_SQL, [_wish_values(r, run_id) for r in wish_rows], batch)
+    if owned:
+        with conn.cursor() as cur:
             cur.execute(
-                "UPDATE analysis_run SET status = 'done', finished_at = now() WHERE run_id = %s",
+                "UPDATE analysis_run SET status = 'ok', finished_at = now() WHERE run_id = %s",
                 (run_id,),
             )
-    conn.commit()
+        conn.commit()
     return run_id

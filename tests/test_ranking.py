@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 
+from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate.ranking import (
     ABSENT_RANK,
     LOW_COMPLETE_THRESHOLD,
@@ -17,7 +18,7 @@ from analysis.aggregate.ranking import (
     scope_threshold,
 )
 
-VERSION = "agg-v1"
+VERSION = AGGREGATE_VERSION
 
 
 def snap(hour: int, rank: int, *, product: str = "p", board: str = "b", price: int | None = None):

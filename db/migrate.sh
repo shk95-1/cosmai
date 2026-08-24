@@ -83,4 +83,12 @@ docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP
 docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
     < db/grants/needs_runtime_reader.sql
 
+# f. operational views, owner-owned. Each file drops and recreates its own view, so re-applying a
+# deploy is a no-op and a view whose columns changed still deploys (CREATE OR REPLACE would not).
+for file in db/views/*.sql; do
+    [ -e "$file" ] || continue
+    { printf 'BEGIN;\nSET ROLE needs_owner;\n'; cat "$file"; printf '\nCOMMIT;\n'; } | migrator_psql \
+        || { echo "needs: view failed: $file" >&2; exit 1; }
+done
+
 echo "needs: $applied migration(s) applied, $present already present"
