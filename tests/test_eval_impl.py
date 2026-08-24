@@ -47,6 +47,20 @@ def test_building_does_not_open_a_connection_or_call_anything():
     assert registry.build("polarity", "llm:claude-opus-5") is not None
 
 
+def test_the_ollama_factory_is_wired_and_free_so_it_skips_the_split_guard():
+    """#6/#21: ollama 는 돈이 들지 않는다 — is_paid 가 False 여야 --split 강제에 걸리지 않는다."""
+    registry.load_implementations()
+    built = registry.build("polarity", "ollama:gemma4:latest")
+    assert built is not None and built.version.startswith("llm-ollama-gemma4:latest-")
+    assert registry.is_paid("polarity", "ollama:gemma4:latest") is False
+
+
+def test_building_the_ollama_impl_does_not_open_a_connection_or_call_anything():
+    """이름만 만든다 — ollama 호출은 predict 가 불릴 때 나간다 (네트워크가 막힌 스위트가 이걸 증명한다)."""
+    registry.load_implementations()
+    assert registry.build("polarity", "ollama:gemma4:latest") is not None
+
+
 def test_an_unknown_impl_stops_with_exit_code_2_before_anything_is_spent(capsys):
     assert main(["eval", "polarity", "--impl", "gpt:whatever"]) == 2
     assert "gpt:whatever" in capsys.readouterr().out
