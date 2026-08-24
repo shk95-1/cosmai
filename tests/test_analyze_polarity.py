@@ -28,15 +28,16 @@ CAPTURED = datetime(2026, 8, 23, tzinfo=UTC)
 WRITTEN = datetime(2026, 3, 4, tzinfo=UTC)
 POSTED = datetime(2026, 3, 5, tzinfo=UTC)
 
-# 시드가 이미 담고 있는 행과 자연키가 겹치는 원천 (dev DB 실측: slice-suncare 리뷰 400/400 이 이 규칙으로
-# 같은 (src, ref, need_key, sentence) 를 다시 만든다). 시드 값은 need_mention·wish_mention 에서 그대로 읽었다.
+# 시드가 이미 담고 있는 행과 같은 (src, ref, need_key, sentence) 를 만드는 원천 (dev DB 실측: slice-suncare
+# 리뷰 400/400). 005 로 extractor_version 이 키에 들어간 뒤 이것은 더 이상 자연키 충돌이 아니다 — 두 행이
+# 나란히 남는다. 시드 값은 need_mention·wish_mention 에서 그대로 읽었다.
 SEED_NEED = ("glowpick", "146765", "7856759", "146765/7856759", "끈적유분")
 SEED_NEED_SENTENCE = "엄청 끈적이고 잘 안 발리고… 돈 더주고 좋은 거 살걸 그랬어요ㅠㅠ"
 SEED_NEED_AT = datetime(2026, 8, 18, tzinfo=UTC)
 SEED_WISH = ("--5yicxxgp4", "UgxrFMQux3xh1gzOnI94AaABAg")
 SEED_WISH_TEXT = "스킨케어 루틴 찍어주세요"
 SEED_WISH_AT = datetime(2026, 4, 22, tzinfo=UTC)
-SEED_COUNTS = {"need_mention": 15498, "wish_mention": 18489}  # tests/test_seed.py 의 기대값과 같은 출처
+SEED_COUNTS = {"need_mention": 16046, "wish_mention": 18489}  # tests/test_seed.py 의 기대값과 같은 출처
 
 REVIEWS = [
     ("oliveyoung", "R1", "P1", 5.0, "백탁이 하나도 없어서 진짜 좋아요", WRITTEN),
@@ -279,14 +280,15 @@ def _tagged(url: str, table: str, prefix: str) -> int:
 
 
 def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _schema_name: str):
-    """UNIQUE 에 버전이 없어 재추출이 시드와 같은 자연키를 만든다 — UPSERT 가 그 행을 갱신하면 안 된다."""
+    """재추출이 시드와 같은 문장·need_key 를 다시 뽑는다 — 005 로 extractor_version 이 자연키에 들어간
+    뒤로 둘은 충돌하지 않고 나란히 남고, 시드 행의 버전 태그는 그대로다."""
     assert {t: _tagged(seeded, t, "slice-%") for t in SEED_COUNTS} == SEED_COUNTS
     _run(seeded, _schema_name)
     _, _, _, ref, need_key = SEED_NEED
     with connect(seeded) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT extractor_version, polarity_version FROM need_mention"
-            " WHERE ref = %s AND need_key = %s AND sentence = %s",
+            " WHERE ref = %s AND need_key = %s AND sentence = %s ORDER BY extractor_version",
             (ref, need_key, SEED_NEED_SENTENCE),
         )
         need = cur.fetchall()
@@ -295,7 +297,12 @@ def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _sche
             ("/".join(SEED_WISH),),
         )
         wish = cur.fetchall()
-    # 충돌은 한 행에서 일어난다 — 새 행이 생겨서 시드가 살아남은 것이 아니다.
-    assert need == [("slice-suncare", "rule-v2.1")]
+    # 시드가 살아남는 방식이 바뀌었다: UPSERT 의 WHERE 가 아니라 자연키가 행을 갈라놓는다. 이 리뷰는
+    # slice-p1 도 다시 뽑은 548건 중 하나라 세 버전이 나란히 남는다(전에는 suncare 하나에 흡수됐다).
+    assert need == [
+        ("rule-v2.2", "rule-v2.2"),
+        ("slice-p1", "rule-v2.2"),
+        ("slice-suncare", "rule-v2.1"),
+    ]
     assert wish == [("slice-p9", "b")]
     assert {t: _tagged(seeded, t, "slice-%") for t in SEED_COUNTS} == SEED_COUNTS

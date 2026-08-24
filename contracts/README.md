@@ -7,6 +7,7 @@
 | `ddl/current/*.sql` | 2026-08-23 현재 DB의 실제 스키마 덤프 (app.trend_radar 13 · app.tubedepth 13 · cosmai.cosmai 12 테이블). 수집기 이식 후에도 **이 테이블 모양을 유지**해야 한다 | `pg_dump --schema-only` 재덤프 → diff |
 | `ddl/needs/001_needs.sql` | 신규 `app.needs` 스키마 (17 테이블). 주석 3곳은 낡았다 — 아래 각주 | 마이그레이션 적용 후 `pg_catalog` 대조 테스트 |
 | `ddl/needs/002_audit_additive.sql` | 2026-08-23 계약 감사(이슈 #17)가 요구한 **추가만** — 테이블 3(`need_key`, `category_map`, `product_ref_candidate`) + 컬럼 31. 합계 20 테이블 | 같은 테스트 + `tests/test_ddl_additive_only.py` |
+| `ddl/needs/005_need_mention_natural_key.sql` | `need_mention` 자연키 교체 — btree 2704B 상한(#5 운영 실패)과 시드·분석 충돌(#12 안 A)을 한 번에 푼다. `UNIQUE (src, ref, need_key, sentence)` → `UNIQUE INDEX (src, ref, need_key, extractor_version, md5(sentence))`. **추가만의 유일한 예외**(사용자 승인 2026-08-24) | `tests/test_ddl_additive_only.py` 의 `SANCTIONED_DESTRUCTIVE` 화이트리스트 + `tests/test_need_mention_natural_key.py` |
 | `ddl/needs/*.sql` | (위와 같은 디렉터리) | 적용 경로는 `db/migrate.sh` 하나 (운영·테스트 공용); 적용 여부는 원장 `needs.schema_migration`에 기록 |
 | `entrypoints.md` | CLI 진입점·종료 코드·run/fetch_log 공통 뷰 | CLI `--help` 스냅샷 + 뷰 존재 테스트 |
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입·수식, 평가 하네스가 넘어야 할 기준선 | `tests/test_contract_types.py` 가 `analysis/types.py` 와 대조 · `eval <task>` 가 기준선과 비교 |
