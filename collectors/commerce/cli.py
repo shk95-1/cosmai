@@ -105,7 +105,12 @@ def run(
 class _EngineSink:
     """Commits each batch in its own transaction as it arrives -- not one transaction for the whole
     run, so a crash partway through does not discard rows a natural-key upsert already made safe to
-    have written twice."""
+    have written twice.
+
+    Taking the connection out of the pool per call is also how this satisfies `engine.Sink`'s
+    requirement to be callable from several threads at once: the `Engine` is shared and thread-safe,
+    a `Connection` would not be. Holding one open for the run would be fewer checkouts and a
+    concurrency bug."""
 
     def __init__(self, engine) -> None:
         self._engine = engine

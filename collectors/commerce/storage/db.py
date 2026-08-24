@@ -57,7 +57,12 @@ def create_engine(url: str) -> Engine:
 
 def write_records(connection: sa.Connection, records: Sequence) -> None:
     """Commits happen per batch by the caller, not per write: an hourly collection is minutes long,
-    and the natural-key upserts already make re-running a partial hour harmless."""
+    and the natural-key upserts already make re-running a partial hour harmless.
+
+    `connection` belongs to the caller for the duration of this call and must not be one that another
+    thread is also using -- `engine.Sink` is called concurrently and a `sqlalchemy.Connection` is not
+    thread-safe. Hand it a fresh one per call (`cli._EngineSink` takes one out of the pool), not a
+    long-lived connection opened once and shared."""
     if not records:
         return
     Repository(connection).write(records)

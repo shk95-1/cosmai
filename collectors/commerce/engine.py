@@ -113,6 +113,24 @@ class NullJournal:
 
 
 class Sink(Protocol):
+    """Where a lane's parsed records go.
+
+    Two requirements, and the second is the one with teeth:
+
+    1. `write` is called from several threads at once. A lane runs `policy.concurrency` workers over
+       one sink and `_Lane._work` calls this outside `_lock` on purpose -- serialising a database
+       write behind the lock that guards the queue would pay for pacing twice. SQLAlchemy documents
+       `Connection` as not thread-safe, so an implementation must not close over one; at two workers
+       and short statements psycopg's own lock hides that, which is exactly why it is written down
+       here rather than left to be discovered.
+    2. Each call commits on its own. Threads sharing one `Connection` share one transaction, so a
+       rollback anywhere discards every batch written since -- including other workers' rows that the
+       run has already counted. `tests/collectors/commerce/test_sink_takes_concurrent_writes.py`
+       holds this one.
+
+    `cli._EngineSink` satisfies both by taking a connection out of the pool per call.
+    """
+
     def write(self, records: Sequence[Record]) -> None: ...
 
 
