@@ -88,6 +88,11 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 씨드 수로만 계산된다. 그러니 이 숫자는 "적어도 이만큼"이지 "많아야 이만큼"이 아니다. 겹치지 않는다는 보장은
 간격이 아니라 락이 준다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
 무해하므로 이 규칙에서 제외된다.
+
+youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋만 있었고 큐를 비우는 줄이
+없었다). 상주 데몬이 아니라 크론인 이유는 `collectors/youtube/cli.py:_run_work` 가 한 번에
+`DEFAULT_WORK_BATCH` 만큼만 claim 하고 끝나는 배치이기 때문이다 — 반복은 바깥이 준다. 겹쳐 떠도
+안전하다: `_claim` 이 `FOR UPDATE SKIP LOCKED` 한 문장으로 집는다.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
 5 2 * * *   cosmai collect commerce --dataset product
@@ -96,6 +101,6 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
-youtube: watch 1h · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
+youtube: watch 1h · work 5m · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
 naver:   datalab 월 1회 (키워드 사전 기준)
 ```

@@ -1,0 +1,13 @@
+# UTC. work 5m, from contracts/entrypoints.md §스케줄. Cron and not a resident daemon because
+# `collectors/youtube/cli.py:_run_work` is a batch: it claims up to DEFAULT_WORK_BATCH (50) queued
+# jobs, works them, and returns -- there is no poll loop and no --poll flag to give it one, so the
+# repetition has to come from outside the process. (The archived tubedepth worker was a daemon with
+# `work --poll 5`; that flag did not come across into this CLI.)
+#
+# 5 minutes drains faster than watch fills: 50 jobs a pass is 600 an hour against one watch sweep an
+# hour, so a backlog shrinks between sweeps instead of growing. Overlap is safe by construction -- if
+# one pass is still running when the next fires, `_claim`'s single `FOR UPDATE SKIP LOCKED` statement
+# means the second cannot see the first's rows as queued.
+#
+# The only youtube line that spends an external request budget, which is why it is alone here.
+*/5 * * * *   cosmai collect youtube --dataset work

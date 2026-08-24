@@ -1,0 +1,8 @@
+# UTC. flatten 15m and prune 1d, from contracts/entrypoints.md §스케줄. These two share a container
+# because neither makes an external request -- flatten reads stored payloads into the snapshot tables
+# and prune deletes aged rows, so they have no budget to be throttled apart by, unlike watch and work.
+*/15 * * * *   cosmai collect youtube --dataset flatten
+# 02:50 and not an exact quarter hour: prune deletes the artifact rows flatten is reading, and
+# supercronic starts an overlapping line rather than skipping it, so the daily line is placed off
+# every */15 tick instead of on one.
+50 2 * * *     cosmai collect youtube --dataset prune
