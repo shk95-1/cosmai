@@ -66,7 +66,10 @@ for file in contracts/ddl/needs/*.sql; do
         continue
     fi
     {
-        printf 'BEGIN;\nSET ROLE needs_owner;\n'
+        # needs_migrator has no lock_timeout of its own (db/bootstrap.sql only sets it on
+        # needs_runtime), so a DDL migration would wait forever behind a long reader; 5s matches
+        # needs_runtime's lock_timeout and just fails+rolls back the transaction for a plain retry.
+        printf 'BEGIN;\nSET ROLE needs_owner;\nSET lock_timeout = '"'"'5s'"'"';\n'
         cat "$file"
         printf "\nINSERT INTO needs.schema_migration(version) VALUES (:'version');\nCOMMIT;\n"
     } | migrator_psql -v version="$version" \
