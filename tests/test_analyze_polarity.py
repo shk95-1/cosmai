@@ -46,13 +46,18 @@ SEED_WISH_TEXT = "스킨케어 루틴 찍어주세요"
 SEED_WISH_AT = datetime(2026, 4, 22, tzinfo=UTC)
 SEED_COUNTS = {"need_mention": 16046, "wish_mention": 18489}  # tests/test_seed.py 의 기대값과 같은 출처
 
+# P1 은 선블록(suncare-v2.2 사전), P2 는 샴푸(p1-v2.2 사전) — 스코프 없는 실행의 기본 모양이다.
+# 한 달의 한 페이지가 두 사전을 함께 싣고, need_rows 가 그 둘을 나눠 부른 뒤 되돌린다.
 REVIEWS = [
     ("oliveyoung", "R1", "P1", 5.0, "백탁이 하나도 없어서 진짜 좋아요", WRITTEN),
     ("oliveyoung", "R2", "P1", 1.0, "백탁이 너무 심해서 최악이에요", WRITTEN),
     ("oliveyoung", "R3", "P1", 5.0, "그냥 무난합니다", WRITTEN),
     # written_at 이 NULL 인 리뷰 — captured_at 으로 폴백하고 그 수를 센다 (formats.md §시간).
     ("oliveyoung", "R4", "P1", 2.0, "끈적임이 심하고 밀려요", None),
+    ("oliveyoung", "R5", "P2", 1.0, "비듬이 너무 심해서 최악이에요", WRITTEN),
 ]
+SUNCARE_REVIEWS = 4  # 위 다섯 중 P1 의 것
+SHAMPOO_REVIEWS = 1
 COMMENTS = [
     ("V1", "C1", "쿠션형으로도 출시해주세요 제발요", 12, POSTED),
     ("V1", "C2", "항상 잘 보고 있습니다 감사합니다", 3, POSTED),
@@ -86,16 +91,22 @@ def loaded(sources: str, needs_runtime_url: str, _schema_name: str) -> Iterator[
     seed.run_all(needs_runtime_url, only=("lexicon",))
     # 원천 행은 그 스키마의 소유자로 넣는다 — needs_runtime 은 원천에 SELECT 만 갖는다 (db/grants).
     with connect(sources) as conn, conn.cursor() as cur:
-        cur.execute(
+        cur.executemany(
             "INSERT INTO product (source, product_key, captured_at, name, first_seen_at, last_seen_at)"
-            " VALUES ('oliveyoung', 'P1', %s, '테스트 선크림 SPF50', %s, %s)",
-            (CAPTURED, CAPTURED, CAPTURED),
+            " VALUES ('oliveyoung', %s, %s, %s, %s, %s)",
+            [
+                ("P1", CAPTURED, "테스트 선크림 SPF50", CAPTURED, CAPTURED),
+                ("P2", CAPTURED, "테스트 샴푸 500ml", CAPTURED, CAPTURED),
+            ],
         )
-        cur.execute(
+        cur.executemany(
             "INSERT INTO rank_snapshot"
             " (source, board, category_key, product_key, captured_at, category_name, rank, product_name)"
-            " VALUES ('oliveyoung', 'best', 'suncare', 'P1', %s, '스킨케어 > 선크림', 1, '테스트 선크림')",
-            (CAPTURED,),
+            " VALUES ('oliveyoung', 'best', %s, %s, %s, %s, 1, %s)",
+            [
+                ("suncare", "P1", CAPTURED, "스킨케어 > 선크림", "테스트 선크림"),
+                ("haircare", "P2", CAPTURED, "헤어케어 > 샴푸", "테스트 샴푸"),
+            ],
         )
         cur.executemany(
             "INSERT INTO review (source, review_key, captured_at, product_key, rating, body, written_at)"
@@ -159,9 +170,12 @@ def test_a_review_gets_the_lexicon_category_the_category_map_derives(loaded: str
     with connect(loaded) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT DISTINCT category, lexicon_category, source_product_key FROM need_mention"
-            " WHERE src = 'review'"
+            " WHERE src = 'review' ORDER BY source_product_key"
         )
-        assert cur.fetchall() == [("스킨케어 > 선크림", "선블록", "P1")]
+        assert cur.fetchall() == [
+            ("스킨케어 > 선크림", "선블록", "P1"),
+            ("헤어케어 > 샴푸", "샴푸", "P2"),
+        ]
 
 
 def test_the_sunscreen_dictionary_lands_a_complaint_and_a_satisfaction_on_the_same_aspect(
@@ -216,8 +230,8 @@ def test_since_narrows_the_run_to_the_months_that_still_matter(loaded: str, _sch
 
 
 def test_scope_keeps_only_one_lexicon_category(loaded: str, _schema_name: str):
-    assert _run(loaded, _schema_name, scope="샴푸").units == 0
-    assert _run(loaded, _schema_name, scope="선블록").units == len(REVIEWS)
+    assert _run(loaded, _schema_name, scope="샴푸").units == SHAMPOO_REVIEWS
+    assert _run(loaded, _schema_name, scope="선블록").units == SUNCARE_REVIEWS
 
 
 def test_a_missing_source_schema_is_a_run_with_no_rows_not_a_crash(loaded: str):
@@ -486,3 +500,25 @@ def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
     with connect(loaded) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, finished_at IS NOT NULL FROM analysis_run")
         assert cur.fetchall() == [("failed", True)]
+
+
+def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _schema_name: str):
+    """스코프 없는 실행의 한 달 한 페이지에는 선블록(suncare-v2.2)과 샴푸(p1-v2.2)가 섞여 들어온다.
+    need_rows 는 사전별로 묶어 classify_many 를 부르고 그 결과를 *전역* 인덱스로 되돌린다 — 그룹-로컬
+    인덱스로 되돌리면 뒤 그룹의 판정이 앞 그룹의 문장에 붙고 뒤 그룹은 행을 통째로 잃는다.
+    '비듬'은 p1-v2.2 의 트러블에만 있다(suncare-v2.2 의 트러블 패턴에는 없다) — 이 행이 있다는 것이
+    그 문장을 generic 사전이 봤다는 증거다.
+    """
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT ref, lexicon_category, need_key, polarity, sentence FROM need_mention"
+            " WHERE src = 'review' ORDER BY ref, need_key"
+        )
+        found = cur.fetchall()
+    assert found == [
+        ("P1/R1", "선블록", "백탁", "만족", "백탁이 하나도 없어서 진짜 좋아요"),
+        ("P1/R2", "선블록", "백탁", "불만", "백탁이 너무 심해서 최악이에요"),
+        ("P1/R4", "선블록", "끈적유분", "불만", "끈적임이 심하고 밀려요"),
+        ("P2/R5", "샴푸", "트러블", "불만", "비듬이 너무 심해서 최악이에요"),
+    ]
