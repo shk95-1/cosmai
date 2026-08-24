@@ -174,8 +174,9 @@ def _run_seconds(line: _Line, *, capped: bool) -> float:
     `engine.collect` walks them one after another.
 
     The budget tier is not a ceiling. Besides the widening in `_paced_seconds`, a source with
-    `max_requests_per_run=None` (hwahae) has no budget to charge, so it is priced at its seed count
-    while `max_depth` lets it follow further. Read the tier as "at least this long", never "at most".
+    `max_requests_per_run=None` has no budget to charge, so it is priced at its seed count while
+    `max_depth` lets it follow further -- all four declare one since #10, but the branch stays
+    because a new source is not obliged to. Read the tier as "at least this long", never "at most".
     """
     dataset = Dataset(line.dataset)
     total = 0.0

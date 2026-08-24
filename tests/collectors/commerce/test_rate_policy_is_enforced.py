@@ -505,3 +505,22 @@ def test_the_policys_user_agent_reaches_the_fetcher(declared: str):
 
     headers = {k.lower(): v for k, v in fetcher.seen[0].headers}
     assert headers.get("user-agent") == declared
+
+
+# --- what every shipped source has to declare ----------------------------------
+
+
+def test_every_shipped_source_declares_a_request_budget():
+    """A source with no `max_requests_per_run` has no worst case.
+
+    Harmless while nothing paced and nothing fetched (#7); not harmless now that a lane really waits
+    out `min_interval_s` between real requests, because `max_depth` alone bounds how deep a walk
+    goes and not how wide. hwahae was the last one without a budget and got 20 for #10 (사용자 승인
+    2026-08-24) -- twenty times the one request production measures per run.
+    """
+    from collectors.commerce import sources as _registered  # noqa: F401 -- import registers them
+    from collectors.commerce.registry import SOURCES
+
+    assert SOURCES, "an empty registry would assert nothing"
+    unbounded = sorted(key for key, cls in SOURCES.items() if cls.policy.max_requests_per_run is None)
+    assert not unbounded, f"these sources have no ceiling on a run's requests: {unbounded}"
