@@ -537,8 +537,14 @@ def test_an_unlock_that_fails_on_a_live_connection_leaves_the_lock_on_the_pooled
             out = capsys.readouterr().out
             assert "oliveyoung" in out and "pool" in out, out
 
+            # dispose() only closes the client socket; Postgres reclaiming the backend and dropping its
+            # session advisory lock is asynchronous, so the first _free() right after can still see it
+            # held -- bounded retry, same idiom as the idle_session_timeout test above.
             engine.dispose()
-            assert _free(observer, "oliveyoung")
+            deadline = time.monotonic() + FREED_TIMEOUT_S
+            while not _free(observer, "oliveyoung") and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert _free(observer, "oliveyoung"), "dispose() did not free the lock in time"
     finally:
         engine.dispose()
         observer_engine.dispose()
