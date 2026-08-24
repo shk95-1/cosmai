@@ -149,15 +149,25 @@ def _paced_seconds(policy, requests: int) -> float:
     A token bucket at one request per `min_interval_s` with `burst` free at the start, which is why
     a walk of one seed costs nothing. `concurrency` overlaps waiting on responses but every lane
     draws from that one bucket, so it never divides the total -- the pace does all the bounding.
+
+    This is the pace the policy *declares*, not a bound on the walk. `Gate._back_off` widens the
+    live interval up to `Gate.MAX_INTERVAL_S` (300s) whenever the site answers 403/429/503, so a
+    refused source walks slower than any number here -- daisomall's 30s becomes 300s. Response
+    latency and retries are not priced either. Every number below is therefore a lower bound, which
+    is the honest direction: a gap that fails here fails in production too.
     """
     return max(0, requests - policy.burst) * policy.min_interval_s
 
 
 def _run_seconds(line: _Line, *, capped: bool) -> float:
     """How long that cron line runs. `capped=False` is the seed floor (every source walks exactly
-    the requests `seeds()` hands it, nothing followed); `capped=True` is the ceiling where every
-    source spends its whole `max_requests_per_run`. Sources are summed, not maxed, because
+    the requests `seeds()` hands it, nothing followed); `capped=True` is the budget tier, where
+    every source spends its whole `max_requests_per_run`. Sources are summed, not maxed, because
     `engine.collect` walks them one after another.
+
+    The budget tier is not a ceiling. Besides the widening in `_paced_seconds`, a source with
+    `max_requests_per_run=None` (hwahae) has no budget to charge, so it is priced at its seed count
+    while `max_depth` lets it follow further. Read the tier as "at least this long", never "at most".
     """
     dataset = Dataset(line.dataset)
     total = 0.0
