@@ -67,6 +67,13 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     search.add_argument("--top", type=int, default=10, help="How many chunks to print.")
     search.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    ev = actions.add_parser("eval", help="Score the retriever against the topic dictionary.")
+    ev.add_argument("--mode", required=True, choices=["literal", "heldout"])
+    ev.add_argument("--engine", default="bm25", choices=["bm25"], help="Vector arrives with #28-4.")
+    ev.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
+    ev.add_argument("--out", default=None, help="Write one row per query to this CSV.")
+    ev.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
@@ -165,6 +172,8 @@ def _run_retrieval(args: argparse.Namespace) -> int:
                 print(f"  {problem}")
             # 계약 위반은 적재를 막지 않지만 조용히 넘어가서도 안 된다.
             return 0 if not outcome.problems else 1
+        if args.action == "eval":
+            return _run_retrieval_eval(conn, args, sources)
         hits = pipeline.search(conn, args.query, top=args.top, sources=sources)
     if not hits:
         print("결과 없음")
@@ -172,6 +181,23 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
     return 0
+
+
+def _run_retrieval_eval(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:
+    import csv
+
+    from analysis.retrieval import eval as retrieval_eval
+
+    rows = retrieval_eval.run(conn, args.mode, engine=args.engine, sources=sources)
+    print(retrieval_eval.summary(rows))
+    if args.out:
+        with Path(args.out).open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=retrieval_eval.FIELDS, lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(vars(row) for row in rows)
+        print(f"{args.out} 저장")
+    # 질의가 하나도 채점되지 않으면 청크가 비었거나 사전이 안 얹힌 것이다. 조용히 0 을 주지 않는다.
+    return 0 if rows else 1
 
 
 def _connect(url: str | None) -> psycopg.Connection[Any]:

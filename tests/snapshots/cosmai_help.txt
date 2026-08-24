@@ -39,15 +39,16 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai retrieval --help
-usage: cosmai retrieval [-h] {chunk,search} ...
+usage: cosmai retrieval [-h] {chunk,search,eval} ...
 
 positional arguments:
-  {chunk,search}
-    chunk         Load needs.retrieval_chunk from the source schemas.
-    search        Rank chunks against a query.
+  {chunk,search,eval}
+    chunk              Load needs.retrieval_chunk from the source schemas.
+    search             Rank chunks against a query.
+    eval               Score the retriever against the topic dictionary.
 
 options:
-  -h, --help      show this help message and exit
+  -h, --help           show this help message and exit
 
 $ cosmai retrieval chunk --help
 usage: cosmai retrieval chunk [-h] [--since SINCE]
@@ -73,6 +74,20 @@ options:
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --top TOP             How many chunks to print.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval eval --help
+usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25}]
+                             [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                             [--out OUT] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --mode {literal,heldout}
+  --engine {bm25}       Vector arrives with #28-4.
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --out OUT             Write one row per query to this CSV.
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help

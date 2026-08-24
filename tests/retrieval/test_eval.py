@@ -1,0 +1,112 @@
+"""literal / heldout 의 정의를 고정한다. 두 모드의 차이가 흐려지면 heldout 숫자가
+"벡터가 넘어야 하는 선"이 아니게 되고, #28 단계 4의 채택 기준이 근거를 잃는다."""
+
+from __future__ import annotations
+
+import psycopg
+import pytest
+from sqlalchemy.engine import make_url
+
+from analysis.retrieval import eval as retrieval_eval
+from analysis.retrieval.bm25 import Index
+
+pytestmark = pytest.mark.postgres
+
+
+def test_a_query_is_a_topic_alias_and_excluded_topics_are_left_out():
+    literal = retrieval_eval.queries("literal")
+    assert literal
+    topics = {topic for topic, _ in literal}
+    # `선크림`·`추천_재구매` 는 판별력이 없어 판정에서 빠졌다. 평가에서도 빠져야 한다.
+    assert "선크림" not in topics and "추천_재구매" not in topics
+    assert ("백탁", "하얗게") in literal
+
+
+def test_heldout_drops_a_topic_that_has_only_one_alias():
+    # 별칭이 하나면 뺄 것이 없어 heldout 질문 자체가 성립하지 않는다.
+    assert any(t == "혼합자차" for t, _ in retrieval_eval.queries("literal"))
+    assert not any(t == "혼합자차" for t, _ in retrieval_eval.queries("heldout"))
+
+
+def test_chunks_of_one_document_count_once():
+    # 긴 문서 하나가 상위 10칸을 차지하면 P@10 이 문서 수가 아니라 조각 수를 잰다.
+    ranked = retrieval_eval.to_docs(["d1#0", "d1#1", "d2#0", "d1#2", "d3#0"], k=10)
+    assert ranked == ["d1", "d2", "d3"]
+
+
+def test_scoring_counts_rank_positions():
+    p, mrr, hit = retrieval_eval.score(["a", "b", "c"], {"b"})
+    assert p == pytest.approx(1 / 3)
+    assert mrr == pytest.approx(1 / 2)
+    assert hit is True
+    assert retrieval_eval.score([], {"b"}) == (0.0, 0.0, False)
+
+
+def test_held_out_docs_are_removed_by_token_not_by_substring():
+    # `하얘` 와 `하얗게` 는 글자가 안 겹치지만 Kiwi 는 같은 어간을 준다. 토큰으로 빼야 한다.
+    index = Index(["d1#0", "d2#0"], ["하얘서 별로다", "발림성이 좋다"])
+    assert retrieval_eval.docs_with_tokens(index, "하얗게") == {"d1"}
+
+
+@pytest.fixture
+def loaded(needs_schema: str, needs_runtime_url: str):
+    """청크는 운영과 같은 needs_runtime 이 쓴다 -- migrator 는 needs_owner 소유 표에 못 쓴다."""
+    parsed = make_url(needs_runtime_url)
+    conn = psycopg.connect(
+        host=parsed.host,
+        port=parsed.port,
+        user=parsed.username,
+        password=parsed.password,
+        dbname=parsed.database,
+        options=parsed.query["options"],  # pyright: ignore[reportArgumentType]
+    )
+    rows = [
+        ("백탁이 심하다", "d1"),
+        ("하얗게 뜬다", "d2"),
+        ("하얘서 못 쓰겠다", "d3"),
+        ("발림성이 좋다", "d4"),
+    ]
+    with conn.cursor() as cur:
+        for text, doc in rows:
+            cur.execute(
+                "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+                "VALUES (%s, %s, 'youtube_comment', 0, %s, 'x')",
+                (f"{doc}#0", doc, text),
+            )
+    conn.commit()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def test_gold_comes_from_the_topic_dictionary_over_the_chunks(loaded):
+    gold = retrieval_eval.gold_from_chunks(loaded)
+    assert gold["백탁"] == {"d1", "d2", "d3"}
+    assert "d4" not in gold["백탁"]
+
+
+def test_literal_finds_the_documents_that_carry_the_query_word(loaded):
+    rows = retrieval_eval.run(loaded, "literal")
+    by_query = {r.query: r for r in rows}
+    assert by_query["백탁"].hit is True
+    assert by_query["백탁"].p_at_k > 0
+
+
+def test_heldout_asks_for_the_documents_the_query_word_is_missing_from(loaded):
+    rows = {r.query: r for r in retrieval_eval.run(loaded, "heldout")}
+    row = rows["백탁"]
+    # `백탁` 이 든 d1 은 정답에서 빠지고, 같은 주제의 d2·d3 만 남는다.
+    assert row.gold_size == 2
+    # BM25 는 여기서 거의 0 이 정상이다 -- 그 0 이 벡터가 넘어야 하는 선이다.
+    assert row.p_at_k == 0.0
+
+
+def test_the_summary_reports_the_query_count(loaded):
+    assert "질의" in retrieval_eval.summary(retrieval_eval.run(loaded, "literal"))
+    assert retrieval_eval.summary([]).startswith("질의 0개")
+
+
+def test_an_unknown_engine_is_refused(loaded):
+    with pytest.raises(ValueError):
+        retrieval_eval.run(loaded, "literal", engine="vector")
