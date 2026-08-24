@@ -73,9 +73,15 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
 
 ## 스케줄 (stack/crontab, UTC)
-외부를 fetch하는 commerce 줄은 분 0을 쓰지 않는다 (매시 ranking이 분 0에 시작하고 약 74초 걸린다).
-각 일별 걷기는 약 7분이므로 서로 최소 그만큼 떨어뜨린다. `analyze all`은 외부 fetch가 없는 DB 전용
-작업이라 매시 실행과 겹쳐도 무해하므로 이 규칙에서 제외된다.
+commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
+여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
+순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
+소요도 둘이다: `seeds()` 길이만 도는 하한과 `max_requests_per_run`까지 차는 상한. 상한 기준으로는 매시 ranking이
+한 시간의 절반 가까이를 점유해 02:05 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨 풀 겹침이
+아니라 어드바이저리 락(#10 §A-8-1)이 닫을 겹침이라, 그때까지
+`tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`가 하한은 항상 검사하고 상한은
+xfail(strict)로 붙들어 둔다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
+무해하므로 이 규칙에서 제외된다.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
 5 2 * * *   cosmai collect commerce --dataset product
