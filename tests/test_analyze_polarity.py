@@ -341,3 +341,65 @@ def test_the_implementation_the_run_was_given_is_the_version_it_records(loaded: 
 
 def test_without_an_implementation_the_rule_still_runs(loaded: str, _schema_name: str):
     assert _run(loaded, _schema_name).polarity_version == "rule-v2.2"
+
+
+# 이전 실행이 남긴 행: --scope 가 다시 쓰지 않을 자리들이다 (다른 카테고리 · 다른 src).
+OTHER_SCOPE = ("review", "P9/R9", "샴푸")
+OTHER_SRC = ("yt_comment", "V9/C9", None)
+STALE_MONTH = "2026-03"
+
+
+@pytest.fixture
+def with_other_scopes(loaded: str) -> str:
+    with connect(loaded) as conn, conn.cursor() as cur:
+        for src, ref, lexicon_category in (OTHER_SCOPE, OTHER_SRC):
+            cur.execute(
+                "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
+                " observed_at, observed_at_resolution, month, sentence, extractor_version,"
+                " polarity_version) VALUES (%s, 'oliveyoung', %s, %s, '백탁', '불만', '2026-03-04',"
+                " 'day', %s, '이전 실행이 남긴 문장', 'rule-v2.2', 'rule-v2.2')",
+                (src, ref, lexicon_category, STALE_MONTH),
+            )
+        cur.execute(
+            "INSERT INTO wish_mention (src, ref, video_id, observed_at, observed_at_resolution, month,"
+            " wish_class, sentence, extractor_version)"
+            " VALUES ('yt_comment', 'V9/C9', 'V9', '2026-03-05', 'day', %s, 'a', '쿠션형 내주세요',"
+            " 'rule-v2.2')",
+            (STALE_MONTH,),
+        )
+        conn.commit()
+    return loaded
+
+
+def _refs(url: str, table: str) -> list[str]:
+    query = pgsql.SQL("SELECT ref FROM {} WHERE ref IN ('P9/R9', 'V9/C9') ORDER BY ref").format(
+        pgsql.Identifier(table)
+    )
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(query)
+        return [row[0] for row in cur.fetchall()]
+
+
+def test_a_scoped_run_does_not_delete_the_rows_it_will_not_rewrite(with_other_scopes: str, _schema_name: str):
+    """스코프 밖 행은 이 실행이 다시 쓰지 않는다 — 지우면 그 달에서 사라진다 (재라벨이면 매번)."""
+    before = _refs(with_other_scopes, "need_mention")
+    assert before == ["P9/R9", "V9/C9"]
+    _run(with_other_scopes, _schema_name, scope="선블록", polarity=StubPolarity())
+    assert _refs(with_other_scopes, "need_mention") == before
+
+
+def test_a_scoped_run_does_not_delete_wish_rows_it_will_not_rewrite(
+    with_other_scopes: str, _schema_name: str
+):
+    """--scope 는 lexicon_category 로 자르는데 wish_mention 에는 그 열이 없다 — 스코프 실행은
+    wish 행을 하나도 만들지 않으므로 하나도 지워서는 안 된다."""
+    _run(with_other_scopes, _schema_name, scope="선블록", polarity=StubPolarity())
+    assert _refs(with_other_scopes, "wish_mention") == ["V9/C9"]
+
+
+def test_an_unscoped_rerun_still_replaces_this_units_own_stale_rows(
+    with_other_scopes: str, _schema_name: str
+):
+    """스코프가 없으면 전량을 다시 쓴다 — 그때는 옛 버전 행을 치우는 것이 여전히 이 단계의 몫이다."""
+    _run(with_other_scopes, _schema_name, polarity=StubPolarity())
+    assert _refs(with_other_scopes, "need_mention") == []

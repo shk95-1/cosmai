@@ -57,6 +57,9 @@ NEED_DELETE: LiteralString = """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
 """
+# --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
+# 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
+NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
 WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
@@ -365,13 +368,19 @@ class PolarityStage:
             extractor_version=RuleExtractor.version,
         )
 
-    def replace_stale(self, src: str, month: str) -> int:
-        """자기 버전 계열의 옛 행만 지운다 — 그 자체로 한 트랜잭션이다."""
+    def replace_stale(self, src: str, month: str, scope: str | None = None) -> int:
+        """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다."""
+        versions = (RuleExtractor.version, self.polarity.version)
         with self.conn.cursor() as cur:
-            cur.execute(NEED_DELETE, (src, month, RuleExtractor.version, self.polarity.version))
+            if scope is None:
+                cur.execute(NEED_DELETE, (src, month, *versions))
+            else:
+                cur.execute(NEED_DELETE_SCOPED, (src, month, *versions, scope))
             replaced = cur.rowcount
-            cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
-            replaced += cur.rowcount
+            # wish_mention 에는 lexicon_category 가 없고 스코프 실행은 wish 행을 하나도 만들지 않는다.
+            if scope is None:
+                cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
+                replaced += cur.rowcount
         self.conn.commit()
         return replaced
 
@@ -415,7 +424,7 @@ def run(
         table = _table(commerce_schema, "review")
         for month in _months(conn, table, "written_at", "captured_at", since):
             months += 1
-            replaced += stage.replace_stale("review", month)
+            replaced += stage.replace_stale("review", month, scope)
             for page in _pages(
                 conn,
                 table,
@@ -452,7 +461,9 @@ def run(
                 need_rows += len(needs)
                 stage.flush(needs, ())
 
-    if _exists(conn, youtube_schema, "comments"):
+    # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
+    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다).
+    if scope is None and _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
@@ -486,8 +497,6 @@ def run(
                         view_count=view_count,
                     )
                     # 댓글에는 제품 카테고리가 없다 — 카테고리 사전 없이 generic 규칙만 돈다.
-                    if scope:
-                        continue
                     units += 1
                     pending.extend(stage.candidates(unit, None))
                     wish = stage.wish_row(unit)
