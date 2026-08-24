@@ -62,16 +62,19 @@ def _ollama_predictor(model: str) -> Predictor:
         items, by_ruleset = _rows_by_ruleset(rows)
         out = [""] * len(rows)
         with connect_lexicon() as conn:
+            # ollama 에는 배치 API 가 없어 문장마다 왕복한다(수 초, ollama.py:103) — 트랜잭션을 쥔 채
+            # 그동안 기다리면 needs_runtime 의 idle_in_transaction_session_timeout(15s, db/bootstrap.sql)
+            # 을 첫 문장에서 넘긴다(실측: IdleInTransactionSessionTimeout). llm 경로는 pricing.reserve()
+            # 의 커밋이 부수적으로 이걸 막아 왔다 — reserve() 없는 무료 경로는 스스로 커밋해야 한다.
+            conn.autocommit = True
             aspects = {name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)}
             ollama = OllamaPolarity(model, UsageLedger(conn))
-            try:
-                for ruleset, indexes in by_ruleset.items():
-                    found = ollama.classify_many([items[i] for i in indexes], aspects[ruleset])
-                    for i, result in zip(indexes, found, strict=True):
-                        out[i] = result.polarity
-            # 예산 차단은 blocked(exit 2)여야 한다 — cli 의 그 경로가 LookupError 를 잡는다.
-            except BudgetExceeded as blocked:
-                raise LookupError(str(blocked)) from blocked
+            # 무료 경로는 reserve() 를 거치지 않으니 BudgetExceeded 가 날 수 없다 — llm 팩터리와
+            # 달리 그 분기가 아예 없다(있으면 예산 보호가 있는 것처럼 오독된다).
+            for ruleset, indexes in by_ruleset.items():
+                found = ollama.classify_many([items[i] for i in indexes], aspects[ruleset])
+                for i, result in zip(indexes, found, strict=True):
+                    out[i] = result.polarity
         return out
 
     return predict
