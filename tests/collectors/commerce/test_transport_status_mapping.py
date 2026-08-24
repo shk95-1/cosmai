@@ -153,7 +153,20 @@ def test_an_api_answering_json_is_never_read_for_prose():
     # The daisomall and oliveyoung review endpoints answer JSON full of free Korean text. Scanning it
     # is how a review halts a source the site never refused -- see
     # test_challenge_never_fires_on_content.py, which drives this from the real captures.
+    #
+    # NOTE: this body has no `<title>` tag, so the title regex wouldn't match here even with
+    # `_is_document` deleted -- it does not actually exercise the gate. The test right below this one
+    # is the one only the gate stops.
     body = '{"revwCn":"품절이라 재입고까지 잠시만 기다려주세요"}'.encode()
+    raise_for_refusal(200, {"content-type": "application/json; charset=utf-8"}, body)
+
+
+def test_a_json_body_carrying_a_literal_title_tag_is_not_scanned_for_it():
+    # The case the content-type gate alone stops: a non-document content-type whose body happens to
+    # contain a literal `<title>...잠시만 기다려...</title>` string. Deleting `_is_document` (make it
+    # always return True) is the review-round-2 mutation that every other case in this file survived --
+    # this is the one that catches it.
+    body = '{"html":"<title>잠시만 기다려 주세요 - 올리브영</title>"}'.encode()
     raise_for_refusal(200, {"content-type": "application/json; charset=utf-8"}, body)
 
 
