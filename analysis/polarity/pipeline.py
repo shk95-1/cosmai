@@ -23,7 +23,17 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
-from analysis.types import AspectLexicon, Lexicon, NeedMentionRow, TextUnit, WishMentionRow
+from analysis.types import (
+    AspectLexicon,
+    Candidate,
+    Lexicon,
+    NeedMentionRow,
+    Polarity,
+    PolarityRequest,
+    PolarityResult,
+    TextUnit,
+    WishMentionRow,
+)
 from analysis.units import CategoryMap, comment_unit, load_category_map, month_of, review_unit
 
 COMMERCE_SCHEMA = "trend_radar"
@@ -95,14 +105,24 @@ class StageResult:
     wish_rows: int
     replaced: int
     captured_at_fallbacks: int  # formats.md: 0 이 아니게 되는 순간이 시간 규칙을 다시 볼 때다
+    polarity_version: str = RulePolarity.version
 
     @property
     def note(self) -> str:
         return (
-            f"analyze:polarity:{RulePolarity.version} units={self.units} need={self.need_rows} "
+            f"analyze:polarity:{self.polarity_version} units={self.units} need={self.need_rows} "
             f"wish={self.wish_rows} replaced={self.replaced} "
             f"captured_at_fallback={self.captured_at_fallbacks}"
         )
+
+
+@dataclass(frozen=True)
+class _Pending:
+    """한 페이지분의 후보 — 판정은 페이지가 다 모인 뒤에 사전별로 한 번씩 간다 (classify_many)."""
+
+    unit: TextUnit
+    lexicon_category: str | None
+    candidate: Candidate
 
 
 def _table(schema: str, table: str) -> pgsql.Composed:
@@ -231,11 +251,15 @@ def _channels(conn: psycopg.Connection[Any], schema: str) -> dict[str, tuple[str
 class PolarityStage:
     """사전·규칙을 한 번만 만들고 src×월 배치를 돌린다."""
 
-    def __init__(self, conn: psycopg.Connection[Any], batch: int = BATCH) -> None:
+    def __init__(
+        self, conn: psycopg.Connection[Any], batch: int = BATCH, polarity: Polarity | None = None
+    ) -> None:
         self.conn = conn
         self.batch = batch
         self.extractor = RuleExtractor()
+        # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
         self.rule = RulePolarity()
+        self.polarity: Polarity = polarity or self.rule
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
@@ -246,7 +270,7 @@ class PolarityStage:
     def versions(self) -> dict[str, Any]:
         return {
             "extractor": RuleExtractor.version,
-            "polarity": RulePolarity.version,
+            "polarity": self.polarity.version,
             "lexicon": {"entity": self.lexicon.version, "aspect": self.aspects[GENERIC_RULESET].version},
         }
 
@@ -256,40 +280,66 @@ class PolarityStage:
                 return pattern.scope
         return "generic"
 
-    def need_rows(self, unit: TextUnit, lexicon_category: str | None) -> Iterator[NeedMentionRow]:
+    def candidates(self, unit: TextUnit, lexicon_category: str | None) -> list[_Pending]:
         aspects = self.aspects[ruleset_for(lexicon_category)]
-        for candidate in self.extractor.candidates(unit, aspects, lexicon_category):
-            found = self.rule.classify(candidate.sentence, unit.rating, lexicon_category, aspects)
-            strength = (
-                round(1 - unit.rating / FIVE, 2)
-                if unit.src == "review" and unit.rating is not None
-                else unit.like_count
+        return [
+            _Pending(unit, lexicon_category, candidate)
+            for candidate in self.extractor.candidates(unit, aspects, lexicon_category)
+        ]
+
+    def need_rows(self, pending: Sequence[_Pending]) -> list[NeedMentionRow]:
+        """사전별로 묶어 classify_many 한 번씩 — 배치 API 를 가진 구현(#6)은 문장마다 왕복하면 정가다."""
+        grouped: dict[str, list[int]] = {}
+        for i, item in enumerate(pending):
+            grouped.setdefault(ruleset_for(item.lexicon_category), []).append(i)
+        rows: list[NeedMentionRow | None] = [None] * len(pending)
+        for ruleset, indexes in grouped.items():
+            aspects = self.aspects[ruleset]
+            found = self.polarity.classify_many(
+                [
+                    PolarityRequest(
+                        pending[i].candidate.sentence, pending[i].unit.rating, pending[i].lexicon_category
+                    )
+                    for i in indexes
+                ],
+                aspects,
             )
-            yield NeedMentionRow(
-                src=unit.src,
-                site=unit.site,
-                ref=unit.ref,
-                product_ref=None,  # #2 의 linker 가 analyze link 에서 채운다
-                source_product_key=unit.product_key,
-                category=unit.category,
-                lexicon_category=lexicon_category,
-                need_key=found.aspect or "",  # B8: aspect 없음은 '' 센티널
-                aspect_scope=self._scope_of(aspects, lexicon_category, found.aspect)
-                if found.aspect
-                else None,
-                polarity=found.polarity,
-                strength=strength,
-                rating=unit.rating,
-                observed_at=unit.observed_at,
-                observed_at_resolution=unit.observed_at_resolution,
-                month=month_of(unit.observed_at),
-                sentence=candidate.sentence,
-                kind=candidate.kind,
-                marker=candidate.marker,
-                polarity_reason=found.reason,
-                extractor_version=RuleExtractor.version,
-                polarity_version=RulePolarity.version,
-            )
+            for i, result in zip(indexes, found, strict=True):
+                rows[i] = self._row(pending[i], result, aspects)
+        return [row for row in rows if row is not None]
+
+    def _row(self, item: _Pending, found: PolarityResult, aspects: AspectLexicon) -> NeedMentionRow:
+        unit = item.unit
+        strength = (
+            round(1 - unit.rating / FIVE, 2)
+            if unit.src == "review" and unit.rating is not None
+            else unit.like_count
+        )
+        return NeedMentionRow(
+            src=unit.src,
+            site=unit.site,
+            ref=unit.ref,
+            product_ref=None,  # #2 의 linker 가 analyze link 에서 채운다
+            source_product_key=unit.product_key,
+            category=unit.category,
+            lexicon_category=item.lexicon_category,
+            need_key=found.aspect or "",  # B8: aspect 없음은 '' 센티널
+            aspect_scope=self._scope_of(aspects, item.lexicon_category, found.aspect)
+            if found.aspect
+            else None,
+            polarity=found.polarity,
+            strength=strength,
+            rating=unit.rating,
+            observed_at=unit.observed_at,
+            observed_at_resolution=unit.observed_at_resolution,
+            month=month_of(unit.observed_at),
+            sentence=item.candidate.sentence,
+            kind=item.candidate.kind,
+            marker=item.candidate.marker,
+            polarity_reason=found.reason,
+            extractor_version=RuleExtractor.version,
+            polarity_version=self.polarity.version,
+        )
 
     def wish_row(self, unit: TextUnit) -> WishMentionRow | None:
         found = self.extractor.wishes(unit, self.lexicon)
@@ -318,7 +368,7 @@ class PolarityStage:
     def replace_stale(self, src: str, month: str) -> int:
         """자기 버전 계열의 옛 행만 지운다 — 그 자체로 한 트랜잭션이다."""
         with self.conn.cursor() as cur:
-            cur.execute(NEED_DELETE, (src, month, RuleExtractor.version, RulePolarity.version))
+            cur.execute(NEED_DELETE, (src, month, RuleExtractor.version, self.polarity.version))
             replaced = cur.rowcount
             cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
             replaced += cur.rowcount
@@ -345,12 +395,14 @@ def run(
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     batch: int = BATCH,
+    polarity: Polarity | None = None,
 ) -> StageResult:
-    stage = PolarityStage(conn, batch)
+    stage = PolarityStage(conn, batch, polarity)
+    version = stage.polarity.version
     with conn.cursor() as cur:
         cur.execute(
             RUN_START,
-            (json.dumps(stage.versions(), ensure_ascii=False), f"analyze:polarity:{RulePolarity.version}"),
+            (json.dumps(stage.versions(), ensure_ascii=False), f"analyze:polarity:{version}"),
         )
         row = cur.fetchone()
     run_id = int(row[0]) if row else 0
@@ -376,7 +428,7 @@ def run(
                 since,
                 batch,
             ):
-                needs: list[NeedMentionRow] = []
+                pending: list[_Pending] = []
                 for source, product_key, review_key, rating, body, written_at, captured_at in page:
                     fallbacks += written_at is None
                     unit = review_unit(
@@ -395,7 +447,8 @@ def run(
                     if scope and lexicon_category != scope:
                         continue
                     units += 1
-                    needs.extend(stage.need_rows(unit, lexicon_category))
+                    pending.extend(stage.candidates(unit, lexicon_category))
+                needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 stage.flush(needs, ())
 
@@ -417,7 +470,7 @@ def run(
                 since,
                 batch,
             ):
-                needs = []
+                pending = []
                 wishes: list[WishMentionRow] = []
                 for video_id, comment_id, text, like_count, published_at, first_seen_at in page:
                     fallbacks += published_at is None
@@ -436,10 +489,11 @@ def run(
                     if scope:
                         continue
                     units += 1
-                    needs.extend(stage.need_rows(unit, None))
+                    pending.extend(stage.candidates(unit, None))
                     wish = stage.wish_row(unit)
                     if wish is not None:
                         wishes.append(wish)
+                needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 wish_rows += len(wishes)
                 stage.flush(needs, wishes)
@@ -452,6 +506,7 @@ def run(
         wish_rows=wish_rows,
         replaced=replaced,
         captured_at_fallbacks=fallbacks,
+        polarity_version=version,
     )
     with conn.cursor() as cur:
         cur.execute(RUN_END, (result.note, run_id))

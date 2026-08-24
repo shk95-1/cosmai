@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 
-from analysis.types import LabeledRow, Predictor
+from analysis.types import LabeledRow, Polarity, Predictor
 
 __all__ = [
     "IMPLEMENTATIONS",
@@ -17,6 +18,7 @@ __all__ = [
     "build",
     "get",
     "is_paid",
+    "open_classifier",
     "register",
     "register_factory",
 ]
@@ -44,6 +46,9 @@ _REGISTRY: dict[str, Implementation] = {}
 _FACTORIES: dict[tuple[str, str], Callable[[str], Implementation]] = {}
 # 외부에 돈을 내는 구현. cli 는 이 표시만 보고 --split 을 요구한다 (홀드아웃이 먼저 도는 것을 막는다).
 _PAID: set[tuple[str, str]] = set()
+# 같은 `--impl` 스펙이 여는 *단계용* 판정자. eval 은 라벨만 받는 Predictor 로 충분하지만 analyze 는
+# aspect·reason 까지 필요해 Polarity 그 자체를 쓴다 — 원장 커넥션을 열고 닫아야 해서 컨텍스트 매니저다.
+_CLASSIFIERS: dict[str, dict[str, Callable[[str], AbstractContextManager[Polarity]]]] = {}
 
 
 def register(task: str, version: str, predict: Predictor) -> None:
@@ -53,14 +58,34 @@ def register(task: str, version: str, predict: Predictor) -> None:
 
 
 def register_factory(
-    task: str, name: str, factory: Callable[[str], Implementation], *, paid: bool = False
+    task: str,
+    name: str,
+    factory: Callable[[str], Implementation],
+    *,
+    paid: bool = False,
+    classifier: Callable[[str], AbstractContextManager[Polarity]] | None = None,
 ) -> None:
-    """paid=True 는 "이 구현은 외부에 돈을 낸다" 는 표시다 — cli 가 그것만 보고 규율을 강제한다."""
+    """paid=True 는 "이 구현은 외부에 돈을 낸다" 는 표시다 — cli 가 그것만 보고 규율을 강제한다.
+
+    classifier 는 같은 이름·같은 스펙 문법으로 `analyze` 가 여는 단계 판정자다 (없으면 eval 전용).
+    """
     if task not in TASKS:
         raise ValueError(f"unknown task {task!r}; expected one of {', '.join(TASKS)}")
     _FACTORIES[(task, name)] = factory
     if paid:
         _PAID.add((task, name))
+    if classifier is not None:
+        _CLASSIFIERS.setdefault(task, {})[name] = classifier
+
+
+def open_classifier(task: str, spec: str) -> AbstractContextManager[Polarity]:
+    """`--impl <name>:<argument>` → 단계가 쓸 판정자. 여는 것은 커넥션뿐, 첫 호출은 classify 가 낸다."""
+    name, _, argument = spec.partition(":")
+    factory = _CLASSIFIERS.get(task, {}).get(name)
+    if factory is None:
+        known = ", ".join(sorted(_CLASSIFIERS.get(task, {}))) or "(none)"
+        raise LookupError(f"no stage classifier for --impl {spec!r} on {task}; registered: {known}")
+    return factory(argument)
 
 
 def is_paid(task: str, spec: str) -> bool:

@@ -50,6 +50,7 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("stage", choices=STAGES)
     p.add_argument("--since", default=None, help="Only units observed on or after this date.")
     p.add_argument("--scope", default=None, help="Restrict to one lexicon category.")
+    p.add_argument("--impl", default=None, help="Registered polarity factory, e.g. ollama:gemma4:latest.")
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
@@ -123,19 +124,34 @@ def _run_login(args: argparse.Namespace) -> int:
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
+    import contextlib
+
     import psycopg
 
+    from analysis import predictors, registry
     from analysis.pipeline import run_stage
 
-    try:
-        since = date.fromisoformat(args.since) if args.since else None
-        conn = _connect(args.url)
-    # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
-    except (ValueError, LookupError, psycopg.Error) as refused:
-        print(refused)
-        return 2
-    with conn:
-        outcome = run_stage(conn, args.stage, since=since, scope=args.scope)
+    if args.impl:
+        registry.load_implementations()
+        # eval 의 --split 강제에 대응하는 자리. analyze 에는 split 이 없고 전량이 기본이라, 유료 구현은
+        # --scope 로 한 카테고리를 이름 붙여야 돈다 (재개 5번이 정확히 `--scope 선블록` 이다).
+        if args.scope is None and registry.is_paid("polarity", args.impl):
+            print(f"--impl {args.impl} spends money; name the corpus with --scope <category>")
+            return 2
+    with contextlib.ExitStack() as stack:
+        try:
+            since = date.fromisoformat(args.since) if args.since else None
+            # 판정자의 사전·원장 커넥션도 --url 을 따라가야 한 실행이 두 DB 에 걸치지 않는다 (eval 과 같다).
+            predictors.set_lexicon_url(args.url)
+            polarity = (
+                stack.enter_context(registry.open_classifier("polarity", args.impl)) if args.impl else None
+            )
+            conn = stack.enter_context(_connect(args.url))
+        # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
+        except (ValueError, LookupError, psycopg.Error) as refused:
+            print(refused)
+            return 2
+        outcome = run_stage(conn, args.stage, since=since, scope=args.scope, polarity=polarity)
     print(outcome.note)
     return 0 if outcome.status == "ok" else 1
 

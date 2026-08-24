@@ -23,6 +23,7 @@ from analysis.linker import pipeline as link_stage
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
+from analysis.types import Polarity
 
 __all__ = ["POPULATION", "StageOutcome", "run_stage"]
 
@@ -80,7 +81,7 @@ def _detail(stage: str, failure: Exception) -> str:
     return f"{stage} {message[:DETAIL_CHARS]}"
 
 
-def _versions(conn: psycopg.Connection[Any]) -> dict[str, Any]:
+def _versions(conn: psycopg.Connection[Any], polarity_version: str = POLARITY_VERSION) -> dict[str, Any]:
     """#17 판정: lexicon 은 활성 버전 + ruleset 이다 — aspect 사전은 ruleset 마다 따로 켜진다."""
     lexicon = load_lexicon(conn)
     aspects = {ruleset: load_aspects(conn, ruleset).version for ruleset in RULESETS}
@@ -88,7 +89,7 @@ def _versions(conn: psycopg.Connection[Any]) -> dict[str, Any]:
     return {
         "linker": LINKER_VERSION,
         "extractor": EXTRACTOR_VERSION,
-        "polarity": POLARITY_VERSION,
+        "polarity": polarity_version,
         "aggregate": AGGREGATE_VERSION,
         "lexicon": {"entity": lexicon.version, "aspect": aspects},
     }
@@ -149,6 +150,7 @@ def run_all(
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
+    polarity: Polarity | None = None,
 ) -> StageOutcome:
     counts: dict[str, int] = {}
     versions: dict[str, Any] = {}
@@ -156,23 +158,24 @@ def run_all(
     mark: int | None = None
     stage = "link"
     try:
-        versions = _versions(conn)
+        versions = _versions(conn, polarity.version if polarity else POLARITY_VERSION)
         linked = link_stage.run(
             conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
         )
         counts.update({name: linked[name] for name in LINK_COUNTS})
         stage = "polarity"
         mark = _last_run_id(conn)
-        polarity = polarity_stage.run(
+        found = polarity_stage.run(
             conn,
             since=since,
             scope=scope,
             commerce_schema=commerce_schema,
             youtube_schema=youtube_schema,
+            polarity=polarity,
         )
-        run_id = polarity.run_id
+        run_id = found.run_id
         # upsert 가 실제로 넣은 수가 아니라 시도한 수다 — 시드와 자연키가 겹치는 문장은 자기 행을 못 만든다.
-        counts.update({"attempted_need": polarity.need_rows, "attempted_wish": polarity.wish_rows})
+        counts.update({"attempted_need": found.need_rows, "attempted_wish": found.wish_rows})
         stage = "aggregate"
         aggregate_stage.run(
             conn,
@@ -198,9 +201,10 @@ def run_stage(
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
+    polarity: Polarity | None = None,
 ) -> StageOutcome:
     if stage == "all":
-        return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at)
+        return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity)
     mark: int | None = None
     try:
         if stage == "link":
@@ -211,15 +215,16 @@ def run_stage(
         if stage == "polarity":
             # 이 단계는 자기 run 을 열고 닫는다 — 단독 실행의 run 은 polarity 것이다.
             mark = _last_run_id(conn)
-            polarity = polarity_stage.run(
+            found = polarity_stage.run(
                 conn,
                 since=since,
                 scope=scope,
                 commerce_schema=commerce_schema,
                 youtube_schema=youtube_schema,
+                polarity=polarity,
             )
-            counts = {"attempted_need": polarity.need_rows, "attempted_wish": polarity.wish_rows}
-            return StageOutcome(stage, OK, polarity.run_id, counts)
+            counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
+            return StageOutcome(stage, OK, found.run_id, counts)
         run_id = aggregate_stage.run(
             conn,
             scope=scope,

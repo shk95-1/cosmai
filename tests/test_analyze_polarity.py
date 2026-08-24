@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,7 @@ from psycopg import sql as pgsql
 from sqlalchemy import create_engine
 
 from analysis.polarity.pipeline import run
+from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
 from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 
@@ -306,3 +307,37 @@ def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _sche
     ]
     assert wish == [("slice-p9", "b")]
     assert {t: _tagged(seeded, t, "slice-%") for t in SEED_COUNTS} == SEED_COUNTS
+
+
+class StubPolarity:
+    """등록된 구현체 자리에 꽂는 판정자 — 규칙과 다른 버전을 내는 것이 이 스텁의 요점이다."""
+
+    version = "stub-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="백탁", polarity="중립", reason="stub", version=self.version)
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
+
+
+def test_the_implementation_the_run_was_given_is_the_version_it_records(loaded: str, _schema_name: str):
+    """versioning.md: analysis_run.versions 는 그 run 의 버전을 기록한다 — 실제로 돈 구현의 것이어야 한다."""
+    found = _run(loaded, _schema_name, polarity=StubPolarity())
+    assert found.polarity_version == StubPolarity.version
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT versions, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        cur.execute("SELECT DISTINCT polarity_version, polarity FROM need_mention WHERE src = 'review'")
+        stamped = cur.fetchall()
+    assert row is not None
+    versions, note = row
+    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.2"
+    assert f"analyze:polarity:{StubPolarity.version}" in note
+    assert stamped == [(StubPolarity.version, "중립")]
+
+
+def test_without_an_implementation_the_rule_still_runs(loaded: str, _schema_name: str):
+    assert _run(loaded, _schema_name).polarity_version == "rule-v2.2"

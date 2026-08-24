@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 from analysis.lexicon import load_aspects
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, ruleset_for
@@ -15,7 +16,7 @@ from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.pricing import BudgetExceeded, UsageLedger
 from analysis.predictors import category_of, connect_lexicon, rating_of
 from analysis.registry import Implementation, LabeledRow, Predictor, register_factory
-from analysis.types import PolarityRequest
+from analysis.types import AspectLexicon, Polarity, PolarityRequest, PolarityResult
 
 IMPL_NAME = "llm"
 OLLAMA_IMPL_NAME = "ollama"
@@ -86,6 +87,49 @@ def build_ollama(model: str) -> Implementation:
     return Implementation(version=OllamaPolarity(model).version, predict=_ollama_predictor(model))
 
 
-register_factory("polarity", IMPL_NAME, build, paid=True)
+class _Blocking:
+    """예산 하드스톱을 단계가 잡는 예외로 바꾼다 — BudgetExceeded(RuntimeError)는 analysis/pipeline.py 의
+    FAILURES 밖이라 run 을 'running' 인 채 트레이스백으로 끝낸다."""
+
+    def __init__(self, inner: Polarity) -> None:
+        self.inner = inner
+        self.version = inner.version
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return self.classify_many([PolarityRequest(sentence, rating, category)], aspects)[0]
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        try:
+            return self.inner.classify_many(items, aspects)
+        except BudgetExceeded as blocked:
+            raise LookupError(str(blocked)) from blocked
+
+
+@contextmanager
+def open_llm(model: str) -> Iterator[Polarity]:
+    """`analyze --impl llm:<model>`. 원장은 단계의 커넥션이 아니라 자기 것을 쓴다 — reserve() 의 커밋이
+    단계의 미완성 upsert 를 같이 커밋해 버리면 페이지 단위 재개가 깨진다."""
+    if not model:
+        raise LookupError("--impl llm:<model> needs a model, e.g. llm:claude-sonnet-5")
+    with connect_lexicon() as conn:
+        yield _Blocking(
+            LLMPolarity(model, UsageLedger(conn), purpose=f"analyze:polarity:{version_for(model)}")
+        )
+
+
+@contextmanager
+def open_ollama(model: str) -> Iterator[Polarity]:
+    """`analyze --impl ollama:<model>`. 무료 경로라 reserve() 의 커밋이 없다 — 그 커밋이 부수적으로
+    막아 주던 idle_in_transaction 15s 를 autocommit 이 대신 막는다 (eval 쪽 f8aff76 과 같은 이유)."""
+    if not model:
+        raise LookupError("--impl ollama:<model> needs a model, e.g. ollama:gemma4:latest")
+    with connect_lexicon() as conn:
+        conn.autocommit = True
+        yield OllamaPolarity(model, UsageLedger(conn))
+
+
+register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
 # 무료·로컬이라 --split 강제(cli.is_paid)에 걸리지 않는다 — 홀드아웃을 첫 호출로 바로 돌려도 된다.
-register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False)
+register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False, classifier=open_ollama)

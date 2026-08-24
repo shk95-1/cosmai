@@ -33,7 +33,7 @@ options:
   --source SOURCE  Source key whose browser profile to authorise.
 
 $ cosmai analyze --help
-usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] [--url URL]
+usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] [--impl IMPL] [--url URL]
                       {link,polarity,aggregate,all}
 
 positional arguments:
@@ -43,6 +43,7 @@ options:
   -h, --help            show this help message and exit
   --since SINCE         Only units observed on or after this date.
   --scope SCOPE         Restrict to one lexicon category.
+  --impl IMPL           Registered polarity factory, e.g. ollama:gemma4:latest.
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai eval --help
