@@ -10,11 +10,12 @@ from pathlib import Path
 
 from collectors.commerce import sources as _sources  # noqa: F401 -- import registers every source
 from collectors.commerce.contract import Payload
-from collectors.commerce.engine import Fetcher, collect, exit_code_for
+from collectors.commerce.engine import Fetcher, RunReport, collect, exit_code_for
 from collectors.commerce.models import Dataset, hour_bucket
 from collectors.commerce.registry import SOURCES
 from collectors.commerce.storage import db as storage_db
 from collectors.commerce.storage.db import PostgresJournal, RunLog, create_engine
+from collectors.commerce.storage.locks import PostgresSourceLock
 
 SCOPE_PATH = Path(__file__).resolve().parent / "scope.json"
 
@@ -76,30 +77,49 @@ def run(
 
     when = captured_at or hour_bucket(datetime.now(UTC))
     engine = create_engine(database_url or storage_db.runtime_url())
-    log = RunLog(engine)
-    run_id = log.start(when, [s.key for s in chosen], [wanted.value])
-
-    active_fetcher = fetcher or _RaisingFetcher()
-    journal = PostgresJournal(engine, run_id)
-
     try:
-        report = collect(
-            sources=chosen,
-            dataset=wanted,
-            sink=_EngineSink(engine),
-            captured_at=when,
-            fetcher=active_fetcher,
-            journal=journal,
-            board=board,
-        )
-    except BaseException as exc:
-        log.finish(run_id, status="failed", note=f"{type(exc).__name__}: {exc}")
-        raise
+        log = RunLog(engine)
+        run_id = log.start(when, [s.key for s in chosen], [wanted.value])
 
-    log.record_sources(run_id, report.sources)
-    status = "blocked" if report.blocked else ("ok" if report.ok else "partial")
-    log.finish(run_id, status=status, note=", ".join(report.blocked) or None)
-    return exit_code_for(report)
+        active_fetcher = fetcher or _RaisingFetcher()
+        journal = PostgresJournal(engine, run_id)
+
+        try:
+            report = collect(
+                sources=chosen,
+                dataset=wanted,
+                sink=_EngineSink(engine),
+                captured_at=when,
+                fetcher=active_fetcher,
+                journal=journal,
+                board=board,
+                # Only here. This is the entrypoint cron runs, and two cron lines overlapping on one
+                # source is the whole reason the lock exists.
+                lock=PostgresSourceLock(engine),
+            )
+        except BaseException as exc:
+            log.finish(run_id, status="failed", note=f"{type(exc).__name__}: {exc}")
+            raise
+
+        log.record_sources(run_id, report.sources)
+        status = "blocked" if report.blocked else ("ok" if report.ok else "partial")
+        log.finish(run_id, status=status, note=_note(report))
+        return exit_code_for(report)
+    finally:
+        # This returns rather than exits, so the pool outlives the run for any in-process caller --
+        # and the roles this connects as are capped at a handful of connections (db/bootstrap.sql).
+        engine.dispose()
+
+
+def _note(report: RunReport) -> str | None:
+    """Why this run is not a plain `ok`, in one line -- the only thing an unattended run says beyond
+    its exit code, and the column `needs.collector_health` puts next to `status = 'partial'`."""
+    parts = []
+    if report.blocked:
+        parts.append("blocked: " + ", ".join(report.blocked))
+    if report.skipped:
+        parts.append("skipped (locked by another run): " + ", ".join(report.skipped))
+    return "; ".join(parts) or None
 
 
 class _EngineSink:
