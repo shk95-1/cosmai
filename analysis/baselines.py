@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import ROUND_HALF_EVEN, Decimal
 
 
 @dataclass(frozen=True)
 class Check:
     metric: str  # evaluate 가 내는 이름: acc | P:<라벨> | R:<라벨> | strict | 변형허용
-    threshold: float
+    # 계약 표에 적힌 글자 그대로다 — 소수 자리수가 곧 이 게이트의 해상도라 float 로는 담기지 않는다.
+    threshold: Decimal
 
 
 @dataclass(frozen=True)
@@ -31,14 +33,14 @@ BASELINES: tuple[EvalSet, ...] = (
         task="polarity",
         name="sun holdout 100",
         split="holdout",
-        checks=(Check("acc", 0.77), Check("P:불만", 0.89)),
+        checks=(Check("acc", Decimal(".77")), Check("P:불만", Decimal(".89"))),
         ref_prefix="sun:",
     ),
     EvalSet(
         task="polarity",
         name="p1 blind40",
         split="holdout",
-        checks=(Check("acc", 0.47), Check("P:불만", 0.67)),
+        checks=(Check("acc", Decimal(".47")), Check("P:불만", Decimal(".67"))),
         ref_prefix="p1:",
     ),
     # wish 의 ref 는 comment_id 단독이라(formats.md) holdout60 과 blind60_v2 를 접두로 가를 수 없다 —
@@ -47,17 +49,17 @@ BASELINES: tuple[EvalSet, ...] = (
         task="wish_class",
         name="P9 blind60_v2",
         split="holdout",
-        checks=(Check("P:a", 0.90),),
+        checks=(Check("P:a", Decimal(".90")),),
         extra_key="set",
         extra_value="blind60_v2",
     ),
     # brand_link 는 두 표본 120행 전체가 그대로 한 셋이라 고를 것이 없다.
-    EvalSet(task="brand_link", name="P3 120", split="holdout", checks=(Check("P:OK", 0.97),)),
+    EvalSet(task="brand_link", name="P3 120", split="holdout", checks=(Check("P:OK", Decimal(".97")),)),
     EvalSet(
         task="product_match",
         name="P2 blind 40",
         split="holdout",
-        checks=(Check("strict", 0.769),),
+        checks=(Check("strict", Decimal(".769")),),
         ref_prefix="v2:",
     ),
 )
@@ -90,17 +92,21 @@ OBSERVED: tuple[EvalSet, ...] = (
 
 # interfaces.md §규칙 실측 — 채택 조건은 계약이 요구하는 바닥이고, 구현 교체는 규칙이 실제로 낸 이 숫자를
 # 넘어야 한다. 두 표가 갈라지면 tests/test_baselines.py 가 잡는다.
-RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, float]]] = {
+RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, Decimal]]] = {
     "polarity": {
-        "sun holdout 100": {"acc": 0.870, "P:불만": 0.915},
-        "p1 blind40": {"acc": 0.475, "P:불만": 0.667},
+        "sun holdout 100": {"acc": Decimal(".870"), "P:불만": Decimal(".915")},
+        "p1 blind40": {"acc": Decimal(".475"), "P:불만": Decimal(".667")},
     }
 }
 
 
-def meets(metric: float, threshold: float) -> bool:
-    """지표가 임계값을 넘었는가. 게이트의 비교는 여기 한 곳이다 — 두 표가 같은 자를 쓰게 하려고 모았다."""
-    return metric >= threshold
+def meets(metric: float, threshold: Decimal) -> bool:
+    """지표를 임계값이 적힌 자리수로 반올림한 뒤 비교한다. 표의 숫자는 규칙이 낸 원값의 반올림 표기라
+    원값과 곧이곧대로 재면 기준선을 만든 규칙 자신이 진다 (2/3 = .6667 < .67). 자리수가 해상도다:
+    `.67` 은 두 자리라 .6667 이 통과하고, `.769` 는 세 자리라 그만큼 촘촘하다. 게이트의 비교는
+    여기 한 곳이라 기준선 표와 규칙 실측 표가 같은 자를 쓴다."""
+    # 하네스가 출력하는 f"{metric:.3f}" 와 같은 반올림 — 표에 옮겨 적힌 값이 곧 통과선이다.
+    return Decimal(metric).quantize(threshold, rounding=ROUND_HALF_EVEN) >= threshold
 
 
 def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tuple[str, ...]:
@@ -110,7 +116,7 @@ def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tup
     if absent:
         raise LookupError(f"{task}: no adoption verdict without {', '.join(absent)} — run --split holdout")
     return tuple(
-        f"{name}: {metric} {scores[name].get(metric, 0.0):.3f} < rule {want:.3f}"
+        f"{name}: {metric} {scores[name].get(metric, 0.0):.3f} < rule {want}"
         for name, wants in wanted.items()
         for metric, want in wants.items()
         if not meets(scores[name].get(metric, 0.0), want)

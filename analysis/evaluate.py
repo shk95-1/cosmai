@@ -120,7 +120,7 @@ def evaluate(
         scores = score(pairs)
         metrics = _metrics(task, pairs, scores)
         misses = tuple(
-            f"{eval_set.name}: {check.metric} {metrics.get(check.metric, 0.0):.3f} < {check.threshold:.2f}"
+            f"{eval_set.name}: {check.metric} {metrics.get(check.metric, 0.0):.3f} < {check.threshold}"
             for check in eval_set.checks
             if not meets(metrics.get(check.metric, 0.0), check.threshold)
         )

@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import importlib
 import re
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -20,7 +22,12 @@ MEASURED_HEADER = "| 평가셋 | 규칙 실측 |"
 MEASURED = re.compile(r"([^\s|·]+)\s+(\d*\.\d+)")
 
 
-def _table_rows() -> list[tuple[str, tuple[tuple[str, float], ...]]]:
+def _written(number: str) -> str:
+    """표에 적힌 자리수까지 비교하려고 글자로 맞춘다 — `.870` 이 `.87` 로 줄면 게이트의 해상도가 바뀐다."""
+    return str(Decimal(number))
+
+
+def _table_rows() -> list[tuple[str, tuple[tuple[str, str], ...]]]:
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
     start = lines.index(TABLE_HEADER + " 규칙 기준선 | 채택 조건 (단일 임계값) |") + 2
     rows = []
@@ -28,14 +35,14 @@ def _table_rows() -> list[tuple[str, tuple[tuple[str, float], ...]]]:
         if not line.startswith("|"):
             break
         cells = [c.strip() for c in line.strip("|").split("|")]
-        rows.append((cells[0].split()[0], tuple((name, float(n)) for name, n in CHECK.findall(cells[3]))))
+        rows.append((cells[0].split()[0], tuple((name, _written(n)) for name, n in CHECK.findall(cells[3]))))
     return rows
 
 
 def test_the_table_and_the_constants_carry_the_same_checks_in_the_same_order():
     parsed = _table_rows()
     assert len(parsed) == 5
-    assert parsed == [(b.task, tuple((c.metric, c.threshold) for c in b.checks)) for b in BASELINES]
+    assert parsed == [(b.task, tuple((c.metric, str(c.threshold)) for c in b.checks)) for b in BASELINES]
 
 
 def test_every_task_the_cli_offers_has_at_least_one_eval_set():
@@ -50,15 +57,15 @@ def test_an_eval_set_selects_rows_from_the_database_alone():
     assert (wish.extra_key, wish.extra_value) == ("set", "blind60_v2")
 
 
-def _measured_rows() -> dict[str, dict[str, float]]:
+def _measured_rows() -> dict[str, dict[str, str]]:
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
     start = lines.index(MEASURED_HEADER) + 2
-    out: dict[str, dict[str, float]] = {}
+    out: dict[str, dict[str, str]] = {}
     for line in lines[start:]:
         if not line.startswith("|"):
             break
         cells = [c.strip() for c in line.strip("|").split("|")]
-        out[cells[0]] = {name: float(n) for name, n in MEASURED.findall(cells[1])}
+        out[cells[0]] = {name: _written(n) for name, n in MEASURED.findall(cells[1])}
     return out
 
 
@@ -66,10 +73,13 @@ def test_the_rule_measured_table_and_the_constant_carry_the_same_numbers():
     """교체 조건은 이 표다 — 상수만 있으면 #3 이 규칙을 고쳤을 때 조용히 낡는다 (수정 라운드 1, I-5)."""
     parsed = _measured_rows()
     assert parsed == {
-        "sun holdout 100": {"acc": 0.870, "P:불만": 0.915},
-        "p1 blind40": {"acc": 0.475, "P:불만": 0.667},
+        "sun holdout 100": {"acc": "0.870", "P:불만": "0.915"},
+        "p1 blind40": {"acc": "0.475", "P:불만": "0.667"},
     }
-    assert parsed == dict(RULE_MEASURED["polarity"])
+    assert parsed == {
+        name: {metric: str(want) for metric, want in wants.items()}
+        for name, wants in RULE_MEASURED["polarity"].items()
+    }
 
 
 def test_every_measured_set_is_one_of_the_contract_baseline_sets():
@@ -123,14 +133,33 @@ def test_the_rule_implementations_pass_check_baseline_on_the_holdout_sets(
 ):
     """RULE_RAW 는 손으로 옮긴 숫자다 — 실제 구현을 돌려 그 숫자가 아직 현실인지 여기서 못 박는다."""
     from analysis import predictors
+    from analysis.linker import LINKER_VERSION
+    from analysis.linker.evaluators import BrandLinkPredictor
+    from analysis.registry import register
     from cosmai.cli import main
     from db import seed
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
-    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 (tests/test_polarity.py 와 같다).
+    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 — 등록된 기본값은 운영 URL 이라
+    # 두 구현체를 테스트 URL 에 묶는다 (tests/test_polarity.py · tests/test_linker.py 와 같은 손질).
     monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
+    register("brand_link", LINKER_VERSION, BrandLinkPredictor(url=needs_runtime_url))
     gate = ["--url", needs_runtime_url, "--split", "holdout", "--check-baseline"]
-    for task in ("polarity", "brand_link", "product_match"):
-        assert main(["eval", task, *gate]) == 0, f"{task}: {capsys.readouterr().out}"
-    assert main(["eval", "wish_class", *gate]) == 1
-    assert "P9 blind60_v2: P:a" in capsys.readouterr().out
+    try:
+        for task in ("polarity", "brand_link", "product_match"):
+            assert main(["eval", task, *gate]) == 0, f"{task}: {capsys.readouterr().out}"
+        # wish 규칙은 blind60_v2 에서 실제로 진다 (KNOWN_MISS) — 반올림이 아니라 성능이라 여기서 안 고친다.
+        assert main(["eval", "wish_class", *gate]) == 1
+        assert "P9 blind60_v2: P:a" in capsys.readouterr().out
+    finally:
+        # 등록 모듈은 import 캐시라 load_implementations() 가 기본 등록을 되돌려 주지 않는다.
+        importlib.reload(importlib.import_module("analysis.linker.evaluators"))
+
+
+def test_a_threshold_is_read_at_the_precision_it_is_written_to():
+    """`.67` 은 두 자리다 — 세 자리로 잰 .667 을 미달로 읽으면 게이트가 자기 출처와 어긋난다.
+    반대로 자리를 늘려 적으면 그만큼 촘촘해진다: 완화가 아니라 표기와 대조를 같은 자로 맞추는 것이다."""
+    assert meets(2 / 3, Decimal(".67"))
+    assert not meets(0.6649, Decimal(".67"))
+    assert meets(0.76851, Decimal(".769"))
+    assert not meets(0.7684, Decimal(".769"))
