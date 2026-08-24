@@ -1,7 +1,11 @@
 """모델별 단가와 $7.00 하드스톱. 누적은 needs.llm_usage(DDL 003)이고 차단은 호출 *전*이다.
 
-호출 후에 세면 이미 나간 돈은 돌아오지 않는다 — check() 가 남은 예산보다 큰 견적을 거절하고, record()
-는 응답이 돌아온 뒤 실제 usage 로 한 행을 남기고 바로 커밋한다(중간에 죽어도 원장은 사실이다).
+호출 후에 세면 이미 나간 돈은 돌아오지 않는다. 그래서 reserve() 가 한 트랜잭션 안에서 잠그고·읽고·
+견적 행을 쓰고 커밋한다: 그 뒤 응답이 오지 않아도(타임아웃·Ctrl-C·예외) 예약분은 원장에 남아 다음
+실행의 예산에서 빠진다. settle() 이 그 행을 실측으로 덮어쓴다 — 새 행을 더하면 이중 계상이 된다.
+
+잠금이 없으면 두 실행이 같은 remaining() 을 읽고 둘 다 제출한다. pg_advisory_xact_lock 이 읽기와
+예약 사이를 한 줄로 만든다.
 """
 
 from __future__ import annotations
@@ -78,11 +82,30 @@ def cost_usd(model: str, usage: Usage, *, batch: bool = False) -> Decimal:
     return total * BATCH_DISCOUNT if batch else total
 
 
+# 이슈 번호를 잠금 키로 쓴다 — 예산을 읽고 예약하는 구간을 지나는 실행은 한 번에 하나다.
+ADVISORY_KEY = 6
+LOCK: LiteralString = "SELECT pg_advisory_xact_lock(%s)"
 SPENT: LiteralString = "SELECT coalesce(sum(usd), 0) FROM llm_usage"
 RECORD: LiteralString = """
 INSERT INTO llm_usage (model, purpose, input_tokens, output_tokens, cache_read, cache_write, usd, batch_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
 """
+SETTLE: LiteralString = """
+UPDATE llm_usage SET called_at = now(), purpose = %s, input_tokens = %s, output_tokens = %s,
+       cache_read = %s, cache_write = %s, usd = %s, batch_id = coalesce(%s, batch_id)
+WHERE id = %s
+"""
+RESERVED: LiteralString = "SELECT id, model, usd FROM llm_usage WHERE batch_id = %s ORDER BY id LIMIT 1"
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """제출 전에 원장에 잡아 둔 견적 한 행. 실측이 오면 settle() 이 이 행을 덮어쓴다."""
+
+    id: int
+    model: str
+    usd: Decimal
+    batch: bool
 
 
 class UsageLedger:
@@ -101,16 +124,87 @@ class UsageLedger:
     def remaining(self) -> Decimal:
         return self.budget - self.spent()
 
-    def check(self, model: str, usage: Usage, *, batch: bool = False) -> Decimal:
-        """이 호출의 견적이 남은 예산에 들어가는지 — 들어가지 않으면 호출은 일어나지 않는다."""
-        estimate = cost_usd(model, usage, batch=batch)
-        left = self.remaining()
-        if estimate > left:
-            raise BudgetExceeded(
-                f"{model}: this call is estimated at ${estimate:.4f} and only ${left:.4f} of the "
-                f"${self.budget:.2f} budget is left (needs.llm_usage)"
+    def reserve(
+        self,
+        model: str,
+        purpose: str,
+        usage: Usage,
+        *,
+        batch: bool = False,
+        batch_id: str | None = None,
+    ) -> Reservation:
+        """잠금 → 누적 읽기 → 견적 검사 → 예약 행 → 커밋, 전부 한 트랜잭션. 호출은 이 뒤에 나간다."""
+        usd = cost_usd(model, usage, batch=batch)
+        with self.conn.cursor() as cur:
+            cur.execute(LOCK, (ADVISORY_KEY,))
+            cur.execute(SPENT)
+            row = cur.fetchone()
+            left = self.budget - (Decimal(row[0]) if row else Decimal(0))
+            if usd > left:
+                self.conn.rollback()
+                raise BudgetExceeded(
+                    f"{model}: this call is estimated at ${usd:.4f} and only ${left:.4f} of the "
+                    f"${self.budget:.2f} budget is left (needs.llm_usage)"
+                )
+            cur.execute(
+                RECORD,
+                (
+                    model,
+                    f"reserve:{purpose}",
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.cache_read,
+                    usage.cache_write,
+                    usd,
+                    batch_id,
+                ),
             )
-        return estimate
+            reserved = cur.fetchone()
+        self.conn.commit()
+        return Reservation(id=int(reserved[0]) if reserved else 0, model=model, usd=usd, batch=batch)
+
+    def settle(
+        self,
+        reservation: Reservation,
+        purpose: str,
+        usage: Usage,
+        *,
+        batch_id: str | None = None,
+    ) -> Decimal:
+        """예약 행을 실측으로 덮어쓴다. 행을 더하면 예약분이 남아 예산이 두 번 깎인다."""
+        usd = cost_usd(reservation.model, usage, batch=reservation.batch)
+        with self.conn.cursor() as cur:
+            cur.execute(
+                SETTLE,
+                (
+                    purpose,
+                    usage.input_tokens,
+                    usage.output_tokens,
+                    usage.cache_read,
+                    usage.cache_write,
+                    usd,
+                    batch_id,
+                    reservation.id,
+                ),
+            )
+        self.conn.commit()
+        return usd
+
+    def reservation_for(self, batch_id: str) -> Reservation | None:
+        """batch_id 로 예약 행을 되찾는다 — submit 과 collect 가 다른 실행이어도 정산이 붙는다."""
+        with self.conn.cursor() as cur:
+            cur.execute(RESERVED, (batch_id,))
+            row = cur.fetchone()
+        self.conn.rollback()
+        if row is None:
+            return None
+        return Reservation(id=int(row[0]), model=str(row[1]), usd=Decimal(row[2]), batch=True)
+
+    def attach_batch_id(self, reservation: Reservation, batch_id: str) -> None:
+        """제출 직후 회수 주소를 예약 행에 붙인다 — 그것이 29일간 결과를 되찾을 유일한 키다."""
+        with self.conn.cursor() as cur:
+            cur.execute("UPDATE llm_usage SET batch_id = %s WHERE id = %s", (batch_id, reservation.id))
+        self.conn.commit()
 
     def record(
         self,
@@ -121,6 +215,7 @@ class UsageLedger:
         batch: bool = False,
         batch_id: str | None = None,
     ) -> Decimal:
+        """이미 일어난 지출을 그대로 적는다 (무료인 로컬 모델·테스트의 사전 적립). 예산 검사는 없다."""
         usd = cost_usd(model, usage, batch=batch)
         with self.conn.cursor() as cur:
             cur.execute(

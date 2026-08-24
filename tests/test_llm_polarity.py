@@ -13,7 +13,7 @@ import pytest
 
 from analysis.lexicon import DISCOURSE_MARKERS, WISH_MARKERS
 from analysis.polarity import RulePolarity
-from analysis.polarity.llm import DEFAULT_MODEL, PROMPT_DATE, LLMPolarity, version_for
+from analysis.polarity.llm import DEFAULT_MODEL, PROMPT_DATE, TRUNCATED, LLMPolarity, version_for
 from analysis.polarity.pricing import BudgetExceeded, Usage, UsageLedger
 from analysis.polarity.prompt import LABEL_CRITERIA, system_prompt, user_prompt
 from analysis.types import AspectLexicon, AspectPattern, Polarity, PolarityRequest
@@ -55,21 +55,32 @@ def _answer(polarity: str, aspect: str | None = "끈적유분", reason: str = "�
     return json.dumps({"aspect": aspect, "polarity": polarity, "reason": reason}, ensure_ascii=False)
 
 
-def _message(text: str) -> SimpleNamespace:
-    return SimpleNamespace(content=[SimpleNamespace(type="text", text=text)], usage=USAGE)
+def _message(text: str, stop_reason: str = "end_turn") -> SimpleNamespace:
+    return SimpleNamespace(
+        content=[SimpleNamespace(type="text", text=text)], usage=USAGE, stop_reason=stop_reason
+    )
+
+
+COUNTS = SimpleNamespace(succeeded=1, errored=0, expired=0, canceled=0, processing=0)
 
 
 class FakeBatches:
-    def __init__(self, answers: dict[str, str]) -> None:
+    def __init__(
+        self, answers: dict[str, str], failures: dict[str, str] | None = None, status: str = "ended"
+    ) -> None:
         self.answers = answers
+        self.failures = failures or {}
+        self.status = status
         self.submitted: list[Any] = []
+        self.polls = 0
 
     def create(self, *, requests: list[Any]) -> SimpleNamespace:
         self.submitted.append(requests)
         return SimpleNamespace(id="msgbatch_fake")
 
     def retrieve(self, batch_id: str) -> SimpleNamespace:
-        return SimpleNamespace(id=batch_id, processing_status="ended")
+        self.polls += 1
+        return SimpleNamespace(id=batch_id, processing_status=self.status, request_counts=COUNTS)
 
     def results(self, batch_id: str) -> Any:
         # 결과는 아무 순서로나 온다 (Batches 계약) — 뒤집어 돌려주어 순서 복원을 강제한다.
@@ -78,17 +89,20 @@ class FakeBatches:
                 custom_id=custom_id,
                 result=SimpleNamespace(type="succeeded", message=_message(text)),
             )
+        for custom_id, kind in self.failures.items():
+            yield SimpleNamespace(custom_id=custom_id, result=SimpleNamespace(type=kind))
 
 
 class FakeMessages:
     def __init__(self, answers: list[str], batches: FakeBatches | None = None) -> None:
         self.answers = list(answers)
         self.calls: list[dict[str, Any]] = []
+        self.stop_reason = "end_turn"
         self.batches = batches or FakeBatches({})
 
     def create(self, **params: Any) -> SimpleNamespace:
         self.calls.append(params)
-        return _message(self.answers.pop(0))
+        return _message(self.answers.pop(0), self.stop_reason)
 
 
 class FakeClient:
@@ -196,10 +210,50 @@ class TestAgainstAFakeClient:
         client = FakeClient([_answer("불만")])
         with connect(needs_runtime_url) as conn:
             ledger = UsageLedger(conn)
-            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_000))  # $6.99
+            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999
             with pytest.raises(BudgetExceeded):
                 LLMPolarity("claude-sonnet-5", ledger, client=client).classify(SENTENCE, None, None, SUN)
         assert client.messages.calls == []  # 호출 자체가 없었다
+
+    def test_the_ledger_is_a_required_argument_so_no_call_can_skip_the_hard_stop(self):
+        with pytest.raises(TypeError):
+            LLMPolarity("claude-sonnet-5")  # type: ignore[call-arg]
+
+    def test_a_truncated_answer_says_so_instead_of_looking_like_a_label_violation(
+        self, needs_runtime_url: str
+    ):
+        client = FakeClient([_answer("긍정"), _answer("긍정")])
+        client.messages.stop_reason = "max_tokens"
+        with connect(needs_runtime_url) as conn:
+            found = self._polarity(conn, client).classify(SENTENCE, None, "선블록", SUN)
+        assert found.reason == TRUNCATED
+
+    def test_the_batch_is_reserved_before_submission_and_names_its_recovery_address(
+        self, needs_runtime_url: str
+    ):
+        batches = FakeBatches({"p0": _answer("불만")}, status="in_progress")
+        client = FakeClient([], batches)
+        with connect(needs_runtime_url) as conn:
+            ledger = UsageLedger(conn)
+            llm = LLMPolarity("claude-sonnet-5", ledger, client=client, timeout_seconds=0.0, poll_seconds=0.0)
+            with pytest.raises(LookupError) as timed_out:
+                llm.classify_many((PolarityRequest(SENTENCE, 1.0, "선블록"),), SUN)
+            assert "msgbatch_fake" in str(timed_out.value)
+            # 응답을 못 받아도 예약은 남는다 — 다음 실행의 예산이 그것을 본다.
+            assert ledger.spent() > 0
+            assert ledger.reservation_for("msgbatch_fake") is not None
+
+    def test_a_failed_batch_item_records_which_failure_made_it_neutral(self, needs_runtime_url: str):
+        batches = FakeBatches({"p0": _answer("불만")}, failures={"p1": "expired"})
+        client = FakeClient([], batches)
+        items = (PolarityRequest(SENTENCE, 1.0, "선블록"), PolarityRequest("백탁 없어요", 5.0, "선블록"))
+        with connect(needs_runtime_url) as conn:
+            found = LLMPolarity("claude-sonnet-5", UsageLedger(conn), client=client).classify_many(items, SUN)
+            with conn.cursor() as cur:
+                cur.execute("SELECT purpose FROM llm_usage")
+                purposes = [r[0] for r in cur.fetchall()]
+        assert found[1].reason == "llm:배치 expired"
+        assert "succeeded:1" in purposes[0]  # 몇 건이 왜 중립이 됐는지가 원장에 남는다
 
     def test_classify_many_submits_one_batch_and_returns_the_input_order(self, needs_runtime_url: str):
         batches = FakeBatches({"p0": _answer("불만"), "p1": _answer("만족", aspect="백탁")})

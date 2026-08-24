@@ -8,8 +8,8 @@ from collections.abc import Iterator, Sequence
 import pytest
 
 from analysis import registry
+from analysis.baselines import RULE_MEASURED, adoption_misses
 from analysis.polarity.llm import PROMPT_DATE
-from analysis.polarity.predictor import RULE_MEASURED, adoption_misses
 from analysis.registry import LabeledRow, register, unregister
 from cosmai.cli import main
 from db import seed
@@ -63,10 +63,30 @@ def test_a_split_limits_the_eval_sets_that_are_scored(labeled: str, oracle: None
 
 def test_the_adoption_bar_is_what_the_rule_actually_scored_not_the_contract_floor():
     """계약 바닥은 sun .77/.89 지만 규칙은 .870/.915 를 냈다 — 교체 조건은 뒤쪽이다 (이슈 #6)."""
-    assert RULE_MEASURED["sun holdout 100"] == {"acc": 0.870, "P:불만": 0.915}
-    floor_only = {"sun holdout 100": {"acc": 0.80, "P:불만": 0.90}}
-    assert adoption_misses(floor_only) == (
+    assert RULE_MEASURED["polarity"]["sun holdout 100"] == {"acc": 0.870, "P:불만": 0.915}
+    floor_only = {
+        "sun holdout 100": {"acc": 0.80, "P:불만": 0.90},
+        "p1 blind40": {"acc": 0.50, "P:불만": 0.70},
+    }
+    assert adoption_misses("polarity", floor_only) == (
         "sun holdout 100: acc 0.800 < rule 0.870",
         "sun holdout 100: P:불만 0.900 < rule 0.915",
     )
-    assert adoption_misses({"sun holdout 100": {"acc": 0.90, "P:불만": 0.95}}) == ()
+    beats = {
+        "sun holdout 100": {"acc": 0.90, "P:불만": 0.95},
+        "p1 blind40": {"acc": 0.50, "P:불만": 0.70},
+    }
+    assert adoption_misses("polarity", beats) == ()
+
+
+def test_a_run_that_skipped_a_holdout_set_is_an_error_not_an_adoption():
+    """튠만 돈 실행의 scores 에는 홀드아웃이 없다 — 빈 튜플을 '교체'로 읽으면 안 된다."""
+    with pytest.raises(LookupError) as unusable:
+        adoption_misses("polarity", {"sun holdout 100": {"acc": 0.99, "P:불만": 0.99}})
+    assert "p1 blind40" in str(unusable.value)
+
+
+def test_a_paid_impl_without_a_split_is_refused_before_the_holdout_goes_out(capsys):
+    """기준선 표는 홀드아웃을 먼저 돌려준다 — --split 없이는 첫 호출이 블라인드 셋으로 나간다."""
+    assert main(["eval", "polarity", "--impl", "llm:claude-sonnet-5"]) == 2
+    assert "--split" in capsys.readouterr().out

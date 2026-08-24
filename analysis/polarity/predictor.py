@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 from analysis.lexicon import load_aspects
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, ruleset_for
@@ -17,24 +17,6 @@ from analysis.registry import Implementation, LabeledRow, Predictor, register_fa
 from analysis.types import PolarityRequest
 
 IMPL_NAME = "llm"
-
-# 교체 조건은 "규칙 이상"이다 — contracts/interfaces.md 의 채택 바닥(.77/.89 · .47/.67)이 아니라 규칙
-# 구현이 그 셋에서 실제로 낸 점수다 (#3 실측 2026-08-23). --check-baseline 이 녹색이어도 이 표를
-# 넘지 못하면 polarity_version 을 갈지 않는다.
-RULE_MEASURED: Mapping[str, Mapping[str, float]] = {
-    "sun holdout 100": {"acc": 0.870, "P:불만": 0.915},
-    "p1 blind40": {"acc": 0.475, "P:불만": 0.667},
-}
-
-
-def adoption_misses(scores: Mapping[str, Mapping[str, float]]) -> tuple[str, ...]:
-    """점수표(analysis_run.versions.scores)에서 규칙에 못 미친 칸. 비어 있어야 교체다."""
-    return tuple(
-        f"{name}: {metric} {scores[name].get(metric, 0.0):.3f} < rule {want:.3f}"
-        for name, wants in RULE_MEASURED.items()
-        for metric, want in wants.items()
-        if name in scores and scores[name].get(metric, 0.0) < want
-    )
 
 
 def _predictor(model: str) -> Predictor:
@@ -68,4 +50,4 @@ def build(model: str) -> Implementation:
     return Implementation(version=version_for(model), predict=_predictor(model))
 
 
-register_factory("polarity", IMPL_NAME, build)
+register_factory("polarity", IMPL_NAME, build, paid=True)

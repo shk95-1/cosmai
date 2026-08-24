@@ -111,6 +111,7 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 
 def _run_eval(args: argparse.Namespace) -> int:
     from analysis import registry
+    from analysis.baselines import adoption_misses
     from analysis.evaluate import evaluate, record, render
 
     registry.load_implementations()
@@ -118,6 +119,11 @@ def _run_eval(args: argparse.Namespace) -> int:
         impl = registry.build(args.task, args.impl) if args.impl else registry.get(args.task)
     except LookupError as refused:
         print(refused)
+        return 2
+    # 기준선 표는 홀드아웃 셋을 먼저 돌려준다 (analysis/baselines.py) — 유료 구현을 --split 없이 부르면
+    # 블라인드 홀드아웃이 첫 호출로 나간다. 규율이 아니라 인자로 막는다.
+    if args.impl and registry.is_paid(args.task, args.impl) and args.split is None:
+        print(f"--impl {args.impl} spends money; pass --split tune or --split holdout")
         return 2
     if impl is None:
         print(
@@ -137,6 +143,12 @@ def _run_eval(args: argparse.Namespace) -> int:
             return 2
     if args.check_baseline:
         misses = [miss for result in results for miss in result.misses]
+        try:
+            # 채택 조건은 바닥이고, 교체 조건은 규칙 실측 이상이다 (interfaces.md §규칙 실측).
+            misses += list(adoption_misses(args.task, {r.name: dict(r.metrics) for r in results}))
+        except LookupError as unusable:
+            print(unusable)
+            return 2
         for miss in misses:
             print(miss)
         return 1 if misses else 0

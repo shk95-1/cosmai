@@ -16,6 +16,7 @@ __all__ = [
     "TASKS",
     "build",
     "get",
+    "is_paid",
     "register",
     "register_factory",
 ]
@@ -41,6 +42,8 @@ class Implementation:
 _REGISTRY: dict[str, Implementation] = {}
 # `--impl <name>:<argument>` 로 고르는 구현체. 모델 이름이 인자라 미리 등록해 둘 수 없다 (#6 의 llm:<model>).
 _FACTORIES: dict[tuple[str, str], Callable[[str], Implementation]] = {}
+# 외부에 돈을 내는 구현. cli 는 이 표시만 보고 --split 을 요구한다 (홀드아웃이 먼저 도는 것을 막는다).
+_PAID: set[tuple[str, str]] = set()
 
 
 def register(task: str, version: str, predict: Predictor) -> None:
@@ -49,10 +52,19 @@ def register(task: str, version: str, predict: Predictor) -> None:
     _REGISTRY[task] = Implementation(version=version, predict=predict)
 
 
-def register_factory(task: str, name: str, factory: Callable[[str], Implementation]) -> None:
+def register_factory(
+    task: str, name: str, factory: Callable[[str], Implementation], *, paid: bool = False
+) -> None:
+    """paid=True 는 "이 구현은 외부에 돈을 낸다" 는 표시다 — cli 가 그것만 보고 규율을 강제한다."""
     if task not in TASKS:
         raise ValueError(f"unknown task {task!r}; expected one of {', '.join(TASKS)}")
     _FACTORIES[(task, name)] = factory
+    if paid:
+        _PAID.add((task, name))
+
+
+def is_paid(task: str, spec: str) -> bool:
+    return (task, spec.partition(":")[0]) in _PAID
 
 
 def build(task: str, spec: str) -> Implementation:
