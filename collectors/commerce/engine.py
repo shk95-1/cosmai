@@ -470,7 +470,9 @@ def collect(
 
     That gate is per lane and so per process, which is what `lock` is above: the source another run
     already holds is skipped rather than walked at twice the policy's rate. The default coordinates
-    with nobody; `collectors/commerce/storage/locks.py` is the one the CLI installs.
+    with nobody; `collectors/commerce/storage/locks.py` is the one the CLI installs. A default that
+    quiet needs a keeper, so tests/collectors/commerce/test_source_lock.py reads every caller outside
+    the tests and fails the one that leaves `lock=` off.
     """
     active_journal = journal or NullJournal()
     reports: dict[str, SourceReport] = {}

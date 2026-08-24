@@ -107,7 +107,9 @@ def run(
         return exit_code_for(report)
     finally:
         # This returns rather than exits, so the pool outlives the run for any in-process caller --
-        # and the roles this connects as are capped at a handful of connections (db/bootstrap.sql).
+        # and `trend_radar_runtime` is capped at 8 connections while a walk holds at most 3 (the
+        # source lock plus the widest concurrency shipped, hwahae's 2). That cap is not set anywhere
+        # in this repo; storage/locks.py records where it does come from and when it was read.
         engine.dispose()
 
 

@@ -106,7 +106,8 @@ class RunLog:
                 "error_count": len(r.errors),
                 # A skip is not an error, so it does not move `error_count` -- but its reason has to
                 # land somewhere a reader of `outcome = 'skipped'` can find it, and this is the
-                # column that already holds free text about why a source produced nothing.
+                # column that already holds free text about why a source produced nothing. Hence rows
+                # with `error_count = 0 AND errors IS NOT NULL`: that pair is a skip, not a lost count.
                 "errors": "\n".join([*r.errors, *([r.skipped_reason] if r.skipped_reason else [])]) or None,
                 "outcome": outcome_of(r),
                 "configured_interval_s": r.configured_interval_s,
