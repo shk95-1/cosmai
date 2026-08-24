@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
+from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from cosmai.cli import main
 from db import seed
 from db.seed._common import connect
@@ -256,6 +257,42 @@ def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, source
         row = cur.fetchone()
     # 시드 행이 모집단에 들어왔다면 neg 가 2 다 — 이 run 이 쓴 리뷰 불만 한 건만 센다.
     assert row == (1, 1)
+
+
+class StubPolarity:
+    """`--impl <spec>` 가 여는 판정자 자리의 스텁 — 규칙과 다른 버전을 내는 것이 요점이다
+    (tests/test_analyze_polarity.py 의 같은 이름과 같은 역할)."""
+
+    version = "stub-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="백탁", polarity="중립", reason="stub", version=self.version)
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
+
+
+def test_an_impl_run_records_that_implementations_version_not_the_rules(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """entrypoints.md: `--impl` 이 있으면 그 구현의 버전이 analysis_run.versions.polarity 와 산출 행에
+    남는다. `all` 은 성공한 run 을 자기가 모은 versions 로 다시 닫으므로(analysis/pipeline.py `_close`),
+    polarity 가 RUN_START 에 쓴 올바른 버전은 그 versions 가 판정자를 물어봤을 때만 살아남는다.
+    `--impl` 에서 여기까지의 배선은 tests/test_cli_analyze.py 가 본다."""
+    found = _all(analysis_url, sources, polarity=StubPolarity())
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT versions FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        cur.execute("SELECT DISTINCT polarity_version FROM need_mention")
+        stamped = cur.fetchall()
+    assert row is not None
+    assert row[0]["polarity"] == StubPolarity.version
+    # 나머지 버전은 그대로다 — 갈아 끼운 것은 판정자 하나뿐이다.
+    assert row[0]["extractor"] == EXTRACTOR_VERSION and row[0]["linker"] == LINKER_VERSION
+    assert stamped == [(StubPolarity.version,)]
 
 
 def test_a_failing_stage_closes_the_run_as_failed(analysis_url: str, sources: tuple[str, str]):
