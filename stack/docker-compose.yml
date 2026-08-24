@@ -18,6 +18,14 @@
 # `scope_threshold()` 임포트를 전부 실행한다. 그 빌드가 성공했다는 것이 그 조건의 근거다.
 name: cosmai
 
+# **오늘 `up -d` 하면 수집기 셋은 매 실행 실패한다.** collectors/{commerce,naver,youtube}/cli.py 의
+# 기본 fetcher 는 `_RaisingFetcher` 이고 #10 이 붙일 라이브 트랜스포트가 아직 없다 — collector-commerce
+# 는 하루 29회, collector-youtube-work 는 하루 288회, collector-naver 는 월 2회 NotImplementedError
+# 로 끝난다. 그래도 프로필 뒤로 숨기지 않는 이유: 절차 1 이 검사하는 것이 배선이고, 게이트를 걸면
+# `up -d` 가 그 배선을 띄우지 않아 대조할 것이 없어진다. 비용도 로그뿐이다 — supercronic 은 작업이
+# 실패해도 계속 돌므로 컨테이너는 재시작 루프에 들지 않고, 외부 요청은 한 건도 나가지 않는다.
+# (collector-youtube-watch 를 프로필로 막은 것은 다른 이유다 — 정책이지 능력이 아니다. 아래 참조.)
+#
 # 스케줄러 여섯이 공유하는 정의. 하나의 객체인 이유는 fleet 쪽 앵커와 같다: 이 값들이 서로 달라지면
 # 컨테이너 하나만 조용히 다른 DB(호스트 기본값 127.0.0.1:5434 — 컨테이너 안에서는 아무것도 없는 주소)를
 # 보게 되고, 그것은 크래시가 아니라 "수집은 도는데 행이 안 늘어난다"로 나타난다.
@@ -43,6 +51,10 @@ x-cron: &cron
     # supercronic 이 각 작업의 stdout 을 그대로 흘리므로, 버퍼링되면 `docker logs` 가 실행 중에는
     # 비어 있다가 종료할 때 한꺼번에 찬다.
     PYTHONUNBUFFERED: "1"
+    # stack/crontab.d/* 여섯 파일이 전부 첫 줄에서 UTC 라고 선언하고 contracts/entrypoints.md §스케줄
+    # 의 시각도 UTC 다. 이 줄이 없으면 그것이 베이스 이미지가 마침 UTC 라는 우연이고, 이미지를 바꾸는
+    # 날 여섯 스케줄이 한꺼번에 움직인다.
+    TZ: UTC
   volumes:
     # 읽기 전용: 어느 스케줄러도 이 파일에 쓰지 않는다. 호스트 경로는 리터럴이 아니라 변수이고 기본값이
     # 없다 — 빠지면 compose 가 이름을 말하며 거부한다(stack/env.example).

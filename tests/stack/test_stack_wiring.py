@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = REPO_ROOT / "stack" / "docker-compose.yml"
 ENV_EXAMPLE = REPO_ROOT / "stack" / "env.example"
 CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
+DOCKERFILE_CRON = REPO_ROOT / "stack" / "Dockerfile.cron"
 SECRETS_MD = REPO_ROOT / "contracts" / "secrets.md"
 
 # stack/Dockerfile's WORKDIR: the image carries the checkout there, so a container path is a repo
@@ -245,6 +246,21 @@ def test_a_scheduled_service_reaches_the_database_by_the_contracted_knobs(name: 
 
 
 @pytest.mark.parametrize("name", sorted(SCHEDULED), ids=lambda n: n)
+def test_a_scheduled_service_reads_its_crontab_in_utc(name: str):
+    # Every file in stack/crontab.d/ opens with "UTC." and every time in contracts/entrypoints.md
+    # §스케줄 is UTC. Without TZ set that is a property of whatever the base image happens to ship,
+    # and a base image change moves six schedules at once with nothing here noticing.
+    assert "TZ: UTC" in SERVICES[name], f"{name} does not pin TZ=UTC, which its crontab assumes"
+
+
+@pytest.mark.parametrize("path", CRON_FILES, ids=lambda p: p.name)
+def test_every_crontab_file_says_which_zone_its_times_are_in(path: Path):
+    assert path.read_text(encoding="utf-8").startswith("# UTC"), (
+        f"stack/crontab.d/{path.name} does not open by naming its timezone"
+    )
+
+
+@pytest.mark.parametrize("name", sorted(SCHEDULED), ids=lambda n: n)
 def test_a_scheduled_service_gets_its_secrets_by_read_only_mount(name: str):
     body = SERVICES[name]
     assert f"COSMAI_SECRET_FILE: {SECRET_IN_CONTAINER}" in body, (
@@ -269,7 +285,7 @@ def secret_key_names() -> list[str]:
     return sorted(set(re.findall(r"`([A-Z][A-Z0-9_]{4,})`", SECRETS_MD.read_text(encoding="utf-8"))))
 
 
-@pytest.mark.parametrize("path", [COMPOSE, ENV_EXAMPLE], ids=lambda p: p.name)
+@pytest.mark.parametrize("path", [COMPOSE, ENV_EXAMPLE, DOCKERFILE_CRON, *CRON_FILES], ids=lambda p: p.name)
 def test_no_secret_key_is_given_a_value_in_the_repo(path: Path):
     # contracts/secrets.md: values live in ~/.config/cosmai/env and nowhere else. A placeholder
     # counts -- it is the line someone edits in place and then commits.
