@@ -13,6 +13,7 @@ investigating must not depend on which transport happened to run.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from collectors.commerce.engine import (
@@ -22,15 +23,27 @@ from collectors.commerce.engine import (
     TransientError,
 )
 
-# `cf-mitigated` is what oliveyoung's edge sends. The Korean string is the interstitial's own title,
-# which is what a challenge served with a 200 looks like -- and a 200 is the case worth catching,
-# because nothing else would.
+# `cf-mitigated` is what oliveyoung's edge sends.
 CHALLENGE_HEADERS = ("cf-mitigated",)
-CHALLENGE_MARKERS = (
-    "잠시만 기다려",
-    "cf-browser-verification",
-    "/cdn-cgi/challenge-platform",
-)
+
+# Two kinds of marker, because they carry different amounts of evidence.
+#
+# `잠시만 기다려` is the interstitial's own title (`<title>잠시만 기다려 주세요 - 올리브영</title>`, the
+# capture in the original repo's docs/sources/oliveyoung.md) -- but it is also four ordinary Korean
+# words that a review or a seller's notice says in passing. Anywhere but a title it is content, so
+# that is the only place it is read. The Cloudflare tokens name Cloudflare's own machinery and appear
+# in no product page, so they are read anywhere in the document.
+TITLE_MARKERS = ("잠시만 기다려",)
+BODY_MARKERS = ("cf-browser-verification", "/cdn-cgi/challenge-platform")
+CHALLENGE_MARKERS = TITLE_MARKERS + BODY_MARKERS
+
+# A challenge is a document. An XHR endpoint answering `application/json` is not one, and reading its
+# prose for a Korean phrase is how a shopping review ends up halting a source that was never refused
+# (review round 1, #10). Absent is scanned: a rendered page from the browser transport carries no
+# response content-type of its own, and it is HTML by construction.
+HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+
+_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 # Only worth scanning the small pages a wall produces. A 700 KB ranking page is not a challenge, and
 # decoding it on every fetch is pure cost.
@@ -48,14 +61,26 @@ def challenge_reason(headers: Mapping[str, str], body: bytes | str) -> str | Non
         if header in lowered:
             return f"bot challenge: {header}={lowered[header]!r}"
 
+    if not _is_document(lowered.get("content-type")):
+        return None
     if len(body) >= MAX_SCANNED_BYTES:
         return None
     text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
 
-    for marker in CHALLENGE_MARKERS:
+    for marker in BODY_MARKERS:
         if marker in text:
             return f"bot challenge: response contains {marker!r}"
+    for title in _TITLE.findall(text):
+        for marker in TITLE_MARKERS:
+            if marker in title:
+                return f"bot challenge: page title contains {marker!r}"
     return None
+
+
+def _is_document(content_type: str | None) -> bool:
+    if content_type is None:
+        return True
+    return content_type.split(";", 1)[0].strip().lower() in HTML_CONTENT_TYPES
 
 
 def raise_for_refusal(

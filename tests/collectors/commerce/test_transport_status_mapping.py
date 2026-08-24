@@ -118,23 +118,54 @@ def test_the_challenge_header_is_matched_whatever_case_the_edge_sent_it_in():
         raise_for_refusal(200, {"CF-Mitigated": "challenge"}, b"<html/>")
 
 
-@pytest.mark.parametrize(
-    "marker", ["잠시만 기다려 주세요", "cf-browser-verification", "/cdn-cgi/challenge-platform"]
-)
-def test_an_interstitial_body_served_with_a_200_is_still_a_challenge(marker: str):
+# Each interstitial written the way it actually arrives. The Korean one is the capture in the
+# original repo's docs/sources/oliveyoung.md -- the phrase is the page's *title*, which is why round
+# 1 stopped reading it anywhere else: outside a title those four words are a shopping review.
+INTERSTITIALS = {
+    "oliveyoung title": "<html><head><title>잠시만 기다려 주세요 - 올리브영</title></head></html>",
+    "cf-browser-verification": "<html><body><div id='cf-browser-verification'></div></body></html>",
+    "challenge-platform": "<html><body><script src='/cdn-cgi/challenge-platform/h/b'></script></body></html>",
+}
+
+
+@pytest.mark.parametrize("body", list(INTERSTITIALS.values()), ids=list(INTERSTITIALS))
+def test_an_interstitial_body_served_with_a_200_is_still_a_challenge(body: str):
     with pytest.raises(ChallengeBlocked, match="challenge"):
-        raise_for_refusal(200, {}, f"<html>{marker}</html>".encode())
+        raise_for_refusal(200, {}, body.encode())
+
+
+@pytest.mark.parametrize("body", list(INTERSTITIALS.values()), ids=list(INTERSTITIALS))
+def test_an_interstitial_is_caught_when_the_edge_labels_it_html(body: str):
+    # The scan is gated on content-type now; a challenge page is served as a document, so the gate
+    # must not be what lets one through.
+    with pytest.raises(ChallengeBlocked, match="challenge"):
+        raise_for_refusal(200, {"Content-Type": "text/html; charset=utf-8"}, body.encode())
 
 
 def test_a_page_too_big_to_be_a_wall_is_not_scanned():
     # A 700 KB ranking page is not a challenge, and decoding one on every fetch is pure cost. The
     # marker is really in there, so this fails the moment the size guard stops applying.
-    body = ("잠시만 기다려 주세요" + "x" * MAX_SCANNED_BYTES).encode()
+    body = ("<title>잠시만 기다려 주세요</title>" + "x" * MAX_SCANNED_BYTES).encode()
     raise_for_refusal(200, {}, body)
 
 
+def test_an_api_answering_json_is_never_read_for_prose():
+    # The daisomall and oliveyoung review endpoints answer JSON full of free Korean text. Scanning it
+    # is how a review halts a source the site never refused -- see
+    # test_challenge_never_fires_on_content.py, which drives this from the real captures.
+    body = '{"revwCn":"품절이라 재입고까지 잠시만 기다려주세요"}'.encode()
+    raise_for_refusal(200, {"content-type": "application/json; charset=utf-8"}, body)
+
+
+def test_a_challenge_header_on_a_json_response_is_still_a_challenge():
+    # The content-type gate covers the body scan only. An edge that mitigates an XHR says so in the
+    # header, and that has to keep halting the source.
+    with pytest.raises(ChallengeBlocked):
+        raise_for_refusal(200, {"content-type": "application/json", "cf-mitigated": "challenge"}, b"{}")
+
+
 def test_a_body_just_under_the_scan_limit_is_still_read():
-    body = ("잠시만 기다려 주세요".encode()).ljust(MAX_SCANNED_BYTES - 1, b"x")
+    body = ("<title>잠시만 기다려 주세요</title>".encode()).ljust(MAX_SCANNED_BYTES - 1, b"x")
     with pytest.raises(ChallengeBlocked):
         raise_for_refusal(200, {}, body)
 
