@@ -18,13 +18,21 @@
 # `scope_threshold()` 임포트를 전부 실행한다. 그 빌드가 성공했다는 것이 그 조건의 근거다.
 name: cosmai
 
-# **오늘 `up -d` 하면 수집기 셋은 매 실행 실패한다.** collectors/{commerce,naver,youtube}/cli.py 의
-# 기본 fetcher 는 `_RaisingFetcher` 이고 #10 이 붙일 라이브 트랜스포트가 아직 없다 — collector-commerce
-# 는 하루 29회, collector-youtube-work 는 하루 288회, collector-naver 는 월 2회 NotImplementedError
-# 로 끝난다. 그래도 프로필 뒤로 숨기지 않는 이유: 절차 1 이 검사하는 것이 배선이고, 게이트를 걸면
-# `up -d` 가 그 배선을 띄우지 않아 대조할 것이 없어진다. 비용도 로그뿐이다 — supercronic 은 작업이
-# 실패해도 계속 돌므로 컨테이너는 재시작 루프에 들지 않고, 외부 요청은 한 건도 나가지 않는다.
-# (collector-youtube-watch 를 프로필로 막은 것은 다른 이유다 — 정책이지 능력이 아니다. 아래 참조.)
+# **오늘 `up -d` 하면 수집기 둘은 매 실행 실패한다.** collectors/{naver,youtube}/cli.py 의 기본
+# fetcher 는 아직 `_RaisingFetcher` 라 collector-youtube-work 는 하루 288회, collector-naver 는 월
+# 2회 NotImplementedError 로 끝나고 그 둘에서 나가는 외부 요청은 한 건도 없다. 그래도 프로필 뒤로
+# 숨기지 않는 이유: 절차 1 이 검사하는 것이 배선이고, 게이트를 걸면 `up -d` 가 그 배선을 띄우지 않아
+# 대조할 것이 없어진다. 비용도 로그뿐이다 — supercronic 은 작업이 실패해도 계속 돌므로 컨테이너는
+# 재시작 루프에 들지 않는다.
+#
+# **collector-commerce 는 더 이상 그 셋에 없다.** #10 이 라이브 트랜스포트를 붙였고
+# (collectors/commerce/cli.py 의 `fetcher or live_fetchers()`), 그래서 이 컨테이너는 뜨는 순간부터
+# 다음 크론 시각에 커머스 4사로 진짜 요청을 낸다. STATE.md §3 이 컷오버 전 새 수집을 금지하고 조건
+# 3(그림자 실행)은 사람이 시각을 골라 여는 단계이므로, 그 금지를 관례가 아니라 파일이 지키도록
+# **프로필 `commerce` 뒤에 둔다** — 배포가 곧 그림자 실행이 되면 안 된다. 여는 명령은 그 서비스
+# 블록에 적혀 있고, tests/stack/test_live_collection_is_behind_a_profile.py 가 프로필 없이는 뜨지
+# 않는다는 것을 검사한다.
+# (collector-youtube-watch 도 프로필 뒤이지만 이유는 다르다 — 큐 깊이다. 아래 참조.)
 #
 # 스케줄러 여섯이 공유하는 정의. 하나의 객체인 이유는 fleet 쪽 앵커와 같다: 이 값들이 서로 달라지면
 # 컨테이너 하나만 조용히 다른 DB(호스트 기본값 127.0.0.1:5434 — 컨테이너 안에서는 아무것도 없는 주소)를
@@ -67,9 +75,17 @@ services:
   # 커머스 4사. 여섯 줄이 한 컨테이너인 이유는 하나의 요청 예산을 나눠 쓰기 때문이다: crontab.d 의
   # 간격 규칙(contracts/entrypoints.md §스케줄)은 이 줄들이 서로 겹치지 않는다는 전제 위에 있고,
   # 컨테이너를 쪼개면 그 전제를 지킬 자리가 없어진다.
+  #
+  # **프로필 뒤에 있으므로 `docker compose up -d` 로는 뜨지 않는다** — 라이브 트랜스포트가 붙어 있어
+  # 뜨는 순간부터 실제 요청이 나가고, 언제 처음 나갈지는 #10 조건 3(그림자 실행)에서 사람이 고르는
+  # 시각이다. 조건 5(컷오버)에서 상시로 켜는 것도 같은 명령이다.
+  # 켜기: docker compose --profile commerce up -d collector-commerce
+  # 끄기: docker compose stop collector-commerce
+  # (stack/rollback.sh 는 이 프로필을 이미 켜고 부른다 — 안 그러면 롤백이 이 컨테이너를 못 세운다.)
   collector-commerce:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-commerce"]
+    profiles: ["commerce"]
 
   # 네이버 API Hub. 커머스와 다른 호스트·다른 키(contracts/secrets.md 의 COSMA_SRC_NAVER_BLOG_*)라
   # 예산도 따로다 — 네이버 쿼터가 막혔다고 커머스를 멈출 이유가 없다.

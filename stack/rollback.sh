@@ -69,8 +69,11 @@ old_compose_cmd() {
     ( CDPATH='' cd -- "$old_stack" && docker compose "$@" )
 }
 new_compose_cmd() {
-    # --profile: collector-youtube-watch 는 프로필 뒤에 있어서, 없으면 compose 가 그 이름을 모른다.
-    docker compose --profile youtube-watch -f "$new_compose" "$@"
+    # --profile: collector-commerce 와 collector-youtube-watch 는 프로필 뒤에 있어서, 없으면 compose 가
+    # 그 이름을 모르고 stop 이 통째로 실패한다 -- 즉 롤백 중에 새 수집기가 계속 돈다. 새 프로필이
+    # 생기면 여기에도 넣어야 하고, tests/stack/test_live_collection_is_behind_a_profile.py 가 그 짝을
+    # 검사한다.
+    docker compose --profile commerce --profile youtube-watch -f "$new_compose" "$@"
 }
 
 # 이름이 드리프트했으면 여기서 멈춘다 -- 롤백이 "성공"을 찍고 아무것도 되살리지 않는 것이 최악이다.
