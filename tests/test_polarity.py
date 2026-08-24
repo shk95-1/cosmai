@@ -111,7 +111,11 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     assert "analysis.predictors" in registry.IMPLEMENTATIONS
     registry.load_implementations()
     found = {task: registry.get(task) for task in ("polarity", "wish_class")}
-    assert all(impl is not None and impl.version == "rule-v2.2" for impl in found.values())
+    # 두 task 는 각자의 규칙 버전을 낸다 — 추출기만 rule-v2.3 으로 올라갔다.
+    assert {task: impl.version if impl else None for task, impl in found.items()} == {
+        "polarity": "rule-v2.2",
+        "wish_class": "rule-v2.3",
+    }
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
     # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 (#12 이월).
