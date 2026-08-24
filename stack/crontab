@@ -1,8 +1,9 @@
 # UTC. commerce times from contracts/entrypoints.md §스케줄, which now names all six -- every
 # commerce Dataset member gets a line, per S05 (playbook 02-test-discipline.md T10 records a real
-# outage from a dataset with a collector and no cron line). No commerce line uses minute 0: the
-# hourly ranking run starts there and takes ~74s, and two walks on one source at once would halve
-# the 5s pace the daily walks are spaced to protect (each is ~7 min).
+# outage from a dataset with a collector and no cron line). Spacing here is a gap rule, not a minute
+# rule: each line's gap to the next has to cover how long it runs, which is its sources' min_interval_s
+# times how many requests they make. No runtime is written down here -- the test computes it from those
+# policy constants so it follows them (contracts/entrypoints.md §스케줄).
 0 * * * *   cosmai collect commerce --dataset ranking
 5 2 * * *   cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
@@ -10,10 +11,11 @@
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
 # analyze all is DB-only (no external fetch), so contracts/entrypoints.md §스케줄 exempts it from the
-# minute-0 rule the commerce walks follow.
+# gap rule the commerce walks follow.
 0 5 * * *   cosmai analyze all
 # naver datalab: monthly (키워드 사전 기준, contracts/entrypoints.md), day 1. 06:10 clears every
-# commerce time above (02:05/03:30/04:15/04:45/05:30) and avoids minute 0 like they do.
+# commerce time above (02:05/03:30/04:15/04:45/05:30); naver walks a different host, so the commerce
+# gap rule does not bind it.
 10 6 1 * *  cosmai collect naver --dataset datalab
 # naver blog: monthly too -- every run re-walks all 15 keyword-group terms from scratch (no
 # cursor; natural-key upsert on post_id makes that safe), so once a month is enough spend.
