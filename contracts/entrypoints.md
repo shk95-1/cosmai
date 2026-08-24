@@ -69,7 +69,7 @@ run_id 를 갖지 않으므로(versioning.md A19) 각 단계가 만든 행 수�
 
 ## 분석
 ```
-cosmai analyze <stage> [--since <date>] [--scope <category>]
+cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>]
   stage ∈ {link, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
 cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
@@ -78,6 +78,7 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
 - 산출 행은 반드시 `*_version` 을 가진다 (`versioning.md`).
+- `analyze --impl <spec>` 는 `eval` 과 같은 레지스트리·같은 스펙 문법이다(`ollama:gemma4:latest`·`llm:claude-sonnet-5`). 없으면 규칙이 돌고, 있으면 그 구현의 버전이 `analysis_run.versions.polarity` 와 산출 행에 남는다. `registry.is_paid` 인 구현은 `--scope` 없이는 거절한다 — `eval` 의 `--split` 강제와 같은 자리다(analyze 의 기본은 전량이라 무자격 실행이 곧 예산 소진이다).
 - `analyze all` 은 `needs.analysis_run` 행 하나를 만들고(polarity 가 열고 aggregate 가 그 `run_id` 로
   metrics 를 쓴다) `versions` 에 linker·extractor·polarity·aggregate 와 `lexicon`(활성 버전 + ruleset)을
   기록한다. 한 단계라도 실패하면 그 run 은 `status='failed'` + note 로 닫히고 종료 코드는 1 이다.
