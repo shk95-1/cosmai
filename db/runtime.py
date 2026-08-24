@@ -17,11 +17,20 @@ DEFAULT_PORT = "5434"
 RUNTIME_DSN = "postgresql+psycopg://needs_runtime:{password}@{host}:{port}/app"
 
 
+def host_and_port(host: str | None = None, port: int | str | None = None) -> tuple[str, str]:
+    """이 저장소에서 DSN 을 짓는 세 자리(여기·commerce·youtube)가 같은 노브를 같은 규칙으로 읽게 하는 한 자리.
+
+    명시 인자가 env 를 이긴다: 인자를 준 호출자는 특정 DB 를 겨냥한 것이고, env 는 아무도 지목하지
+    않았을 때의 배포 단위 기본값이다.
+    """
+    # compose 는 값이 없는 ${VAR} 를 빈 문자열로 넘긴다 — 빈 호스트가 아니라 기본값이어야 한다.
+    return (
+        str(host or os.environ.get(HOST_VAR) or DEFAULT_HOST),
+        str(port or os.environ.get(PORT_VAR) or DEFAULT_PORT),
+    )
+
+
 def runtime_url() -> str:
     password = quote(secrets.require([RUNTIME_KEY])[RUNTIME_KEY], safe="")
-    # compose 는 값이 없는 ${VAR} 를 빈 문자열로 넘긴다 — 빈 호스트가 아니라 기본값이어야 한다.
-    return RUNTIME_DSN.format(
-        password=password,
-        host=os.environ.get(HOST_VAR) or DEFAULT_HOST,
-        port=os.environ.get(PORT_VAR) or DEFAULT_PORT,
-    )
+    host, port = host_and_port()
+    return RUNTIME_DSN.format(password=password, host=host, port=port)

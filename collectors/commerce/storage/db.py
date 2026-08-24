@@ -29,16 +29,22 @@ from collectors.commerce.storage.tables import fetch_log as fetch_log_table
 from collectors.commerce.storage.tables import run as run_table
 from collectors.commerce.storage.tables import run_source as run_source_table
 from db import secrets
+from db.runtime import host_and_port
 
 COLLECTOR_VERSION = "commerce-0.1"
 
 
-def runtime_url(host: str = "127.0.0.1", port: int = 5434, database: str = "app") -> str:
+def runtime_url(host: str | None = None, port: int | str | None = None, database: str = "app") -> str:
     """The production runtime connection: `db/secrets.py`'s `COSMA_DB_RUNTIME` password, the schema's
     own runtime role, search_path pointed at `trend_radar` -- `storage/tables.py`'s Table objects are
     schema-unqualified so the same tables module works against a per-test schema too (tests/conftest.py's
-    `trend_radar_schema` fixture sets its own search_path the same way)."""
+    `trend_radar_schema` fixture sets its own search_path the same way).
+
+    Only the host and the port move, and they move through `db.runtime`'s COSMAI_DB_HOST/COSMAI_DB_PORT
+    -- the role, the database and the secret key stay this schema's own (contracts/entrypoints.md
+    §DB 접속 노브)."""
     password = secrets.require(["COSMA_DB_RUNTIME"])["COSMA_DB_RUNTIME"]
+    host, port = host_and_port(host, port)
     url = make_url(f"postgresql+psycopg://{SERVICE_SCHEMA}_runtime:{password}@{host}:{port}/{database}")
     return url.update_query_dict({"options": f"-csearch_path={SERVICE_SCHEMA},pg_catalog"}).render_as_string(
         hide_password=False
