@@ -182,19 +182,19 @@ def _dump(url: str, table: str, columns: str, run_id: int | None) -> list[tuple[
 
 def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sources: tuple[str, str]):
     found = _all(analysis_url, sources)
-    assert found.status == "done", found.detail
+    assert found.status == "ok", found.detail
     assert found.run_id is not None
     assert found.counts["product_ref"] > 0
     assert found.counts["brand_mention"] > 0
-    assert found.counts["need_mention"] > 0
-    assert found.counts["wish_mention"] > 0
+    assert found.counts["attempted_need"] > 0
+    assert found.counts["attempted_wish"] > 0
     assert found.counts["metrics_need"] > 0
     assert found.counts["metrics_wish"] > 0
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT status, finished_at IS NOT NULL FROM analysis_run WHERE run_id = %s", (found.run_id,)
         )
-        assert cur.fetchone() == ("done", True)
+        assert cur.fetchone() == ("ok", True)
         # 세 단계가 한 run 을 나눠 쓴다 — polarity 가 연 run 에 aggregate 가 metrics 를 쓴다.
         cur.execute("SELECT count(*) FROM analysis_run")
         assert cur.fetchone() == (1,)
@@ -207,7 +207,7 @@ def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(
     needs = _dump(analysis_url, "metrics_need", NEED_METRICS, first.run_id)
     wishes = _dump(analysis_url, "metrics_wish", WISH_METRICS, first.run_id)
     second = _all(analysis_url, sources)
-    assert second.status == "done" and second.run_id != first.run_id
+    assert second.status == "ok" and second.run_id != first.run_id
     assert _dump(analysis_url, "metrics_need", NEED_METRICS, second.run_id) == needs
     assert _dump(analysis_url, "metrics_wish", WISH_METRICS, second.run_id) == wishes
     assert second.counts == first.counts
@@ -243,7 +243,7 @@ def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, source
         )
         conn.commit()
     found = _all(analysis_url, sources)
-    assert found.status == "done", found.detail
+    assert found.status == "ok", found.detail
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT versions->>'extractor' FROM analysis_run WHERE run_id = %s", (found.run_id,))
         assert cur.fetchone() == (EXTRACTOR_VERSION,)
@@ -272,15 +272,39 @@ def test_a_failing_stage_closes_the_run_as_failed(analysis_url: str, sources: tu
     assert "nowhere" in rows[0][1]
 
 
+def test_a_polarity_failure_closes_the_run_polarity_itself_opened(
+    analysis_url: str, sources: tuple[str, str], database_url_for_tests: str
+):
+    """polarity 는 run 을 열고 바로 커밋한다 — 그 안에서 죽으면 running 행이 고아로 남으면 안 된다.
+
+    가장 긴 단계라 운영에서 타임아웃이 착지할 자리이기도 하다: 가장 일어나기 쉬운 실패다.
+    """
+    commerce, _ = sources
+    engine = create_engine(database_url_for_tests)
+    with engine.begin() as conn:
+        # link 는 product 만 읽는다 — review 만 닫으면 polarity 가 run 을 연 뒤에 죽는다.
+        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".review FROM needs_runtime')
+    engine.dispose()
+    found = _all(analysis_url, sources)
+    assert found.status == "failed" and "polarity" in found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT run_id, status, finished_at IS NOT NULL, note FROM analysis_run")
+        rows = cur.fetchall()
+    # 고아 running 행 + 새 failed 행이 아니라, polarity 가 연 그 행 하나가 닫힌다.
+    assert [(r[1], r[2]) for r in rows] == [("failed", True)]
+    assert rows[0][0] == found.run_id
+    assert "polarity" in rows[0][3]
+
+
 def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str]):
     commerce, youtube = sources
     with connect(analysis_url) as conn:
         link = pipeline.run_stage(conn, "link", commerce_schema=commerce, youtube_schema=youtube)
         polarity = pipeline.run_stage(conn, "polarity", commerce_schema=commerce, youtube_schema=youtube)
         aggregate = pipeline.run_stage(conn, "aggregate", commerce_schema=commerce, captured_at=CAPTURED_DATE)
-    assert link.status == "done" and link.counts["product_ref"] > 0
-    assert polarity.status == "done" and polarity.counts["need_mention"] > 0
-    assert aggregate.status == "done" and aggregate.counts["metrics_need"] > 0
+    assert link.status == "ok" and link.counts["product_ref"] > 0
+    assert polarity.status == "ok" and polarity.counts["attempted_need"] > 0
+    assert aggregate.status == "ok" and aggregate.counts["metrics_need"] > 0
 
 
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
@@ -310,7 +334,7 @@ def test_the_health_view_reports_the_run_and_its_metric_rows(
             (found.run_id,),
         )
         assert cur.fetchone() == (
-            "done", True, True, EXTRACTOR_VERSION,
+            "ok", True, True, EXTRACTOR_VERSION,
             found.counts["metrics_need"], found.counts["metrics_wish"],
         )  # fmt: skip
 

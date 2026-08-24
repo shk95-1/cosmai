@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate.pipeline import run
 from analysis.aggregate.ranking import run_ranking
 from db import seed
@@ -16,7 +17,7 @@ from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 pytestmark = pytest.mark.postgres
 
 CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
-VERSION = "agg-v1"
+VERSION = AGGREGATE_VERSION
 CAPTURED_AT = date(2026, 8, 23)
 SEEDED_METRICS_NEED = 346
 SEEDED_METRICS_WISH = 601
@@ -108,7 +109,7 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str,
             "FROM analysis_run WHERE run_id = %s",
             (run_id,),
         )
-        assert cur.fetchone() == ("done", True, VERSION, ";".join(POPULATION))
+        assert cur.fetchone() == ("ok", True, VERSION, ";".join(POPULATION))
         needs = _dump(cur, "metrics_need", "scope, need_key, month, product_ref, neg, pos")
         wishes = _dump(cur, "metrics_wish", "scope, format, attribute, brand, mentions")
 

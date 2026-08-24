@@ -28,7 +28,7 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
     def fake_run_stage(conn: object, stage: str, **kwargs: Any) -> analysis.pipeline.StageOutcome:
         calls.append({"stage": stage, **kwargs})
-        return analysis.pipeline.StageOutcome(stage, "done", 7, {"metrics_need": 1})
+        return analysis.pipeline.StageOutcome(stage, "ok", 7, {"metrics_need": 1})
 
     monkeypatch.setattr("cosmai.cli._connect", lambda url: _FakeConn())
     monkeypatch.setattr(analysis.pipeline, "run_stage", fake_run_stage)

@@ -110,7 +110,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
     with conn:
         outcome = run_stage(conn, args.stage, since=since, scope=args.scope)
     print(outcome.note)
-    return 0 if outcome.status == "done" else 1
+    return 0 if outcome.status == "ok" else 1
 
 
 def _connect(url: str | None) -> psycopg.Connection[Any]:

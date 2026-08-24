@@ -6,7 +6,19 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
-__all__ = ["EXAMPLE_CHARS", "LIKE_CAP", "LOW_RATING", "ROLLUP_SCOPE", "RuleAggregator", "WISH_SCOPES"]
+__all__ = [
+    "AGGREGATE_VERSION",
+    "EXAMPLE_CHARS",
+    "LIKE_CAP",
+    "LOW_RATING",
+    "ROLLUP_SCOPE",
+    "RuleAggregator",
+    "WISH_SCOPES",
+]
+
+# versioning.md 의 두 형식 중 하나여야 한다 — 인스턴스 속성은 tests/test_version_strings.py 의
+# VERSIONS 에 한 줄로 들어가지 못하므로 모듈 상수가 정본이고 기본 인자가 그것을 가리킨다.
+AGGREGATE_VERSION = "rule-v1.0"
 
 # interfaces.md §수식 A8: 상한은 슬라이스에 없고 계약이 정한다.
 LIKE_CAP = 100
@@ -45,7 +57,7 @@ def _product(mention: NeedMentionRow) -> str:
 
 
 class RuleAggregator:
-    def __init__(self, version: str = "agg-v1", canonical: Mapping[str, str] | None = None) -> None:
+    def __init__(self, version: str = AGGREGATE_VERSION, canonical: Mapping[str, str] | None = None) -> None:
         self.version = version
         # A17: scope='all' 롤업만 needs.need_key.canonical 로 동의어를 접는다.
         self._canonical = canonical or {}

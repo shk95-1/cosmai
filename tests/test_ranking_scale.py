@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate.ranking import run_ranking
 from db.seed._common import connect
 
@@ -21,7 +22,7 @@ PRICED_PRODUCTS = 1000
 PRICE_POINTS = 116
 EXPECTED_DAILY = BOARDS * PRODUCTS * DAYS
 BASE = datetime(2026, 6, 1, tzinfo=UTC)
-VERSION = "agg-v1"
+VERSION = AGGREGATE_VERSION
 # 런타임 롤의 transaction_timeout. 넘기면 배치가 통째로 롤백되므로 이것이 실제 예산이다.
 BUDGET_SECONDS = 60
 
