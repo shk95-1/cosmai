@@ -6,6 +6,7 @@ contracts/entrypoints.md §스케줄 names a time, stack/crontab has to actually
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -91,11 +92,167 @@ def test_crontab_time_matches_the_contract(dataset: str):
     )
 
 
-@pytest.mark.parametrize("dataset", sorted(set(CONTRACT_TIMES) - {"ranking"}), ids=lambda d: d)
-def test_no_daily_commerce_dataset_starts_on_minute_zero(dataset: str):
-    # Minute 0 is the hourly ranking walk's own start (~74s runtime) -- ranking is the anchor this
-    # rule protects, not subject to it. Every *daily* commerce walk must clear that minute: sharing
-    # it would run two walks against one source at once, halving the 5s pace each is spaced to
-    # protect (see stack/crontab's header and contracts/entrypoints.md §스케줄).
-    minute = CONTRACT_TIMES[dataset][0]
-    assert minute != "0", f"{dataset} starts on minute 0, the same minute as the hourly ranking walk"
+# --- schedule gap -------------------------------------------------------------------------------
+# What replaced the old "no daily walk starts on minute 0" check (#10 §A-8-2). That check passed no
+# matter how long a walk actually took, because the runtime it was reasoning about ("~74s") lived in
+# a comment instead of being computed -- so when collectors/commerce started really enforcing its
+# rate policy, the contract's numbers went stale and nothing went red. Everything below derives the
+# runtime from the same SourcePolicy constants the engine paces against, so a constant change moves
+# the assertion with it.
+
+DAY_S = 86_400
+
+
+@dataclass(frozen=True, slots=True)
+class _Line:
+    """One `cosmai collect commerce` cron line, reduced to what a gap check needs."""
+
+    dataset: str
+    board: str | None
+    minute: int
+    hour: int | None  # None == every hour, i.e. the `0 * * * *` ranking line.
+
+    @property
+    def starts(self) -> tuple[int, ...]:
+        """Seconds past midnight at which this line fires, over one day."""
+        hours = range(24) if self.hour is None else (self.hour,)
+        return tuple(h * 3600 + self.minute * 60 for h in hours)
+
+
+def _commerce_cron_lines(text: str) -> tuple[_Line, ...]:
+    lines: list[_Line] = []
+    for raw in text.splitlines():
+        ln = raw.split("#", 1)[0].strip()
+        if "cosmai collect commerce" not in ln or "--dataset" not in ln:
+            continue
+        parts = ln.split()
+        minute, hour, dom, month, dow = parts[:5]
+        # Only a daily-or-hourly line has a start time this model can place on a 24h timeline; a
+        # monthly or stepped line would silently be treated as daily, so refuse it instead.
+        assert (dom, month, dow) == ("*", "*", "*"), f"unsupported cron day fields in {ln!r}"
+        assert minute.isdigit() and (hour == "*" or hour.isdigit()), f"unsupported cron time in {ln!r}"
+        board = parts[parts.index("--board") + 1] if "--board" in parts else None
+        lines.append(
+            _Line(
+                dataset=parts[parts.index("--dataset") + 1],
+                board=board,
+                minute=int(minute),
+                hour=None if hour == "*" else int(hour),
+            )
+        )
+    return tuple(lines)
+
+
+def _paced_seconds(policy, requests: int) -> float:
+    """Wall clock one source spends on `requests` requests, from its own policy constants.
+
+    A token bucket at one request per `min_interval_s` with `burst` free at the start, which is why
+    a walk of one seed costs nothing. `concurrency` overlaps waiting on responses but every lane
+    draws from that one bucket, so it never divides the total -- the pace does all the bounding.
+    """
+    return max(0, requests - policy.burst) * policy.min_interval_s
+
+
+def _run_seconds(line: _Line, *, capped: bool) -> float:
+    """How long that cron line runs. `capped=False` is the seed floor (every source walks exactly
+    the requests `seeds()` hands it, nothing followed); `capped=True` is the ceiling where every
+    source spends its whole `max_requests_per_run`. Sources are summed, not maxed, because
+    `engine.collect` walks them one after another.
+    """
+    dataset = Dataset(line.dataset)
+    total = 0.0
+    for key in sorted(SOURCES):
+        cls = SOURCES[key]
+        if dataset not in cls.datasets:
+            continue
+        requests = len(cls().seeds(dataset, board=line.board))
+        budget = cls.policy.max_requests_per_run
+        if capped and budget is not None:
+            requests = max(requests, budget)
+        total += _paced_seconds(cls.policy, requests)
+    return total
+
+
+CRON_LINES = _commerce_cron_lines(CRONTAB.read_text(encoding="utf-8"))
+# Every start time in one day, in order -- the hourly ranking line contributes 24 of them.
+OCCURRENCES: tuple[tuple[int, _Line], ...] = tuple(
+    sorted(((start, line) for line in CRON_LINES for start in line.starts), key=lambda p: p[0])
+)
+
+# Adjacencies the capped tier cannot satisfy today, as (running, next to start). They are not a
+# crontab bug to be nudged away: at its request budget the hourly ranking walk owns close to half of
+# every hour, which leaves no honest slot for five daily walks. #10 §A-8-1 (an advisory lock) is what
+# closes them, and strict xfail is what makes this file go red the day it does.
+BUDGET_OVERLAPS_A81_MUST_CLOSE = frozenset({("ranking", "product"), ("ranking", "review")})
+
+
+def _hhmm(start: int) -> str:
+    return f"{start // 3600:02d}:{start % 3600 // 60:02d}"
+
+
+def _overlaps(index: int, *, capped: bool) -> list[str]:
+    """Occurrences that start before occurrence `index` is done, wrap-around included."""
+    start, line = OCCURRENCES[index]
+    runtime = _run_seconds(line, capped=capped)
+    late = []
+    for other_index, (other_start, other) in enumerate(OCCURRENCES):
+        if other_index == index:
+            continue
+        delta = (other_start - start) % DAY_S
+        if delta < runtime:
+            late.append(f"{other.dataset} at {_hhmm(other_start)} (+{delta}s into a {runtime:.0f}s walk)")
+    return late
+
+
+def _gap_params(*, capped: bool) -> list:
+    params = []
+    for index, (start, line) in enumerate(OCCURRENCES):
+        following = OCCURRENCES[(index + 1) % len(OCCURRENCES)][1]
+        marks = []
+        if capped and (line.dataset, following.dataset) in BUDGET_OVERLAPS_A81_MUST_CLOSE:
+            marks.append(
+                pytest.mark.xfail(
+                    strict=True,
+                    reason=f"{line.dataset} -> {following.dataset} waits on #10 §A-8-1 (advisory lock)",
+                )
+            )
+        params.append(pytest.param(index, marks=marks, id=f"{line.dataset}@{_hhmm(start)}"))
+    return params
+
+
+@pytest.mark.parametrize("key", sorted(SOURCES), ids=lambda k: k)
+def test_a_sources_pace_is_what_bounds_its_walk(key: str):
+    # The gap checks below multiply min_interval_s; a source at 0 would contribute 0 seconds and
+    # quietly make every schedule look clear, however many requests it fires.
+    policy = SOURCES[key].policy
+    assert policy.min_interval_s > 0, (
+        f"{key} paces at {policy.min_interval_s}s across {policy.concurrency} lanes: with no interval "
+        "its walk costs zero seconds here and the schedule gap check stops meaning anything"
+    )
+
+
+@pytest.mark.parametrize("index", _gap_params(capped=False))
+def test_no_commerce_walk_starts_while_a_seed_paced_walk_is_running(index: int):
+    """The tier that always runs: every line walking only its seeds, the least any run can cost.
+
+    Split from the capped tier below because this one is a bound the crontab can actually honour --
+    a failure here is a schedule to fix today. The capped tier is a bound only an advisory lock can
+    honour, so failing it would say nothing about the times chosen.
+    """
+    start, line = OCCURRENCES[index]
+    late = _overlaps(index, capped=False)
+    assert not late, f"{line.dataset} at {_hhmm(start)} is still running when {'; '.join(late)} starts"
+
+
+@pytest.mark.parametrize("index", _gap_params(capped=True))
+def test_no_commerce_walk_starts_while_a_budget_capped_walk_is_running(index: int):
+    """The tier that records what is still open: every line spending its whole request budget.
+
+    Two adjacencies cannot pass and are xfail(strict=True) against #10 §A-8-1 rather than skipped,
+    so that landing the advisory lock -- or shrinking a budget until the overlap disappears -- turns
+    them into XPASS failures and forces this list to be trimmed. Every other adjacency is unmarked:
+    a policy constant that grows until a new pair overlaps has to fail here loudly.
+    """
+    start, line = OCCURRENCES[index]
+    late = _overlaps(index, capped=True)
+    assert not late, f"{line.dataset} at {_hhmm(start)} is still running when {'; '.join(late)} starts"
