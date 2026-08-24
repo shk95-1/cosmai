@@ -86,7 +86,15 @@ def _match_segments(parts: tuple[str, ...], pattern: tuple[str, ...]) -> bool:
 
 def _pattern_hits(path: PurePosixPath, pattern: str) -> bool:
     """A .dockerignore pattern excludes a directory and everything under it, so every ancestor of
-    the path counts as a hit too."""
+    the path counts as a hit too.
+
+    Anchored at the context root, unlike .gitignore: a slashless pattern is NOT tried at every depth.
+    Verified against a real `docker build` -- with `tests` and `foo.pyc` in .dockerignore, `tests/t.txt`
+    and `foo.pyc` are excluded while `a/tests/t.txt` and `a/foo.pyc` survive into the image. Arbitrary
+    depth needs an explicit `**/` prefix, which is why .dockerignore writes `**/__pycache__`. Do not
+    "fix" this into gitignore semantics -- test_a_slashless_pattern_is_anchored_at_the_context_root
+    pins it.
+    """
     segments = tuple(s for s in pattern.split("/") if s not in ("", "."))
     parts = path.parts
     return any(_match_segments(parts[:i], segments) for i in range(1, len(parts) + 1))
@@ -126,6 +134,18 @@ def in_image_checkout(path: PurePosixPath) -> bool:
 
 
 # --- the assertions -----------------------------------------------------------------------------
+
+
+def test_a_slashless_pattern_is_anchored_at_the_context_root():
+    """The rule `_pattern_hits` implements, measured with `docker build` rather than assumed from
+    .gitignore. Without this the property lived only in a comment, so a "fix" to gitignore semantics
+    would have made this module's exclusion checks silently wrong."""
+    assert dockerignored(PurePosixPath("tests/x")), ".dockerignore lists `tests`; the root one is excluded"
+    assert not dockerignored(PurePosixPath("a/tests/x")), "a nested `tests` is a different path to docker"
+    assert _pattern_hits(PurePosixPath("foo.pyc"), "*.pyc")
+    assert not _pattern_hits(PurePosixPath("a/foo.pyc"), "*.pyc")
+    # The escape hatch a pattern has to spell out, and the reason .dockerignore writes `**/__pycache__`.
+    assert _pattern_hits(PurePosixPath("a/b/__pycache__/x.pyc"), "**/__pycache__")
 
 
 def test_every_file_db_migrate_sh_reads_is_reachable_in_the_image(wheel_contents: frozenset[str]):
