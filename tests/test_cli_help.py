@@ -13,6 +13,7 @@ SNAPSHOT = Path(__file__).resolve().parent / "snapshots" / "cosmai_help.txt"
 COMMANDS = (
     (),
     ("collect",),
+    ("login",),
     ("analyze",),
     ("eval",),
     ("lexicon",),

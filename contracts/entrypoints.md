@@ -8,6 +8,10 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
   youtube  datasets: watch | work | flatten | prune  (기존 tubedepth 명령 의미 유지)
   naver    datasets: datalab | blog   (source 행 모델 없음 -- cosmai-old 계승 안 함, 원천은 needs.naver_* (004))
 종료 코드: 0 ok · 1 partial(일부 실패·절단) · 2 blocked(차단/거부)   ← trend-radar 관찰 규약 그대로
+cosmai login --source <source>
+  <source> 가 registry 에 없거나 브라우저 트랜스포트(Transport.BROWSER)가 아니면 종료 코드 2 로 거절.
+  headless=False 로 실제 창을 띄우고, 프로필은 `collector-commerce` 컨테이너 안에서 실행했을 때만
+  수집기와 같은 디렉터리(DEFAULT_PROFILE_DIR)를 본다 (#27).
 ```
 - 수집기는 **자기 스키마의 테이블에만** 쓴다 (`ddl/current`). 다른 스키마 읽기는 reader 롤로만.
 - 표본 설계는 상수로 세고 `collectors/<c>/scope.json` 에 기록한다 (scope.lock 의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사).

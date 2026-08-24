@@ -8,11 +8,14 @@ in a fixture-backed fake, and anything passed there is used instead of opening a
 
 from __future__ import annotations
 
+import dataclasses
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from collectors.commerce import sources as _sources  # noqa: F401 -- import registers every source
+from collectors.commerce.contract import Transport
 from collectors.commerce.engine import Fetcher, RunReport, collect, exit_code_for
 from collectors.commerce.models import Dataset, hour_bucket
 from collectors.commerce.registry import SOURCES
@@ -20,6 +23,8 @@ from collectors.commerce.storage import db as storage_db
 from collectors.commerce.storage.db import PostgresJournal, RunLog, create_engine
 from collectors.commerce.storage.locks import PostgresSourceLock
 from collectors.commerce.transport import LiveFetchers
+from collectors.commerce.transport.browser import DEFAULT_PROFILE_DIR
+from collectors.commerce.transport.factory import build_fetcher as _build_fetcher
 
 SCOPE_PATH = Path(__file__).resolve().parent / "scope.json"
 
@@ -46,6 +51,62 @@ def live_fetchers() -> LiveFetchers:
     deployment wants it somewhere other than `transport.DEFAULT_PROFILE_DIR`.
     """
     return LiveFetchers()
+
+
+def login(
+    source: str,
+    *,
+    fetcher_factory: Callable[..., Fetcher] | None = None,
+) -> int:
+    """Open a real, visible browser so a person can clear a source's wall by hand once.
+
+    origin: service/trend-radar/src/trend_radar/cli.py:241-280, de-asynced to match this repo's
+    already-sync transport. `source` is any registered key rather than only the walled one: which
+    sites have a wall is a fact about them, and one of them turned out to be refusing our own
+    User-Agent rather than us -- so a source that stops needing this is a registry change, not a
+    reason to touch this command.
+
+    Nothing here defeats a challenge. It opens the same persistent profile
+    `collectors/commerce/transport/browser.py` uses, waits while a person signs in or clears
+    whatever is in the way, and leaves the cookies on disk for the next scheduled run to find.
+
+    The profile directory is `transport.browser.DEFAULT_PROFILE_DIR` and is deliberately not a CLI
+    knob: it is a relative path resolved from cwd, and the collector reaches the same default the
+    same way, so the two agree only when both run from the image's WORKDIR -- i.e. inside the
+    `collector-commerce` container (`docker compose run --rm collector-commerce ... login ...`),
+    never from an arbitrary host shell.
+    """
+    try:
+        cls = SOURCES[source]
+    except KeyError:
+        known = ", ".join(sorted(SOURCES)) or "none registered"
+        print(f"no source named {source!r}; known: {known}")
+        return 2
+    if cls.policy.transport is not Transport.BROWSER:
+        print(f"{source!r} has no browser transport; there is no profile to authorise")
+        return 2
+
+    build = fetcher_factory or _build_fetcher
+    fetcher = build(cls.policy, source_key=source, profile_dir=DEFAULT_PROFILE_DIR, headless=False)
+    try:
+        instance = cls()
+        dataset = sorted(instance.datasets, key=lambda d: d.value)[0]
+        seeds = instance.seeds(dataset)
+        seed = seeds[0] if seeds else None
+        if seed is not None:
+            print(f"opening {seed.url} for {source}")
+            try:
+                fetcher.fetch(dataclasses.replace(seed, wait_for=None))
+            except Exception as exc:  # noqa: BLE001 - a wall is the expected outcome here
+                print(f"{source}: {exc}")
+        print(
+            f"profile: {DEFAULT_PROFILE_DIR / source}\n"
+            "Sign in or clear the challenge in the window, then press Enter here."
+        )
+        input()
+    finally:
+        fetcher.close()  # pyright: ignore[reportAttributeAccessIssue]
+    return 0
 
 
 def run(
@@ -151,4 +212,4 @@ class _EngineSink:
             storage_db.write_records(connection, records)
 
 
-__all__ = ["run", "review_low_boards"]
+__all__ = ["run", "review_low_boards", "login"]

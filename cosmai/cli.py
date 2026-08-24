@@ -5,6 +5,9 @@ snippets/test_stack_commands_resolve.py).
 `collect commerce`/`youtube` are wired (#7, #8); `naver` is #9 and refuses cleanly until then --
 declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
 checked against, per contracts/entrypoints.md's collector list.
+
+`login` (#27) is the one place a person clears a browser source's challenge by hand -- run from
+inside `collector-commerce` so its profile directory is the one the collector itself resolves.
 """
 
 from __future__ import annotations
@@ -32,6 +35,13 @@ def _add_collect(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--dataset", required=True, help="Which dataset to collect.")
     p.add_argument("--board", default=None, help="commerce review_low only: which board to walk.")
     p.add_argument("--since", default=None, help="Accepted for shape; unused by every dataset today.")
+
+
+def _add_login(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "login", help="Open a visible browser so a person can authorise one source's profile."
+    )
+    p.add_argument("--source", required=True, help="Source key whose browser profile to authorise.")
 
 
 def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
@@ -79,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cosmai")
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_collect(subparsers)
+    _add_login(subparsers)
     _add_analyze(subparsers)
     _add_eval(subparsers)
     _add_lexicon(subparsers)
@@ -99,6 +110,15 @@ def _run_collect(args: argparse.Namespace) -> int:
 
         return run(args.dataset, board=args.board, since=args.since)
     raise AssertionError(f"unreachable: argparse choices are exhausted, got {args.collector!r}")
+
+
+def _run_login(args: argparse.Namespace) -> int:
+    # commerce is the only collector with a browser-transport source today (contract.py's
+    # `Transport.BROWSER`, declared by oliveyoung alone) -- a `--collector` switch would be a knob
+    # with one live setting. Add it back the day a second collector needs a profile of its own.
+    from collectors.commerce.cli import login
+
+    return login(args.source)
 
 
 def _run_analyze(args: argparse.Namespace) -> int:
@@ -252,6 +272,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "collect":
         return _run_collect(args)
+    if args.command == "login":
+        return _run_login(args)
     if args.command == "analyze":
         return _run_analyze(args)
     if args.command == "eval":
