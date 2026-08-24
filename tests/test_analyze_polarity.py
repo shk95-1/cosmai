@@ -364,21 +364,24 @@ def test_without_an_implementation_the_rule_still_runs(loaded: str, _schema_name
 
 
 # 이전 실행이 남긴 행: --scope 가 다시 쓰지 않을 자리들이다 (다른 카테고리 · 다른 src).
-OTHER_SCOPE = ("review", "P9/R9", "샴푸")
-OTHER_SRC = ("yt_comment", "V9/C9", None)
+OTHER_SCOPE = ("review", "P9/R9", "샴푸", "백탁")
+OTHER_SRC = ("yt_comment", "V9/C9", None, "백탁")
+# 이 스코프가 다시 쓰는 자리에 남은 옛 행. need_key 가 달라 upsert 가 제자리에서 덮지 못한다 — 자연키에
+# polarity_version 이 없으므로 옛 판정을 치우는 것은 삭제뿐이다.
+SAME_SCOPE = ("review", "P8/R8", "선블록", "끈적유분")
 STALE_MONTH = "2026-03"
 
 
 @pytest.fixture
 def with_other_scopes(loaded: str) -> str:
     with connect(loaded) as conn, conn.cursor() as cur:
-        for src, ref, lexicon_category in (OTHER_SCOPE, OTHER_SRC):
+        for src, ref, lexicon_category, need_key in (OTHER_SCOPE, OTHER_SRC, SAME_SCOPE):
             cur.execute(
                 "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
                 " observed_at, observed_at_resolution, month, sentence, extractor_version,"
-                " polarity_version) VALUES (%s, 'oliveyoung', %s, %s, '백탁', '불만', '2026-03-04',"
+                " polarity_version) VALUES (%s, 'oliveyoung', %s, %s, %s, '불만', '2026-03-04',"
                 " 'day', %s, '이전 실행이 남긴 문장', 'rule-v2.2', 'rule-v2.2')",
-                (src, ref, lexicon_category, STALE_MONTH),
+                (src, ref, lexicon_category, need_key, STALE_MONTH),
             )
         cur.execute(
             "INSERT INTO wish_mention (src, ref, video_id, observed_at, observed_at_resolution, month,"
@@ -415,6 +418,24 @@ def test_a_scoped_run_does_not_delete_wish_rows_it_will_not_rewrite(
     wish 행을 하나도 만들지 않으므로 하나도 지워서는 안 된다."""
     _run(with_other_scopes, _schema_name, scope="선블록", polarity=StubPolarity())
     assert _refs(with_other_scopes, "wish_mention") == ["V9/C9"]
+
+
+def _stale(url: str, ref: str) -> list[tuple[Any, ...]]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT need_key, lexicon_category FROM need_mention WHERE ref = %s ORDER BY need_key", (ref,)
+        )
+        return cur.fetchall()
+
+
+def test_a_scoped_run_deletes_its_own_scopes_stale_rows(with_other_scopes: str, _schema_name: str):
+    """자연키에 polarity_version 이 없어 같은 need_key 는 제자리 upsert 지만, 새 판정자가 다른 aspect 를
+    내면 옛 need_key 행은 그대로 남는다 — 그러면 aggregate 가 한 문장을 두 번 센다. 스코프를 좁힌
+    그 삭제가 막는 것이 이것이다."""
+    _, ref, lexicon_category, need_key = SAME_SCOPE
+    assert _stale(with_other_scopes, ref) == [(need_key, lexicon_category)]
+    _run(with_other_scopes, _schema_name, scope="선블록", polarity=StubPolarity())
+    assert _stale(with_other_scopes, ref) == []
 
 
 def test_an_unscoped_rerun_still_replaces_this_units_own_stale_rows(
