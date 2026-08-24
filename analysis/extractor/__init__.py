@@ -101,6 +101,8 @@ LAUNCH_NOT = re.compile(
     r"|방송에"
     r"|출연|나와주세요"
 )
+# 표지 바로 앞의 "덜/적게/안": 나오는 주체가 제품이 아니라 증상이라 출시 요청이 아니다.
+LESS_NOT_LAUNCH = re.compile(r"(?:^|\s)(덜|적게|안|그만|더는|더 이상)\s*$")
 LAUNCH_OVER_CONTENT = re.compile(
     r"출시 ?(해 ?주|했으면|좀|되었으면|됐으면|해줘)|나왔으면|내 ?줬으면|재출시|단종"
 )
@@ -183,6 +185,8 @@ def classify_wish(sentence: str) -> tuple[str, str]:
     stated = PAST_LAUNCH.search(sentence) and not LAUNCH_AGAIN.search(sentence)
     launch = None if stated else LAUNCH.search(sentence)
     if LAUNCH_NOT.search(sentence):
+        launch = None
+    if launch and LESS_NOT_LAUNCH.search(sentence[: launch.start()]):
         launch = None
     if launch and not CONTENT.search(sentence):
         return "a", launch.group(0)

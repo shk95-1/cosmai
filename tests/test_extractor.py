@@ -142,6 +142,19 @@ def test_a_launch_marker_buried_in_another_word_is_not_a_request(text: str):
     assert RuleExtractor().wishes(comment(text), LEXICON) is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "유분이 조금이라도 적게 나왔으면 좋겠어요",
+        "이번 여름엔 여드름이 안 나오면 좋겠어요",
+    ],
+)
+def test_a_hope_that_less_of_something_appears_is_a_plain_hope_not_a_launch(text: str):
+    """'적게/안 나왔으면' 의 주어는 제품이 아니라 증상이다 — a 는 브랜드에 대한 제품 요청뿐이다."""
+    found = RuleExtractor().wishes(comment(text), LEXICON)
+    assert found is not None and found.wish_class == "c"
+
+
 def test_a_comment_with_no_wish_at_all_is_not_a_wish_row():
     assert RuleExtractor().wishes(comment("항상 잘 보고 있습니다 감사합니다"), LEXICON) is None
 
