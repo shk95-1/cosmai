@@ -223,3 +223,16 @@ def test_no_secret_key_is_given_a_value_in_the_repo(path: Path):
 def test_the_compose_file_hardcodes_no_host_path():
     bad = [ln for ln in COMPOSE_TEXT.splitlines() if re.search(r"(?<!\w)/(home|root|Users)/", ln)]
     assert not bad, f"host-absolute paths belong in stack/env.example's variables, not here: {bad}"
+
+
+def test_rollback_stops_exactly_the_scheduled_services():
+    """stack/rollback.sh names its services in a list; a seventh scheduler added to compose and not
+    to that list would leave one cron container running through a rollback -- collecting into a
+    database the old stack has just been handed back."""
+    text = (REPO_ROOT / "stack" / "rollback.sh").read_text(encoding="utf-8")
+    match = re.search(r"^new_services='([^']*)'", text, re.MULTILINE)
+    assert match, "stack/rollback.sh no longer declares new_services='...'"
+    assert set(match.group(1).split()) == set(SCHEDULED), (
+        "stack/rollback.sh stops "
+        f"{sorted(match.group(1).split())}, but the scheduled services are {sorted(SCHEDULED)}"
+    )
