@@ -22,3 +22,4 @@
 - `001:8` "needs_reader: SELECT" — 그런 롤은 없다(T12). 읽기는 PostgREST `postgrest_anon` 화이트리스트(`db/grants/postgrest_anon_needs.sql`)와 분석용 `needs_runtime`(`db/grants/needs_runtime_reader.sql`) 둘뿐이다.
 - `001:74` `labeled_set.task` 주석의 `aspect` — 평가셋도 기준선도 없어 뺐다(B11). 현행 목록은 `entrypoints.md`.
 - `001:156` `low_complete` 주석 "RATING_ASC 표본에 3★이 섞임" — 실제 규칙은 `(low_collected < 150) or has_3star` 다(T5). `formats.md §표본 상수`.
+- `001:105` `UNIQUE (src, ref, need_key, sentence)` — 005 가 갈아엎어 이제 거짓이다. 현행 자연키는 `UNIQUE INDEX (src, ref, need_key, extractor_version, md5(sentence))`. `ddl/needs/005_need_mention_natural_key.sql`.
