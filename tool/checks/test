@@ -13,10 +13,11 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     port=${COSMAI_TEST_PG_PORT:-55432}
     name=cosmai-test-postgres-$port
     secret_file=$(mktemp)
-    trap 'rm -f "$secret_file"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
-    docker rm -f "$name" >/dev/null 2>&1 || true
-    docker run -d --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
-        -e POSTGRES_DB=fleet -p "$port":5432 postgres:18-alpine >/dev/null
+    # rm -v: postgres 이미지의 익명 볼륨까지 제거 (없으면 실행마다 ~1GB 볼륨이 누수됨)
+    trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT
+    docker rm -f -v "$name" >/dev/null 2>&1 || true
+    docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
+        -e POSTGRES_DB=fleet --tmpfs /var/lib/postgresql -p "$port":5432 postgres:18-alpine >/dev/null
     for _ in $(seq 1 60); do
         pg_isready -h localhost -p "$port" -U fleet -q 2>/dev/null && break
         sleep 1
