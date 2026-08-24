@@ -62,6 +62,13 @@ class Gate:
         self._clock = clock
         self._sleep = sleep
 
+        # Two locks, and the split is not arbitrary. `_slots` owns `_interval`, `_limit`,
+        # `_in_flight` and `_consecutive_ok`; `_pace` owns `_tokens` and `_last_refill`. `_interval`
+        # is the one that crosses -- `_refill` and `_time_to_next_token` read it under `_pace`
+        # instead -- so that a worker asleep on the pace lock can never stop `observe()` from
+        # widening the interval, which is the moment widening matters most. A float read is atomic
+        # under the GIL: the reader gets the old value or the new one, never a torn one, and a widen
+        # that lands mid-wait takes effect from the next token rather than the one being waited on.
         self._interval = policy.min_interval_s
         self._limit = policy.concurrency
         self._in_flight = 0
@@ -152,6 +159,12 @@ class Gate:
         self._tokens = min(float(self._policy.burst), self._tokens + elapsed / self._interval)
 
     def _time_to_next_token(self) -> float:
+        # Known limit: a widened interval -- an explicit Retry-After included -- reaches the wait only
+        # through this multiplication, so it delays the *next* token and nothing else. A source at
+        # burst > 1 with tokens still banked would fire them back to back straight after a 429,
+        # honouring the new interval only once the bank ran dry. All four shipped sources take the
+        # default burst of 1 (contract.SourcePolicy), where there is never anything banked; raising
+        # one means making Retry-After spend the bank here too.
         if self._interval <= 0:
             return 0.0
         return (1.0 - self._tokens) * self._interval

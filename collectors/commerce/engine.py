@@ -157,8 +157,11 @@ class _Lane:
     """One source's crawl: a frontier, a gate, and however many workers the policy allows.
 
     origin: trend_radar/engine/lane.py, asyncio tasks swapped for threads. The frontier, the report
-    and the halt flag are shared across those workers, so every mutation of them holds `_lock`; the
-    pacing and the in-flight ceiling are the gate's, not this class's.
+    and the halt flag are shared across those workers, so every mutation of them holds `_lock` while
+    those workers are running -- `_finished` writes the report without it, after the last one is
+    joined. The request budget is the one counter read and spent inside a single hold (`_charge`),
+    because it is the only shared number a worker decides on rather than just adds to. Pacing and the
+    in-flight ceiling are the gate's, under locks of its own that this class never takes.
     """
 
     def __init__(
@@ -194,6 +197,10 @@ class _Lane:
             self._report.scope = {}
             return self._report
 
+        # Seeds enter through the frontier rather than straight onto the queue, so a source naming
+        # the same URL twice spends one request on it -- and `deduped` now counts seed collisions
+        # alongside follow-link ones.
+        #
         # `board` is part of every source's `seeds` signature (contract.Source), but only means
         # anything to a REVIEW_LOW walk (#7) -- every other source ignores it.
         for seed in self._source.seeds(self._dataset, board=self._board):
@@ -291,14 +298,12 @@ class _Lane:
     def _fetch_with_retries(self, fetch: Fetch) -> Payload | None:
         request = _with_user_agent(fetch, self._policy)
         for attempt in range(1, self._policy.max_attempts + 1):
-            if self._halted() or self._spent():
+            if self._halted() or self._over_budget():
                 return None
 
             with self._gate.acquire():
-                if self._halted():
+                if self._halted() or not self._charge():
                     return None
-                with self._lock:
-                    self._report.requests += 1
                 # Filled in by whichever branch below runs, and written once in the `finally`. Every
                 # path out of this block -- success, refusal, a retry's `continue` -- leaves a row,
                 # which is the only way the journal and the report's request count can agree.
@@ -356,19 +361,50 @@ class _Lane:
                             error=error,
                         )
                     )
-        return None
 
-    def _spent(self) -> bool:
-        """A retry is another request the site sees, so it is charged to the same budget the first
-        attempt was -- checked before the gate, so a spent budget costs no waiting."""
+    def _truncate(self) -> None:
+        """Caller holds `_lock`. Running out of budget is a reportable outcome and a reason to stop
+        taking new work; both places that can discover it record it the same way from here."""
+        self._report.budget_exhausted = True
+        self._stop = True
+
+    def _over_budget(self) -> bool:
+        """A look at the budget in front of the gate, so a lane with nothing left to spend is not
+        first made to wait out the source's interval to be told so -- daisomall's is 30 seconds.
+
+        Advisory only: this can say no, but a yes means nothing by the time the gate lets go of the
+        worker. `_charge` is what enforces, so a mutation that pins this to False costs a run one
+        needless wait and breaks no assertion here -- correctly, because it guards latency, not the
+        cap.
+        """
         budget = self._policy.max_requests_per_run
         if budget is None:
             return False
         with self._lock:
             if self._report.requests < budget:
                 return False
-            self._report.budget_exhausted = True
-            self._stop = True
+            self._truncate()
+            return True
+
+    def _charge(self) -> bool:
+        """Book one request against the run's budget, or refuse it. This is the enforcement.
+
+        A retry is another request the site sees, so every attempt is charged to the budget the first
+        one was. Reading the count and spending it happen inside a single hold of `_lock` on purpose:
+        with the check and the increment in separate holds, every worker sitting on `budget - 1`
+        passes before any of them writes and a source at concurrency N sends N - 1 requests it had no
+        budget for. Nothing shipped is above one worker *and* budgeted -- hwahae is the only source
+        at concurrency 2 and it declares no budget -- which is the only reason that has never bitten.
+
+        Booked inside the gate, one step before the request goes out, so the count cannot run ahead
+        of the journal.
+        """
+        budget = self._policy.max_requests_per_run
+        with self._lock:
+            if budget is not None and self._report.requests >= budget:
+                self._truncate()
+                return False
+            self._report.requests += 1
             return True
 
 
