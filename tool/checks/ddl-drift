@@ -1,0 +1,80 @@
+#!/bin/sh
+# Does production still look like the contract says it does?
+#
+# #10 condition 1 is "re-dump diff = 0 (added columns only where the contract declares them)". That
+# sentence has two halves and both need machinery, because a human running pg_dump by hand gets a
+# different answer depending on the flags: ownership and ACLs move on their own (db/grants/*.sql
+# adds needs_runtime GRANTs on every deploy) and would drown a real column difference in 150 lines
+# of noise. So: --no-owner -x, and the \restrict lines pg_dump 18 wraps the file in are stripped
+# because they carry a per-dump nonce.
+#
+# The second half is why this is not a plain diff against contracts/ddl/current/. Those files are a
+# BASELINE, not a mirror: contracts/ddl/<schema>/*.sql layer additive changes on top of them, and
+# tests/conftest.py builds its throwaway schema the same way (dump, then every additive file). Were
+# the baseline re-dumped to include an added column, applying that file again would fail with
+# "column already exists" and the fixture would break. Production is therefore compared against
+# baseline + additive files, rebuilt here in a throwaway container -- the same composition the tests
+# use, so the two can never drift apart silently.
+#
+# Reads nothing secret: pg_dump runs inside the production container as the superuser via docker
+# exec, the same access path db/migrate.sh already uses.
+set -e
+. tool/checks/prerequisite
+require_command docker pg_isready
+
+container=${COSMAI_PG_CONTAINER:-shared-postgres}
+superuser=${COSMAI_PG_SUPERUSER:-platform}
+port=${COSMAI_DRIFT_PG_PORT:-55490}
+name=cosmai-drift-postgres-$port
+work=$(mktemp -d)
+trap 'rm -rf "$work"; docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+
+# Comments carry the server version and the object-name banners; SET lines carry session defaults.
+# Neither is schema. Dropping them lets a throwaway postgres:18-alpine be compared with the Debian
+# 18.6 production build without the version banner counting as drift.
+normalise() {
+    grep -v '^--' | grep -v '^\\restrict' | grep -v '^\\unrestrict' \
+        | grep -v '^SET ' | grep -v '^SELECT pg_catalog.set_config' | sed '/^$/d'
+}
+
+docker rm -f "$name" >/dev/null 2>&1 || true
+docker run -d --name "$name" -e POSTGRES_PASSWORD=drift -e POSTGRES_USER=drift \
+    -e POSTGRES_DB=drift -p "$port":5432 postgres:18-alpine >/dev/null
+for _ in $(seq 1 60); do
+    pg_isready -h localhost -p "$port" -U drift -q 2>/dev/null && break
+    sleep 1
+done
+
+status=0
+# db:schema pairs, matching the contracts/ddl/current/<db>.<schema>.sql naming.
+for pair in app:trend_radar app:tubedepth cosmai:cosmai; do
+    db=${pair%%:*}
+    schema=${pair#*:}
+    baseline=contracts/ddl/current/$db.$schema.sql
+    [ -f "$baseline" ] || { echo "ddl-drift: no baseline for $pair" >&2; exit 1; }
+
+    # Expected = baseline, then every additive file the contract declares for that schema.
+    docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+        -c 'SET client_min_messages = warning' -f - < "$baseline" > /dev/null
+    for add in contracts/ddl/"$schema"/*.sql; do
+        [ -e "$add" ] || continue
+        docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 -f - < "$add" > /dev/null
+    done
+    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/expected.$schema"
+    docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
+        -c "DROP SCHEMA $schema CASCADE" > /dev/null
+
+    docker exec "$container" pg_dump -U "$superuser" -d "$db" --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/actual.$schema"
+
+    if diff -u "$work/expected.$schema" "$work/actual.$schema" > "$work/diff.$schema"; then
+        echo "ddl-drift: $db.$schema matches the contract"
+    else
+        echo "ddl-drift: $db.$schema DRIFTED -- production is not baseline + declared additive files" >&2
+        cat "$work/diff.$schema" >&2
+        status=1
+    fi
+done
+
+exit $status
