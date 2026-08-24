@@ -10,6 +10,7 @@ dependencies = [
     # collectors/commerce (#7): oliveyoung's ranking/detail pages are HTML, parsed offline against
     # saved fixtures -- selectolax brings no network dependency with it.
     "selectolax>=0.3,<1",
+    "anthropic>=1.0",
 ]
 
 [project.scripts]
@@ -35,10 +36,11 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]  # `db` and friends are plain packages in the repo root, not installed.
-addopts = "-q -m 'not live' --strict-markers"
+addopts = "-q -m 'not live and not local_llm' --strict-markers"
 markers = [
     "live: touches the real network; excluded by default",
     "postgres: needs the real roles from db/bootstrap.sql (tool/checks/test provides them)",
+    "local_llm: talks to a local ollama on OLLAMA_URL; free and offline-ish but excluded by default",
 ]
 
 [tool.ruff]

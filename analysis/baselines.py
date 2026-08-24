@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 
@@ -85,6 +86,30 @@ OBSERVED: tuple[EvalSet, ...] = (
         extra_value="holdout60",
     ),
 )
+
+
+# interfaces.md §규칙 실측 — 채택 조건은 계약이 요구하는 바닥이고, 구현 교체는 규칙이 실제로 낸 이 숫자를
+# 넘어야 한다. 두 표가 갈라지면 tests/test_baselines.py 가 잡는다.
+RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, float]]] = {
+    "polarity": {
+        "sun holdout 100": {"acc": 0.870, "P:불만": 0.915},
+        "p1 blind40": {"acc": 0.475, "P:불만": 0.667},
+    }
+}
+
+
+def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tuple[str, ...]:
+    """규칙에 못 미친 칸. 빈 튜플이어야 교체다 — 셋이 통째로 빠진 실행은 판정이 아니라 오류다."""
+    wanted = RULE_MEASURED.get(task, {})
+    absent = [name for name in wanted if name not in scores]
+    if absent:
+        raise LookupError(f"{task}: no adoption verdict without {', '.join(absent)} — run --split holdout")
+    return tuple(
+        f"{name}: {metric} {scores[name].get(metric, 0.0):.3f} < rule {want:.3f}"
+        for name, wants in wanted.items()
+        for metric, want in wants.items()
+        if scores[name].get(metric, 0.0) < want
+    )
 
 
 def for_task(task: str) -> tuple[EvalSet, ...]:

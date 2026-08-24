@@ -90,8 +90,13 @@ def _metrics(task: str, pairs: Sequence[tuple[str, str]], scores: Scores) -> dic
     return out
 
 
-def evaluate(conn: psycopg.Connection[Any], task: str, impl: Implementation) -> tuple[SetResult, ...]:
-    loaded = [(eval_set, _rows(conn, task, eval_set)) for eval_set in for_task(task)]
+def evaluate(
+    conn: psycopg.Connection[Any], task: str, impl: Implementation, split: str | None = None
+) -> tuple[SetResult, ...]:
+    # split 을 거르는 것은 점수를 숨기려는 것이 아니다: 홀드아웃을 아예 돌리지 않아야 튜닝 중에
+    # 블라인드가 유지되고, 유료 구현(#6)에서는 그만큼 돈이 나가지 않는다.
+    sets = [s for s in for_task(task) if split is None or s.split == split]
+    loaded = [(eval_set, _rows(conn, task, eval_set)) for eval_set in sets]
     # 예측 전에 읽기 트랜잭션을 닫는다: idle_in_transaction_session_timeout 15s (db/bootstrap.sql) 가
     # 열어둔 채로 도는 구현체(#6 의 LLM 배치)의 세션을 끊는다.
     conn.rollback()

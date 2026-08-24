@@ -14,6 +14,7 @@ from analysis.aggregate import AGGREGATE_VERSION
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import VERSION as POLARITY_VERSION
+from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
 
 # versioning.md: `rule-vX.Y` 또는 `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
@@ -23,6 +24,7 @@ VERSIONS = (
     ("analysis.extractor.VERSION", EXTRACTOR_VERSION),
     ("analysis.polarity.VERSION", POLARITY_VERSION),
     ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
+    ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
 )
 
 

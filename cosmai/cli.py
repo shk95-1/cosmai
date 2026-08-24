@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # psycopg 를 여기서 import 하면 --help 한 번에도 �
     import psycopg
 
 STAGES = ("link", "polarity", "aggregate", "all")
+SPLITS = ("tune", "holdout")
 KINDS = ("brand", "format", "attribute", "ingredient", "stopword", "alias", "aspect")
 
 
@@ -47,6 +48,8 @@ def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
     p.add_argument("task", choices=TASKS)
     p.add_argument("--check-baseline", action="store_true", help="Exit 1 when a baseline is missed.")
+    p.add_argument("--impl", default=None, help="Registered factory to use, e.g. llm:claude-sonnet-5.")
+    p.add_argument("--split", default=None, choices=SPLITS, help="Only score eval sets of this split.")
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
@@ -125,10 +128,20 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 
 def _run_eval(args: argparse.Namespace) -> int:
     from analysis import registry
+    from analysis.baselines import adoption_misses
     from analysis.evaluate import evaluate, record, render
 
     registry.load_implementations()
-    impl = registry.get(args.task)
+    try:
+        impl = registry.build(args.task, args.impl) if args.impl else registry.get(args.task)
+    except LookupError as refused:
+        print(refused)
+        return 2
+    # 기준선 표는 홀드아웃 셋을 먼저 돌려준다 (analysis/baselines.py) — 유료 구현을 --split 없이 부르면
+    # 블라인드 홀드아웃이 첫 호출로 나간다. 규율이 아니라 인자로 막는다.
+    if args.impl and registry.is_paid(args.task, args.impl) and args.split is None:
+        print(f"--impl {args.impl} spends money; pass --split tune or --split holdout")
+        return 2
     if impl is None:
         print(
             f"no implementation registered for {args.task!r}; the unit that owns it calls "
@@ -139,7 +152,7 @@ def _run_eval(args: argparse.Namespace) -> int:
 
     with _connect(args.url) as conn:
         try:
-            results = evaluate(conn, args.task, impl)
+            results = evaluate(conn, args.task, impl, split=args.split)
             print(render(args.task, impl.version, results))
             print(f"analysis_run {record(conn, args.task, impl.version, results)}")
         except (LookupError, psycopg.Error) as unusable:
@@ -147,6 +160,12 @@ def _run_eval(args: argparse.Namespace) -> int:
             return 2
     if args.check_baseline:
         misses = [miss for result in results for miss in result.misses]
+        try:
+            # 채택 조건은 바닥이고, 교체 조건은 규칙 실측 이상이다 (interfaces.md §규칙 실측).
+            misses += list(adoption_misses(args.task, {r.name: dict(r.metrics) for r in results}))
+        except LookupError as unusable:
+            print(unusable)
+            return 2
         for miss in misses:
             print(miss)
         return 1 if misses else 0

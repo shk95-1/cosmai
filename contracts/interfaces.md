@@ -170,6 +170,13 @@ class Candidate:  # extractor 출력 (문장 단위)
 
 
 @dataclass(frozen=True)
+class PolarityRequest:  # classify_many 한 건. classify 의 인자를 그대로 묶은 것이다
+    sentence: str
+    rating: float | None = None
+    category: str | None = None
+
+
+@dataclass(frozen=True)
 class PolarityResult:
     aspect: str | None  # B8: 없음은 need_key='' 로 저장한다
     polarity: str  # 불만 | 만족 | 중립
@@ -314,6 +321,9 @@ class Polarity(Protocol):  # ← LLM 삽입점. 규칙 구현과 LLM 구현이 �
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
     ) -> PolarityResult: ...  # category 는 lexicon_category 다 (사이트 원문 아님)
+    def classify_many(
+        self, items: Sequence[PolarityRequest], aspects: AspectLexicon
+    ) -> list[PolarityResult]: ...  # 배치 API 를 가진 구현(#6)만 이득이다. 입력과 같은 길이·순서
 
 
 class Aggregator(Protocol):
@@ -371,6 +381,15 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
   기준선 .77/.95 는 v2 규칙이 채택한 39쌍(`match_check40_v2_blind.csv` 의 `in_final=1`)에서 나온
   30/39 = .769 · 37/39 = .949 이고, `tests/test_cli_eval.py` 가 그 채택 집합으로 재현을 검사한다.
 - 구현 교체(규칙→LLM, 사전 버전 업)는 이 표를 갱신하는 PR 로만 들어온다.
+
+### 규칙 실측 (2026-08-24, #3 구현체) — 구현 교체의 기준
+| 평가셋 | 규칙 실측 |
+|---|---|
+| sun holdout 100 | acc .870 · P:불만 .915 |
+| p1 blind40 | acc .475 · P:불만 .667 |
+- 위 표의 `채택 조건`은 계약이 요구하는 **바닥**이다. 구현 교체(규칙→LLM)는 여기 숫자를 **넘어야** 한다 —
+  `--check-baseline` 이 녹색이어도 이 표에서 지면 `polarity_version` 을 갈지 않는다 (이슈 #6).
+- `analysis/baselines.py` 의 `RULE_MEASURED` 가 이 표의 사본이고 `tests/test_baselines.py` 가 대조한다.
 
 ## 패스 기준 (2026-08-23 결정: 6단계까지 무정지 → 2차 패스에서 기준선)
 | 패스 | 유닛 완료 기준 | 검사 |
