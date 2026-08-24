@@ -7,8 +7,9 @@ line names a subcommand the CLI has, every service names a crontab file that exi
 that runs one reaches the database the same way, and no secret value is written down anywhere.
 
 Parsed by hand rather than with PyYAML: this repo has no yaml dependency and adding one to read a
-file we ourselves keep regular would be the larger change. `<<: *anchor` is resolved by appending the
-anchor's body, which is enough for the "this block declares X" questions asked below.
+file we ourselves keep regular would be the larger change. `<<: *anchor` is resolved the way YAML
+resolves it -- a key the service declares wins outright and the anchor's copy of that key is gone --
+which is what the "this block declares X" questions asked below need to be about the real file.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -85,20 +87,83 @@ def _anchor_bodies(text: str) -> dict[str, str]:
     return bodies
 
 
-def _services() -> dict[str, str]:
-    """Each service's body with every `<<: *anchor` it merges appended to it."""
-    bodies = _anchor_bodies(COMPOSE_TEXT)
-    out = {}
-    for name, body in _blocks(COMPOSE_TEXT, _SERVICE, under="services").items():
-        merged = [body]
-        for anchor in re.findall(r"<<:\s*\*([\w.-]+)", body):
-            assert anchor in bodies, f"service {name} merges unknown anchor *{anchor}"
-            merged.append(bodies[anchor])
-        out[name] = "\n".join(merged)
+def _keyed(body: str) -> dict[str, str]:
+    """`{key: block}` for the mapping keys at a block body's own indent level, a block being the key
+    line plus everything nested under it."""
+    lines = body.splitlines()
+    depths = [len(ln) - len(ln.lstrip()) for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+    if not depths:
+        return {}
+    level = min(depths)
+    out: dict[str, str] = {}
+    key: str | None = None
+    buf: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and len(line) - len(line.lstrip()) == level:
+            if key is not None:
+                out[key] = "\n".join(buf)
+            # `<<: *anchor` and list items sit at this level too and open no key of their own.
+            match = re.match(r"([\w.-]+):", stripped)
+            key, buf = (match.group(1), [line]) if match else (None, [])
+            continue
+        if key is not None:
+            buf.append(line)
+    if key is not None:
+        out[key] = "\n".join(buf)
     return out
 
 
-SERVICES = _services()
+def _merged_services(text: str) -> dict[str, str]:
+    """Each service's body merged with the anchors it names, under YAML merge-key semantics: a key
+    the service declares **replaces** the anchor's rather than extending it. Concatenating instead
+    made every "this service declares X" check below vacuous for the three services that write their
+    own `volumes:` -- their secret mount could be deleted and nothing here would notice."""
+    bodies = _anchor_bodies(text)
+    out = {}
+    for name, body in _blocks(text, _SERVICE, under="services").items():
+        merged = _keyed(body)
+        for anchor in re.findall(r"<<:\s*\*([\w.-]+)", body):
+            assert anchor in bodies, f"service {name} merges unknown anchor *{anchor}"
+            for anchor_key, block in _keyed(bodies[anchor]).items():
+                merged.setdefault(anchor_key, block)
+        out[name] = "\n".join(merged.values())
+    return out
+
+
+SERVICES = _merged_services(COMPOSE_TEXT)
+
+
+def test_a_service_key_replaces_the_anchors_rather_than_extending_it():
+    """YAML merge-key semantics, which every check below stands on: a service that declares its own
+    `volumes:` gets **none** of the anchor's. Modelling `<<:` as concatenation made the secret-mount
+    check vacuous -- deleting a service's own mount line left the whole file green."""
+    text = textwrap.dedent(
+        """\
+        x-cron: &cron
+          volumes:
+            - anchor-only:/anchor
+          environment:
+            KEEP: "1"
+
+        services:
+          own:
+            <<: *cron
+            volumes:
+              - service-own:/service
+          inherits:
+            <<: *cron
+        """
+    )
+    merged = _merged_services(text)
+    assert "/service" in merged["own"]
+    assert "/anchor" not in merged["own"], (
+        "a service that declares volumes: does not also get the anchor's -- YAML drops them"
+    )
+    assert 'KEEP: "1"' in merged["own"], "keys the service does not declare still come from the anchor"
+    assert "/anchor" in merged["inherits"]
+
+
 # `command: ["supercronic", "<path>"]` -- the services this file is really about.
 SCHEDULED = {
     name: match.group(1)
