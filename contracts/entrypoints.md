@@ -14,12 +14,29 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
 
 ## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
 ```sql
--- db/views/collector_health.sql 이 세 수집기의 run/fetch_log/jobs 를 UNION 한다
+-- db/views/collector_health.sql 이 commerce(trend_radar.run+fetch_log)와
+-- naver(needs.naver_run+naver_fetch_log) 두 팔을 UNION 한다 -- youtube 는 아래 이유로 빠져 있다
 collector text, dataset text, run_id text, started_at timestamptz, finished_at timestamptz,
 status text,          -- ok | partial | blocked | failed | running
 requests int, ok int, blocked int, failed int, queued int, p90_ms int
 ```
-P16 의 표가 이 뷰 하나로 나와야 한다.
+P16 의 표가 이 뷰 하나로 나와야 한다. `requests` 는 fetch 시도 전부이고 `ok`·`blocked`·`failed` 는
+2xx / 403·429 / (error 또는 5xx) 세 통뿐이다 — 셋의 합과 `requests` 의 차이가 어느 통에도 안 들어간
+응답(예: 404)이다.
+
+**youtube 는 3단계에서 이 뷰에 들어가지 않는다** (사용자 결정 2026-08-24). 12컬럼 중 다섯을 낼 원천이
+없고, 그중 `blocked`·`p90_ms` 가 하필 그 수집기의 실제 고장 모드(쿼터 소진·지연)를 보는 컬럼이라
+NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 넷:
+- `tubedepth.jobs` 에는 run 개념이 없다 — `run_id` 를 낼 것이 없고 `created_at` 은 enqueue 시각이라
+  `started_at` 도 아니다.
+- 같은 표에 지연을 잰 컬럼이 없다 — `p90_ms` 의 원천이 아예 없다.
+- `collectors/youtube/cli.py:211` 이 `error_code` 에 예외 클래스명(`type(error).__name__`)만 넣는다 —
+  429·쿼터 소진을 `failed` 와 갈라 `blocked` 로 셀 방법이 없다.
+- `jobs.kind`(`video.metadata` 계열)가 위 §수집의 youtube dataset 어휘(`watch|work|flatten|prune`)와
+  다르다 — `dataset` 컬럼에 그대로 넣으면 다른 두 팔과 다른 어휘가 한 컬럼에 섞인다.
+
+`queued` 가 두 팔 다 NULL 인 것은 그래서다: commerce·naver 는 크론이 부르는 배치 워커라 큐가 없고,
+큐를 가진 유일한 수집기가 youtube 다. 컬럼을 지우지 않고 남겨 둔 것은 그 팔이 돌아올 자리이기 때문이다.
 
 분석판은 `db/views/analysis_health.sql` 의 `needs.analysis_health` 다: run 별 started/finished/
 status/versions 와 그 run 의 `metrics_need`·`metrics_wish` 행 수. `need_mention`·`wish_mention` 은

@@ -23,6 +23,11 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     done
     # Test-only dummy values, not secrets -- matches TEST_POSTGRES_URL/TEST_POSTGRES_RUNTIME_URL below.
     printf 'NEEDS_DB_MIGRATOR=check\nNEEDS_DB_RUNTIME=check-runtime\n' > "$secret_file"
+    # Harness only: collectors/commerce owns trend_radar in production, but db/views/collector_health.sql
+    # binds to it, so without the real dump here the deploy path below could only be tested by guarding
+    # the view into a silent skip -- test green, production missing.
+    docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1 \
+        < contracts/ddl/current/app.trend_radar.sql
     # Run twice: production and the test harness both re-run this on every deploy, so it must be
     # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version).
     COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet

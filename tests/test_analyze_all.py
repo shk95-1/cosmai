@@ -310,7 +310,8 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
-    # 이 컨테이너에는 trend_radar 스키마가 없다 — link 가 거기서 실패한다.
+    # 이 컨테이너의 trend_radar 는 비어 있고 tubedepth 는 아예 없다 (tool/checks/test 는 운영 뷰가
+    # 바인딩할 trend_radar 만 깐다) — link 가 거기서 실패한다.
     assert main(["analyze", "all", "--url", analysis_url]) == 1
     assert "failed" in capsys.readouterr().out
     # 단계에 닿기 전의 거절은 blocked 다 — 실패한 run 이 남는 exit 1 과 갈린다.
