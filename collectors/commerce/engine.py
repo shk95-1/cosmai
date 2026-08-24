@@ -12,7 +12,7 @@ The exit code is the part worth being deliberate about: this runs unattended, so
 runs will ever say is a number.
 
   0  every source collected, nothing refused, nothing truncated
-  1  partial -- a source errored or hit its request budget
+  1  partial -- a source errored, hit its request budget, or was skipped because another run held it
   2  a source was refused outright
 """
 
@@ -22,7 +22,8 @@ import dataclasses
 import queue
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
@@ -62,6 +63,32 @@ class Fetcher(Protocol):
     def fetch(self, fetch: Fetch) -> Payload: ...
 
 
+LOCK_HELD_ELSEWHERE = (
+    "skipped: another run holds this source's lock, and walking it anyway would send the site twice "
+    "the rate its policy allows"
+)
+
+
+class SourceLock(Protocol):
+    """Whatever decides that one source is this run's to walk right now.
+
+    The context manager's value answers "did we get it": False means someone else is already walking
+    this source and this run stands down from it. The lock is held for as long as the block runs, so
+    an implementation must hold whatever it holds across a whole walk, not a single statement.
+    """
+
+    def __call__(self, source_key: str) -> AbstractContextManager[bool]: ...
+
+
+@contextmanager
+def uncoordinated(source_key: str) -> Iterator[bool]:
+    """The default: every source is ours. One process walking on its own -- a test, a one-off walk --
+    has nobody to coordinate with, so only the CLI (the thing cron runs twice) installs a real lock.
+    """
+    del source_key
+    yield True
+
+
 @dataclass
 class SourceReport:
     key: str
@@ -72,6 +99,8 @@ class SourceReport:
     dropped_over_depth: int = 0
     budget_exhausted: bool = False
     blocked_reason: str | None = None
+    # Not an error and not a refusal: this run yielded the source to another one that already had it.
+    skipped_reason: str | None = None
     errors: list[str] = field(default_factory=list)
     final_interval_s: float | None = None
     final_concurrency: int | None = None
@@ -88,7 +117,12 @@ class SourceReport:
 
     @property
     def ok(self) -> bool:
-        return self.blocked_reason is None and not self.errors and not self.stopped_short
+        return (
+            self.blocked_reason is None
+            and self.skipped_reason is None
+            and not self.errors
+            and not self.stopped_short
+        )
 
 
 @dataclass
@@ -142,6 +176,12 @@ class RunReport:
     @property
     def blocked(self) -> list[str]:
         return sorted(k for k, r in self.sources.items() if r.blocked_reason is not None)
+
+    @property
+    def skipped(self) -> list[str]:
+        """Sources this run stood down from. Partial, never blocked: the site refused nothing, and
+        the next run picks them up -- every write here is a natural-key upsert."""
+        return sorted(k for k, r in self.sources.items() if r.skipped_reason is not None)
 
     @property
     def ok(self) -> bool:
@@ -437,6 +477,7 @@ def collect(
     *,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
+    lock: SourceLock = uncoordinated,
 ) -> RunReport:
     """Walk every source that declares `dataset`, one source after another.
 
@@ -444,21 +485,33 @@ def collect(
     an hour and nothing here is waiting on wall clock -- but each source's own requests are paced and
     capped by its `SourcePolicy` through a `Gate` of its own. `clock` and `sleep` are injected so the
     pacing is testable without spending a source's 30-second interval.
+
+    That gate is per lane and so per process, which is what `lock` is above: the source another run
+    already holds is skipped rather than walked at twice the policy's rate. The default coordinates
+    with nobody; `collectors/commerce/storage/locks.py` is the one the CLI installs. A default that
+    quiet needs a keeper, so tests/collectors/commerce/test_source_lock.py reads every caller outside
+    the tests and fails the one that leaves `lock=` off.
     """
     active_journal = journal or NullJournal()
     reports: dict[str, SourceReport] = {}
     for source in sources:
         if dataset not in source.datasets:
             continue
-        lane = _Lane(
-            source=source,
-            fetcher=fetcher,
-            sink=sink,
-            dataset=dataset,
-            captured_at=captured_at,
-            journal=active_journal,
-            board=board,
-            gate=Gate(source.policy, clock, sleep),
-        )
-        reports[source.key] = lane.run()
+        # Held for the whole walk of this one source, and only this one: a source another run has is
+        # given up, the rest of the run carries on.
+        with lock(source.key) as held:
+            if not held:
+                reports[source.key] = SourceReport(key=source.key, skipped_reason=LOCK_HELD_ELSEWHERE)
+                continue
+            lane = _Lane(
+                source=source,
+                fetcher=fetcher,
+                sink=sink,
+                dataset=dataset,
+                captured_at=captured_at,
+                journal=active_journal,
+                board=board,
+                gate=Gate(source.policy, clock, sleep),
+            )
+            reports[source.key] = lane.run()
     return RunReport(captured_at=captured_at, sources=reports)

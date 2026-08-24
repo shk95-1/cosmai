@@ -181,6 +181,22 @@ def database_url_for_tests(_schema_name: str) -> Iterator[str]:
 
 
 @pytest.fixture
+def runtime_url_for_tests() -> str:
+    """The same server as `database_url_for_tests`, connected as needs_runtime and with no schema of
+    its own -- for tests about database-wide state (advisory locks) rather than about rows.
+
+    A role, not a convenience: db/bootstrap.sql gives the migrator `CONNECTION LIMIT 2`, so a test
+    that has to stand a second process next to the one under test runs out of connections before it
+    runs out of assertions. It is also the role production collectors actually run as, timeouts and
+    all.
+    """
+    url = os.environ.get(TEST_RUNTIME_DB_URL_ENV)
+    if not url:
+        pytest.skip(f"set {TEST_RUNTIME_DB_URL_ENV}, or run tool/checks/test")
+    return url
+
+
+@pytest.fixture
 def needs_schema(database_url_for_tests: str, _schema_name: str) -> str:
     """DDL applied as needs_owner (table ownership matches production) then opened to needs_runtime the
     way bootstrap.sql opens `needs`. The schema itself stays migrator-owned, so needs_owner needs an

@@ -109,7 +109,11 @@ class RunLog:
                 "budget_exhausted": r.budget_exhausted,
                 "blocked_reason": r.blocked_reason,
                 "error_count": len(r.errors),
-                "errors": "\n".join(r.errors) or None,
+                # A skip is not an error, so it does not move `error_count` -- but its reason has to
+                # land somewhere a reader of `outcome = 'skipped'` can find it, and this is the
+                # column that already holds free text about why a source produced nothing. Hence rows
+                # with `error_count = 0 AND errors IS NOT NULL`: that pair is a skip, not a lost count.
+                "errors": "\n".join([*r.errors, *([r.skipped_reason] if r.skipped_reason else [])]) or None,
                 "outcome": outcome_of(r),
                 "configured_interval_s": r.configured_interval_s,
                 "configured_concurrency": r.configured_concurrency,
@@ -140,6 +144,9 @@ class RunLog:
 def outcome_of(report: SourceReport) -> str:
     """The one word the report prints for this source, computed once and stored so a dashboard and
     this table cannot drift into two different definitions of "went well"."""
+    if report.skipped_reason is not None:
+        # Before "blocked": a skipped source never went out, so it can have neither.
+        return "skipped"
     if report.blocked_reason is not None:
         return "blocked"
     if report.errors:
