@@ -122,12 +122,49 @@ def load_index(
     return Index(ids, [r[2] for r in rows]), {r[0]: r[1] for r in rows}
 
 
+def ranked_chunks(
+    conn: psycopg.Connection,
+    query: str,
+    *,
+    engine: str = "bm25",
+    top: int = 10,
+    sources: tuple[str, ...] | None = None,
+) -> list[tuple[str, float]]:
+    """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
+
+    점수의 뜻은 엔진마다 다르다(BM25 는 클수록, 벡터는 코사인 거리라 작을수록 가깝다). 그래서
+    비교는 언제나 순위로 한다 -- RRF 를 쓰는 이유도 같다.
+    """
+    if engine == "bm25":
+        index, _ = load_index(conn, sources)
+        return index.search(query, k=top)
+
+    from analysis.retrieval import embed, vectors
+
+    if engine == "vector":
+        return vectors.search(conn, embed.encode_query(query), top=top, sources=sources)
+    if engine == "hybrid":
+        index, _ = load_index(conn, sources)
+        lexical = [c for c, _ in index.search(query, k=top * 4)]
+        semantic = [
+            c for c, _ in vectors.search(conn, embed.encode_query(query), top=top * 4, sources=sources)
+        ]
+        fused = vectors.rrf(lexical, semantic)[:top]
+        # 융합 결과의 점수는 순위 자체다. 두 스케일을 섞어 적으면 읽는 쪽이 오해한다.
+        return [(chunk_id, float(rank)) for rank, chunk_id in enumerate(fused, 1)]
+    raise ValueError(f"모르는 엔진: {engine!r}")
+
+
 def search(
-    conn: psycopg.Connection, query: str, *, top: int = 10, sources: tuple[str, ...] | None = None
+    conn: psycopg.Connection,
+    query: str,
+    *,
+    engine: str = "bm25",
+    top: int = 10,
+    sources: tuple[str, ...] | None = None,
 ) -> list[tuple[str, float, str]]:
-    """(chunk_id, 점수, 본문). 색인을 매번 세운다 -- 캐시는 실측 후에 붙인다."""
-    index, _ = load_index(conn, sources)
-    hits = index.search(query, k=top)
+    """(chunk_id, 점수, 본문)."""
+    hits = ranked_chunks(conn, query, engine=engine, top=top, sources=sources)
     if not hits:
         return []
     with conn.cursor() as cur:

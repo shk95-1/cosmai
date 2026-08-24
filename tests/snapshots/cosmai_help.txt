@@ -39,16 +39,17 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai retrieval --help
-usage: cosmai retrieval [-h] {chunk,search,eval} ...
+usage: cosmai retrieval [-h] {chunk,search,eval,embed} ...
 
 positional arguments:
-  {chunk,search,eval}
-    chunk              Load needs.retrieval_chunk from the source schemas.
-    search             Rank chunks against a query.
-    eval               Score the retriever against the topic dictionary.
+  {chunk,search,eval,embed}
+    chunk               Load needs.retrieval_chunk from the source schemas.
+    search              Rank chunks against a query.
+    eval                Score the retriever against the topic dictionary.
+    embed               Encode chunks into needs.retrieval_embedding.
 
 options:
-  -h, --help           show this help message and exit
+  -h, --help            show this help message and exit
 
 $ cosmai retrieval chunk --help
 usage: cosmai retrieval chunk [-h] [--since SINCE]
@@ -63,32 +64,42 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval search --help
-usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25}]
+usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25,vector,hybrid}]
                                [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
                                [--top TOP] [--url URL]
 
 options:
   -h, --help            show this help message and exit
   --query QUERY         What to search for.
-  --engine {bm25}       Vector arrives with #28-4.
+  --engine {bm25,vector,hybrid}
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --top TOP             How many chunks to print.
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval eval --help
-usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25}]
+usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25,vector,hybrid}]
                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
                              [--out OUT] [--url URL]
 
 options:
   -h, --help            show this help message and exit
   --mode {literal,heldout}
-  --engine {bm25}       Vector arrives with #28-4.
+  --engine {bm25,vector,hybrid}
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --out OUT             Write one row per query to this CSV.
   --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval embed --help
+usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH] [--url URL]
+
+options:
+  -h, --help       show this help message and exit
+  --model MODEL    Sentence-transformers model; default is e5-base.
+  --device DEVICE  cuda, cpu, ...; default is what torch picks.
+  --batch BATCH    Texts per forward pass.
+  --url URL        SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]

@@ -43,6 +43,11 @@ dev = [
 retrieval = [
     "kiwipiepy>=0.20",
 ]
+# 벡터를 만드는 쪽만. torch 가 딸려 오므로 이미지에도 tool/checks/test 에도 넣지 않는다 --
+# 인코딩은 GPU 가 있는 호스트에서 사람이 돌리는 일이고, 크론이 하는 일이 아니다 (#28 단계 4).
+embed = [
+    "sentence-transformers>=3",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

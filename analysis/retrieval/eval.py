@@ -31,6 +31,7 @@ from analysis.retrieval.topics import TOPICS
 K = 10
 FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit")
 MODES = ("literal", "heldout")
+ENGINES = ("bm25", "vector", "hybrid")
 
 
 @dataclass(frozen=True)
@@ -124,11 +125,13 @@ def run(
     """질의마다 한 행. 색인은 heldout 의 정답 계산에도 쓰이므로 엔진과 무관하게 항상 만든다."""
     if mode not in MODES:
         raise ValueError(f"mode 는 {MODES} 중 하나다: {mode!r}")
-    if engine != "bm25":
-        raise ValueError(f"아직 bm25 뿐이다 (#28 단계 4에서 vector·hybrid): {engine!r}")
+    if engine not in ENGINES:
+        raise ValueError(f"engine 은 {ENGINES} 중 하나다: {engine!r}")
 
-    from analysis.retrieval.pipeline import load_index
+    from analysis.retrieval.pipeline import load_index, ranked_chunks
 
+    # 색인은 heldout 의 정답 계산(질의 토큰이 든 문서 빼기)에도 쓰이므로 엔진과 무관하게 만든다.
+    # 정답 정의가 어휘 기준이어야 세 검색기가 같은 판에서 겨룬다.
     index, _ = load_index(conn, sources)
     gold_all = gold_from_chunks(conn)
 
@@ -142,8 +145,8 @@ def run(
         if not gold:
             continue  # 정답이 없는 질의는 점수를 정의할 수 없다
         # 후보는 줄이지 않는다. 두 검색기가 같은 후보·같은 정답으로 겨뤄야 점수를 비교할 수 있다.
-        hits = index.search(query, k=k * 4)
-        ranked = [d for d in to_docs([c for c, _ in hits], k) if True]
+        hits = ranked_chunks(conn, query, engine=engine, top=k * 4, sources=sources)
+        ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)
         rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit))
     return rows

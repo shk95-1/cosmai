@@ -18,6 +18,7 @@ COMMANDS = (
     ("retrieval", "chunk"),
     ("retrieval", "search"),
     ("retrieval", "eval"),
+    ("retrieval", "embed"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

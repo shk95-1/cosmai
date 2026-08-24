@@ -25,6 +25,8 @@ STAGES = ("link", "polarity", "aggregate", "all")
 # analysis.retrieval.corpus.SOURCES 와 같은 값. 여기서 다시 적는 이유는 `--help` 한 번에
 # psycopg 를 딸려 오게 하지 않으려는 것이고, tests/retrieval 이 둘이 같은지 검사한다.
 RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
+# bm25 는 글자, vector 는 뜻, hybrid 는 둘의 순위를 RRF 로 합친 것.
+RETRIEVAL_ENGINES = ("bm25", "vector", "hybrid")
 SPLITS = ("tune", "holdout")
 KINDS = ("brand", "format", "attribute", "ingredient", "stopword", "alias", "aspect")
 
@@ -60,7 +62,7 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
 
     search = actions.add_parser("search", help="Rank chunks against a query.")
     search.add_argument("--query", required=True, help="What to search for.")
-    search.add_argument("--engine", default="bm25", choices=["bm25"], help="Vector arrives with #28-4.")
+    search.add_argument("--engine", default="bm25", choices=RETRIEVAL_ENGINES)
     search.add_argument(
         "--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable."
     )
@@ -69,10 +71,16 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
 
     ev = actions.add_parser("eval", help="Score the retriever against the topic dictionary.")
     ev.add_argument("--mode", required=True, choices=["literal", "heldout"])
-    ev.add_argument("--engine", default="bm25", choices=["bm25"], help="Vector arrives with #28-4.")
+    ev.add_argument("--engine", default="bm25", choices=RETRIEVAL_ENGINES)
     ev.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
     ev.add_argument("--out", default=None, help="Write one row per query to this CSV.")
     ev.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+    emb = actions.add_parser("embed", help="Encode chunks into needs.retrieval_embedding.")
+    emb.add_argument("--model", default=None, help="Sentence-transformers model; default is e5-base.")
+    emb.add_argument("--device", default=None, help="cuda, cpu, ...; default is what torch picks.")
+    emb.add_argument("--batch", type=int, default=256, help="Texts per forward pass.")
+    emb.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
@@ -174,12 +182,27 @@ def _run_retrieval(args: argparse.Namespace) -> int:
             return 0 if not outcome.problems else 1
         if args.action == "eval":
             return _run_retrieval_eval(conn, args, sources)
+        if args.action == "embed":
+            return _run_retrieval_embed(conn, args)
         hits = pipeline.search(conn, args.query, top=args.top, sources=sources)
     if not hits:
         print("결과 없음")
         return 1
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
+    return 0
+
+
+def _run_retrieval_embed(conn: Any, args: argparse.Namespace) -> int:
+    from analysis.retrieval import embed, vectors
+
+    try:
+        outcome = embed.run(conn, model=args.model or vectors.MODEL, device=args.device, batch=args.batch)
+    # 확장이 없다는 것은 실패가 아니라 막힘이다 -- shared-postgres 이미지가 되돌아갔을 때가 이것이다.
+    except vectors.ExtensionMissing as blocked:
+        print(blocked)
+        return 2
+    print(outcome.note)
     return 0
 
 

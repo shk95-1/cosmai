@@ -109,4 +109,9 @@ def test_the_summary_reports_the_query_count(loaded):
 
 def test_an_unknown_engine_is_refused(loaded):
     with pytest.raises(ValueError):
-        retrieval_eval.run(loaded, "literal", engine="vector")
+        retrieval_eval.run(loaded, "literal", engine="lucene")
+
+
+def test_an_unknown_mode_is_refused(loaded):
+    with pytest.raises(ValueError):
+        retrieval_eval.run(loaded, "vibes")
