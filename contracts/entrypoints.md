@@ -77,7 +77,7 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
 순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
 소요도 둘이다: `seeds()` 길이만 도는 **씨드 기준**과 `max_requests_per_run`까지 차는 **예산 기준**. 예산 기준으로는
-매시 ranking이 한 시간의 절반 가까이를 점유해 02:05 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
+매시 ranking이 한 시간의 절반 가까이를 점유해 02:10 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
 풀 겹침이 아니라 어드바이저리 락(#10 §A-8-1)이 닫을 겹침이라, 그때까지
 `tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`가 씨드 기준은 항상 검사하고
 예산 기준은 xfail(strict)로 붙들어 둔다.
@@ -95,7 +95,7 @@ youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋�
 안전하다: `_claim` 이 `FOR UPDATE SKIP LOCKED` 한 문장으로 집는다.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
-5 2 * * *   cosmai collect commerce --dataset product
+10 2 * * *  cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare   (보드는 scope.json 목록으로 확장)
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats

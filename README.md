@@ -18,6 +18,8 @@
 | `eval/` | labeled_set 660 · 회귀 픽스처 (제품 매핑 80쌍 등) | `architect/slice-*/` |
 | `playbook/` | 기존 레포에서 추출한 개발 방법론 카탈로그 (채택/변형/제외) | 추출 |
 
+`stack/` 의 이미지는 **빌드가 곧 검사다**: `stack/Dockerfile` 의 마지막 `RUN` 이 이미지 안에서 `cosmai --help` · `db/migrate.sh --help` · `ls contracts/ddl/needs/*.sql` · site-packages 를 통한 `scope_threshold()` 임포트를 실행한다. 그 빌드가 성공했다는 것이 #10 조건 2 의 "이미지 안 동작 확인" 의 근거다 — 따로 돌려 볼 절차가 없다. 스케줄러(supercronic)는 `stack/Dockerfile.cron` 이 그 이미지 위에 얹는다.
+
 ## 원칙
 1. 슬라이스가 증명한 경로만 정식화한다 (`architect/REBUILD.md` §2 매트릭스).
 2. 인터페이스는 계약 우선, 동작은 점진 구현·검증.

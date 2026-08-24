@@ -45,14 +45,24 @@ def contract_periods() -> dict[str, int]:
     return {}
 
 
+_STEP = re.compile(r"^(?:\*|(?P<phase>\d+)-59)/(?P<step>\d+)$")
+
+
 def _period_seconds(fields: tuple[str, ...], line: str) -> int:
-    """How often a five-field cron line repeats. Only the three shapes the youtube schedule needs are
+    """How often a five-field cron line repeats. Only the shapes the youtube schedule needs are
     accepted -- an unrecognised one raises instead of being guessed at, because a wrong guess here
-    would turn this whole comparison green on a schedule nobody chose."""
+    would turn this whole comparison green on a schedule nobody chose.
+
+    A stepped minute may carry a phase (`7-59/15` fires at :07/:22/:37/:52). That is still a fixed
+    period, but only while the step divides 60 -- otherwise the wrap past the hour is a different gap
+    from every other one, and calling any single number its "period" would be a lie.
+    """
     minute, hour, dom, month, dow = fields
     if (dom, month, dow) == ("*", "*", "*"):
-        if hour == "*" and minute.startswith("*/") and minute[2:].isdigit():
-            return int(minute[2:]) * 60
+        if hour == "*" and (match := _STEP.match(minute)):
+            step = int(match["step"])
+            assert 60 % step == 0, f"{minute} does not divide the hour evenly, so it has no one period"
+            return step * 60
         if hour == "*" and minute.isdigit():
             return 3600
         if minute.isdigit() and hour.isdigit():

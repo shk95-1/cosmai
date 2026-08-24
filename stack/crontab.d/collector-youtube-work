@@ -10,4 +10,9 @@
 # means the second cannot see the first's rows as queued.
 #
 # The only youtube line that spends an external request budget, which is why it is alone here.
-*/5 * * * *   cosmai collect youtube --dataset work
+#
+# Phase 2, not 0: a 5-minute line cannot dodge every commerce window and does not need to (different
+# hosts, different schema, a bounded 50-job batch). Offsetting it by two minutes only keeps it off the
+# minutes the rest of the stack already starts on -- :00 every hour (ranking), 05:00 (analyze all),
+# and the quarter hours collector-youtube-flatten used to sit on.
+2-59/5 * * * *   cosmai collect youtube --dataset work

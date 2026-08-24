@@ -1,8 +1,13 @@
 # UTC. flatten 15m and prune 1d, from contracts/entrypoints.md §스케줄. These two share a container
 # because neither makes an external request -- flatten reads stored payloads into the snapshot tables
 # and prune deletes aged rows, so they have no budget to be throttled apart by, unlike watch and work.
-*/15 * * * *   cosmai collect youtube --dataset flatten
-# 02:50 and not an exact quarter hour: prune deletes the artifact rows flatten is reading, and
-# supercronic starts an overlapping line rather than skipping it, so the daily line is placed off
-# every */15 tick instead of on one.
-50 2 * * *     cosmai collect youtube --dataset prune
+#
+# Phase 7, so the quarter-hour ticks land at :07/:22/:37/:52 instead of :00/:15/:30/:45. Same reason
+# as the work line: nothing here competes with commerce for a host, but :00 is where the hourly
+# ranking walk and (at 05:00) analyze all already start, and there is no reason to add a third
+# process to that boundary every hour.
+7-59/15 * * * *   cosmai collect youtube --dataset flatten
+# 02:59: prune deletes the artifact rows flatten reads, and supercronic starts an overlapping line
+# rather than skipping it, so the daily line sits as far from a flatten tick as the phase above
+# allows (02:52 behind it, 03:07 ahead).
+59 2 * * *       cosmai collect youtube --dataset prune
