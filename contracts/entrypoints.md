@@ -12,6 +12,18 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
 - 수집기는 **자기 스키마의 테이블에만** 쓴다 (`ddl/current`). 다른 스키마 읽기는 reader 롤로만.
 - 표본 설계는 상수로 세고 `collectors/<c>/scope.json` 에 기록한다 (scope.lock 의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사).
 
+## DB 접속 노브 (secret 아님)
+```
+COSMAI_DB_HOST   기본값 127.0.0.1
+COSMAI_DB_PORT   기본값 5434
+```
+- 호스트에서 `uv run cosmai ...` 는 shared-postgres 의 게시 포트(127.0.0.1:5434)로, 컴포즈 망 안에서는
+  서비스명:5432 로 **같은 DB** 에 닿는다. 움직이는 것은 호스트와 포트뿐이다.
+- compose 는 값이 없는 `${VAR}` 를 빈 문자열로 넘기므로 **빈 값은 기본값**으로 읽는다.
+- 세 자리가 같은 규칙을 따른다: `db/runtime.py`(needs_runtime), `collectors/commerce/storage/db.py`,
+  `collectors/youtube/storage/db.py`. 함수에 명시된 host/port 인자가 env 를 이긴다.
+- 롤·DB 이름·secret 키 이름은 노브가 아니다 (`contracts/secrets.md`).
+
 ## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
 ```sql
 -- db/views/collector_health.sql 이 세 수집기의 run/fetch_log/jobs 를 UNION 한다

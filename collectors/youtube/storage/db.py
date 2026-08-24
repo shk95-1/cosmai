@@ -15,10 +15,15 @@ from sqlalchemy.engine import make_url
 
 from collectors.youtube.storage.schema import SERVICE_SCHEMA
 from db import secrets
+from db.runtime import host_and_port
 
 
-def runtime_url(host: str = "127.0.0.1", port: int = 5434, database: str = "app") -> str:
+def runtime_url(host: str | None = None, port: int | str | None = None, database: str = "app") -> str:
+    """Host and port come from `db.runtime`'s COSMAI_DB_HOST/COSMAI_DB_PORT so a container reaches the
+    same database the host does; the role, the database and the secret key stay tubedepth's own
+    (contracts/entrypoints.md §DB 접속 노브)."""
     password = secrets.require(["COSMA_DB_RUNTIME"])["COSMA_DB_RUNTIME"]
+    host, port = host_and_port(host, port)
     url = make_url(f"postgresql+psycopg://{SERVICE_SCHEMA}_runtime:{password}@{host}:{port}/{database}")
     return url.update_query_dict({"options": f"-csearch_path={SERVICE_SCHEMA},pg_catalog"}).render_as_string(
         hide_password=False

@@ -1,0 +1,28 @@
+# Build context root for stack/Dockerfile: `docker build -f stack/Dockerfile .` from the repo root,
+# which is where docker looks for this file. Everything left in is either installed as the wheel or
+# read by db/migrate.sh at deploy time -- tests/test_image_payload.py holds that line mechanically,
+# so a new exclusion here that hides a migration input fails the suite instead of the deploy.
+.git
+.githooks
+.claude
+.superpowers
+
+# Rebuilt inside the image by `uv sync`; a host .venv is the wrong interpreter and the largest tree
+# in the context.
+.venv
+dist
+**/__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+
+# Runtime output and secrets never belong in an image layer.
+data
+var
+*.env
+
+# Not part of the runtime: the suite runs on the host (tool/checks/test), the playbook is prose, and
+# portal is its own image (stack/docker-compose.yml builds it from ../portal).
+tests
+playbook
+portal

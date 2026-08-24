@@ -7,8 +7,26 @@ container=shared-postgres
 db=app
 superuser=platform
 
+usage() {
+    cat <<'EOF'
+usage: db/migrate.sh [--container NAME] [--db NAME] [--superuser NAME]
+
+Applies db/bootstrap.sql, contracts/ddl/needs/*.sql, the two named grants files
+(db/grants/postgrest_anon_needs.sql, db/grants/needs_runtime_reader.sql) and db/views/*.sql to
+$container/$db through `docker exec`. Every path is repo-relative: run it from the repo root
+(the image's WORKDIR is that root -- stack/Dockerfile).
+
+Reads NEEDS_DB_MIGRATOR and NEEDS_DB_RUNTIME from $COSMAI_SECRET_FILE (default ~/.config/cosmai/env).
+
+  --container NAME   postgres container to `docker exec` into (default: shared-postgres)
+  --db NAME          database to apply to (default: app)
+  --superuser NAME   role that owns the bootstrap step (default: platform)
+EOF
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
+        -h|--help) usage; exit 0 ;;
         --container) container=$2; shift 2 ;;
         --db) db=$2; shift 2 ;;
         --superuser) superuser=$2; shift 2 ;;
