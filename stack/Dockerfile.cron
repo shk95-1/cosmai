@@ -6,10 +6,15 @@
 #   - 한 번만 도는 실행(`docker compose run --rm collector-commerce cosmai analyze all`, db/migrate.sh)
 #     에는 스케줄러가 필요 없다.
 #
-# 빌드 순서는 두 단계다 — 아래 FROM 이 그 결과를 집는다:
-#   docker build -f stack/Dockerfile -t cosmai .              (레포 루트에서)
+# 빌드 순서는 두 단계다 — 아래 FROM 이 그 결과를 집는다. 둘을 한 번에 도는 것이 tool/stack-build 이고,
+# `compose build` 만 따로 돌리면 안 되는 이유가 그 아래 태그다:
+#   docker build -f stack/Dockerfile -t cosmai-needs:local .   (레포 루트에서)
 #   docker compose -f stack/docker-compose.yml build
-ARG COSMAI_IMAGE=cosmai
+#
+# 기본값이 `cosmai` 가 아닌 이유: 배포 호스트에서 그 이름은 이미 구 fleet 의 아카이브된 앱 이미지이고
+# shared-db 컨테이너 셋이 그것을 돌고 있다. 첫 줄을 건너뛰어도 FROM 은 실패하지 않고 그 이미지를
+# 집는다 — WORKDIR 이 달라서 crontab.d/* 가 없고, 실패가 빌드가 아니라 런타임으로 밀린다.
+ARG COSMAI_IMAGE=cosmai-needs:local
 FROM ${COSMAI_IMAGE}
 
 # supercronic: root 데몬 없는 cron 의미론 — 컨테이너 사용자로 포그라운드에서 돌고 각 작업의 종료 상태를

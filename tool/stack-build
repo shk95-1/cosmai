@@ -1,0 +1,19 @@
+#!/bin/sh
+# The stack image, both steps. Two `docker build`s in a fixed order, which is the only order that
+# works: stack/Dockerfile.cron's `FROM ${COSMAI_IMAGE}` resolves against the local daemon, so a
+# `docker compose build` run on its own does not fail when step 1 is missing -- on the deploy host it
+# finds the archived fleet's image under a similar name and ships that instead. Running them apart is
+# what this script exists to stop.
+#
+#   tool/stack-build [extra docker build args...]
+set -e
+. tool/checks/prerequisite
+require_command docker
+
+# Same tag as stack/Dockerfile.cron's ARG COSMAI_IMAGE default; tests/stack/test_image_tag.py holds
+# the two together, along with README.md and stack/Dockerfile's own comment.
+echo "→ docker build -f stack/Dockerfile -t cosmai-needs:local ."
+docker build -f stack/Dockerfile -t cosmai-needs:local "$@" .
+
+echo "→ docker compose -f stack/docker-compose.yml build"
+docker compose -f stack/docker-compose.yml build

@@ -23,11 +23,13 @@ name: cosmai
 # 보게 되고, 그것은 크래시가 아니라 "수집은 도는데 행이 안 늘어난다"로 나타난다.
 x-cron: &cron
   # 이미지는 stack/Dockerfile 하나에서 나온다. supercronic 만 stack/Dockerfile.cron 이 그 위에 얹는다
-  # (그 파일의 주석이 왜 두 장인지 설명한다).
+  # (그 파일의 주석이 왜 두 장인지 설명한다). **`docker compose build` 만 따로 돌리지 마라** —
+  # 그 앞 단계가 없으면 FROM 이 이 호스트에 이미 있는 남의 `cosmai` 를 집는다. 두 단계는
+  # tool/stack-build 가 한 번에 돈다.
   build:
     context: ..
     dockerfile: stack/Dockerfile.cron
-  image: cosmai-cron
+  image: cosmai-needs-cron:local
   # 여섯 다 같은 build 를 들고 있다: 태그가 같아 두 번째부터는 캐시 히트이고, 대신 프로필 뒤에 숨은
   # watch 컨테이너도 다른 서비스 없이 혼자 빌드하고 띄울 수 있다.
   restart: unless-stopped

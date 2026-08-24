@@ -20,6 +20,17 @@
 
 `stack/` 의 이미지는 **빌드가 곧 검사다**: `stack/Dockerfile` 의 마지막 `RUN` 이 이미지 안에서 `cosmai --help` · `db/migrate.sh --help` · `ls contracts/ddl/needs/*.sql` · site-packages 를 통한 `scope_threshold()` 임포트를 실행한다. 그 빌드가 성공했다는 것이 #10 조건 2 의 "이미지 안 동작 확인" 의 근거다 — 따로 돌려 볼 절차가 없다. 스케줄러(supercronic)는 `stack/Dockerfile.cron` 이 그 이미지 위에 얹는다.
 
+빌드는 두 단계이고 `tool/stack-build` 가 둘을 한 번에 돈다 (레포 루트에서):
+
+```sh
+tool/stack-build
+# 즉,
+#   docker build -f stack/Dockerfile -t cosmai-needs:local .
+#   docker compose -f stack/docker-compose.yml build
+```
+
+태그는 `cosmai-needs:local` 이지 `cosmai` 가 아니다 — 배포 호스트에서 `cosmai` 는 이미 아카이브된 구 fleet 앱 이미지이고 `shared-db` 컨테이너 셋이 그것을 돌고 있다. `docker compose build` 만 단독으로 돌리면 실패가 아니라 그 남의 이미지를 base 로 집는다.
+
 ## 원칙
 1. 슬라이스가 증명한 경로만 정식화한다 (`architect/REBUILD.md` §2 매트릭스).
 2. 인터페이스는 계약 우선, 동작은 점진 구현·검증.
