@@ -304,6 +304,43 @@ class MetricsWishRow:  # → needs.metrics_wish
     example: str | None = None
 
 
+@dataclass(frozen=True)
+class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 명부; 값은 시드가 채운다 (#31)
+    channel_id: str
+    version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
+    panel_role: str  # product | expert — 명부에 없는 채널은 패널 밖이라 분모에 안 들어간다
+    handle: str | None = None
+    channel_title: str | None = None
+    role_basis: str | None = None  # 역할을 그렇게 정한 근거 (team_message | name_rule_verified …)
+    source_list: str | None = None
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
+    run_id: int
+    scope: str  # 카테고리명 | 'all' (metrics_need.scope 와 같은 어휘)
+    need_key: str  # 주제 id. 주제 사전이 aspect_lexicon(ruleset='retrieval-topic') 이라 어휘가 같다
+    quarter: str  # 'YYYYQn'
+    source: str  # youtube_video | youtube_comment — 영상 설명과 댓글은 합치지 않고 나란히 낸다
+    content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
+    panel_version: int  # 이 비율의 모집단: panel_channel.version
+    panel_role: str  # 그 명부의 어느 모집단인지. product | expert
+    mentions: int  # 분자: 이 주제가 걸린 문서 수
+    documents: int  # 그 분기 그 모집단의 문서 수
+    quarter_mentions: int  # 구성비의 분모: 그 분기 전 주제의 언급 합
+    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수
+    composition: float | None = None
+    velocity_yoy: float | None = None
+    persistence: float | None = None
+    persist_quarters: int | None = None
+    window_quarters: int | None = None
+    unique_ratio: float | None = None
+    channel_count: int | None = None
+    channel_diffusion: float | None = None
+    sample_ok: bool = False
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str
