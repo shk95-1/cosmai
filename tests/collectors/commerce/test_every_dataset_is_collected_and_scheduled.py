@@ -198,11 +198,14 @@ OCCURRENCES: tuple[tuple[int, _Line], ...] = tuple(
     sorted(((start, line) for line in CRON_LINES for start in line.starts), key=lambda p: p[0])
 )
 
-# Adjacencies the capped tier cannot satisfy today, as (running, next to start). They are not a
-# crontab bug to be nudged away: at its request budget the hourly ranking walk owns close to half of
-# every hour, which leaves no honest slot for five daily walks. #10 §A-8-1 (an advisory lock) is what
-# closes them, and strict xfail is what makes this file go red the day it does.
-BUDGET_OVERLAPS_A81_MUST_CLOSE = frozenset({("ranking", "product"), ("ranking", "review")})
+# Adjacencies the capped tier cannot satisfy, as (running, next to start). They are not a crontab bug
+# to be nudged away and they are not waiting on anything: at its request budget the hourly ranking
+# walk owns close to half of every hour, which leaves no honest slot for five daily walks. The
+# per-source advisory lock (#10 §A-8-1) is what makes the overlap harmless and it has landed --
+# collectors/commerce/storage/locks.py, wired into the cron entrypoint and held there by
+# tests/collectors/commerce/test_source_lock.py. Nothing here queries it: interval arithmetic cannot
+# see a lock, so these two overlap on this file's terms permanently.
+BUDGET_OVERLAPS_THE_LOCK_CLOSES = frozenset({("ranking", "product"), ("ranking", "review")})
 
 
 def _hhmm(start: int) -> str:
@@ -228,11 +231,14 @@ def _gap_params(*, capped: bool) -> list:
     for index, (start, line) in enumerate(OCCURRENCES):
         following = OCCURRENCES[(index + 1) % len(OCCURRENCES)][1]
         marks = []
-        if capped and (line.dataset, following.dataset) in BUDGET_OVERLAPS_A81_MUST_CLOSE:
+        if capped and (line.dataset, following.dataset) in BUDGET_OVERLAPS_THE_LOCK_CLOSES:
             marks.append(
                 pytest.mark.xfail(
                     strict=True,
-                    reason=f"{line.dataset} -> {following.dataset} waits on #10 §A-8-1 (advisory lock)",
+                    reason=(
+                        f"{line.dataset} -> {following.dataset} overlaps at full budget and gap "
+                        "arithmetic cannot close it; the per-source advisory lock does"
+                    ),
                 )
             )
         params.append(pytest.param(index, marks=marks, id=f"{line.dataset}@{_hhmm(start)}"))
@@ -265,12 +271,15 @@ def test_no_commerce_walk_starts_while_a_seed_paced_walk_is_running(index: int):
 
 @pytest.mark.parametrize("index", _gap_params(capped=True))
 def test_no_commerce_walk_starts_while_a_budget_capped_walk_is_running(index: int):
-    """The tier that records what is still open: every line spending its whole request budget.
+    """The tier that records what gap arithmetic cannot close: every line spending its whole budget.
 
-    Two adjacencies cannot pass and are xfail(strict=True) against #10 §A-8-1 rather than skipped,
-    so that landing the advisory lock -- or shrinking a budget until the overlap disappears -- turns
-    them into XPASS failures and forces this list to be trimmed. Every other adjacency is unmarked:
-    a policy constant that grows until a new pair overlaps has to fail here loudly.
+    Two adjacencies overlap here and always will -- no daily time clears an hourly walk that owns
+    half of every hour. What makes that harmless is the per-source advisory lock, not a schedule, and
+    this file never queries it, so they are xfail(strict=True) as a standing record rather than a
+    countdown to anything. Strict, not skipped, because the one thing that *would* close them on
+    these terms -- a budget shrinking until the pair no longer overlaps -- has to turn them into
+    XPASS failures and force this list to be trimmed. Every other adjacency is unmarked: a policy
+    constant that grows until a new pair overlaps has to fail here loudly.
     """
     start, line = OCCURRENCES[index]
     late = _overlaps(index, capped=True)

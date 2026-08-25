@@ -148,9 +148,12 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
 소요도 둘이다: `seeds()` 길이만 도는 **씨드 기준**과 `max_requests_per_run`까지 차는 **예산 기준**. 예산 기준으로는
 매시 ranking이 한 시간의 절반 가까이를 점유해 02:10 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
-풀 겹침이 아니라 어드바이저리 락(#10 §A-8-1)이 닫을 겹침이라, 그때까지
-`tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`가 씨드 기준은 항상 검사하고
-예산 기준은 xfail(strict)로 붙들어 둔다.
+풀 겹침이 아니라 소스별 어드바이저리 락(#10 §A-8-1, `collectors/commerce/storage/locks.py`)이 닫는 겹침이고,
+그 락은 이미 운영 진입점에 무조건 배선돼 있다(`collectors/commerce/cli.py`,
+`tests/collectors/commerce/test_source_lock.py`가 그 자리를 붙든다). 간격 산술은 락을 볼 수 없으므로
+`tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`는 씨드 기준만 항상 검사하고,
+그 두 쌍의 예산 기준은 **영구히** xfail(strict)로 남는다 — 그 strict 가 잡는 것은 락의 착륙이 아니라
+예산이 줄어 겹침 자체가 사라지는 날이다.
 
 **둘 다 상한이 아니라 하한이다.** 위 계산은 정책이 *선언한* 페이스를 쓰는데, `Gate._back_off`는 사이트가
 403·429·503으로 답하면 살아 있는 인터벌을 `Gate.MAX_INTERVAL_S`(300초)까지 벌린다 — daisomall의 30초가
