@@ -355,7 +355,12 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
 - **population_share_pct** (`metrics_need`) = `100 * (low_mentioning / denom_low) * site_low_pct`
   - `low_mentioning` = 그 카테고리의 저평점 전수(`low_complete`) 제품에서 이 need_key 를 언급한 ≤2★ 리뷰 수
   - `denom_low` = 같은 제품 집합의 `low_collected` 합 · `denom_site` = 같은 집합의 `site_review_count` 합
-  - `site_low_pct` = `(review_stats.pct_1 + review_stats.pct_2) / 100` (사이트가 보고한 저평점 비율)
+  - `site_low_pct` = 제품 단위로 `(review_stats.pct_1 + review_stats.pct_2) / 100` (사이트가 보고한
+    저평점 비율). `metrics_need` 의 행은 제품이 아니라 카테고리이므로 그 집계는 제품들의 단순 평균이
+    아니라 **리뷰수 가중 평균**이다: `Σ site_low_est / denom_site`, 합의 범위는 위 두 분모와 같은
+    `low_complete` 제품 집합이고 `site_low_est` = `round(site_review_count × site_low_pct)` 가 그
+    제품 단위 값이다 (`product_denominator.site_low_est`). 분자는 그 집합이 사이트에 가진 ≤2★ 리뷰의
+    추정 총수이고, 제품 하나짜리 집합에서는 제품 단위 정의로 그대로 되돌아간다.
   - `low_share` = `low_mentioning / denom_low` (저평점 표본 내 비율)
   - B7: 시드의 `seed:slice-p1` 행은 이 식이 아니라 수집 표본 근사(`100 * low_mentioning / denom_site`)로 계산된 값이다. 2차 패스 목표는 두 값의 차 ±0.05 이고 골든이 아니다.
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
