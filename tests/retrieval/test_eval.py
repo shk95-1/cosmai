@@ -116,6 +116,29 @@ def test_gold_size_counts_only_the_evaluated_sources(mixed_sources):
     assert rows["백탁"].gold_size == 3
 
 
+def test_the_gold_pages_through_the_chunks_narrowed_by_source(mixed_sources, monkeypatch):
+    """서버 커서로 38만 행을 한 트랜잭션에 훑으면 needs_runtime 의 transaction_timeout(60초,
+    db/bootstrap.sql:48)이 트랜잭션 **총 수명**을 끊는다 -- 키셋으로 페이지마다 끊고, 주제 매칭은
+    커밋한 뒤에 돈다. 소스 좁힘(#16)이 그 페이징과 함께 살아 있어야 한다(#17 S4)."""
+    from analysis.retrieval import topics
+
+    seen: list = []
+    matched = topics.match_topics
+
+    def watching(text, **kw):
+        seen.append(mixed_sources.info.transaction_status)
+        return matched(text, **kw)
+
+    monkeypatch.setattr(topics, "match_topics", watching)
+    monkeypatch.setattr(retrieval_eval, "GOLD_PAGE", 2)  # 청크 4개를 여러 페이지로 나눈다
+    gold = retrieval_eval.gold_from_chunks(mixed_sources, ("youtube_comment",))
+    assert gold["백탁"] == {"d1", "d2", "d3"}  # commerce_review 의 r1 은 좁힘 밖이다
+    assert len(seen) == 4  # 페이지가 잘려도 청크를 빠뜨리거나 두 번 세지 않는다
+    assert set(seen) == {psycopg.pq.TransactionStatus.IDLE}
+    # 좁히지 않으면 전 소스가 정답이다 -- 페이징이 그 뜻을 바꾸지 않는다.
+    assert retrieval_eval.gold_from_chunks(mixed_sources)["백탁"] == {"d1", "d2", "d3", "r1"}
+
+
 def test_literal_finds_the_documents_that_carry_the_query_word(loaded):
     rows = retrieval_eval.run(loaded, "literal", cache_dir=None)
     by_query = {r.query: r for r in rows}
