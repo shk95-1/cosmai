@@ -521,3 +521,25 @@ def test_the_note_counts_kinds_not_samples(conn, owner, _schema_name, monkeypatc
     outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     assert len(outcome.problems) > 1
     assert "계약 위반 1종" in outcome.note
+
+
+def test_violations_in_two_batches_read_as_two_coordinates(conn, owner, _schema_name, monkeypatch):
+    """행 번호는 한 배치 안에서 세어져 "2행"이 배치마다 다른 문서를 가리켰다. 표본 상한이 실행
+    전체로 이어진 뒤(#18 M12b) 남는 표본이 어느 문서인지 읽히지 않는다 -- 좌표가 모호하면 사람이
+    원본을 찾아가라는 메시지의 목적이 없어진다(#27)."""
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # 문서 하나가 배치 하나
+    real = pipeline.document_rows
+
+    def blank_source(documents):
+        # source 없음은 행 자체의 좌표 말고는 서로를 가를 것이 없는 종류다.
+        for document, rows in real(documents):
+            yield document, [row | {"source": ""} for row in rows]
+
+    monkeypatch.setattr(pipeline, "document_rows", blank_source)
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    missing = [p for p in outcome.problems if p.startswith("source 없음")]
+    # 세 문서가 세 배치로 갈렸고 각각 자기 chunk_id 로 읽힌다 -- 전에는 셋 다 "2행" 이라
+    # 표본 상한을 채우기도 전에 같은 메시지로 접혀 한 건만 남았다.
+    assert {p.split(": ", 1)[1] for p in missing} == {
+        f"{corpus.YOUTUBE_COMMENT}:c{i}#0" for i in (1, 2, 3)
+    }, outcome.problems
