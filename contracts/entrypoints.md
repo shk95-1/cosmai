@@ -110,6 +110,15 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   자기 것으로 뽑으므로, **두 구현이 다른 `need_key` 를 고르면 그 동안 한 문장이 두 행을 갖고 집계도 둘을
   센다** — 같은 `need_key` 면 자연키가 겹치고 소유 술어가 갱신을 막아 주인의 행 하나로 남는다. 옛 행은
   주인의 `polarity_version` 이 오르는 첫 실행이 치운다.
+- 반대로 제품이 남의 scope에서 **주인의 scope 안으로** 옮겨오면 회수 주체가 다르다. 옮겨오기 전에
+  규칙이 써 둔 행은 저장된 `lexicon_category` 가 옛 카테고리 그대로이고, 규칙 실행은 그 유닛을
+  건너뛴다(`analysis/polarity/pipeline.py` 가 `lexicon_category` 를 `stage.foreign` 이나 지금 `--scope`
+  와 견줘 판정 자체를 하지 않는다). 주인이 도는 `--scope` 삭제문(`NEED_DELETE_SCOPED`)은
+  `lexicon_category = <그 scope>` 로 좁혀져 있어 옛 카테고리를 단 그 행을 맞히지 못한다 — 그래서 이
+  방향의 옛 행을 치우는 것은 주인 패스가 아니라 **규칙 자신의 버전이 오르는 실행**이다:
+  `NEED_DELETE` 의 `NOT (extractor_version = ... AND polarity_version = ...)` 술어가 규칙의
+  `extractor_version`·`polarity_version` 이 바뀔 때 그 옛 행을 stale 로 잡아 지운다. 그 사이 이중
+  계수는 주인 패스를 몇 번 다시 돌려도 없어지지 않는다.
 - `metrics_need` 의 `scope` 축은 `lexicon_category` 가 아니라 원천 카테고리이고 rollup
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
