@@ -69,7 +69,15 @@ def analyze_lock(conn: psycopg.Connection[Any], name: str = ANALYZE) -> Iterator
                 conn.rollback()  # 단계가 실패한 트랜잭션을 남겼으면 여기서 아무 문장도 나가지 못한다.
                 with conn.cursor() as cur:
                     cur.execute(GIVE_BACK, (classid, objid))
+                    row = cur.fetchone()
                 conn.commit()
+                # 수집기와 같은 한 줄이다: 2.5~4시간짜리 실행에서 이것이 "둘이 겹쳤을 수 있다"의
+                # 유일한 사후 증거다 — 반환값을 버리면 그 사실을 아무도 모른다.
+                if not (row and row[0]):
+                    print(
+                        f"{name} lock: pg_advisory_unlock says this session did not hold it, so the "
+                        "lock went sometime during the run and the run was not told"
+                    )
             # 세션이 이미 갔으면 락도 같이 갔다 — 크론 메일에 트레이스백 대신 한 줄.
             except psycopg.Error as unreachable:
                 print(f"analyze lock: not given back -- {str(unreachable).splitlines()[0]}")

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 
-from analysis.locks import ANALYZE, advisory_key
+from analysis.locks import ANALYZE, advisory_key, analyze_lock
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ownership import NO_OWNERS, OWNERS
@@ -285,6 +285,7 @@ def test_an_analyze_run_holds_the_analyze_lock_while_a_stage_works(loaded: str, 
             seen.append(int(row[0]) if row else 0)
 
     polarity = _Interrupt(observe, RulePolarity.version, explode=False)
+    back: list[int] = []
     with connect(loaded) as conn:
         found = run_stage(
             conn,
@@ -294,12 +295,32 @@ def test_an_analyze_run_holds_the_analyze_lock_while_a_stage_works(loaded: str, 
             polarity=polarity,
             owners=NO_OWNERS,
         )
+        # 놓아줬는지는 락을 쥔 커넥션이 살아 있는 동안 물어야 한다 — 세션이 닫히면 서버가 회수하므로
+        # 닫은 뒤의 pg_locks 는 unlock 이 있든 없든 0 이다(진공 단언). 같은 세션 재획득도 못 잡는다:
+        # pg_try_advisory_lock 은 재진입 가능해서 두 번 잡아도 granted 는 1 이다.
+        with conn.cursor() as cur:
+            cur.execute(GRANTED, (classid, objid & 0xFFFFFFFF))
+            row = cur.fetchone()
+            back.append(int(row[0]) if row else -1)
     assert found.status == "ok", found.detail
     assert seen == [1], "the analyze lock was not held while the stage was writing"
-    # 그리고 끝나면 놓아준다 — 다음 크론 줄이 영원히 건너뛰면 안 된다.
-    with connect(loaded) as conn, conn.cursor() as cur:
-        cur.execute(GRANTED, (classid, objid & 0xFFFFFFFF))
-        assert cur.fetchone() == (0,)
+    assert back == [0], "the analyze lock was still held after the stage returned"
+
+
+def test_a_lock_that_went_missing_mid_run_is_said_out_loud(
+    runtime_url_for_tests: str, capsys: pytest.CaptureFixture[str]
+):
+    """수집기와 같은 한 줄이다 (collectors/commerce/storage/locks.py): `pg_advisory_unlock` 이 false 면
+    락은 실행 도중에 갔고, 2.5~4시간짜리 실행에서 그 한 줄이 "둘이 겹쳤을 수 있다"의 유일한 사후 증거다.
+    """
+    classid, objid = advisory_key(ANALYZE)
+    with connect(runtime_url_for_tests) as conn, analyze_lock(conn) as held:
+        assert held
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_unlock(%s, %s)", (classid, objid))
+            assert cur.fetchone() == (True,)
+        conn.commit()
+    assert "did not hold it" in capsys.readouterr().out
 
 
 def test_a_second_analyze_run_yields_instead_of_interleaving(
