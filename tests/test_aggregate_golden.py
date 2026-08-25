@@ -16,6 +16,9 @@ from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
 
 pytestmark = pytest.mark.postgres
 
+# 두 후보는 한 디렉터리의 두 이름이 아니라 두 체크아웃 모양이다: 주 체크아웃은 `<repo>/../architect`
+# (`DEFAULT_SLICES`), 워크트리는 `cosmai-wt/<name>/` 한 단 아래라 `<repo>/../../architect` 다.
+# 뒤엣것을 지우면 워크트리에서 이 골든은 조용히 영구 skip 이 된다.
 CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
 TOLERANCE = 0.01
 SAMPLES = 6
