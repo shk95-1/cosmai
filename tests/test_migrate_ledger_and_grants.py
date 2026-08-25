@@ -14,7 +14,14 @@ pytestmark = pytest.mark.postgres
 MIGRATIONS = sorted(
     p.stem for p in (Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs").glob("*.sql")
 )
-WHITELIST = ["metrics_need", "metrics_wish", "entity_lexicon", "aspect_lexicon", "product_ref"]
+WHITELIST = [
+    "metrics_need",
+    "metrics_wish",
+    "entity_lexicon",
+    "aspect_lexicon",
+    "product_ref",
+    "analysis_run",
+]
 NOT_WHITELISTED = ["need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member"]
 
 

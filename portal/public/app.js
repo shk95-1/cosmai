@@ -146,17 +146,21 @@ async function boot() {
     const needOrder = 'run_id.desc,scope,need_key,month,product_ref';
     const wishSelect = ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'];
     const wishOrder = 'run_id.desc,scope,format,attribute,brand'; // metrics_wish PK 전체
+    // analysis_run: "최신"의 근거(#87) — run_id 가 아니라 finished_at·status 로 고른다.
+    const runSelect = ['run_id', 'finished_at', 'status', 'versions', 'note'];
+    const runOrder = 'run_id.desc';
 
-    const [need, wish] = await Promise.all([
+    const [runs, need, wish] = await Promise.all([
+      apiAll('/analysis_run', { select: runSelect, order: runOrder }),
       apiAll('/metrics_need', { select: needSelect, order: needOrder }),
       apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
     ]);
     state.need = need;
     state.wish = wish;
-    const { needRunId, wishRunId } = latestRuns(need, wish);
+    const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
     state.needRunId = needRunId;
     state.wishRunId = wishRunId;
-    $('run-caption').textContent = runCaption(needRunId, wishRunId);
+    $('run-caption').textContent = runCaption(needRun, wishRun);
 
     // need·wish는 다른 run(슬라이스별 시드)이라 scope 목록도 표마다 따로 채운다
     // — 한쪽 표의 scope로 둘 다 채우면 다른 표는 고를 값이 없다(수정 라운드 1 결함 2).

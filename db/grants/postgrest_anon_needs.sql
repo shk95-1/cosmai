@@ -7,6 +7,6 @@ WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgrest_anon') \gexec
 
 GRANT USAGE ON SCHEMA needs TO postgrest_anon;
 GRANT SELECT ON needs.metrics_need, needs.metrics_wish, needs.entity_lexicon, needs.aspect_lexicon,
-    needs.product_ref TO postgrest_anon;
+    needs.product_ref, needs.analysis_run TO postgrest_anon;
 
 NOTIFY pgrst, 'reload schema';

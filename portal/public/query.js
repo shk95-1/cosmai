@@ -67,8 +67,9 @@ export function appendCsvPage(accumulated, page, isFirst) {
   return accumulated + sep + body;
 }
 
-// 'analysis_run' 은 anon 화이트리스트에 없다(#11 1차 결정) — metrics_need 가
-// 이미 담고 온 run_id 중 최댓값을 "최신 run"으로 쓴다.
+// #87: 'analysis_run' 이 anon 화이트리스트에 들어온 뒤로 "최신 run" 판정은
+// screens.js의 latestRuns/okRunsByRecency(analysis_run.finished_at·status)가 한다.
+// 이 함수는 run_id 최댓값이 필요한 범용 자리(테스트 픽스처 등)에만 남는다.
 export function latestRunId(rows) {
   let max = null;
   for (const r of rows || []) {
@@ -76,6 +77,16 @@ export function latestRunId(rows) {
     if (Number.isFinite(id) && (max === null || id > max)) max = id;
   }
   return max;
+}
+
+// analysis_run 행 중 끝난 것(status='ok', finished_at 있음)만 최근순으로 정렬한다.
+// 손으로 돌린 aggregate 는 note 로 기존 run 을 재사용해 더 작은 run_id 를 쓸 수 있어
+// (analysis/aggregate/pipeline.py의 _run_id) run_id 크기로는 "최신"을 못 고른다(#87).
+export function okRunsByRecency(runs) {
+  return (runs || [])
+    .filter((r) => r && r.status === 'ok' && r.finished_at)
+    .slice()
+    .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at));
 }
 
 // need_key/product_ref 등 정렬 가능한 표 정렬. 원본 배열은 건드리지 않는다.
