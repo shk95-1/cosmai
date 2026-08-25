@@ -87,14 +87,14 @@ def test_gold_comes_from_the_topic_dictionary_over_the_chunks(loaded):
 
 
 def test_literal_finds_the_documents_that_carry_the_query_word(loaded):
-    rows = retrieval_eval.run(loaded, "literal")
+    rows = retrieval_eval.run(loaded, "literal", cache_dir=None)
     by_query = {r.query: r for r in rows}
     assert by_query["백탁"].hit is True
     assert by_query["백탁"].p_at_k > 0
 
 
 def test_heldout_asks_for_the_documents_the_query_word_is_missing_from(loaded):
-    rows = {r.query: r for r in retrieval_eval.run(loaded, "heldout")}
+    rows = {r.query: r for r in retrieval_eval.run(loaded, "heldout", cache_dir=None)}
     row = rows["백탁"]
     # `백탁` 이 든 d1 은 정답에서 빠지고, 같은 주제의 d2·d3 만 남는다.
     assert row.gold_size == 2
@@ -103,15 +103,28 @@ def test_heldout_asks_for_the_documents_the_query_word_is_missing_from(loaded):
 
 
 def test_the_summary_reports_the_query_count(loaded):
-    assert "질의" in retrieval_eval.summary(retrieval_eval.run(loaded, "literal"))
+    assert "질의" in retrieval_eval.summary(retrieval_eval.run(loaded, "literal", cache_dir=None))
     assert retrieval_eval.summary([]).startswith("질의 0개")
 
 
 def test_an_unknown_engine_is_refused(loaded):
     with pytest.raises(ValueError):
-        retrieval_eval.run(loaded, "literal", engine="lucene")
+        retrieval_eval.run(loaded, "literal", engine="lucene", cache_dir=None)
+
+
+def test_cache_dir_none_leaves_no_files_behind(loaded, tmp_path, monkeypatch):
+    """`None` 을 "기본값"으로 읽으면 캐시를 끌 방법이 없고, 실제로 테스트가 레포의
+    var/retrieval/bm25 에 색인 세 개를 남겼다(2026-08-25)."""
+    from analysis.retrieval import pipeline
+
+    monkeypatch.setattr(pipeline, "CACHE_DIR", tmp_path)
+    retrieval_eval.run(loaded, "literal", cache_dir=None)
+    assert list(tmp_path.iterdir()) == []
+    # 기본값을 그대로 쓰면 그 자리에 남는다 -- 둘이 구분된다는 것이 이 테스트의 요점이다.
+    retrieval_eval.run(loaded, "literal")
+    assert list(tmp_path.glob("index-*.pkl"))
 
 
 def test_an_unknown_mode_is_refused(loaded):
     with pytest.raises(ValueError):
-        retrieval_eval.run(loaded, "vibes")
+        retrieval_eval.run(loaded, "vibes", cache_dir=None)

@@ -185,15 +185,19 @@ def ranked_chunks(
     sources: tuple[str, ...] | None = None,
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
+    index: Index | None = None,
 ) -> list[tuple[str, float]]:
     """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
+
+    `index` 를 넘기면 그것을 쓴다. eval 은 질의 61개를 연달아 돌리는데 매번 다시 읽으면 38만
+    청크짜리 피클을 61번 푸는 셈이라, 세워 둔 것을 넘겨 받아야 한다.
 
     점수의 뜻은 엔진마다 다르다(BM25 는 클수록, 벡터는 코사인 거리라 작을수록 가깝다). 그래서
     비교는 언제나 순위로 한다 -- RRF 를 쓰는 이유도 같다.
     """
     if engine == "bm25":
-        index, _ = load_index(conn, sources, cache_dir=cache_dir)
-        return index.search(query, k=top)
+        lexical_index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
+        return lexical_index.search(query, k=top)
 
     from analysis.retrieval import embed, vectors
 
@@ -203,8 +207,8 @@ def ranked_chunks(
     if engine == "vector":
         return vectors.search(loaded, query_vector, top=top, sources=sources)
     if engine == "hybrid":
-        index, _ = load_index(conn, sources, cache_dir=cache_dir)
-        lexical = [c for c, _ in index.search(query, k=top * 4)]
+        lexical_index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
+        lexical = [c for c, _ in lexical_index.search(query, k=top * 4)]
         semantic = [c for c, _ in vectors.search(loaded, query_vector, top=top * 4, sources=sources)]
         fused = vectors.rrf(lexical, semantic)[:top]
         # 융합 결과의 점수는 순위 자체다. 두 스케일을 섞어 적으면 읽는 쪽이 오해한다.
