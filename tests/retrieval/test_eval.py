@@ -229,3 +229,52 @@ def test_the_vector_store_and_encoder_are_opened_once(loaded, monkeypatch, tmp_p
 def test_an_unknown_mode_is_refused(loaded):
     with pytest.raises(ValueError):
         retrieval_eval.run(loaded, "vibes", cache_dir=None)
+
+
+def test_the_scorecard_carries_the_coverage_warning(loaded, monkeypatch, tmp_path):
+    """저장소가 청크를 다 덮지 않아도 점수는 멀쩡한 숫자로 나온다 -- 채점표가 어느 코퍼스 위에서
+    나왔는지 그 자리에 적혀 있지 않으면 아무도 못 알아챈다(#12 완료 기준 2)."""
+    import numpy as np
+
+    from analysis.retrieval import embed, vectors
+
+    with loaded.cursor() as cur:
+        cur.execute("SELECT chunk_id, source, chunked_at FROM retrieval_chunk ORDER BY chunk_id")
+        rows = cur.fetchall()
+    loaded.commit()
+    matrix = np.zeros((len(rows), vectors.DIM), dtype="float32")
+    matrix[:, 0] = 1.0
+    out = tmp_path / "e5base"
+    vectors.save(
+        out,
+        matrix,
+        [(chunk_id, source) for chunk_id, source, _ in rows],
+        {
+            "model": "m",
+            "l2_normalized": True,
+            "query_prefix": "query: ",
+            "dim": vectors.DIM,
+            "sources": ["youtube_comment"],
+            "chunked_at_max": max(chunked_at for _, _, chunked_at in rows).isoformat(),
+        },
+    )
+    # 저장소를 구운 뒤 청크가 하나 늘었다. 벡터는 이 행을 오류 없이 못 본다.
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES ('d9#0', 'd9', 'youtube_comment', 0, '백탁이 새로 생겼다', 'z')"
+        )
+    loaded.commit()
+
+    class FakeEncoder:
+        def encode(self, texts, **_kw):
+            return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_kw: FakeEncoder())
+    scored = retrieval_eval.run(loaded, "literal", engine="vector", store=out, cache_dir=None)
+    assert scored, "질의가 하나도 채점되지 않았다"
+    assert "note" in retrieval_eval.FIELDS  # CSV 로 떨어져 나가도 같이 간다
+    assert all(row.note for row in scored)
+    assert scored[0].note in retrieval_eval.summary(scored)
+    # bm25 에는 대조할 저장소가 없다 -- 없는 경고를 지어내지 않는다.
+    assert all(not row.note for row in retrieval_eval.run(loaded, "literal", cache_dir=None))

@@ -162,6 +162,12 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
   청크가 비었거나 사전이 안 얹혔다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수 없음 — 파일이
   없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이 행렬과 어긋난 것이
   같은 자리다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
+- **커버리지 경고는 stderr 로 나가고 종료 코드를 바꾸지 않는다** — `search`·`eval` 의 vector·hybrid 는 저장소가
+  덮는 청크 수와 매니페스트 `chunked_at_max` 를 BM25 캐시 키와 **같은 질의**(`count(*)`·`max(chunked_at)`)와
+  대조하고, 어긋나면 한 줄을 찍고 계속한다 — 멈추면 옛 코퍼스를 일부러 검색하는 정상 용법까지 막힌다.
+  `eval` 은 같은 줄을 CSV `note` 열과 stdout 요약에 싣는다(어느 코퍼스 위의 점수인지). `chunked_at_max` 는
+  **필수 키가 아니다** — 없으면 개수만 대조하고 그 사실을 경고한다(거부하면 그 키 이전에 구운 저장소로 도는
+  검색이 통째로 멈춘다). 어긋남을 고치는 것은 `embed` 전량 재인코딩이다.
 - **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
   BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + 사전 해시).
   둘 다 `var/` 라 레포에 들어가지 않고, 지워도 다시 만들어진다.

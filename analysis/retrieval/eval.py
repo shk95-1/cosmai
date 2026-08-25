@@ -30,7 +30,7 @@ from analysis.retrieval import bm25
 from analysis.retrieval.topics import TOPICS
 
 K = 10
-FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit")
+FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit", "note")
 MODES = ("literal", "heldout")
 ENGINES = ("bm25", "vector", "hybrid")
 
@@ -65,6 +65,7 @@ class Row:
     p_at_k: float
     mrr: float
     hit: bool
+    note: str = ""  # 이 점수가 어느 코퍼스 위에서 나왔는지. 질의마다 같은 값이라 CSV 어느 줄을 봐도 읽힌다
 
 
 def queries(mode: str) -> list[tuple[str, str]]:
@@ -168,17 +169,21 @@ def run(
 
     # 색인은 heldout 의 정답 계산(질의 토큰이 든 문서 빼기)에도 쓰이므로 엔진과 무관하게 만든다.
     # 정답 정의가 어휘 기준이어야 세 검색기가 같은 판에서 겨룬다.
-    from analysis.retrieval.pipeline import load_index, ranked_chunks
+    from analysis.retrieval.pipeline import coverage_note, load_index, ranked_chunks
 
     index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
     gold_all = gold_from_chunks(conn, sources)
 
     # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
     vector_store = encoder = None
+    coverage = ""
     if engine != "bm25":
         from analysis.retrieval import embed, vectors
 
         vector_store = vectors.load(store or vectors.DEFAULT_STORE)
+        # 저장소를 연 쪽이 커버리지를 묻는다. 채점표에 실어야 "어느 코퍼스 위의 점수인가"가 읽힌다 --
+        # 어긋나도 점수는 멀쩡한 숫자로 나오므로 수치만 봐서는 알 수 없다.
+        coverage = coverage_note(conn, vector_store) or ""
         encoder = embed.load_encoder(vector_store.model)
 
     rows: list[Row] = []
@@ -205,7 +210,7 @@ def run(
         )
         ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)
-        rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit))
+        rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit, coverage))
     return rows
 
 
@@ -217,4 +222,7 @@ def summary(rows: list[Row]) -> str:
     p = sum(r.p_at_k for r in rows) / n
     mrr = sum(r.mrr for r in rows) / n
     hit = sum(1 for r in rows if r.hit) / n
-    return f"질의 {n}개 · P@{K} {p:.3f} · MRR@{K} {mrr:.3f} · Hit@{K} {hit:.0%}"
+    line = f"질의 {n}개 · P@{K} {p:.3f} · MRR@{K} {mrr:.3f} · Hit@{K} {hit:.0%}"
+    # 커버리지 경고는 CSV 를 안 열어도 보여야 한다 -- 요약만 읽고 표에 옮겨 적는 것이 실제 용법이다.
+    note = next((r.note for r in rows if r.note), "")
+    return f"{line}\n{note}" if note else line
