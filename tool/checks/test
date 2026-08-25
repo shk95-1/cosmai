@@ -8,6 +8,12 @@ require_command uv docker pg_isready
 
 uv sync --extra dev --frozen
 
+# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
+# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
+# commit landed on a real branch during pre-push). The suite must see the same environment under
+# a hook as from a terminal.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 if [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
     # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
