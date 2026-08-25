@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import http.client
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 
 from analysis.lexicon import load_aspects
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, ruleset_for
@@ -15,7 +17,7 @@ from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.pricing import BudgetExceeded, UsageLedger
 from analysis.predictors import category_of, connect_lexicon, rating_of
 from analysis.registry import Implementation, LabeledRow, Predictor, register_factory
-from analysis.types import PolarityRequest
+from analysis.types import AspectLexicon, Polarity, PolarityRequest, PolarityResult
 
 IMPL_NAME = "llm"
 OLLAMA_IMPL_NAME = "ollama"
@@ -86,6 +88,59 @@ def build_ollama(model: str) -> Implementation:
     return Implementation(version=OllamaPolarity(model).version, predict=_ollama_predictor(model))
 
 
-register_factory("polarity", IMPL_NAME, build, paid=True)
+# 왕복 고장의 표면 그대로다: urlopen 은 URLError·TimeoutError(둘 다 OSError)를 내고, getresponse() 는
+# RemoteDisconnected·IncompleteRead 를 그대로 흘린다. 여기서 넓히면 안 된다 — AttributeError 같은
+# 프로그래밍 실수까지 삼키면 run 이 조용히 failed 로 닫히고 버그가 note 한 줄로 숨는다.
+UNREACHABLE = (OSError, http.client.HTTPException)
+
+
+class _Blocking:
+    """이 판정자를 멈추게 하는 것들을 단계가 잡는 예외로 바꾼다 — 예산 하드스톱(BudgetExceeded,
+    RuntimeError)도 왕복 실패(URLError 등, OSError)도 analysis/pipeline.py 의 FAILURES 밖이라, 그대로
+    새면 단계가 트레이스백으로 끝나고 polarity 가 연 run 이 'running' 인 채 영원히 열려 있다."""
+
+    def __init__(self, inner: Polarity) -> None:
+        self.inner = inner
+        self.version = inner.version
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return self.classify_many([PolarityRequest(sentence, rating, category)], aspects)[0]
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        try:
+            return self.inner.classify_many(items, aspects)
+        except BudgetExceeded as blocked:
+            raise LookupError(str(blocked)) from blocked
+        except UNREACHABLE as unreachable:
+            raise LookupError(f"{type(unreachable).__name__}: {unreachable}") from unreachable
+
+
+@contextmanager
+def open_llm(model: str) -> Iterator[Polarity]:
+    """`analyze --impl llm:<model>`. 원장은 단계의 커넥션이 아니라 자기 것을 쓴다 — reserve() 의 커밋이
+    단계의 미완성 upsert 를 같이 커밋해 버리면 페이지 단위 재개가 깨진다."""
+    if not model:
+        raise LookupError("--impl llm:<model> needs a model, e.g. llm:claude-sonnet-5")
+    with connect_lexicon() as conn:
+        yield _Blocking(
+            LLMPolarity(model, UsageLedger(conn), purpose=f"analyze:polarity:{version_for(model)}")
+        )
+
+
+@contextmanager
+def open_ollama(model: str) -> Iterator[Polarity]:
+    """`analyze --impl ollama:<model>`. autocommit 은 "왕복을 트랜잭션 안에서 기다리지 않는다" 를 이
+    커넥션의 성질로 만든다 — 오늘 안전한 이유는 record() 가 스스로 커밋한다는 우연뿐이고, eval 이 같은
+    자리에서 죽은 것(f8aff76)은 사전 로드가 트랜잭션 하나를 열어 둔 채였기 때문이다."""
+    if not model:
+        raise LookupError("--impl ollama:<model> needs a model, e.g. ollama:gemma4:latest")
+    with connect_lexicon() as conn:
+        conn.autocommit = True
+        yield _Blocking(OllamaPolarity(model, UsageLedger(conn)))
+
+
+register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
 # 무료·로컬이라 --split 강제(cli.is_paid)에 걸리지 않는다 — 홀드아웃을 첫 호출로 바로 돌려도 된다.
-register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False)
+register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False, classifier=open_ollama)

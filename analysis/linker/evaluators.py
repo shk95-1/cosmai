@@ -21,18 +21,18 @@ PAIR_SEPARATOR = " | "
 class BrandLinkPredictor:
     """행마다 '그 브랜드를 그 문맥에서 우리 회로가 링크하는가'를 답한다 — OK 는 채택, FP 는 비채택."""
 
-    url: str | None = None
     lexicon: Lexicon | None = None
     linker: RuleLinker = field(default_factory=RuleLinker)
 
     def _lexicon(self) -> Lexicon:
         if self.lexicon is not None:
             return self.lexicon
-        # Predictor 프로토콜은 연결을 넘겨주지 않는다 — 사전을 읽을 접속은 구현체가 연다.
-        from db.runtime import runtime_url
-        from db.seed._common import connect
+        # Predictor 프로토콜은 연결을 넘겨주지 않는다 — 사전을 읽을 접속은 구현체가 연다. 그 접속의
+        # 목적지는 예측자마다 따로 들지 않고 analysis.predictors 한 자리에서 온다: 여기에 자기 url
+        # 필드를 두었더니 `cosmai eval --url` 이 닿지 않아 이 예측자만 운영 DB 의 사전을 읽었다.
+        from analysis.predictors import connect_lexicon
 
-        with connect(self.url or runtime_url()) as conn:
+        with connect_lexicon() as conn:
             return load_lexicon(conn)
 
     def __call__(self, rows: Sequence[LabeledRow]) -> Sequence[str]:

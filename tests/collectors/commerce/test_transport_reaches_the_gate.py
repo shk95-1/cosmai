@@ -171,6 +171,10 @@ def test_the_user_agent_the_policy_declares_is_what_the_site_sees():
     _, requests, _ = _walk(policy, lambda _: httpx.Response(200, text="{}"))
     assert requests[-1].headers["user-agent"] == DEFAULT_UA
     assert DEFAULT_UA == policy.user_agent
+    # Comparing the symbol to itself proves nothing about the string it holds. Pin the literal -- the
+    # name this crawler answers to in an access log -- so an edit to the constant fails this
+    # assertion instead of sailing through unnoticed.
+    assert DEFAULT_UA == "cosmai-commerce/0.1 (+https://github.com/slopindustries/cosmai)"
 
 
 def test_a_good_walk_over_the_real_transport_exits_zero():

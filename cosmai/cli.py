@@ -5,6 +5,10 @@ snippets/test_stack_commands_resolve.py).
 `collect commerce`/`youtube` are wired (#7, #8); `naver` is #9 and refuses cleanly until then --
 declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
 checked against, per contracts/entrypoints.md's collector list.
+
+`login` (#27) is the one place a person clears a browser source's challenge by hand -- run on the
+HOST from the repo root (not inside a container -- WSL2 needs no display forwarding that way), so
+its profile directory is the one collector-commerce's bind mount reads.
 """
 
 from __future__ import annotations
@@ -39,11 +43,19 @@ def _add_collect(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--since", default=None, help="Accepted for shape; unused by every dataset today.")
 
 
+def _add_login(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "login", help="Open a visible browser so a person can authorise one source's profile."
+    )
+    p.add_argument("--source", required=True, help="Source key whose browser profile to authorise.")
+
+
 def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("analyze", help="Run one analysis stage over the needs schema.")
     p.add_argument("stage", choices=STAGES)
     p.add_argument("--since", default=None, help="Only units observed on or after this date.")
     p.add_argument("--scope", default=None, help="Restrict to one lexicon category.")
+    p.add_argument("--impl", default=None, help="Registered polarity factory, e.g. ollama:gemma4:latest.")
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
@@ -121,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cosmai")
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_collect(subparsers)
+    _add_login(subparsers)
     _add_analyze(subparsers)
     _add_retrieval(subparsers)
     _add_eval(subparsers)
@@ -144,20 +157,50 @@ def _run_collect(args: argparse.Namespace) -> int:
     raise AssertionError(f"unreachable: argparse choices are exhausted, got {args.collector!r}")
 
 
+def _run_login(args: argparse.Namespace) -> int:
+    # commerce is the only collector with a browser-transport source today (contract.py's
+    # `Transport.BROWSER`, declared by oliveyoung alone) -- a `--collector` switch would be a knob
+    # with one live setting. Add it back the day a second collector needs a profile of its own.
+    from collectors.commerce.cli import login
+
+    return login(args.source)
+
+
 def _run_analyze(args: argparse.Namespace) -> int:
+    import contextlib
+
     import psycopg
 
+    from analysis import predictors, registry
     from analysis.pipeline import run_stage
+    from analysis.polarity.ownership import OWNERS, unready
 
-    try:
-        since = date.fromisoformat(args.since) if args.since else None
-        conn = _connect(args.url)
-    # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
-    except (ValueError, LookupError, psycopg.Error) as refused:
-        print(refused)
-        return 2
-    with conn:
-        outcome = run_stage(conn, args.stage, since=since, scope=args.scope)
+    if args.impl:
+        registry.load_implementations()
+        # eval 의 --split 강제에 대응하는 자리. analyze 에는 split 이 없고 전량이 기본이라, 유료 구현은
+        # --scope 로 한 카테고리를 이름 붙여야 돈다 (재개 5번이 정확히 `--scope 선블록` 이다).
+        if args.scope is None and registry.is_paid("polarity", args.impl):
+            print(f"--impl {args.impl} spends money; name the corpus with --scope <category>")
+            return 2
+    with contextlib.ExitStack() as stack:
+        try:
+            since = date.fromisoformat(args.since) if args.since else None
+            # 판정자의 사전·원장 커넥션도 --url 을 따라가야 한 실행이 두 DB 에 걸치지 않는다 (eval 과 같다).
+            predictors.set_lexicon_url(args.url)
+            polarity = (
+                stack.enter_context(registry.open_classifier("polarity", args.impl)) if args.impl else None
+            )
+            # 규칙이 아닌 구현은 소유 표가 자기 이름을 적어둔 자리에서만 돈다 — 사람이 손으로 치는
+            # 명령이라 순서(등록 → 패스)를 아는 곳이 여기밖에 없다 (analysis/polarity/ownership.py).
+            if polarity is not None and (blocked := unready(OWNERS, polarity.version, args.scope)):
+                print(blocked)
+                return 2
+            conn = stack.enter_context(_connect(args.url))
+        # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
+        except (ValueError, LookupError, psycopg.Error) as refused:
+            print(refused)
+            return 2
+        outcome = run_stage(conn, args.stage, since=since, scope=args.scope, polarity=polarity)
     print(outcome.note)
     return 0 if outcome.status == "ok" else 1
 
@@ -373,6 +416,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "collect":
         return _run_collect(args)
+    if args.command == "login":
+        return _run_login(args)
     if args.command == "analyze":
         return _run_analyze(args)
     if args.command == "retrieval":

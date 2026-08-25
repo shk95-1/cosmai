@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,8 @@ from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
+from analysis.polarity.ownership import NO_OWNERS, OWNERS
+from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from cosmai.cli import main
 from db import seed
 from db.seed._common import connect
@@ -158,6 +160,10 @@ def analysis_url(needs_runtime_url: str) -> str:
 
 
 def _all(url: str, sources: tuple[str, str], **kwargs: Any) -> pipeline.StageOutcome:
+    # 이 파일의 리뷰는 전부 선크림(=선블록)이고, 배송되는 소유 표는 그 scope 를 gemma4 에 준다 (#31).
+    # 여기서 검사하는 것은 세 단계의 배선이므로 주인 없는 상태로 돈다 — 소유 자체는 아래 한 테스트와
+    # tests/test_analyze_polarity.py 가 본다.
+    kwargs.setdefault("owners", NO_OWNERS)
     commerce, youtube = sources
     with connect(url) as conn:
         return pipeline.run_stage(
@@ -198,6 +204,33 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
         # 세 단계가 한 run 을 나눠 쓴다 — polarity 가 연 run 에 aggregate 가 metrics 를 쓴다.
         cur.execute("SELECT count(*) FROM analysis_run")
         assert cur.fetchone() == (1,)
+
+
+def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):
+    """크론이 부르는 모양 그대로다: 소유 표를 아무도 인자로 말하지 않아도 배송값(#31)이 선다. 이 픽스처의
+    리뷰는 전부 선블록이라 규칙은 리뷰를 한 건도 쓰지 않고, 주인이 라벨한 행은 그 자리에 남는다."""
+    commerce, youtube = sources
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
+            "observed_at_resolution, month, sentence, category, lexicon_category, "
+            "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
+            "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
+            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"]),
+        )
+        conn.commit()
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "all", commerce_schema=commerce, youtube_schema=youtube, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT lexicon_category, polarity, polarity_version FROM need_mention "
+            "WHERE src = 'review'"
+        )
+        # 규칙이 이 문장을 다시 뽑았다면 '불만'/rule-v2.2 한 줄만 남았을 것이다 (제자리 upsert).
+        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"])]
 
 
 def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(
@@ -258,6 +291,42 @@ def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, source
     assert row == (1, 1)
 
 
+class StubPolarity:
+    """`--impl <spec>` 가 여는 판정자 자리의 스텁 — 규칙과 다른 버전을 내는 것이 요점이다
+    (tests/test_analyze_polarity.py 의 같은 이름과 같은 역할)."""
+
+    version = "stub-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="백탁", polarity="중립", reason="stub", version=self.version)
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
+
+
+def test_an_impl_run_records_that_implementations_version_not_the_rules(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """entrypoints.md: `--impl` 이 있으면 그 구현의 버전이 analysis_run.versions.polarity 와 산출 행에
+    남는다. `all` 은 성공한 run 을 자기가 모은 versions 로 다시 닫으므로(analysis/pipeline.py `_close`),
+    polarity 가 RUN_START 에 쓴 올바른 버전은 그 versions 가 판정자를 물어봤을 때만 살아남는다.
+    `--impl` 에서 여기까지의 배선은 tests/test_cli_analyze.py 가 본다."""
+    found = _all(analysis_url, sources, polarity=StubPolarity())
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT versions FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        cur.execute("SELECT DISTINCT polarity_version FROM need_mention")
+        stamped = cur.fetchall()
+    assert row is not None
+    assert row[0]["polarity"] == StubPolarity.version
+    # 나머지 버전은 그대로다 — 갈아 끼운 것은 판정자 하나뿐이다.
+    assert row[0]["extractor"] == EXTRACTOR_VERSION and row[0]["linker"] == LINKER_VERSION
+    assert stamped == [(StubPolarity.version,)]
+
+
 def test_a_failing_stage_closes_the_run_as_failed(analysis_url: str, sources: tuple[str, str]):
     _, youtube = sources
     with connect(analysis_url) as conn:
@@ -300,7 +369,9 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
     commerce, youtube = sources
     with connect(analysis_url) as conn:
         link = pipeline.run_stage(conn, "link", commerce_schema=commerce, youtube_schema=youtube)
-        polarity = pipeline.run_stage(conn, "polarity", commerce_schema=commerce, youtube_schema=youtube)
+        polarity = pipeline.run_stage(
+            conn, "polarity", commerce_schema=commerce, youtube_schema=youtube, owners=NO_OWNERS
+        )
         aggregate = pipeline.run_stage(conn, "aggregate", commerce_schema=commerce, captured_at=CAPTURED_DATE)
     assert link.status == "ok" and link.counts["product_ref"] > 0
     assert polarity.status == "ok" and polarity.counts["attempted_need"] > 0

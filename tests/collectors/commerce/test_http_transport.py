@@ -67,6 +67,16 @@ def test_the_headers_the_engine_stamped_are_the_ones_that_go_out():
     assert sent["x-trace"] == "1"
 
 
+def test_default_ua_is_pinned_to_this_crawlers_own_name():
+    # Importing DEFAULT_UA and comparing it to itself (as the tests above do) would pass no matter
+    # what the constant said, so this pins the literal. It was briefly swapped for the previous
+    # project's name on the theory that oliveyoung keyed on the UA; the follow-up measurement put
+    # the same UA through from the host and into a 403 from the container, so what the site reads
+    # is the image's TLS stack (tests/stack/test_image_tls_stack.py) and this string is free to be
+    # honest about who is calling. An edit to it must edit this assertion too.
+    assert DEFAULT_UA == "cosmai-commerce/0.1 (+https://github.com/slopindustries/cosmai)"
+
+
 def test_the_transport_names_no_user_agent_of_its_own():
     # Two places stamping a UA is how they disagree. The engine owns it; this owns the headers that
     # describe what a Korean site should answer with.

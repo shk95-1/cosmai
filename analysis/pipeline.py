@@ -8,6 +8,7 @@ run 행은 polarity 가 열고 aggregate 가 그 run_id 로 metrics 를 쓴다: 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, LiteralString
@@ -20,9 +21,13 @@ from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.linker import LINKER_VERSION
 from analysis.linker import pipeline as link_stage
+from analysis.locks import ANALYZE, analyze_lock
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
+from analysis.polarity.ownership import OWNERS
+from analysis.polarity.pipeline import MARKER
+from analysis.types import Polarity
 
 __all__ = ["POPULATION", "StageOutcome", "run_stage"]
 
@@ -35,6 +40,14 @@ RULESETS = (SUNCARE_RULESET, GENERIC_RULESET)
 LINK_COUNTS = ("product_ref", "brand_mention")
 OK = "ok"  # entrypoints.md §공통 운영 뷰의 어휘: ok | partial | blocked | failed | running
 FAILED = "failed"
+PARTIAL = "partial"
+# 수집기가 소스를 양보할 때와 같은 어휘·같은 종료 코드다 (entrypoints.md §수집기): 사이트가 거절한 게
+# 아니라 우리가 양보한 것이고, 건너뛴 일은 다음 실행이 그대로 가져간다(모든 단계가 자연키 upsert).
+SKIPPED = (
+    f"skipped: another analyze run holds the {ANALYZE} lock, and running both would let one read a "
+    "month the other has half-rewritten"
+)
+STALE = "half-written month(s) left behind by a run that died: {}"
 # 재현에 필요한 것은 첫 줄이다 — psycopg 는 여기에 쿼리 전문을 붙여 note 를 통째로 삼킨다.
 DETAIL_CHARS = 160
 
@@ -43,17 +56,33 @@ NOTE: LiteralString = "analyze:{stage}"
 RUN_FAILED: LiteralString = (
     "INSERT INTO analysis_run (status, finished_at, versions, note) VALUES ('failed', now(), %s::jsonb, %s)"
 )
+# versions 는 덮지 않고 합친다 — 단독 폴라리티 실행은 자기가 라벨한 판본을 RUN_START 에서만 적고
+# (analysis/polarity/pipeline.py), 여기서 통째로 덮으면 4시간짜리 gemma4 패스가 무엇으로 라벨하다
+# 죽었는지가 analysis_health.polarity_version 에서 사라진다 (contracts/versioning.md).
 RUN_CLOSE: LiteralString = (
-    "UPDATE analysis_run SET status = %s, finished_at = now(), versions = %s::jsonb, note = %s "
-    "WHERE run_id = %s"
+    "UPDATE analysis_run SET status = %s, finished_at = now(), versions = versions || %s::jsonb, "
+    "note = %s WHERE run_id = %s"
 )
-LAST_RUN: LiteralString = "SELECT coalesce(max(run_id), 0) FROM analysis_run"
-# polarity 가 자기 run 을 열고 바로 커밋하므로(analysis/polarity/pipeline.py) 그 안에서 죽으면 run_id 가
-# 밖으로 나오지 못한다. 이 실행이 시작한 뒤에 열린 것만 본다 — 남의 run 을 실패로 닫으면 안 된다.
-ORPHAN_RUN: LiteralString = (
-    "SELECT run_id FROM analysis_run WHERE run_id > %s AND status = 'running' "
-    "AND note LIKE 'analyze:polarity:%%' ORDER BY run_id DESC LIMIT 1"
+RUN_SKIPPED: LiteralString = (
+    "INSERT INTO analysis_run (status, finished_at, versions, note) "
+    "VALUES ('partial', now(), '{}'::jsonb, %s)"
 )
+NOTE_OF: LiteralString = "SELECT note FROM analysis_run WHERE run_id = %s"
+# 이미 한 번 말한 표식에 붙는 꼬리표. status 로는 이 구별이 안 된다: 실무에서 가장 흔한 죽음(ollama
+# 예외·statement_timeout)은 FAILURES 로 잡혀 _close 가 failed 로 닫으므로 'running' 만 보면 그 반쪽
+# 달을 통째로 놓치고, 반대로 status 를 빼기만 하면 주인 있는 scope 의 달은 아무도 메우지 않아 매일 밤
+# 같은 partial 이 나온다.
+REPORTED = "stale-reported"
+# analyze 락을 쥔 동안 열려 있는 rewriting 표식은 죽은 실행의 것뿐이다 — 산 실행은 락을 못 잡는다.
+ABANDONED: LiteralString = "SELECT run_id, note FROM analysis_run WHERE note LIKE %s AND note NOT LIKE %s"
+ABANDONED_CLOSE: LiteralString = (
+    "UPDATE analysis_run SET status = 'failed', finished_at = coalesce(finished_at, now()), "
+    "note = note || %s WHERE run_id = %s"
+)
+# polarity 는 자기 run 을 열고 실패해도 여기서 닫는다. aggregate 도 note 로 run 을 찾아 열거나 되살려
+# 'running' 으로 만들지만(analysis/aggregate/pipeline.py `_run_id`) 그 run_id 는 여기로 올라오지 않아,
+# 단독 `analyze aggregate` 가 실패하면 그 행은 'running' 인 채 남는다 — 표식이 없어 다음 실행도 못 찾는다.
+OPENS_RUN = ("polarity",)
 METRICS: LiteralString = (
     "SELECT (SELECT count(*) FROM metrics_need WHERE run_id = %s), "
     "(SELECT count(*) FROM metrics_wish WHERE run_id = %s)"
@@ -71,7 +100,7 @@ class StageOutcome:
     @property
     def note(self) -> str:
         rows = " ".join(f"{name}={n}" for name, n in self.counts.items())
-        tail = f" failed:{self.detail}" if self.status != OK else ""
+        tail = f" {self.status}:{self.detail}" if self.status != OK else ""
         return f"{NOTE.format(stage=self.stage)} {rows}{tail}".strip()
 
 
@@ -80,7 +109,7 @@ def _detail(stage: str, failure: Exception) -> str:
     return f"{stage} {message[:DETAIL_CHARS]}"
 
 
-def _versions(conn: psycopg.Connection[Any]) -> dict[str, Any]:
+def _versions(conn: psycopg.Connection[Any], polarity_version: str = POLARITY_VERSION) -> dict[str, Any]:
     """#17 판정: lexicon 은 활성 버전 + ruleset 이다 — aspect 사전은 ruleset 마다 따로 켜진다."""
     lexicon = load_lexicon(conn)
     aspects = {ruleset: load_aspects(conn, ruleset).version for ruleset in RULESETS}
@@ -88,25 +117,50 @@ def _versions(conn: psycopg.Connection[Any]) -> dict[str, Any]:
     return {
         "linker": LINKER_VERSION,
         "extractor": EXTRACTOR_VERSION,
-        "polarity": POLARITY_VERSION,
+        "polarity": polarity_version,
         "aggregate": AGGREGATE_VERSION,
         "lexicon": {"entity": lexicon.version, "aspect": aspects},
     }
 
 
-def _last_run_id(conn: psycopg.Connection[Any]) -> int:
+def _abandoned(conn: psycopg.Connection[Any]) -> tuple[str, ...]:
+    """죽은 실행이 반쯤 다시 쓰고 만 달들 — 죽음이 잡혔든(failed) 아니든(running) 표식으로 찾는다.
+
+    여기서 닫아 두는 것은 상태뿐이다: 그 달을 메우는 것은 주인의 일이고(주인 있는 scope 는 규칙이
+    배제한다), 표식은 note 에 남아 어느 달인지 계속 말한다. 말하는 것은 한 번뿐이라 꼬리표를 붙인다.
+    """
     with conn.cursor() as cur:
-        cur.execute(LAST_RUN)
+        cur.execute(ABANDONED, (f"%{MARKER}%", f"%{REPORTED}%"))
+        found = [(int(run_id), str(note or "")) for run_id, note in cur.fetchall()]
+        for run_id, _ in found:
+            cur.execute(ABANDONED_CLOSE, (f" {REPORTED}", run_id))
+    conn.commit()
+    return tuple(note.partition(MARKER)[2].split(" ")[0] for _, note in found)
+
+
+def _carried(conn: psycopg.Connection[Any], run_id: int, note: str) -> str:
+    """실패 메시지가 표식을 지우면 어느 달이 반쪽인지 아무도 모른다 — 그 토막만 새 note 로 옮긴다."""
+    with conn.cursor() as cur:
+        cur.execute(NOTE_OF, (run_id,))
         row = cur.fetchone()
+    _, found, tail = (row[0] if row and row[0] else "").partition(MARKER)
+    return f"{note} {MARKER}{tail}" if found else note
+
+
+def _amend(outcome: StageOutcome, stale: Sequence[str]) -> StageOutcome:
+    """성공했어도 조용히 끝내지 않는다: 이 실행이 아니라 죽은 실행이 남긴 구멍을 종료 코드로 말한다."""
+    if not stale or outcome.status != OK:
+        return outcome
+    return replace(outcome, status=PARTIAL, detail=STALE.format(" ".join(stale)))
+
+
+def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
+    outcome = StageOutcome(stage, PARTIAL, None, {}, SKIPPED)
     conn.rollback()
-    return int(row[0]) if row else 0
-
-
-def _orphan_run_id(conn: psycopg.Connection[Any], mark: int) -> int | None:
     with conn.cursor() as cur:
-        cur.execute(ORPHAN_RUN, (mark,))
-        row = cur.fetchone()
-    return int(row[0]) if row else None
+        cur.execute(RUN_SKIPPED, (outcome.note,))
+    conn.commit()
+    return outcome
 
 
 def _metrics_counts(conn: psycopg.Connection[Any], run_id: int) -> dict[str, int]:
@@ -121,19 +175,17 @@ def _close(
     conn: psycopg.Connection[Any],
     outcome: StageOutcome,
     versions: dict[str, Any],
-    mark: int | None = None,
 ) -> StageOutcome:
     payload = json.dumps(versions, ensure_ascii=False)
     try:
         conn.rollback()
         run_id = outcome.run_id
-        if run_id is None and mark is not None:
-            run_id = _orphan_run_id(conn, mark)
         with conn.cursor() as cur:
             if run_id is None:
                 cur.execute(RUN_FAILED, (payload, outcome.note))
             else:
-                cur.execute(RUN_CLOSE, (outcome.status, payload, outcome.note, run_id))
+                note = outcome.note if outcome.status == OK else _carried(conn, run_id, outcome.note)
+                cur.execute(RUN_CLOSE, (outcome.status, payload, note, run_id))
         conn.commit()
     # 세션이 끊긴 뒤(idle_in_transaction 등)에는 rollback 조차 던진다 — 크론 메일에 트레이스백 대신 한 줄.
     except psycopg.Error as unreachable:
@@ -149,30 +201,38 @@ def run_all(
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
+    polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
+    stale: Sequence[str] = (),
 ) -> StageOutcome:
     counts: dict[str, int] = {}
     versions: dict[str, Any] = {}
     run_id: int | None = None
-    mark: int | None = None
     stage = "link"
+
+    def opened(found: int) -> None:
+        nonlocal run_id
+        run_id = found
+
     try:
-        versions = _versions(conn)
+        versions = _versions(conn, polarity.version if polarity else POLARITY_VERSION)
         linked = link_stage.run(
             conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
         )
         counts.update({name: linked[name] for name in LINK_COUNTS})
         stage = "polarity"
-        mark = _last_run_id(conn)
-        polarity = polarity_stage.run(
+        found = polarity_stage.run(
             conn,
             since=since,
             scope=scope,
             commerce_schema=commerce_schema,
             youtube_schema=youtube_schema,
+            polarity=polarity,
+            owners=owners,
+            on_run_open=opened,
         )
-        run_id = polarity.run_id
         # upsert 가 실제로 넣은 수가 아니라 시도한 수다 — 시드와 자연키가 겹치는 문장은 자기 행을 못 만든다.
-        counts.update({"attempted_need": polarity.need_rows, "attempted_wish": polarity.wish_rows})
+        counts.update({"attempted_need": found.need_rows, "attempted_wish": found.wish_rows})
         stage = "aggregate"
         aggregate_stage.run(
             conn,
@@ -182,11 +242,12 @@ def run_all(
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        counts.update(_metrics_counts(conn, run_id))
+        if run_id is not None:
+            counts.update(_metrics_counts(conn, run_id))
     except FAILURES as failure:
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
-        return _close(conn, outcome, versions, mark)
-    return _close(conn, StageOutcome("all", OK, run_id, counts), versions)
+        return _close(conn, outcome, versions)
+    return _close(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), versions)
 
 
 def run_stage(
@@ -198,42 +259,76 @@ def run_stage(
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
+    polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
 ) -> StageOutcome:
-    if stage == "all":
-        return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at)
-    mark: int | None = None
+    """한 실행 = 한 락. 못 잡으면 아무것도 열지 않고 양보한다 (analysis/locks.py)."""
+    with analyze_lock(conn) as held:
+        if not held:
+            return _skipped(conn, stage)
+        stale = _abandoned(conn)
+        if stage == "all":
+            return run_all(
+                conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+            )
+        return _one(
+            conn, stage, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+        )
+
+
+def _one(
+    conn: psycopg.Connection[Any],
+    stage: str,
+    since: date | None,
+    scope: str | None,
+    commerce_schema: str,
+    youtube_schema: str,
+    captured_at: date | None,
+    polarity: Polarity | None,
+    owners: Mapping[str, str],
+    stale: Sequence[str],
+) -> StageOutcome:
+    run_id: int | None = None
+
+    def opened(found: int) -> None:
+        nonlocal run_id
+        run_id = found
+
     try:
         if stage == "link":
             linked = link_stage.run(
                 conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
             )
-            return StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
+            return _amend(StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS}), stale)
         if stage == "polarity":
             # 이 단계는 자기 run 을 열고 닫는다 — 단독 실행의 run 은 polarity 것이다.
-            mark = _last_run_id(conn)
-            polarity = polarity_stage.run(
+            found = polarity_stage.run(
                 conn,
                 since=since,
                 scope=scope,
                 commerce_schema=commerce_schema,
                 youtube_schema=youtube_schema,
+                polarity=polarity,
+                owners=owners,
+                on_run_open=opened,
             )
-            counts = {"attempted_need": polarity.need_rows, "attempted_wish": polarity.wish_rows}
-            return StageOutcome(stage, OK, polarity.run_id, counts)
-        run_id = aggregate_stage.run(
+            counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
+            return _amend(StageOutcome(stage, OK, found.run_id, counts), stale)
+        aggregated = aggregate_stage.run(
             conn,
             scope=scope,
             commerce_schema=commerce_schema,
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        return StageOutcome(stage, OK, run_id, _metrics_counts(conn, run_id))
+        return _amend(StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated)), stale)
     except FAILURES as failure:
-        outcome = StageOutcome(stage, FAILED, None, {}, _detail(stage, failure))
-        if mark is None:  # run 을 여는 단계는 polarity 뿐이다 — 나머지는 닫을 행이 없다.
+        outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
+        if stage not in OPENS_RUN:
             try:
                 conn.rollback()
             except psycopg.Error:
                 pass
             return outcome
-        return _close(conn, outcome, {}, mark)
+        # 거절은 run 이 열리기 전에도 온다 (남의 scope) — 그때는 닫을 행이 없으니 새 failed 행을 남긴다.
+        return _close(conn, outcome, {})

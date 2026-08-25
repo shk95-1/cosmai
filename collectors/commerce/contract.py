@@ -18,7 +18,11 @@ from typing import ClassVar, Protocol, runtime_checkable
 from collectors.commerce.models import Dataset, Record
 
 # What this crawler calls itself, not a browser string -- so a site operator reading an access log
-# can tell who this is and ask it to stop.
+# can tell who this is and ask it to stop. It carried the previous project's name for one commit,
+# on the reading that oliveyoung's Cloudflare challenge keyed on this string; the measurement that
+# closed it ran the *same* UA to a clean pass from the host and to a 403 from the container, so what
+# that edge answers is the image's TLS fingerprint (stack/Dockerfile), not the name. Kept honest and
+# pinned by test to the literal, since a UA that lies is a UA no operator can write to.
 DEFAULT_UA = "cosmai-commerce/0.1 (+https://github.com/slopindustries/cosmai)"
 
 

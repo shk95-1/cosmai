@@ -111,7 +111,11 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     assert "analysis.predictors" in registry.IMPLEMENTATIONS
     registry.load_implementations()
     found = {task: registry.get(task) for task in ("polarity", "wish_class")}
-    assert all(impl is not None and impl.version == "rule-v2.2" for impl in found.values())
+    # 두 task 는 각자의 규칙 버전을 낸다 — 추출기만 rule-v2.3 으로 올라갔다.
+    assert {task: impl.version if impl else None for task, impl in found.items()} == {
+        "polarity": "rule-v2.2",
+        "wish_class": "rule-v2.3",
+    }
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
     # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 (#12 이월).
@@ -125,7 +129,7 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT note, versions FROM analysis_run ORDER BY run_id")
         rows = cur.fetchall()
-    assert [note for note, _ in rows] == ["eval:polarity:rule-v2.2", "eval:wish_class:rule-v2.2"]
+    assert [note for note, _ in rows] == ["eval:polarity:rule-v2.2", "eval:wish_class:rule-v2.3"]
     scores = rows[0][1]["scores"]
     assert scores["sun holdout 100"]["acc"] > 0.77
     assert rows[1][1]["scores"]["P9 blind60_v2"]["P:a"] > 0
