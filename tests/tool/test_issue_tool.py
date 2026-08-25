@@ -4,6 +4,9 @@ The fake reads the repository name out of the `-f query=` string and answers wit
 is the whole reason the query names the repository inline instead of passing it as a variable: a
 test that cannot tell the two repos apart cannot exercise the cross-repo blockedBy that #55 <- fork#6
 actually has.
+
+Isolation here is PATH precedence, not conftest's socket block: tool/issue shells out, and a
+subprocess is outside the guard that stops in-process sockets.
 """
 
 from __future__ import annotations
@@ -77,11 +80,21 @@ def page(repo: str, issues: list[dict], labels: list[str] | None = None) -> dict
 
 
 FAKE_GH = """#!/bin/sh
+# The fork pattern is tested first because "cosmai" is a substring of "cosmai-import-ydc":
+# the looser case would answer for both repos and the cross-repo tests would prove nothing.
 for arg in "$@"; do
   case "$arg" in
-    query=*'name: "cosmai-import-ydc"'*) cat "$FIXTURES/fork.json"; exit 0 ;;
-    query=*'name: "cosmai"'*) cat "$FIXTURES/upstream.json"; exit 0 ;;
+    query=*'name: "cosmai-import-ydc"'*) which=fork ;;
+    query=*'name: "cosmai"'*) which=upstream ;;
+    *) continue ;;
   esac
+  if [ "$FAKE_GH_FAIL" = "$which" ]; then echo "fake gh: the API said no" >&2; exit 1; fi
+  if [ "$FAKE_GH_ERRORS" = "$which" ]; then
+    echo '{"errors":[{"message":"Although you appear to have the correct authorization"}]}'
+    exit 0
+  fi
+  cat "$FIXTURES/$which.json"
+  exit 0
 done
 echo "fake gh: no fixture for: $*" >&2
 exit 1
@@ -97,7 +110,13 @@ def run(tmp_path: Path):
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
 
-    def _run(*args: str, upstream: list[dict], fork: list[dict] | None = None, **fixture_kwargs):
+    def _run(
+        *args: str,
+        upstream: list[dict],
+        fork: list[dict] | None = None,
+        cwd: Path | None = None,
+        **fixture_kwargs,
+    ):
         (tmp_path / "upstream.json").write_text(
             json.dumps(page(UPSTREAM, upstream, fixture_kwargs.get("upstream_labels"))), encoding="utf-8"
         )
@@ -109,9 +128,16 @@ def run(tmp_path: Path):
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "FIXTURES": str(tmp_path),
             "COSMAI_ISSUE_REPOS": f"{UPSTREAM} {FORK}",
+            "FAKE_GH_FAIL": fixture_kwargs.get("gh_fails_on", ""),
+            "FAKE_GH_ERRORS": fixture_kwargs.get("gh_errors_on", ""),
         }
         return subprocess.run(
-            [str(ISSUE), *args], capture_output=True, text=True, cwd=REPO_ROOT, env=env, check=False
+            [str(ISSUE), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(cwd or REPO_ROOT),
+            env=env,
+            check=False,
         )
 
     return _run
@@ -322,7 +348,7 @@ def test_audit_reports_drift_without_failing(run):
     )
     assert done.returncode == 0, done.stderr
     assert "cosmai#11" in done.stdout
-    assert "1" in done.stdout
+    assert "14일 넘은 memo (1건)" in done.stdout, done.stdout
     # The fork fixture is missing five of the six shared labels, which is what makes a rule
     # unenforceable in one repo while reading as enforced in the other.
     assert "when-touched" in done.stdout
@@ -372,12 +398,111 @@ def test_a_rule_quoting_home_is_not_a_machine_path(run):
     assert done.returncode == 0, done.stdout
 
 
-def test_audit_counts_the_same_queue_ready_prints(run):
-    # #60 Phase 4.1 wants the two to agree; they agree because they are one computation.
+def test_audit_counts_the_default_ready_queue_and_needs_user_apart(run):
+    # #60 Phase 4.1 wants the two to agree. The needs-user issue is the only thing that can make
+    # them disagree, because it is the one issue the default listing drops.
     fixture = [
-        epic(10, "tool", subs=(11,)),
+        epic(10, "tool", subs=(11, 13)),
         issue(11, "제자리", labels=("ch:tool",), parent=10),
+        issue(13, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
         issue(12, "떠돌이", labels=("ch:tool",)),
     ]
-    assert "ch:tool (cosmai#10) · 2건" in run("audit", upstream=fixture).stdout
-    assert len(json.loads(run("ready", "--json", upstream=fixture).stdout)["channels"][0]["items"]) == 2
+    audit = run("audit", upstream=fixture).stdout
+    assert "ch:tool (cosmai#10) · 2건" in audit, audit
+    assert "needs-user 1건" in audit, audit
+    ready = json.loads(run("ready", "--json", upstream=fixture).stdout)["channels"][0]["items"]
+    assert [row["key"] for row in ready] == ["cosmai#11", "cosmai#12"]
+
+
+def test_the_user_listing_marks_which_items_are_waiting_on_the_user(run):
+    # --user folds two lists into one; without a marker the reader cannot tell which rows are
+    # startable work and which are sitting in their own queue.
+    fixture = [
+        epic(10, "tool", subs=(11, 12)),
+        issue(11, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
+        issue(12, "그냥 일", labels=("ch:tool",), parent=10),
+    ]
+    rows = json.loads(run("ready", "--user", "--json", upstream=fixture).stdout)["channels"][0]["items"]
+    assert [row["needs_user"] for row in rows] == [True, False]
+    assert [row["status"] for row in rows] == ["ready", "ready"]
+    text = run("ready", "--user", upstream=fixture).stdout
+    assert "needs-user" in [line for line in text.splitlines() if "cosmai#11" in line][0]
+    assert "needs-user" not in [line for line in text.splitlines() if "cosmai#12" in line][0]
+
+
+def test_a_closed_memo_blocker_does_not_keep_lint_red(run):
+    # Promotion closes the memo and re-issues it. A rule that reads the edge without its state
+    # would keep the promoted issue red forever, which is how a check stops being run.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "승격 뒤", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 20, "CLOSED"),)),
+            issue(20, "닫힌 메모", body=MEMO_BODY, labels=("memo",)),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+
+
+def test_a_repo_that_fails_to_fetch_stops_the_command(run):
+    # A half graph is worse than no graph: the fork holds the blocker for cosmai#55, so a swallowed
+    # fork fetch would report a blocked issue as ready.
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        gh_fails_on="fork",
+    )
+    assert done.returncode != 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+    assert FORK in done.stderr, done.stderr
+
+
+def test_an_errors_response_is_not_read_as_an_empty_repo(run):
+    # GraphQL answers a partial failure with HTTP 200 and no `data`, which reads as "this repo has
+    # no open issues" to anything that only checks gh's exit code.
+    done = run(
+        "lint",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        gh_errors_on="upstream",
+    )
+    assert done.returncode != 0, done.stdout
+    assert done.stdout.strip() == ""
+    assert UPSTREAM in done.stderr, done.stderr
+
+
+@pytest.fixture
+def checkout(tmp_path: Path) -> Path:
+    """A repo whose main and working tree disagree about markers in both directions.
+
+    git grep skips untracked files, so the working tree has to differ in tracked ones: main's
+    marker is edited away, and a marker main never had is added.
+    """
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    subprocess.run([*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True)
+    (repo / "kept.py").write_text("# TODO(#7) 만지는 김에 고친다\n", encoding="utf-8")
+    (repo / "scratch.py").write_text("# 표식 없음\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True)
+    (repo / "kept.py").write_text("# 작업 중에 지운 표식\n", encoding="utf-8")
+    (repo / "scratch.py").write_text("# TODO(#8) 커밋되지 않은 표식\n", encoding="utf-8")
+    return repo
+
+
+def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
+    # Worktrees share the ref, so whichever checkout runs audit sees a different working tree and a
+    # different answer. main is the one tree every worker agrees on.
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(7, 9)),
+            issue(7, "표식 있음", labels=("ch:tool", "when-touched"), parent=10),
+            issue(9, "표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+        ],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "TODO(#8)" not in done.stdout, done.stdout
+    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
+    assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout
