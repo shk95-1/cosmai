@@ -50,11 +50,13 @@ SKIPPED = (
 STALE = "half-written month(s) left behind by a run that died: {}"
 # #38: polarity scopes need_mention by lexicon_category, aggregate scopes metrics by the source
 # category (need_mention.category) — a --scope can own the first axis and miss the second entirely,
-# so a multi-hour pass writes labels and aggregates none of them. wish is never scoped (comments carry
-# no category), so it alone hitting 0 is normal; both hitting 0 after aggregate ran is not.
+# so a multi-hour pass writes labels and aggregates none of them. metrics_wish ignores --scope
+# altogether (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every
+# time, scoped or not), so it carries no signal about this scope and never enters the predicate —
+# only a scoped run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
 SILENT_SCOPE = (
-    "--scope {scope!r} wrote 0 metrics_need and 0 metrics_wish rows: aggregate scopes by the source "
-    "category (need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
+    "--scope {scope!r} wrote 0 metrics_need rows: aggregate scopes by the source category "
+    "(need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
     "the source category: {categories}"
 )
 SCOPE_CATEGORIES: LiteralString = (
@@ -190,23 +192,40 @@ def _scope_categories(conn: psycopg.Connection[Any], scope: str) -> tuple[str, .
 def _amend_silent_scope(
     conn: psycopg.Connection[Any], outcome: StageOutcome, scope: str | None, close_run: bool = False
 ) -> StageOutcome:
-    """A scoped run that reached aggregate and wrote 0 metrics rows is not a quiet success (#38).
+    """A scoped run that reached aggregate and wrote 0 metrics_need rows is not a quiet success (#38).
 
     Unscoped runs (the 05:00 cron) never take this branch — that predicate never fires without a scope.
+    Runs only `_amend`(stale) already ran on: this must still speak even when that already made the
+    outcome PARTIAL, so both reasons land in the one note instead of the second silently winning
+    (review round 1 #3) — never called on a FAILED outcome, so status here is always OK or PARTIAL.
     """
-    if scope is None or outcome.status != OK or "metrics_need" not in outcome.counts:
+    if scope is None or outcome.status == FAILED or "metrics_need" not in outcome.counts:
         return outcome
-    if outcome.counts.get("metrics_need") or outcome.counts.get("metrics_wish"):
+    if outcome.counts.get("metrics_need"):
         return outcome
-    categories = _scope_categories(conn, scope)
-    hint = ", ".join(categories) if categories else "none found for that lexicon_category"
-    detail = SILENT_SCOPE.format(scope=scope, categories=hint)
+    # The category lookup is a nicety, not the finding — losing it must never leave the run open
+    # (review round 1 #1): a `statement_timeout` here used to escape uncaught past `run_all`/`_one`
+    # and `cosmai/cli.py`, killing the process with the run still 'running' and nothing said.
+    try:
+        categories = _scope_categories(conn, scope)
+        hint = ", ".join(categories) if categories else "none found for that lexicon_category"
+    except psycopg.Error as lookup_failure:
+        conn.rollback()
+        hint = f"category lookup failed: {str(lookup_failure).splitlines()[0][:DETAIL_CHARS]}"
+    silent_detail = SILENT_SCOPE.format(scope=scope, categories=hint)
+    detail = f"{outcome.detail}; {silent_detail}" if outcome.detail else silent_detail
     amended = replace(outcome, status=PARTIAL, detail=detail)
     # standalone `analyze aggregate` already closed its own run as 'ok' before we could see the counts.
     if close_run and outcome.run_id is not None:
-        with conn.cursor() as cur:
-            cur.execute(SILENT_CLOSE, (f" {PARTIAL}:{detail}", outcome.run_id))
-        conn.commit()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(SILENT_CLOSE, (f" {PARTIAL}:{detail}", outcome.run_id))
+            conn.commit()
+        except psycopg.Error as close_failure:
+            # same convention as _close(): a write that can't land must say so, not vanish silently.
+            conn.rollback()
+            tail = f"run-not-closed {str(close_failure).splitlines()[0][:DETAIL_CHARS]}"
+            return replace(amended, status=FAILED, detail=f"{detail} {tail}")
     return amended
 
 
