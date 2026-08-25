@@ -117,8 +117,15 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   `analysis_run.note` 에 `rewriting=<src>/<month>[/<scope>]` 를 적고 그 달을 다 쓰면 지운다. 실행이 그
   사이에 죽으면 그 표식이 남고, 락을 쥔 다음 실행은 **열려 있는 표식은 죽은 실행의 것뿐**이라는
   사실로 그것을 찾아낸다: 그 run 을 failed 로 닫고(영원한 `running` 을 남기지 않는다) 어느 달인지를
-  자기 note 와 stdout 에 적은 뒤 partial(**1**)로 끝난다. 그 달을 다시 채우는 것은 그 scope 주인의
-  일이다 — 주인 있는 scope 는 규칙 실행이 배제하므로 아무도 대신 메우지 않는다.
+  자기 note 와 stdout 에 적은 뒤 partial(**1**)로 끝난다. 찾아내는 조건은 표식이지 `status` 가 아니다
+  — 실무에서 가장 흔한 죽음(ollama 예외·`statement_timeout`)은 잡혀서 run 이 `failed` 로 닫히므로
+  `running` 만 보면 그 반쪽 달을 통째로 놓친다. 말하는 것은 **한 번뿐**이고, 말한 실행이 그 note 에
+  `stale-reported` 를 붙여 그 사실을 적는다.
+- 그 "한 번"이 충분한지가 scope 마다 다르다. **주인 없는** scope 의 반쪽 달은 다음 밤 규칙 실행이 그 달을
+  통째로 다시 써서 스스로 메워진다 — 한 번 말하면 그것으로 끝이다. **주인 있는** scope(선블록→gemma4)의
+  반쪽 달은 규칙 실행이 배제하므로 아무도 메우지 않고, 한 번 말한 뒤로는 아무도 다시 말하지 않는다:
+  그 달을 되찾는 길은 사람이 주인의 패스를 그 달에 다시 돌리는 것 하나뿐이고, 그때까지 남는 증거는 죽은
+  run 의 note 에 계속 붙어 있는 `rewriting=` 표식이다.
 
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는

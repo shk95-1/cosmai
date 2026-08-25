@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -33,6 +34,9 @@ SUNBLOCK = "선블록"
 GEMMA4 = OWNERS[SUNBLOCK]
 BOOM = "polarity boom"
 SOURCE_TABLES = ("review", "rank_snapshot", "product")
+TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"
+# 덤프 전체를 한 스키마에 부으면 trend_radar 와 부딪힌다 — polarity 가 읽는 두 표만 세운다.
+TUBEDEPTH_TABLES = ("comments", "video_snapshots")
 
 # P1 은 선블록(주인 있는 scope), P2 는 샴푸(주인 없는 scope) — 한 페이지에 둘 다 실려야 규칙 실행도
 # 스코프 실행도 판정을 한 번은 부른다.
@@ -90,6 +94,39 @@ def loaded(needs_schema: str, trend_radar_schema: str, _schema_name: str, needs_
         )
         conn.commit()
     return needs_runtime_url
+
+
+@pytest.fixture
+def half_wired_youtube(loaded: str, needs_schema: str, _schema_name: str) -> str:
+    """tubedepth 의 두 표를 세우되 `video_snapshots` 의 SELECT 는 열지 않는다.
+
+    운영에서 새 표의 grant 를 빠뜨리면(db/grants/needs_runtime_reader.sql) polarity 의 yt_comment
+    가지가 정확히 `_channels` 에서 psycopg.Error 로 죽는다 — 리뷰 가지를 다 쓴 직후다.
+    """
+    dump = TUBEDEPTH_DDL.read_text(encoding="utf-8")
+    ddl = "\n".join(
+        dump.split(f"CREATE TABLE tubedepth.{table} (")[1]
+        .split(");")[0]
+        .join((f'CREATE TABLE "{_schema_name}"."{table}" (', ");"))
+        for table in TUBEDEPTH_TABLES
+    )
+    engine = create_engine(needs_schema)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(ddl)
+            conn.exec_driver_sql(f'GRANT SELECT ON "{_schema_name}"."comments" TO needs_runtime')
+    finally:
+        engine.dispose()
+    return loaded
+
+
+def _open(url: str, schema: str, table: str) -> None:
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f'GRANT SELECT ON "{schema}"."{table}" TO needs_runtime')
+    finally:
+        engine.dispose()
 
 
 class _Interrupt:
@@ -345,3 +382,62 @@ def test_a_month_left_half_written_by_a_dead_pass_is_reported_not_swallowed(load
     # 그 run 은 영원히 running 이 아니라 닫힌다. 표식은 note 에 남아 어느 달인지 계속 말한다.
     assert rows[dead][0] == "failed" and rows[dead][2]
     assert f"rewriting=review/{MONTH}/{SUNBLOCK}" in rows[dead][1]
+
+
+def test_a_caught_failure_leaves_a_half_month_the_next_run_finds(loaded: str, _schema_name: str):
+    """실무에서 가장 흔한 죽음은 잡히는 죽음이다 — ollama 예외·statement_timeout 은 FAILURES 로 잡혀
+    run 이 `failed` 로 닫히고, `running` 만 보는 조회는 그 죽음이 남긴 반쪽 달을 통째로 놓친다.
+
+    그리고 그 달은 아무도 메우지 않는다: 선블록은 주인이 있어 규칙 실행이 배제한다 (#31).
+    """
+    polarity = _Interrupt(lambda: None, GEMMA4)
+    with connect(loaded) as conn:
+        died = run_stage(
+            conn,
+            "polarity",
+            scope=SUNBLOCK,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            polarity=polarity,
+            owners=OWNERS,
+        )
+    assert died.status == "failed" and died.run_id is not None
+    assert f"rewriting=review/{MONTH}/{SUNBLOCK}" in _rows(loaded)[died.run_id][1]
+    # 다음 밤의 규칙 실행이 그 표식을 찾아 이름으로 말한다.
+    with connect(loaded) as conn:
+        next_night = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=OWNERS
+        )
+    assert next_night.status == "partial", next_night.note
+    assert f"review/{MONTH}/{SUNBLOCK}" in next_night.note
+    # 한 번만 말한다 — 주인이 다시 돌 때까지 메워지지 않는 달이라 매일 밤 같은 partial 을 내면
+    # partial 이 아무 뜻도 없어진다.
+    with connect(loaded) as conn:
+        after = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=OWNERS
+        )
+    assert after.status == "ok", after.note
+
+
+def test_a_month_finished_before_the_run_died_is_not_called_stale(
+    half_wired_youtube: str, needs_schema: str, _schema_name: str
+):
+    """리뷰 가지가 마지막 달을 다 쓴 뒤 yt_comment 가지에서 죽는 경우 — 그 달은 완성됐다.
+
+    표식이 거기 남으면 다음 실행이 멀쩡한 달을 반쪽이라 부르고, 사람은 다시 돌릴 것 없는 4시간짜리
+    패스를 다시 돈다.
+    """
+    with connect(half_wired_youtube) as conn:
+        died = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=NO_OWNERS
+        )
+    assert died.status == "failed" and "permission denied" in died.detail
+    assert died.run_id is not None
+    assert "rewriting=" not in _rows(half_wired_youtube)[died.run_id][1]
+    # grant 를 채우면 다음 실행은 성공한다 — 그리고 다 쓴 달을 stale 이라 말하지 않는다.
+    _open(needs_schema, _schema_name, "video_snapshots")
+    with connect(half_wired_youtube) as conn:
+        found = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=NO_OWNERS
+        )
+    assert found.status == "ok", found.note

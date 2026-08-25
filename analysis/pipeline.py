@@ -68,10 +68,16 @@ RUN_SKIPPED: LiteralString = (
     "VALUES ('partial', now(), '{}'::jsonb, %s)"
 )
 NOTE_OF: LiteralString = "SELECT note FROM analysis_run WHERE run_id = %s"
+# 이미 한 번 말한 표식에 붙는 꼬리표. status 로는 이 구별이 안 된다: 실무에서 가장 흔한 죽음(ollama
+# 예외·statement_timeout)은 FAILURES 로 잡혀 _close 가 failed 로 닫으므로 'running' 만 보면 그 반쪽
+# 달을 통째로 놓치고, 반대로 status 를 빼기만 하면 주인 있는 scope 의 달은 아무도 메우지 않아 매일 밤
+# 같은 partial 이 나온다.
+REPORTED = "stale-reported"
 # analyze 락을 쥔 동안 열려 있는 rewriting 표식은 죽은 실행의 것뿐이다 — 산 실행은 락을 못 잡는다.
-ABANDONED: LiteralString = "SELECT run_id, note FROM analysis_run WHERE status = 'running' AND note LIKE %s"
+ABANDONED: LiteralString = "SELECT run_id, note FROM analysis_run WHERE note LIKE %s AND note NOT LIKE %s"
 ABANDONED_CLOSE: LiteralString = (
-    "UPDATE analysis_run SET status = 'failed', finished_at = now() WHERE run_id = %s"
+    "UPDATE analysis_run SET status = 'failed', finished_at = coalesce(finished_at, now()), "
+    "note = note || %s WHERE run_id = %s"
 )
 # run 을 여는 단계는 polarity 뿐이다 — 나머지가 실패하면 닫을 행이 아예 없다.
 OPENS_RUN = ("polarity",)
@@ -116,13 +122,16 @@ def _versions(conn: psycopg.Connection[Any], polarity_version: str = POLARITY_VE
 
 
 def _abandoned(conn: psycopg.Connection[Any]) -> tuple[str, ...]:
-    """죽은 실행이 반쯤 다시 쓰고 만 달들. 여기서 닫아 두는 것은 상태뿐이다 — 그 달을 메우는 것은 주인의
-    일이고(주인 있는 scope 는 규칙이 배제한다), 표식은 note 에 남아 어느 달인지 계속 말한다."""
+    """죽은 실행이 반쯤 다시 쓰고 만 달들 — 죽음이 잡혔든(failed) 아니든(running) 표식으로 찾는다.
+
+    여기서 닫아 두는 것은 상태뿐이다: 그 달을 메우는 것은 주인의 일이고(주인 있는 scope 는 규칙이
+    배제한다), 표식은 note 에 남아 어느 달인지 계속 말한다. 말하는 것은 한 번뿐이라 꼬리표를 붙인다.
+    """
     with conn.cursor() as cur:
-        cur.execute(ABANDONED, (f"%{MARKER}%",))
+        cur.execute(ABANDONED, (f"%{MARKER}%", f"%{REPORTED}%"))
         found = [(int(run_id), str(note or "")) for run_id, note in cur.fetchall()]
         for run_id, _ in found:
-            cur.execute(ABANDONED_CLOSE, (run_id,))
+            cur.execute(ABANDONED_CLOSE, (f" {REPORTED}", run_id))
     conn.commit()
     return tuple(note.partition(MARKER)[2].split(" ")[0] for _, note in found)
 
