@@ -29,11 +29,11 @@ QUARTER = "metrics_topic_quarter"
 VIEW = ROOT / "db" / "views" / "metrics_topic_quarter_violation.sql"
 TOPIC_AXIS = ROOT / "analysis" / "retrieval" / "dict" / "topics_v1.csv"
 NEED_REGISTRY = ROOT / "eval" / "lexicon" / "need_key_v1.csv"
-PANEL_SEED = ROOT / "analysis" / "slices" / "ydc" / "seeds" / "channels_v1.csv"
+PANEL_SEED = ROOT / "eval" / "panel" / "channels_v1.csv"
 GRAIN_HEADER = "| 그레인 | 정본 표 | 행의 시간 칸 |"
 ROLE_HEADER = "| `panel_role` | 뜻 | v1 패널 |"
 PANEL_CSV_HEADER = "| CSV 열 | → `needs.panel_channel` |"
-PANEL_CHANNELS = 43  # ydc 시드 채널 43개 (이슈 #3 본문). 값 적재는 #31.
+PANEL_CHANNELS = 43  # ydc 시드 채널 43개 (이슈 #3 본문). 값 적재는 tests/test_panel_seed.py (#31).
 # 주제 축의 레지스트리. 이 문장이 계약 두 곳에 그대로 있어야 한다 (아래 두 테스트).
 REGISTRY = "aspect_lexicon(ruleset='retrieval-topic')"
 NOT_THE_REGISTRY = "needs.need_key 가 아니다"
