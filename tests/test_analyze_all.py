@@ -21,6 +21,7 @@ from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
+from analysis.polarity.ownership import NO_OWNERS, OWNERS
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from cosmai.cli import main
 from db import seed
@@ -159,6 +160,10 @@ def analysis_url(needs_runtime_url: str) -> str:
 
 
 def _all(url: str, sources: tuple[str, str], **kwargs: Any) -> pipeline.StageOutcome:
+    # 이 파일의 리뷰는 전부 선크림(=선블록)이고, 배송되는 소유 표는 그 scope 를 gemma4 에 준다 (#31).
+    # 여기서 검사하는 것은 세 단계의 배선이므로 주인 없는 상태로 돈다 — 소유 자체는 아래 한 테스트와
+    # tests/test_analyze_polarity.py 가 본다.
+    kwargs.setdefault("owners", NO_OWNERS)
     commerce, youtube = sources
     with connect(url) as conn:
         return pipeline.run_stage(
@@ -199,6 +204,33 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
         # 세 단계가 한 run 을 나눠 쓴다 — polarity 가 연 run 에 aggregate 가 metrics 를 쓴다.
         cur.execute("SELECT count(*) FROM analysis_run")
         assert cur.fetchone() == (1,)
+
+
+def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):
+    """크론이 부르는 모양 그대로다: 소유 표를 아무도 인자로 말하지 않아도 배송값(#31)이 선다. 이 픽스처의
+    리뷰는 전부 선블록이라 규칙은 리뷰를 한 건도 쓰지 않고, 주인이 라벨한 행은 그 자리에 남는다."""
+    commerce, youtube = sources
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
+            "observed_at_resolution, month, sentence, category, lexicon_category, "
+            "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
+            "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
+            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"]),
+        )
+        conn.commit()
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "all", commerce_schema=commerce, youtube_schema=youtube, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT lexicon_category, polarity, polarity_version FROM need_mention "
+            "WHERE src = 'review'"
+        )
+        # 규칙이 이 문장을 다시 뽑았다면 '불만'/rule-v2.2 한 줄만 남았을 것이다 (제자리 upsert).
+        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"])]
 
 
 def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(
@@ -337,7 +369,9 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
     commerce, youtube = sources
     with connect(analysis_url) as conn:
         link = pipeline.run_stage(conn, "link", commerce_schema=commerce, youtube_schema=youtube)
-        polarity = pipeline.run_stage(conn, "polarity", commerce_schema=commerce, youtube_schema=youtube)
+        polarity = pipeline.run_stage(
+            conn, "polarity", commerce_schema=commerce, youtube_schema=youtube, owners=NO_OWNERS
+        )
         aggregate = pipeline.run_stage(conn, "aggregate", commerce_schema=commerce, captured_at=CAPTURED_DATE)
     assert link.status == "ok" and link.counts["product_ref"] > 0
     assert polarity.status == "ok" and polarity.counts["attempted_need"] > 0

@@ -8,6 +8,7 @@ run 행은 polarity 가 열고 aggregate 가 그 run_id 로 metrics 를 쓴다: 
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any, LiteralString
@@ -23,6 +24,7 @@ from analysis.linker import pipeline as link_stage
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
+from analysis.polarity.ownership import OWNERS
 from analysis.types import Polarity
 
 __all__ = ["POPULATION", "StageOutcome", "run_stage"]
@@ -151,6 +153,7 @@ def run_all(
     youtube_schema: str,
     captured_at: date | None,
     polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
 ) -> StageOutcome:
     counts: dict[str, int] = {}
     versions: dict[str, Any] = {}
@@ -172,6 +175,7 @@ def run_all(
             commerce_schema=commerce_schema,
             youtube_schema=youtube_schema,
             polarity=polarity,
+            owners=owners,
         )
         run_id = found.run_id
         # upsert 가 실제로 넣은 수가 아니라 시도한 수다 — 시드와 자연키가 겹치는 문장은 자기 행을 못 만든다.
@@ -202,9 +206,10 @@ def run_stage(
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
     polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
 ) -> StageOutcome:
     if stage == "all":
-        return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity)
+        return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners)
     mark: int | None = None
     try:
         if stage == "link":
@@ -222,6 +227,7 @@ def run_stage(
                 commerce_schema=commerce_schema,
                 youtube_schema=youtube_schema,
                 polarity=polarity,
+                owners=owners,
             )
             counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
             return StageOutcome(stage, OK, found.run_id, counts)

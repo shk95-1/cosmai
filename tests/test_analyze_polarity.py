@@ -19,6 +19,7 @@ from sqlalchemy.engine import make_url
 from analysis import predictors, registry
 from analysis.pipeline import run_stage
 from analysis.polarity.ollama import OllamaPolarity
+from analysis.polarity.ownership import NO_OWNERS, OWNERS
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -129,6 +130,8 @@ def loaded(sources: str, needs_runtime_url: str, _schema_name: str) -> Iterator[
 
 
 def _run(url: str, schema: str, **kwargs: Any):
+    """소유 표를 말하지 않은 실행은 주인이 없는 상태로 돈다 — 소유 이전(#31)의 동작이 그것이다."""
+    kwargs.setdefault("owners", NO_OWNERS)
     with connect(url) as conn:
         return run(conn, commerce_schema=schema, youtube_schema=schema, **kwargs)
 
@@ -543,3 +546,124 @@ def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _
         ("P1/R4", "선블록", "끈적유분", "불만", "끈적임이 심하고 밀려요"),
         ("P2/R5", "샴푸", "트러블", "불만", "비듬이 너무 심해서 최악이에요"),
     ]
+
+
+# 구현 소유권 (#31): 선블록은 gemma4 가, 나머지는 규칙이 갱신한다 — 표는 ownership.py 한 곳이다.
+GEMMA4 = OWNERS["선블록"]
+# 규칙 실행이 다시 뽑지 않는 자리에 남은 주인의 행 — 삭제문이 이것을 지우는지 본다.
+OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
+# 규칙 실행이 같은 자연키로 다시 쓰는 자리 — 005 의 자연키에 polarity_version 이 없어 제자리 upsert 가
+# 주인의 라벨을 덮을 수 있다. 규칙은 이 문장을 '불만'으로 읽는다 (test_two_dictionaries... 참고).
+CONTESTED = ("P1/R2", "백탁", "백탁이 너무 심해서 최악이에요")
+
+
+def _label(url: str, ref: str, need_key: str, sentence: str, version: str, polarity: str = "만족") -> None:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
+            " observed_at, observed_at_resolution, month, sentence, extractor_version,"
+            " polarity_version) VALUES ('review', 'oliveyoung', %s, '선블록', %s, %s, '2026-03-04',"
+            " 'day', '2026-03', %s, 'rule-v2.3', %s)",
+            (ref, need_key, polarity, sentence, version),
+        )
+        conn.commit()
+
+
+def _labels(url: str, ref: str) -> list[tuple[Any, ...]]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT need_key, polarity, polarity_version FROM need_mention WHERE ref = %s"
+            " ORDER BY need_key, polarity_version",
+            (ref,),
+        )
+        return cur.fetchall()
+
+
+def test_an_unscoped_rule_run_does_not_delete_the_owners_rows(loaded: str, _schema_name: str):
+    """오늘의 결함 그대로다: 스코프 없는 규칙 실행이 매일 05:00 에 gemma4 라벨을 통째로 지웠다.
+    소유 표가 배송되는 값 그대로(=선블록은 gemma4)일 때 그 행은 그 자리에 남아야 한다."""
+    ref, need_key, sentence = OWNED_ONLY
+    _label(loaded, ref, need_key, sentence, GEMMA4)
+    with connect(loaded) as conn:  # 크론이 부르는 모양: 소유 표를 말하지 않으면 배송값이 선다
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    assert _labels(loaded, ref) == [(need_key, "만족", GEMMA4)]
+
+
+def test_an_unscoped_rule_run_does_not_overwrite_the_owners_label(loaded: str, _schema_name: str):
+    """같은 문장을 규칙이 다시 뽑는 자리 — 자연키에 polarity_version 이 없어 삭제를 피해도 제자리
+    upsert 가 주인의 라벨을 규칙 라벨로 갈아 끼운다. 주인 아닌 실행은 그 문장을 아예 판정하지 않는다."""
+    ref, need_key, sentence = CONTESTED
+    _label(loaded, ref, need_key, sentence, GEMMA4)
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    assert _labels(loaded, ref) == [(need_key, "만족", GEMMA4)]
+
+
+class OwnerPolarity:
+    """선블록의 주인 자리에 꽂는 스텁 — 규칙과도 경쟁자와도 다른 버전을 내는 것이 요점이다."""
+
+    version = "stub-owner-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="백탁", polarity="만족", reason="owner", version=self.version)
+
+    def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
+
+
+class RivalPolarity(OwnerPolarity):
+    """크론의 자리 — 스코프 없이 전량을 돈다. 주인의 문장까지 가져가면 그 라벨이 사라진다."""
+
+    version = "stub-rival-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="백탁", polarity="불만", reason="rival", version=self.version)
+
+
+def _by_scope(url: str) -> list[tuple[Any, ...]]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT lexicon_category, polarity, polarity_version FROM need_mention"
+            " WHERE src = 'review' GROUP BY 1, 2, 3 ORDER BY 1, 3"
+        )
+        return cur.fetchall()
+
+
+def test_the_owner_keeps_the_scope_a_later_unscoped_run_walks_over(loaded: str, _schema_name: str):
+    """두 구현이 같은 문장을 두고 다툰다: 주인이 먼저 선블록을 라벨하고, 그 뒤 스코프 없는 실행이 전량을
+    돈다. 주인의 scope 는 그대로, 나머지(샴푸)는 나중 실행의 것이다."""
+    owners = {"선블록": OwnerPolarity.version}
+    _run(loaded, _schema_name, scope="선블록", polarity=OwnerPolarity(), owners=owners)
+    _run(loaded, _schema_name, polarity=RivalPolarity(), owners=owners)
+    assert _by_scope(loaded) == [
+        ("샴푸", "불만", RivalPolarity.version),
+        ("선블록", "만족", OwnerPolarity.version),
+    ]
+
+
+def test_with_no_owners_the_later_run_takes_every_scope_as_it_always_did(loaded: str, _schema_name: str):
+    """회귀 방지: 소유 표가 비면 오늘 동작 그대로다 — 나중 실행이 전량을 가져간다."""
+    _run(loaded, _schema_name, scope="선블록", polarity=OwnerPolarity(), owners=NO_OWNERS)
+    _run(loaded, _schema_name, polarity=RivalPolarity(), owners=NO_OWNERS)
+    assert _by_scope(loaded) == [
+        ("샴푸", "불만", RivalPolarity.version),
+        ("선블록", "불만", RivalPolarity.version),
+    ]
+
+
+def test_a_run_that_names_a_scope_it_does_not_own_is_refused(loaded: str, _schema_name: str):
+    """`--scope 선블록` 을 --impl 없이 부르면 규칙이 주인의 자리를 도는 셈이다. 조용한 무동작이 아니라
+    거절이어야 운영자가 표를 본다."""
+    with pytest.raises(ValueError, match=GEMMA4):
+        _run(loaded, _schema_name, scope="선블록", owners=OWNERS)
+
+
+def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
+    """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
+    산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
+    assert dict(OWNERS) == {"선블록": "llm-ollama-gemma4:latest-fs2-20260824"}
+    assert OWNERS["선블록"] == OllamaPolarity().version

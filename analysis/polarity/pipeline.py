@@ -7,12 +7,14 @@ idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징�
 쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
 자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
 (삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
+같은 계열 안에서 두 극성 구현이 공존하는 자리는 scope 로 갈린다 — 소유 표(ownership.py)가 배정한
+lexicon_category 는 그 주인만 쓰고 지운다.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import astuple, dataclass
 from datetime import date
 from typing import Any, LiteralString
@@ -23,6 +25,7 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
+from analysis.polarity.ownership import OWNERS, foreign_scopes
 from analysis.types import (
     AspectLexicon,
     Candidate,
@@ -56,7 +59,9 @@ RUN_END: LiteralString = (
 NEED_DELETE: LiteralString = """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
+AND (lexicon_category IS NULL OR lexicon_category <> ALL(%s::text[]))
 """
+# 마지막 줄이 남의 scope(ownership.py)를 삭제 밖에 둔다 — 빈 배열이면 <> ALL 이 전부 참이라 옛 동작이다.
 # --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
 # 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
 NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
@@ -255,7 +260,11 @@ class PolarityStage:
     """사전·규칙을 한 번만 만들고 src×월 배치를 돌린다."""
 
     def __init__(
-        self, conn: psycopg.Connection[Any], batch: int = BATCH, polarity: Polarity | None = None
+        self,
+        conn: psycopg.Connection[Any],
+        batch: int = BATCH,
+        polarity: Polarity | None = None,
+        owners: Mapping[str, str] = OWNERS,
     ) -> None:
         self.conn = conn
         self.batch = batch
@@ -263,6 +272,8 @@ class PolarityStage:
         # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
         self.rule = RulePolarity()
         self.polarity: Polarity = polarity or self.rule
+        # 다른 구현이 주인인 scope — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
+        self.foreign = foreign_scopes(owners, self.polarity.version)
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
@@ -370,7 +381,7 @@ class PolarityStage:
 
     def replace_stale(self, src: str, month: str, scope: str | None = None) -> int:
         """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다."""
-        versions = (RuleExtractor.version, self.polarity.version)
+        versions = (RuleExtractor.version, self.polarity.version, list(self.foreign))
         with self.conn.cursor() as cur:
             if scope is None:
                 cur.execute(NEED_DELETE, (src, month, *versions))
@@ -405,9 +416,15 @@ def run(
     youtube_schema: str = YOUTUBE_SCHEMA,
     batch: int = BATCH,
     polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
 ) -> StageResult:
-    stage = PolarityStage(conn, batch, polarity)
+    stage = PolarityStage(conn, batch, polarity, owners)
     version = stage.polarity.version
+    if scope is not None and scope in stage.foreign:
+        # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
+        raise ValueError(
+            f"{scope} is owned by {owners[scope]}, not {version} (analysis/polarity/ownership.py)"
+        )
     with conn.cursor() as cur:
         cur.execute(
             RUN_START,
@@ -453,7 +470,9 @@ def run(
                     lexicon_category = stage.categories.lexicon_category(
                         source, unit.category, names.get((source, product_key))
                     )
-                    if scope and lexicon_category != scope:
+                    # 주인이 따로 있는 scope 는 판정 자체를 하지 않는다: 자연키에 polarity_version 이
+                    # 없어 여기서 한 줄만 흘러도 upsert 가 주인의 라벨을 제자리에서 덮는다.
+                    if lexicon_category in stage.foreign or (scope and lexicon_category != scope):
                         continue
                     units += 1
                     pending.extend(stage.candidates(unit, lexicon_category))

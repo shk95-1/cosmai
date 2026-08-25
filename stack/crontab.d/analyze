@@ -2,4 +2,18 @@
 # the gap rule the commerce walks follow -- which is also why it is not in the commerce container:
 # nothing it does competes for a host budget, and a commerce collector stopped for a rollback must not
 # take the analysis of already-collected rows down with it.
+#
+# 이 줄에는 --impl 이 없으니 규칙 극성으로 돈다. 무엇을 다시 라벨할지는 이제 이 줄의 인자가 아니라
+# analysis/polarity/ownership.py 의 소유 표가 정한다 (#31): 주인이 있는 lexicon_category(오늘은
+# 선블록 → gemma4)의 행은 지우지도 덮지도 않고, 주인 없는 카테고리와 lexicon_category 가 없는
+# 행(유튜브 댓글·카테고리를 못 붙인 리뷰)만 매일 새로 라벨된다. 소유를 옮기는 곳은 그 파일 하나다 --
+# 크론 인자로 옮기면 이 줄과 아래 줄이 서로 어긋나도 아무도 모른다.
 0 5 * * *   cosmai analyze all
+#
+# 주인(gemma4)의 패스는 아직 여기 줄이 없다. 명령은
+#     cosmai analyze polarity --impl ollama:gemma4:latest --scope 선블록
+# 이지만 GPU 를 쥔 ollama 는 호스트 프로세스이고 이 컨테이너에는 OLLAMA_URL 도 호스트로 나가는 경로도
+# 배선돼 있지 않다(stack/docker-compose.yml 에 그 키가 없다) -- 지금 넣으면 매일 밤 실패하는 줄이 된다.
+# 그때까지 선블록은 사람이 호스트에서 도는 전량 패스(~2.5시간)가 갱신하고, 위 줄이 그 결과를 지우지
+# 않는다는 것이 #31 이 고친 부분이다. 배선이 생기면 그 줄은 05:00 **앞**에 놓는다(예: 0 2 * * *):
+# 주인이 먼저 라벨해야 같은 새벽의 aggregate 가 그 라벨을 센다.
