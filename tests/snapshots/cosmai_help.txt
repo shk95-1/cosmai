@@ -94,16 +94,16 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval embed --help
-usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH] [--out OUT]
-                              [--url URL]
+usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH]
+                              [--vectors VECTORS] [--url URL]
 
 options:
-  -h, --help       show this help message and exit
-  --model MODEL    Sentence-transformers model; default is e5-base.
-  --device DEVICE  cuda, cpu, ...; default is what torch picks.
-  --batch BATCH    Texts per forward pass.
-  --out OUT        Vector store path; default var/retrieval/...
-  --url URL        SQLAlchemy URL; default is needs_runtime.
+  -h, --help         show this help message and exit
+  --model MODEL      Sentence-transformers model; default is e5-base.
+  --device DEVICE    cuda, cpu, ...; default is what torch picks.
+  --batch BATCH      Texts per forward pass.
+  --vectors VECTORS  Vector store path; default var/retrieval/...
+  --url URL          SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]

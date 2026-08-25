@@ -82,7 +82,7 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     emb.add_argument("--model", default=None, help="Sentence-transformers model; default is e5-base.")
     emb.add_argument("--device", default=None, help="cuda, cpu, ...; default is what torch picks.")
     emb.add_argument("--batch", type=int, default=256, help="Texts per forward pass.")
-    emb.add_argument("--out", default=None, help="Vector store path; default var/retrieval/...")
+    emb.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     emb.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
@@ -170,13 +170,15 @@ def _run_retrieval(args: argparse.Namespace) -> int:
 
     try:
         since = date.fromisoformat(args.since) if getattr(args, "since", None) else None
+        # 인자를 먼저 푼다 -- 인자가 틀렸다고 말하려고 DB 에 붙을 이유가 없고, 연결 뒤에 풀면
+        # 옵션 하나가 빠진 하위명령이 연결에 성공한 뒤에야 AttributeError 로 죽는다.
+        # embed 에는 --source 가 없다: 하위명령마다 있는 옵션이 다르므로 없으면 기본값을 쓴다.
+        sources = tuple(args.source) if getattr(args, "source", None) else corpus.SOURCES
+        store = Path(args.vectors) if getattr(args, "vectors", None) else None
         conn = _connect(args.url)
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
-
-    sources = tuple(args.source) if args.source else corpus.SOURCES
-    store = Path(args.vectors) if getattr(args, "vectors", None) else None
     try:
         with conn:
             if args.action == "chunk":
@@ -189,7 +191,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
             if args.action == "eval":
                 return _run_retrieval_eval(conn, args, sources, store)
             if args.action == "embed":
-                return _run_retrieval_embed(conn, args)
+                return _run_retrieval_embed(conn, args, store)
             hits = pipeline.search(
                 conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
             )
