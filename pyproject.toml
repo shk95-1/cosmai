@@ -51,7 +51,7 @@ markers = [
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-exclude = ["analysis/slices", "playbook"]  # 참조용 원본: 이식 시 패키지로 옮기며 검사 대상이 된다
+exclude = ["analysis/slices", "playbook"]  # analysis/slices 는 #80 이 지웠다 — 포크(cosmai-import-ydc#9)가 ydc 사본을 지우고 올 때까지 자리만 남긴다
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
@@ -59,4 +59,4 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.basedpyright]
 typeCheckingMode = "standard"
 include = ["tests", "analysis", "collectors", "db"]
-exclude = ["analysis/slices", "playbook"]
+exclude = ["analysis/slices", "playbook"]  # 같은 이유 (#80)
