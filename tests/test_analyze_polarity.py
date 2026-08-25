@@ -685,9 +685,9 @@ def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
 
 
 def test_every_registered_scope_names_the_same_owner_version():
-    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 27개 전부가
+    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 등록된 1개가
     가리키는 값이 하나인지를 표 자체로 확인한다."""
-    assert len(OWNERS) == 27
+    assert len(OWNERS) == 1
     assert set(OWNERS.values()) == {OllamaPolarity().version}
 
 
@@ -715,8 +715,8 @@ def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scop
 ):
     """need_key 가 갈리면 두 행이 나란히 남는다 — entrypoints.md §분석 이 '한 문장에 라벨 하나'를
     어디까지 약속할 수 있는지가 여기서 정해진다. 옛 scope 의 행은 주인의 판본이 오를 때 치워진다.
-    #31 이후 배송 표는 샴푸도 gemma4 소유라 새 scope 를 규칙이 못 건드린다 — 이 시나리오는 '새 scope 가
-    아직 주인이 없을 때'를 보이는 것이므로 표를 선블록 하나로 좁혀서 그 모양을 지킨다."""
+    이 시나리오는 '새 scope 가 아직 주인이 없을 때'를 보이는 것이라, 전역 OWNERS 를 그대로 써도 되는
+    지금도 owners={"선블록": GEMMA4} 로 표를 좁혀 그 모양을 그대로 지킨다(표 크기와 무관한 형태)."""
     ref, sentence = MOVED
     _label(loaded, ref, "백탁", sentence, GEMMA4)
     with connect(loaded) as conn:
@@ -758,7 +758,7 @@ def test_only_the_rule_may_be_let_loose_without_a_scope():
     것은 05:00 의 규칙 하나뿐이고, 나머지는 시간이든 돈이든 자기 자리에서만 쓴다 (cosmai/cli.py)."""
     assert unready(OWNERS, RulePolarity.version, None) is None
     assert "--scope" in str(unready(OWNERS, GEMMA4, None))
-    # 아직 주인이 없는 카테고리(#31 의 27개에 없는 이름) — 안 막으면 성공하고도 다음 05:00 에 지워진다.
+    # 아직 주인이 없는 카테고리(OWNERS 에 없는 이름) — 안 막으면 성공하고도 다음 05:00 에 지워진다.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
     assert unready(OWNERS, GEMMA4, "선블록") is None
     # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
