@@ -1,0 +1,17 @@
+# 운영 app.needs 에 있으나 이 체크아웃의 contracts/ddl/needs/*.sql 로는 만들어지지 않는 객체.
+# 포크가 운영에 DDL 을 올리면 이 파일에 한 줄을 PR 로 보낸다 -- 남의 DDL 이 운영에 들어오면 선언한다.
+#
+# 원장(needs.schema_migration)이 아니라 이 파일이 기준인 이유: 원장에 020 이 있어도 그 파일은 이
+# 체크아웃에 없어 기대치를 조립할 수 없다. 남이 올린 DDL 은 조립되는 것이 아니라 선언되는 것이다.
+#
+# tool/checks/ddl-drift 만 읽는다. 한 줄에 객체 하나, '#' 뒤는 주석:
+#   <table>           테이블 전체. 운영 pg_dump 에서 -T needs.<table> 로 빠진다.
+#   <table>.<column>  컬럼 하나. pg_dump 에 컬럼 제외가 없어서, 운영 덤프를 일회용 postgres 에
+#                     되돌린 뒤 DROP COLUMN 하고 다시 덤프한다.
+#
+# 여기 없는 남의 객체가 운영에 있으면 ddl-drift 는 DRIFTED 로 실패한다 -- 그것이 이 파일의 값이다.
+# 반대로 이 레포가 선언하는 테이블은 여기 적을 수 없다(tests/tool/test_ddl_drift_foreign.py):
+# 적는 순간 그 테이블의 드리프트가 영원히 안 보인다.
+
+retrieval_chunk        # 포크 cosmai-import-ydc 의 020_retrieval_chunk (2026-08-24 23:47 운영 적용)
+aspect_lexicon.extra   # 포크 cosmai-import-ydc 의 021_aspect_lexicon_extra (2026-08-25 18:30 운영 적용)
