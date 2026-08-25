@@ -1,7 +1,7 @@
 # AGENTS.md — 부팅과 절대 규칙 (본문 25줄 이하, tests/test_agents_md.py 가 지킨다)
 
 ## 부팅 (이 순서)
-1. `tool/issue audit` → `tool/issue ready` (두 레포 한 그래프). 도구가 죽으면 `gh issue list -l ch:<채널>` 로 퇴화 부팅.
+1. `tool/issue audit` → `tool/issue ready` (두 레포 한 그래프). 도구가 없거나 죽으면 `gh issue list -l ch:<채널>` 로 퇴화 부팅.
 2. 핀 이슈: `[규약]`(규칙이 어디서 강제되는지 색인 + 변경 원장) · 현행 `[목표]` · 진행 중인 `[repo]` 이슈.
 3. `STATE.md` §2(계산 불가 사실)·§3(승인 경계). 계산 가능한 사실은 `tool/status` 가 찍는다.
 4. `contracts/README.md` → 자기 채널 에픽(`channel` 라벨) → 착수할 이슈 본문. 본문이 현재 진실, 코멘트는 이력.

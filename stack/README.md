@@ -8,4 +8,4 @@
 - **GPU 는 하나다.** `cosmai retrieval embed`(38만 청크, 유휴 GPU 20.6분)와 gemma4 패스가 겹치면 5h38m 이 되고 상대편도 같은 대가를 치른다(포크 실측). gemma4 크론 창은 `stack/crontab.d/analyze` 주석과 #32 — `embed` 는 그 창을 피해 돌린다. 어드바이저리 락은 다른 레포의 프로세스를 못 보므로 창은 문서로 정한다.
 - **스위트 잔여 컨테이너**: `tool/checks/test` 는 워크트리마다 `cosmai-test-postgres-<port>`(tmpfs, RAM 점유)를 띄우고 trap 으로 지운다. 셸이 SIGKILL 로 죽으면 남는다 — `tool/status` 의 `test-leftovers` 절이 보여 주고, 같은 포트의 다음 실행은 소유 컨테이너 이름을 찍고 멈춘다. 다른 워크트리 것이면 지우지 말고 주인에게.
 - **이미지는 retrieval extra 를 싣지 않는다**(`stack/Dockerfile` `uv sync --no-dev`). 컨테이너 안에서 `cosmai retrieval …` 은 `--help` 만 통과한다. 검색 크론(#55)이 생기는 날 upstream 이 싣는다.
-- **이미지 베이스가 TLS 지문을 바꾼다**: bookworm(OpenSSL 3.0)은 oliveyoung 리뷰 API 에 막히고 trixie(3.5)는 통과한다. `tests/stack/test_image_tls_stack.py` 가 하한을 지킨다. 전말은 #35.
+- **이미지 베이스가 TLS 지문을 바꾼다**: OpenSSL 3.0 베이스는 oliveyoung 리뷰 API 에 막히고 3.5 베이스(현행)는 통과한다. `tests/stack/test_image_tls_stack.py` 가 하한을 지킨다. 전말은 #35.

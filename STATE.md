@@ -2,7 +2,7 @@
 
 **부팅 순서는 `AGENTS.md`, 할 일은 이슈(`tool/issue ready`), 계산 가능한 운영 사실은 `tool/status` 가 찍는다.** 이 파일에는 그 셋이 못 주는 것만 남긴다: 의도(무엇이 돌아야 하는가), 승인 경계, 되돌림 절차. 갱신은 도는 것을 바꾸는 `ops` 이슈를 닫는 커밋에서 한다. 이력은 git.
 
-## 2. 사실 (계산 불가)
+## 2. 사실 (계산 불가) — §1(부팅)은 `AGENTS.md` 다
 - **신 스택**(`stack/docker-compose.yml`)이 돌아야 한다: `cosmai-{analyze, collector-commerce, collector-naver, collector-youtube-work, collector-youtube-flatten, portal}`. `collector-youtube-watch` 는 `profiles: ["youtube-watch"]` 뒤 — 재가동 조건은 #39.
 - **구 스택 잔여(무정지)**: `shared-postgres` · postgrest ×2 · data-portal · trend-radar-dashboard · tubedepth-api · cosmai-old ×4. **정지 상태여야 하는 것**: trend-radar-collector · tubedepth-worker · tubedepth-flatten.
 - 이미지 `cosmai-needs:local`·`cosmai-needs-cron:local` 의 베이스는 **trixie / OpenSSL ≥ 3.5** 여야 한다 — bookworm(3.0)은 oliveyoung 리뷰 API 의 Cloudflare 챌린지에 막힌다(A/B 실측, #35). `tests/stack/test_image_tls_stack.py` 가 하한을 못 박는다.
