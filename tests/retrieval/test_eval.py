@@ -177,7 +177,8 @@ def test_the_vector_store_and_encoder_are_opened_once(loaded, monkeypatch, tmp_p
     matrix = np.zeros((len(rows), vectors.DIM), dtype="float32")
     matrix[:, 0] = 1.0
     out = tmp_path / "e5base"
-    vectors.save(out, matrix, rows, {"model": "m", "l2_normalized": True, "query_prefix": "query: "})
+    manifest = {"model": "m", "l2_normalized": True, "query_prefix": "query: ", "dim": vectors.DIM}
+    vectors.save(out, matrix, rows, manifest)
 
     opened = {"store": 0, "encoder": 0}
     real_load = vectors.load

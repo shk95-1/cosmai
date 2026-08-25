@@ -84,6 +84,45 @@ def test_loading_refuses_vectors_that_are_not_normalised(store):
         vectors.load(store)
 
 
+@pytest.mark.parametrize("key", ["model", "query_prefix", "l2_normalized", "dim"])
+def test_loading_refuses_a_manifest_that_is_missing_a_key(store, key):
+    """빠진 키를 코드의 기본값으로 메우면 다른 모델·다른 프리픽스로 구운 저장소가 조용히
+    통과하고, 그 어긋남은 오류가 아니라 틀린 순위로만 나타난다(#17 S7)."""
+    _, _, manifest = vectors.paths(store)
+    kept = {k: v for k, v in {**MANIFEST, "count": 3}.items() if k != key}
+    manifest.write_text(json.dumps(kept), encoding="utf-8")
+    with pytest.raises(vectors.StoreMissing) as refused:
+        vectors.load(store)
+    assert key in str(refused.value)
+
+
+def test_loading_refuses_a_manifest_whose_dim_is_not_the_matrix_width(store):
+    # dim 은 적어 두기만 하고 아무도 대조하지 않았다 -- 768 이라 적힌 512 차원 행렬이 통과했다.
+    _, _, manifest = vectors.paths(store)
+    manifest.write_text(json.dumps({**MANIFEST, "dim": 512, "count": 3}), encoding="utf-8")
+    with pytest.raises(vectors.StoreMissing) as refused:
+        vectors.load(store)
+    assert "512" in str(refused.value)
+
+
+def test_loading_refuses_vectors_whose_rows_are_not_unit_length(tmp_path):
+    # l2_normalized 는 embed.py 가 적은 리터럴 True 라 스스로를 증명하지 못한다 -- 재서 본다(#17 S8).
+    out = tmp_path / "raw"
+    matrix = np.zeros((2, vectors.DIM), dtype="float32")
+    matrix[:, 0] = 3.0
+    vectors.save(out, matrix, [("d1#0", "youtube_comment"), ("d2#0", "youtube_comment")], MANIFEST)
+    with pytest.raises(vectors.StoreMissing) as refused:
+        vectors.load(out)
+    assert "노름" in str(refused.value)
+
+
+def test_the_model_name_comes_from_the_manifest_alone(store):
+    # 매니페스트가 정본이다. 코드 상수로 되돌아가면 다른 모델로 구운 벡터에 e5 질의를 태운다.
+    _, _, manifest = vectors.paths(store)
+    manifest.write_text(json.dumps({**MANIFEST, "model": "other/model", "count": 3}), encoding="utf-8")
+    assert vectors.load(store).model == "other/model"
+
+
 def test_the_query_prefix_comes_from_the_manifest(store):
     # 문서에 붙인 것과 짝이 맞아야 한다. 코드의 기본값을 다시 쓰면 정본이 두 벌이 된다.
     _, _, manifest = vectors.paths(store)

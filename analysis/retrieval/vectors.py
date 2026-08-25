@@ -31,6 +31,10 @@ MODEL = "intfloat/multilingual-e5-base"
 DOC_PREFIX = "passage: "
 QUERY_PREFIX = "query: "  # 안 붙이면 오류 없이 성능만 떨어진다
 DEFAULT_STORE = Path("var/retrieval/vectors/e5base")
+# 읽을 때 반드시 있어야 하는 설정. 없는 것을 코드 기본값으로 메우면 다른 모델·다른 프리픽스로 구운
+# 저장소가 조용히 통과하고, 그 어긋남은 오류가 아니라 틀린 순위로만 나타난다.
+REQUIRED_MANIFEST = ("model", "query_prefix", "l2_normalized", "dim")
+UNIT_TOLERANCE = 1e-3  # float32 로 저장한 단위 벡터가 노름 1 에서 벗어나는 폭
 
 
 class StoreMissing(RuntimeError):
@@ -53,12 +57,12 @@ class VectorStore:
 
     @property
     def model(self) -> str:
-        return str(self.manifest.get("model", ""))
+        return str(self.manifest["model"])
 
     @property
     def query_prefix(self) -> str:
-        # 문서에 붙인 것과 짝이 맞아야 한다. 매니페스트에 적힌 것을 쓴다.
-        return str(self.manifest.get("query_prefix", QUERY_PREFIX))
+        # 문서에 붙인 것과 짝이 맞아야 한다. load() 가 부재를 막으므로 여기서 기본값을 대지 않는다.
+        return str(self.manifest["query_prefix"])
 
 
 def save(out: Path, matrix, rows: list[tuple[str, str]], manifest: dict) -> None:
@@ -99,9 +103,22 @@ def load(out: Path = DEFAULT_STORE) -> VectorStore:
         raise StoreMissing(f"행렬 {len(matrix)}행과 id {len(rows)}개가 다르다: {out}")
     if manifest.get("count") not in (None, len(rows)):
         raise StoreMissing(f"매니페스트가 {manifest['count']}개라는데 id 는 {len(rows)}개다: {out}")
-    if not manifest.get("l2_normalized"):
+    if absent := [key for key in REQUIRED_MANIFEST if key not in manifest]:
+        raise StoreMissing(
+            f"매니페스트에 {', '.join(absent)} 가 없다: {manifest_path}. "
+            "`cosmai retrieval embed` 로 다시 만들어야 한다."
+        )
+    if not str(manifest["model"]).strip():
+        raise StoreMissing(f"매니페스트의 model 이 비어 있다: {manifest_path}")
+    if matrix.ndim != 2 or matrix.shape[1] != manifest["dim"]:
+        raise StoreMissing(f"매니페스트가 {manifest['dim']} 차원이라는데 행렬은 {matrix.shape} 다: {out}")
+    if not manifest["l2_normalized"]:
         # 정규화가 안 됐으면 내적을 코사인으로 쓸 수 없다. 조용히 틀린 순위를 내느니 멈춘다.
         raise StoreMissing(f"l2_normalized 가 아닌 벡터다: {manifest_path}")
+    # 플래그는 인코딩 때 적은 리터럴이라 스스로를 증명하지 못한다 -- 행 하나를 재서 대조한다.
+    norm = float(np.linalg.norm(matrix[0])) if len(matrix) else 1.0
+    if abs(norm - 1.0) > UNIT_TOLERANCE:
+        raise StoreMissing(f"l2_normalized 라는데 첫 행의 노름이 {norm:.3f} 다: {matrix_path}")
     return VectorStore(matrix, [r["chunk_id"] for r in rows], [r["source"] for r in rows], manifest)
 
 

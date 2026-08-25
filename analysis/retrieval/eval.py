@@ -164,7 +164,7 @@ def run(
         from analysis.retrieval import embed, vectors
 
         vector_store = vectors.load(store or vectors.DEFAULT_STORE)
-        encoder = embed.load_encoder(vector_store.model or vectors.MODEL)
+        encoder = embed.load_encoder(vector_store.model)
 
     rows: list[Row] = []
     for topic_id, query in queries(mode):

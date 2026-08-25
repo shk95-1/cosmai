@@ -179,7 +179,7 @@ def encode_query(
     1.2GB 행렬과 모델을 61번 여는 셈이다.
     """
     store = store or load(out)
-    encoder = encoder or load_encoder(store.model or MODEL, device)
+    encoder = encoder or load_encoder(store.model, device)
     vector = encoder.encode([store.query_prefix + query], normalize_embeddings=True, show_progress_bar=False)[
         0
     ]
