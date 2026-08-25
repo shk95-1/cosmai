@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from analysis.retrieval import topics
-from analysis.retrieval.topics import TOPICS
 
 if TYPE_CHECKING:  # 타입 전용: 런타임에 kiwipiepy 를 끌어오면 --help 한 번에 모델이 뜬다.
     from kiwipiepy import Kiwi
@@ -37,9 +36,10 @@ USER_WORD_SCORE = 3.0
 # 원본(읽기 전용 참조, #9 가 지운다)이라 고쳐도 색인에 아무 일도 일어나지 않는다(#18 M15).
 DICT_DIR = Path(__file__).resolve().parent / "dict"
 DICTIONARIES = (DICT_DIR / "user_dictionary.tsv", DICT_DIR / "ingredient_dictionary.tsv")
-# 토큰을 정하는 입력 전부. topics.py 가 여기 드는 이유는 그 별칭이 Kiwi 사용자 단어로 등록되고
-# (kiwi()) 부분문자열 확장 목록도 되기 때문이다(expand()) -- 색인 캐시 서명이 이 전부를 걸어야 한다.
-TOKENIZER_INPUTS = (*DICTIONARIES, Path(topics.__file__).resolve())
+# 토큰을 정하는 입력 중 **파일인 것** 전부. 주제 별칭도 토큰을 정하지만(Kiwi 사용자 단어이자
+# 확장 목록) 그쪽은 이제 파일이 아니라 활성 사전 버전이라, 색인 캐시 서명은 이 해시에 더해
+# 그 사전의 지문을 따로 문다 (pipeline.index_signature, #8).
+TOKENIZER_INPUTS = DICTIONARIES
 
 
 _kiwi = None
@@ -49,6 +49,19 @@ _expand_words: list[str] | None = None
 # 3,013개 · 약 92B, 이어 돈 질의 150번이 더한 것은 2개), 그 어휘로 세운 postings 를 같은
 # 프로세스가 이미 훨씬 크게 물고 있다 -- 프로세스는 CLI 한 번이다(#18 M16).
 _expanded: dict[str, tuple[str, ...]] = {}
+
+
+def _forget_topics(_dictionary: topics.Topics | None) -> None:
+    """활성 주제 사전이 갈리면 여기서 파생된 것이 전부 낡는다 -- 하나라도 남으면 두 사전이 섞인
+    토큰이 나온다. Kiwi 는 등록한 사용자 단어를 뺄 수 없어 새로 만드는 것이 유일한 길이다."""
+    global _kiwi, _topic_words, _expand_words
+    _kiwi = None
+    _topic_words = None
+    _expand_words = None
+    _expanded.clear()
+
+
+topics.on_change(_forget_topics)
 
 
 def topic_words() -> list[str]:
@@ -62,7 +75,7 @@ def topic_words() -> list[str]:
 
     bare = Kiwi()  # 사용자 사전을 얹지 않은 판정용
     words = set()
-    for entry in TOPICS:
+    for entry in topics.active().entries:
         for alias in entry["ko"]:
             # 공백이 든 별칭·조사가 붙은 별칭은 낱말이 아니라 Kiwi 에 넣을 수 없다.
             if " " in alias or len(alias) < 2 or alias.endswith("에"):
@@ -90,7 +103,7 @@ def kiwi(dictionaries: tuple[Path, ...] = DICTIONARIES) -> Kiwi:
             if not dictionary.exists():
                 raise FileNotFoundError(f"Kiwi 사전이 없다: {dictionary}")
             _kiwi.load_user_dictionary(str(dictionary))
-        # 주제 별칭은 topics.py 가 정본이므로 TSV 에 복사하지 않고 여기서 넣는다.
+        # 주제 별칭의 정본은 활성 사전(needs.aspect_lexicon)이라 TSV 에 복사하지 않고 여기서 넣는다.
         for word in topic_words():
             _kiwi.add_user_word(word, "NNG", USER_WORD_SCORE)  # pyright: ignore[reportArgumentType]
     return _kiwi
@@ -107,7 +120,8 @@ def expand_words() -> list[str]:
     """부분문자열 확장에 쓸 별칭 전부. 등록 목록과 다른 집합이다."""
     global _expand_words
     if _expand_words is None:
-        _expand_words = sorted({a for e in TOPICS for a in e["ko"] if " " not in a and len(a) >= 2})
+        aliases = (a for e in topics.active().entries for a in e["ko"])
+        _expand_words = sorted({a for a in aliases if " " not in a and len(a) >= 2})
     return _expand_words
 
 

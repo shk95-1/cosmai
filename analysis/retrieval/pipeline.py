@@ -18,7 +18,7 @@ from pathlib import Path
 
 import psycopg
 
-from analysis.retrieval import corpus
+from analysis.retrieval import corpus, topics
 from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
 from analysis.retrieval.chunks import (
     MAX_CHARS,
@@ -241,12 +241,23 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
     """이 색인이 무엇 위에 세워졌는지. 하나라도 달라지면 캐시를 다시 만들어야 한다.
 
     청크 수와 최신 `chunked_at` 이면 충분하다 -- UPSERT 가 본문이 바뀐 행만 `chunked_at` 을
-    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 토큰을 정하는 입력(사전 두 벌과
-    주제 사전 topics.py)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의
-    캐시 키와 같은 발상).
+    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 토큰을 정하는 입력(Kiwi 사전
+    두 벌)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의 캐시 키와 같은
+    발상).
+
+    **주제 사전은 파일이 아니다.** 별칭은 Kiwi 사용자 단어이자 확장 목록이라 토큰을 정하는데,
+    그 원천이 `needs.aspect_lexicon` 의 활성 버전으로 옮겨간 뒤로는 `topics.py` 를 해시해도 주제
+    내용을 덮지 못한다(#8) -- 그래서 활성 버전 번호와 그 내용 지문을 함께 문다. 번호만으로는
+    모자란다: 이미 켜져 있는 버전에 행을 더 넣을 수 있고, 그러면 번호는 그대로다.
     """
     count, latest = chunk_census(conn, sources)
-    parts = [str(count), str(latest), ",".join(sources or ())]
+    dictionary = topics.use_active(conn)
+    parts = [
+        str(count),
+        str(latest),
+        ",".join(sources or ()),
+        f"topics:v{dictionary.version}:{dictionary.fingerprint}",
+    ]
     for path in TOKENIZER_INPUTS:
         parts.append(hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "-")
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
@@ -265,6 +276,8 @@ def load_index(
     `cosmai retrieval search` 한 번이 그만큼 걸렸다. 피클에 담는 것은 클래스가 아니라 `state()`
     dict 다 -- 클래스를 담으면 모듈 경로가 바뀌는 날 캐시 전체를 못 읽는다.
     """
+    # 캐시를 안 쓸 때도 사전은 세워야 한다 -- 토큰화가 그 아래에서 활성 사전을 읽는다.
+    topics.use_active(conn)
     cached = cache_dir / f"index-{index_signature(conn, sources)}.pkl" if cache_dir else None
     if cached and cached.exists():
         state = pickle.loads(cached.read_bytes())

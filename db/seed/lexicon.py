@@ -78,6 +78,7 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
                 boolean(r["is_neutral_noun"]),
                 r["ruleset"],
                 int(r["priority"]),
+                {},  # v1 CSV 에는 룰셋별 여분 칸이 없다 (021)
             )
             for r in read_csv(source_dir / "lexicon" / "aspect_lexicon_v1.csv")
         ],

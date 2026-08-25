@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy.engine import make_url
 
 from analysis.retrieval import chunks, corpus, pipeline, vectors
+from tests.retrieval.conftest import csv_rows, install_topics
 
 pytestmark = pytest.mark.postgres
 
@@ -60,7 +61,9 @@ def owner(needs_schema: str, _schema_name: str):
 
 @pytest.fixture
 def conn(owner, needs_runtime_url: str):
-    """파이프라인이 도는 롤. 운영과 같은 needs_runtime 이라야 GRANT 누락이 여기서 드러난다."""
+    """파이프라인이 도는 롤. 운영과 같은 needs_runtime 이라야 GRANT 누락이 여기서 드러난다.
+
+    주제 사전도 여기서 스키마에 세운다 -- 색인은 활성 사전 없이는 서지 않는다(#8)."""
     parsed = make_url(needs_runtime_url)
     connection = psycopg.connect(
         host=parsed.host,
@@ -70,6 +73,7 @@ def conn(owner, needs_runtime_url: str):
         dbname=parsed.database,
         options=parsed.query["options"],  # pyright: ignore[reportArgumentType]
     )
+    install_topics(connection)
     try:
         yield connection
     finally:
@@ -216,21 +220,54 @@ def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
     assert second.n == first.n
 
 
-def test_the_topic_dictionary_is_part_of_the_cache_key():
-    """topics.py 의 별칭은 Kiwi 사용자 단어이자 expand() 의 확장 목록이다 -- 사전 두 벌만 해시하면
-    주제를 고친 날 96MB 옛 색인이 그대로 재사용된다(#17 S3)."""
+def test_the_topic_dictionary_is_not_a_file_in_the_cache_key():
+    """주제 별칭은 Kiwi 사용자 단어이자 expand() 의 확장 목록이라 토큰을 정한다. 그 원천이
+    `needs.aspect_lexicon` 으로 옮겨간 뒤 `topics.py` 를 해시하면 **주제 내용을 안 덮는 해시**가
+    캐시 키에 남아, 사전을 바꿔도 옛 색인이 재사용되는 것을 못 막는다(#17 S3 -> #8)."""
     from analysis.retrieval import topics
 
-    assert Path(topics.__file__).resolve() in {p.resolve() for p in pipeline.TOKENIZER_INPUTS}
+    files = {p.resolve() for p in pipeline.TOKENIZER_INPUTS}
+    assert Path(topics.__file__).resolve() not in files
+    assert topics.DICTIONARY_CSV.resolve() not in files  # 적재 원본이지 런타임 입력이 아니다
+
+
+def test_a_changed_topic_dictionary_invalidates_the_index_cache(conn, _schema_name, tmp_path):
+    """완료 기준 3번이 주제에 대해 깨지던 자리다 -- 서명이 활성 사전(버전 + 내용 지문)을 따라가지
+    않으면 별칭을 하나 더한 날 96MB 옛 색인이 그대로 답한다(#8)."""
+    from db.lexicon import activate, insert_aspects
+
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    pipeline.load_index(conn, cache_dir=tmp_path)
+    before = pipeline.index_signature(conn, None)
+    with conn.cursor() as cur:
+        more = ("백탁", "generic", "", "허옇", False, "retrieval-topic", 1, {"term_kind": "ko"})
+        wider = [*csv_rows(), more]
+        insert_aspects(cur, wider, 2, active=False)
+        assert pipeline.index_signature(conn, None) == before  # 켜기 전에는 아무 일도 없다
+        activate(cur, "aspect", 2)
+    conn.commit()
+    assert pipeline.index_signature(conn, None) != before
+    pipeline.load_index(conn, cache_dir=tmp_path)
+    assert len(list(tmp_path.glob("index-*.pkl"))) == 2
+
+
+def test_an_index_cannot_be_built_without_an_active_dictionary(needs_runtime_url, _schema_name):
+    """사전이 안 켜져 있으면 색인은 오류 없이 서고 검색만 조용히 빈다 -- 그 초록이 가장 나쁘다."""
+    bare = _connect(needs_runtime_url, _schema_name)
+    try:
+        with pytest.raises(LookupError, match="cosmai lexicon"):
+            pipeline.load_index(bare, cache_dir=None)
+    finally:
+        bare.close()
 
 
 def test_a_changed_tokenizer_input_invalidates_the_signature(conn, tmp_path, monkeypatch):
     # 토큰을 정하는 입력이 바뀌면 같은 본문이 다른 토큰이 된다 -- 서명이 안 움직이면 옛 색인이 산다.
-    spare = tmp_path / "topics.py"
-    spare.write_text("TOPICS = []\n", encoding="utf-8")
+    spare = tmp_path / "user_dictionary.tsv"
+    spare.write_text("백탁\tNNG\n", encoding="utf-8")
     monkeypatch.setattr(pipeline, "TOKENIZER_INPUTS", (spare,))
     before = pipeline.index_signature(conn, None)
-    spare.write_text("TOPICS = ['백탁']\n", encoding="utf-8")
+    spare.write_text("백탁\tNNG\n허옇\tVA\n", encoding="utf-8")
     assert pipeline.index_signature(conn, None) != before
 
 

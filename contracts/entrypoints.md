@@ -151,6 +151,11 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
   source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
   engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
 ```
+- **주제 사전은 `needs.aspect_lexicon` 의 활성 버전이다**(`ruleset='retrieval-topic'`, 포크 #8). 그 별칭이
+  BM25 토큰 확장(Kiwi 사용자 단어 + 부분문자열 확장)과 평가 정답(`match_topics`)을 함께 정하므로, 사전을
+  바꾸는 길은 `cosmai lexicon load/diff/activate` 하나다 — 적재 원본은 `analysis/retrieval/dict/topics_v1.csv`.
+  aspect 버전 하나 = **모든 룰셋을 합친 aspect 사전 전체**라(`activate` 는 kind 단위로 켠다) 주제를 새
+  버전으로 올릴 때는 극성 쪽 CSV(`eval/lexicon/aspect_lexicon_v1.csv`)도 같은 버전으로 함께 적재한다.
 - `chunk` 만 쓰기다(`needs.retrieval_chunk`). 나머지 셋은 그 표와 파일을 읽는다. 원천은 다른 스키마이고
   `db/grants/needs_runtime_reader.sql` 의 SELECT 로만 닿는다 — 수집기가 자기 스키마에만 쓴다는 규칙의 반대편이다.
 - 멱등: `chunk` 는 `text_md5` 가 같은 행을 건드리지 않는다(재실행 = 변경 0). `embed` 는 전량 재인코딩이다.
@@ -159,9 +164,10 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
   0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다(여섯 줄 전부는 `contracts/interfaces.md`
   §검색 실측). 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
 - 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음, `eval` 의 채점된 질의 0개 —
-  청크가 비었거나 사전이 안 얹혔다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수 없음 — 파일이
-  없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이 행렬과 어긋난 것이
-  같은 자리다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
+  청크가 비었다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수
+  없음 — 파일이 없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이
+  행렬과 어긋난 것이 같은 자리다, **활성 주제 사전 없음** — `cosmai lexicon load/activate` 를 아직 안
+  돌렸다는 뜻이라 실패가 아니라 막힘이다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
 - **커버리지 경고는 stderr 로 나가고 종료 코드를 바꾸지 않는다** — `search`·`eval` 의 vector·hybrid 는 저장소가
   덮는 청크 수와 매니페스트 `chunked_at_max` 를 BM25 캐시 키와 **같은 질의**(`count(*)`·`max(chunked_at)`)와
   대조하고, 어긋나면 한 줄을 찍고 계속한다 — 멈추면 옛 코퍼스를 일부러 검색하는 정상 용법까지 막힌다.
@@ -169,7 +175,9 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
   **필수 키가 아니다** — 없으면 개수만 대조하고 그 사실을 경고한다(거부하면 그 키 이전에 구운 저장소로 도는
   검색이 통째로 멈춘다). 어긋남을 고치는 것은 `embed` 전량 재인코딩이다.
 - **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
-  BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + 사전 해시).
+  BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + Kiwi
+  사전 두 벌의 해시 + **활성 주제 사전의 버전과 내용 지문**). 주제 사전이 파일이 아니게 된 뒤로 파일 해시만
+  거는 키는 주제 변경을 놓친다 — 버전 번호만으로도 모자란다(켜져 있는 버전에 행을 더할 수 있다).
   둘 다 `var/` 라 레포에 들어가지 않고, 지워도 다시 만들어진다.
 - **`embed` 는 크론이 아니라 사람이 GPU 호스트에서 돌린다.** 그래서 `sentence-transformers`·`torch` 는 `embed`
   extra 에만 있고 `stack/Dockerfile` 에도 `tool/checks/test` 에도 들어가지 않는다 — 테스트는 이미지가 싣는

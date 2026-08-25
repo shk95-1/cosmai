@@ -7,9 +7,19 @@ from dataclasses import dataclass
 from typing import Any, LiteralString
 
 import psycopg
+from psycopg.types.json import Json
 
 ENTITY_COLUMNS = ("kind", "canonical", "surface", "tier", "source", "note")
-ASPECT_COLUMNS = ("aspect", "scope", "category", "pattern", "is_neutral_noun", "ruleset", "priority")
+ASPECT_COLUMNS = (
+    "aspect",
+    "scope",
+    "category",
+    "pattern",
+    "is_neutral_noun",
+    "ruleset",
+    "priority",
+    "extra",
+)
 
 ENTITY_SQL: LiteralString = """
 INSERT INTO entity_lexicon (kind, canonical, surface, tier, source, note, version, active)
@@ -20,8 +30,8 @@ ON CONFLICT (kind, surface, version) DO NOTHING
 # 행은 다시 쓰이지 않으므로 사전 내용은 여전히 버전으로만 바뀐다 (formats.md).
 ASPECT_SQL: LiteralString = """
 INSERT INTO aspect_lexicon
-  (aspect, scope, category, pattern, is_neutral_noun, ruleset, priority, version, active)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+  (aspect, scope, category, pattern, is_neutral_noun, ruleset, priority, extra, version, active)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (aspect, scope, category, pattern, version) DO UPDATE
 SET ruleset = EXCLUDED.ruleset, priority = EXCLUDED.priority
 WHERE aspect_lexicon.ruleset = ''
@@ -35,6 +45,7 @@ FROM entity_lexicon WHERE kind = %s AND version = %s
 ASPECT_READ: LiteralString = """
 SELECT aspect || ' :: ' || scope || ' :: ' || category || ' :: ' || pattern,
        is_neutral_noun::text || ' | ' || priority::text || ' | ' || ruleset
+         || ' | ' || extra::text
 FROM aspect_lexicon WHERE version = %s
 """
 ENTITY_ACTIVATE: LiteralString = "UPDATE entity_lexicon SET active = (version = %s) WHERE kind = %s"
@@ -74,8 +85,9 @@ def insert_entities(
 def insert_aspects(
     cur: psycopg.Cursor[Any], rows: Sequence[Sequence[Any]], version: int, active: bool = True
 ) -> int:
-    """rows 는 ASPECT_COLUMNS 순서."""
-    return _write(cur, ASPECT_SQL, [(*row, version, active) for row in rows])
+    """rows 는 ASPECT_COLUMNS 순서. 마지막 칸(`extra`)은 psycopg 가 dict 를 jsonb 로 바꾸지 않으므로
+    여기서 감싼다 -- 부르는 쪽이 감싸면 CSV 로더와 테스트가 각자 다른 모양을 넘긴다."""
+    return _write(cur, ASPECT_SQL, [(*row[:-1], Json(row[-1] or {}), version, active) for row in rows])
 
 
 def version_rows(cur: psycopg.Cursor[Any], kind: str, version: int) -> int:
