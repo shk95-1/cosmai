@@ -207,15 +207,16 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     return 0
 
 
-def _run_retrieval_embed(conn: Any, args: argparse.Namespace) -> int:
+def _run_retrieval_embed(conn: Any, args: argparse.Namespace, store: Path | None) -> int:
     from analysis.retrieval import embed, vectors
 
-    try:
-        outcome = embed.run(conn, model=args.model or vectors.MODEL, device=args.device, batch=args.batch)
-    # 확장이 없다는 것은 실패가 아니라 막힘이다 -- shared-postgres 이미지가 되돌아갔을 때가 이것이다.
-    except vectors.ExtensionMissing as blocked:
-        print(blocked)
-        return 2
+    outcome = embed.run(
+        conn,
+        out=store or vectors.DEFAULT_STORE,
+        model=args.model or vectors.MODEL,
+        device=args.device,
+        batch=args.batch,
+    )
     print(outcome.note)
     return 0
 
