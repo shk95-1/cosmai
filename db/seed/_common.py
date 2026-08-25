@@ -15,7 +15,8 @@ from sqlalchemy.engine import make_url
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_DIR = REPO_ROOT / "eval"
-DEFAULT_SLICES = REPO_ROOT.parent / "architect"
+# 레포 안이어야 한다: 밖을 가리키면 체크아웃 모양마다 경로가 달라져 시드 테스트가 조용히 skip 된다 (#79).
+DEFAULT_SLICES = REPO_ROOT / "db" / "seed" / "data"
 
 LEXICON_VERSION = 1
 LABELER = "shk"
