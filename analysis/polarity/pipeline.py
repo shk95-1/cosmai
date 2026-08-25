@@ -56,6 +56,11 @@ RUN_START: LiteralString = "INSERT INTO analysis_run (versions, note) VALUES (%s
 RUN_END: LiteralString = (
     "UPDATE analysis_run SET finished_at = now(), status = 'ok', note = %s WHERE run_id = %s"
 )
+RUN_NOTE: LiteralString = "UPDATE analysis_run SET note = %s WHERE run_id = %s"
+# `replace_stale` 의 DELETE 커밋과 그 달의 마지막 flush 사이가 그 달이 부분만 남아 있는 창이다. 실행이
+# 그 안에서 죽으면 원천은 그대로여도 그 달의 need_mention 은 반쪽이고, 주인 있는 scope 는 규칙이
+# 배제하므로(#31) 사람이 다시 돌릴 때까지 아무도 메우지 않는다. 창 안에 있다는 사실을 DB 가 말한다.
+MARKER = "rewriting="
 NEED_DELETE: LiteralString = """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
@@ -136,6 +141,16 @@ class _Pending:
     unit: TextUnit
     lexicon_category: str | None
     candidate: Candidate
+
+
+def _rewriting(base: str, src: str, month: str, scope: str | None) -> str:
+    return f"{base} {MARKER}{src}/{month}" + (f"/{scope}" if scope else "")
+
+
+def _note(conn: psycopg.Connection[Any], run_id: int, note: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(RUN_NOTE, (note, run_id))
+    conn.commit()
 
 
 def _table(schema: str, table: str) -> pgsql.Composed:
@@ -444,6 +459,7 @@ def run(
     conn.commit()
     if on_run_open is not None:
         on_run_open(run_id)
+    base_note = f"analyze:polarity:{version}"
 
     months = units = need_rows = wish_rows = replaced = fallbacks = 0
 
@@ -452,6 +468,7 @@ def run(
         table = _table(commerce_schema, "review")
         for month in _months(conn, table, "written_at", "captured_at", since):
             months += 1
+            _note(conn, run_id, _rewriting(base_note, "review", month, scope))
             replaced += stage.replace_stale("review", month, scope)
             for page in _pages(
                 conn,
@@ -490,6 +507,7 @@ def run(
                 needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 stage.flush(needs, ())
+            _note(conn, run_id, base_note)
 
     # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
     # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다).
@@ -498,6 +516,7 @@ def run(
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
             months += 1
+            _note(conn, run_id, _rewriting(base_note, "yt_comment", month, None))
             replaced += stage.replace_stale("yt_comment", month)
             for page in _pages(
                 conn,
@@ -536,6 +555,7 @@ def run(
                 need_rows += len(needs)
                 wish_rows += len(wishes)
                 stage.flush(needs, wishes)
+            _note(conn, run_id, base_note)
 
     result = StageResult(
         run_id=run_id,

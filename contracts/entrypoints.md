@@ -104,6 +104,21 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - 주인이 아닌 실행이 `--scope <남의 scope>` 를 지정하면 **거절한다** — 조용한 무동작이 아니라 그 단계가
   실패로 끝나고(`analysis_run.status='failed'`, 종료 코드 1) 메시지가 주인의 `polarity_version` 과 소유
   표의 경로를 말한다.
+- **analyze 실행은 한 번에 하나다.** 05:00 크론(`analyze all`)과 사람이 손으로 도는 극성 패스는
+  겹치는 것이 정상이고, 겹치면 서로의 반쯤 쓴 상태를 읽는다: polarity 는 한 달치를 지우고 **커밋한 뒤**
+  페이지별로 다시 쓰고, aggregate 는 `extractor_version` 만 걸고 need_mention 전량을 여러 트랜잭션에
+  나눠 읽는다(스냅숏이 아니다). 그래서 락은 **scope 별도 단계별도 아닌 전역 하나**다 — 어느 쪽으로
+  좁혀도 `polarity --scope <한 카테고리>` 와 전량을 읽는 `aggregate` 를 가르지 못한다. 다른 실행이
+  그 락을 쥐고 있으면 **아무것도 열지 않고 건너뛰고** 사유를 남긴 뒤 partial(**1**)로 끝난다 —
+  기다리지 않는다(수집기와 같은 규약: 우리가 양보한 것이지 거절당한 게 아니고, 모든 단계가 자연키
+  upsert 라 다음 실행이 그대로 가져간다). 구현은 세션 스코프 어드바이저리 락이고 작업 커넥션이 쥔다
+  (`analysis/locks.py`).
+- 그 락 덕분에 **반쯤 다시 쓰인 달**을 이름으로 말할 수 있다. polarity 는 한 달을 지우기 직전
+  `analysis_run.note` 에 `rewriting=<src>/<month>[/<scope>]` 를 적고 그 달을 다 쓰면 지운다. 실행이 그
+  사이에 죽으면 그 표식이 남고, 락을 쥔 다음 실행은 **열려 있는 표식은 죽은 실행의 것뿐**이라는
+  사실로 그것을 찾아낸다: 그 run 을 failed 로 닫고(영원한 `running` 을 남기지 않는다) 어느 달인지를
+  자기 note 와 stdout 에 적은 뒤 partial(**1**)로 끝난다. 그 달을 다시 채우는 것은 그 scope 주인의
+  일이다 — 주인 있는 scope 는 규칙 실행이 배제하므로 아무도 대신 메우지 않는다.
 
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
