@@ -24,7 +24,21 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 - 유도 순서: 사이트 카테고리 leaf → 없으면 `name_keyword` → 그래도 없으면 카테고리 없음. 표에 없는 leaf 는 그대로 `lexicon_category` 가 된다(항등).
 
 ## 패널 명부 CSV (→ `needs.panel_channel`, 포크 #3)
-`channel_id,handle,channel_title,panel_role,role_basis,source_list` — 한 줄 = 한 채널. ydc 의 모든 비율이 이 명부를 분모로 쓴다(시드 원본 `analysis/slices/ydc/seeds/channels_v1.csv`, **43채널**).
+한 줄 = 한 채널. ydc 의 모든 비율이 이 명부를 분모로 쓴다(시드 원본 `analysis/slices/ydc/seeds/channels_v1.csv`, **43채널**, UTF-8 BOM). 파일은 11열이고 여섯 열만 표로 간다 — 나머지 다섯은 적재하지 않는다. 무엇을 버렸는지가 여기 적혀 있지 않으면 #31 의 적재기와 이 스펙이 조용히 갈라진다.
+
+| CSV 열 | → `needs.panel_channel` |
+|---|---|
+| `channel_id` | `channel_id` |
+| `handle` | `handle` |
+| `channel_title` | `channel_title` |
+| `panel_role` | `panel_role` (아래 두 값) |
+| `role_basis` | `role_basis` |
+| `source_list` | `source_list` |
+| `team_rank` | — 팀 내부 순위. 역할 판정의 근거는 `role_basis` 한 칸이 진다 |
+| `team_role` | — 위와 같다 |
+| `channel_published_at` | — 원천(`tubedepth`)이 이미 가진 채널 사실이라 명부가 두 번 들지 않는다 |
+| `video_count_at_seed` | — 위와 같다 (시드 시점 스냅샷) |
+| `subscriber_count_at_seed` | — 위와 같다 |
 
 | `panel_role` | 뜻 | v1 패널 |
 |---|---|---|
@@ -33,7 +47,7 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 
 - **역할은 원천이 아니라 `needs` 파생에 산다**(사용자 결정 2026-08-26). 원천(`tubedepth`)의 채널 표는 upstream 계약이고 `tool/checks/ddl-drift` 가 지키는 자리라 포크가 컬럼을 더할 자리가 아니다. 43채널은 고정 목록이라 시드 한 벌로 충분하고, 패널 구성이 바뀌면 시드를 다시 적재한다.
 - **대가는 알고 받는다: 새 채널이 수집에 들어와도 역할이 자동으로 붙지 않는다.** 명부에 없는 채널은 패널 밖이므로 분모에 안 들어가는 것이 맞고, 그 사실이 행에서 읽히기만 하면 된다 — `metrics_topic_quarter` 의 `panel_version`·`panel_role`·`denom_channels` 가 그 자리다. '역할 비슷한 값'이 들어올 자리는 없다(DDL 의 CHECK, 022).
-- 버전은 사전과 같은 모양이다: 적재 시 `version` 을 부여하고 `active` 로 교체한다. 집계 행은 자기가 쓴 명부를 `panel_version` 으로 가리키므로, 패널이 바뀐 뒤에도 옛 행이 무엇을 분모로 삼았는지 남는다.
+- 버전은 사전과 같은 모양이다: 적재 시 `version` 을 부여하고 `active` 로 교체한다. 집계 행은 자기가 쓴 명부를 `panel_version` 으로 가리키므로, 패널이 바뀐 뒤에도 옛 행이 무엇을 분모로 삼았는지 남는다. 그 판본은 한 줄짜리 부모 `needs.panel_roster(version)` 에 살고 명부 행과 집계 행이 **둘 다 FK 로** 그 줄을 가리킨다 — `needs_runtime` 이 두 표에 DELETE 를 갖고 있어, 부모가 없으면 명부 판본이 지워진 뒤 그 문장이 거짓이 된다.
 - 값 적재(43채널)는 이 계약의 범위가 아니라 포크 #31 이다. 여기는 값이 들어갈 **자리와 뜻**만 정한다.
 
 ## 언급 행의 ref 문법 (A20)
@@ -79,4 +93,4 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 | 월 | `needs.metrics_wish` | `first_month`·`last_month`·`months_present` (키에는 시간이 없다) |
 | 분기 | `needs.metrics_topic_quarter` | `quarter` (`'YYYYQn'`) |
 
-같은 개념의 지표(언급 수·채널 수·지속성)가 두 표에 살게 되므로, **한 입자의 값을 묻는 자리는 이 표가 가리키는 표 하나뿐이다.** 새 집계 표는 이 표에 줄을 더하면서 선다 — `tests/test_panel_quarter_contract.py` 가 그레인 없는 `metrics_*` 표를 잡는다.
+같은 개념의 지표(언급 수·채널 수·지속성)가 두 표에 살게 되므로, **한 (그레인 × 개념)의 값을 묻는 자리는 이 표가 가리키는 표 하나뿐이다** — 월에 정본 표가 둘인 것은 개념이 둘(need·wish)이기 때문이고, 한 표가 두 그레인을 지는 일은 없다. 새 집계 표는 이 표에 줄을 더하면서 선다 — `tests/test_panel_quarter_contract.py` 가 그레인 없는 `metrics_*` 표를 잡는다.
