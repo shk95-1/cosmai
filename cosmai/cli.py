@@ -2,10 +2,10 @@
 `--help` is checkable offline in a subprocess without an installed console script (playbook
 snippets/test_stack_commands_resolve.py).
 
-TODO(#95): the sentence below is stale -- naver dispatches and dies with a traceback, not exit 2.
-`collect commerce`/`youtube` are wired (#7, #8); `naver` is #9 and refuses cleanly until then --
-declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
-checked against, per contracts/entrypoints.md's collector list.
+`collect commerce`/`youtube`/`naver` are all wired (#7, #8, #9); naver has no live transport yet
+so it ends blocked (exit 2) until #10's cutover -- declared here anyway so this module is the one
+place stack/crontab and stack/docker-compose.yml can be checked against, per
+contracts/entrypoints.md's collector list.
 
 `login` (#27) is the one place a person clears a browser source's challenge by hand -- run on the
 HOST from the repo root (not inside a container -- WSL2 needs no display forwarding that way), so

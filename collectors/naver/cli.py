@@ -106,6 +106,12 @@ def run(
             outcome = _run_datalab(engine, active_fetcher, journal, now=now)
         else:
             outcome = _run_blog(engine, active_fetcher, journal, now=now)
+    except NotImplementedError:
+        # The default fetcher's "no live transport yet" signal -- surfaced as blocked/exit 2 with a
+        # one-line pointer, not a bare traceback (#95).
+        note = "no live transport yet for naver -- see issue #95 (_RaisingFetcher)"
+        print(note)
+        outcome = _Outcome("blocked", 2, note)
     except BaseException as exc:
         log.finish(run_id, status="failed", note=f"{type(exc).__name__}: {exc}")
         engine.dispose()
@@ -141,6 +147,10 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
         )
         try:
             body = fetcher.fetch(spec)
+        except NotImplementedError:
+            # No live transport (default fetcher, #95) -- let `run` turn this into one blocked
+            # outcome instead of a per-category note that would misreport it as a vendor failure.
+            raise
         except Exception as error:  # noqa: BLE001 - one category's failure must not stop the run
             journal.record(query=category, status=None, attempt=1, error=str(error))
             blocked.append(category)
@@ -200,6 +210,10 @@ def _walk_blog_query(
         spec = FetchSpec(kind="blog", query=q.term, params=params)
         try:
             body = fetcher.fetch(spec)
+        except NotImplementedError:
+            # No live transport (default fetcher, #95) -- let `run` turn this into one blocked
+            # outcome instead of a per-query note that would misreport it as a vendor failure.
+            raise
         except Exception as error:  # noqa: BLE001 - one query's failure must not stop the run
             journal.record(query=q.term, status=None, attempt=attempt, error=str(error))
             return posted, True
