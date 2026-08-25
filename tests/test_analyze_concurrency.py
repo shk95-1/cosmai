@@ -206,6 +206,33 @@ def test_a_dying_rule_run_leaves_the_manual_passs_run_alone(loaded: str, _schema
         assert cur.fetchone() == (GEMMA4,)
 
 
+def test_a_failed_solo_pass_keeps_the_version_it_was_labelling_with(loaded: str, _schema_name: str):
+    """단독 패스가 죽어도 그 run 의 `versions.polarity` 는 그 패스가 쓰던 판본이어야 한다.
+
+    `analysis_health.polarity_version` 이 그 값을 그대로 읽는다 (db/views/analysis_health.sql) —
+    닫는 쪽이 빈 versions 로 덮으면 4시간짜리 gemma4 패스가 무엇으로 라벨하다 죽었는지 표에 남지
+    않는다 (contracts/versioning.md).
+    """
+    polarity = _Interrupt(lambda: None, GEMMA4)
+    with connect(loaded) as conn:
+        found = run_stage(
+            conn,
+            "polarity",
+            scope=SUNBLOCK,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            polarity=polarity,
+            owners=OWNERS,
+        )
+    assert found.status == "failed" and BOOM in found.detail
+    assert found.run_id is not None
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, versions ->> 'polarity' FROM analysis_run WHERE run_id = %s", (found.run_id,)
+        )
+        assert cur.fetchone() == ("failed", GEMMA4)
+
+
 # --- 결함 3: analyze 끼리 락 하나로 겹침을 막는다 -------------------------------------------------
 
 

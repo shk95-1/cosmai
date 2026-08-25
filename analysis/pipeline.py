@@ -56,9 +56,12 @@ NOTE: LiteralString = "analyze:{stage}"
 RUN_FAILED: LiteralString = (
     "INSERT INTO analysis_run (status, finished_at, versions, note) VALUES ('failed', now(), %s::jsonb, %s)"
 )
+# versions 는 덮지 않고 합친다 — 단독 폴라리티 실행은 자기가 라벨한 판본을 RUN_START 에서만 적고
+# (analysis/polarity/pipeline.py), 여기서 통째로 덮으면 4시간짜리 gemma4 패스가 무엇으로 라벨하다
+# 죽었는지가 analysis_health.polarity_version 에서 사라진다 (contracts/versioning.md).
 RUN_CLOSE: LiteralString = (
-    "UPDATE analysis_run SET status = %s, finished_at = now(), versions = %s::jsonb, note = %s "
-    "WHERE run_id = %s"
+    "UPDATE analysis_run SET status = %s, finished_at = now(), versions = versions || %s::jsonb, "
+    "note = %s WHERE run_id = %s"
 )
 RUN_SKIPPED: LiteralString = (
     "INSERT INTO analysis_run (status, finished_at, versions, note) "
