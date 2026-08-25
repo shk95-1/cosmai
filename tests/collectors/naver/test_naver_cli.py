@@ -115,6 +115,30 @@ def test_datalab_writes_a_point_per_group_and_month(needs_runtime_url: str, secr
     assert len(fetcher.calls) == 1
 
 
+def test_datalab_shares_one_request_key_within_a_run_and_a_different_one_across_runs(
+    needs_runtime_url: str, secret_file: Path
+):
+    fetcher = _FakeFetcher()
+    run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
+    later = datetime(2026, 9, 1, 6, 10, tzinfo=UTC)  # a later run's endDate moves -> a new window
+    run(
+        "datalab",
+        database_url=needs_runtime_url,
+        secrets_path=secret_file,
+        fetcher=fetcher,
+        captured_at=later,
+    )
+
+    engine = sa.create_engine(needs_runtime_url)
+    with engine.begin() as conn:
+        keys = conn.execute(sa.select(naver_datalab_point.c.request_key)).scalars().all()
+    engine.dispose()
+
+    # the second run's fresh window rescaled every group's ratio -- all 5 rows now share its key.
+    assert len(set(keys)) == 1
+    assert keys[0] != ""
+
+
 def test_datalab_rerun_of_the_same_month_upserts_not_duplicates(needs_runtime_url: str, secret_file: Path):
     fetcher = _FakeFetcher()
     run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
