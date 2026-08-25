@@ -1,4 +1,4 @@
-"""registry.IMPLEMENTATIONS 가 import 하는 유닛 #3 의 예측자: polarity · wish_class.
+"""registry.load_implementations() 가 꽂는 유닛 #3 의 예측자: polarity · wish_class.
 
 Predictor 계약(interfaces.md)은 배치 행만 받고 연결은 받지 않는다 — 사전은 스스로 읽는다.
 LEXICON_URL 은 그 연결을 needs_runtime 이 아닌 곳으로 돌리는 유일한 자리다: `cosmai eval --url` 도,
@@ -85,5 +85,8 @@ def predict_wish_class(rows: Sequence[LabeledRow]) -> Sequence[str]:
     return out
 
 
-register("polarity", RulePolarity.version, predict_polarity)
-register("wish_class", RuleExtractor.version, predict_wish_class)
+def register_implementations() -> None:
+    """registry.load_implementations() 만이 등록을 일으킨다 — 모듈 수준에서 부르면 이 모듈을 먼저
+    import 한 쪽이 레지스트리 상태를 정한다 (#99)."""
+    register("polarity", RulePolarity.version, predict_polarity)
+    register("wish_class", RuleExtractor.version, predict_wish_class)

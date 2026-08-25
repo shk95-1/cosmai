@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Iterator, Sequence
 from decimal import Decimal
 
@@ -27,12 +26,15 @@ def oracle() -> Iterator[None]:
     def predict(rows: Sequence[LabeledRow]) -> Sequence[str]:
         return [row.gold for row in rows]
 
-    register("polarity", "oracle-v0", predict)
-    yield
+    # 오라클은 진짜 구현체의 자리에 선다 — cli 의 load_implementations() 가 그 위에 규칙을 다시
+    # 꽂으면 재려던 --split 배선 대신 규칙이 돈다 (test_cli_eval.py 의 harness_only 와 같은 자리).
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(registry, "IMPLEMENTATIONS", ())
+        register("polarity", "oracle-v0", predict)
+        yield
     unregister("polarity")
-    # 등록 모듈은 import 캐시라 load_implementations() 가 register() 를 다시 돌려 주지 않는다 —
-    # 이 파일이 지운 등록을 다음 테스트가 되찾을 방법은 그 모듈을 다시 실행하는 것뿐이다.
-    importlib.reload(importlib.import_module("analysis.predictors"))
+    # 이 파일이 갈아 끼운 등록을 다음 테스트가 되찾을 자리 (#30).
+    registry.load_implementations()
 
 
 def test_the_llm_factory_is_wired_by_the_implementations_list_and_not_by_the_cli():

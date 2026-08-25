@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import contextlib
-import importlib
 from collections.abc import Iterator
 
 import pytest
@@ -29,15 +28,10 @@ class Refused(Exception):
 
 @pytest.fixture
 def default_implementations() -> Iterator[None]:
-    """다른 파일이 지웠거나 갈아 끼운 등록을 되돌린다 — 검사 대상은 **기본** 등록이다.
-
-    register() 는 import 부작용이라 load_implementations() 는 캐시된 모듈을 다시 돌려주지 않는다.
-    """
-    for module in registry.IMPLEMENTATIONS:
-        importlib.reload(importlib.import_module(module))
+    """다른 파일이 지웠거나 갈아 끼운 등록을 되돌린다 — 검사 대상은 **기본** 등록이다."""
+    registry.load_implementations()
     yield
-    for module in registry.IMPLEMENTATIONS:
-        importlib.reload(importlib.import_module(module))
+    registry.load_implementations()
 
 
 @pytest.fixture
