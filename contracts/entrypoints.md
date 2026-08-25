@@ -123,9 +123,18 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
   돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.
-- 그 두 축의 어긋남이 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
+- `--scope <값>` 은 **두 축을 다 받는다**(#38): 값이 `lexicon_category` 면 aggregate 는 그 run 의 모집단에서
+  그 라벨을 단 언급들의 **원천 카테고리 집합**으로 펼쳐 그 scope 들에 쓰고, 원천 카테고리 문자열이면 그
+  한 scope 만 쓴다(`analysis/aggregate/pipeline.py` 의 `scopes_for`). 어느 쪽이든 `metrics_need.scope` 에
+  남는 값은 위 줄 그대로 **원천 카테고리**이고, 펼친 scope 의 행은 `--scope` 없는 실행이 그 카테고리에
+  쓰는 행과 같다 — scope 는 어느 카테고리를 쓸지를 고를 뿐 그 안에서 무엇이 세어지는지를 바꾸지 않는다.
+  역방향(lexicon → 원천)은 `needs.category_map` 만으로 복원되지 않는다: 표에 없는 leaf 는 항등이고
+  (`formats.md`) `name_keyword` 라벨은 원천 카테고리가 아예 없다 — 그래서 답은 표가 아니라 그 run 의
+  언급에서 나온다.
+- 펼치고도 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
   `metrics_need` 를 0행 쓰면 그 run 은 락을 놓친 실행과 같은 어휘·같은 자리로 `partial` + 종료 코드 **1**
-  로 닫히고, note 와 stdout 이 준 scope 값과 그 scope 가 실제로 걸려야 할 원천 category 문자열을 말한다.
+  로 닫히고, note 와 stdout 이 준 scope 값과 그 `lexicon_category` 를 단 언급들이 실제로 갖고 있는 원천
+  category 문자열을 말한다(하나도 없으면 없다고 말한다 — `name_keyword` 라벨이 그 갈래다).
   **`metrics_wish` 는 이 술어에 들어가지 않는다** — `analysis/aggregate/pipeline.py` 의 wish 집계는
   `--scope` 를 아예 보지 않고 그 모집단의 위시 전량을 매번 다시 세므로(`WISH_SCOPES` 는 스코프 인자와
   무관), 0 이든 아니든 이 scope 에 대해 아무것도 말해주지 않는다. `--scope` 없는 실행(05:00 크론)은 이
