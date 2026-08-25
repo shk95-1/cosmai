@@ -89,6 +89,12 @@ def _rows(rows: Iterable[Any], keys: Sequence[str], columns: Sequence[str]) -> d
     return {tuple(getattr(r, k) for k in keys): {c: getattr(r, c) for c in columns} for r in rows}
 
 
+def _category_sums(rows: Iterable[Any]) -> list[Any]:
+    """골든이 재는 것은 카테고리 합 행이다 — 제품 축 행(#41)은 같은 (scope, need_key) 를 다시 쓰므로
+    걸러내지 않으면 키가 겹쳐 합 행을 덮어쓴다. 시드 쪽 질의도 product_ref = '' 만 읽는다."""
+    return [r for r in rows if r.product_ref == "" and r.month == ""]
+
+
 def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime_url: str):
     seed.run_all(needs_runtime_url)
     aggregator = RuleAggregator()
@@ -103,13 +109,16 @@ def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime
             "suncare": (
                 _golden(cur, "metrics_need", "scope, need_key", NEED_COLUMNS, "seed:slice-suncare",
                         "AND product_ref = '' AND month = ''"),
-                _rows(aggregator.need_metrics(suncare, [], "선블록"), ("scope", "need_key"), NEED_COLUMNS),
+                _rows(_category_sums(aggregator.need_metrics(suncare, [], "선블록")),
+                      ("scope", "need_key"), NEED_COLUMNS),
             ),
             "p1": (
                 _golden(cur, "metrics_need", "scope, need_key", NEED_COLUMNS, "seed:slice-p1"),
                 _rows(
-                    [r for s in {d.category for d in denominators if d.category}
-                     for r in aggregator.need_metrics(p1, denominators, s)],
+                    _category_sums(
+                        r for s in {d.category for d in denominators if d.category}
+                        for r in aggregator.need_metrics(p1, denominators, s)
+                    ),
                     ("scope", "need_key"), NEED_COLUMNS,
                 ),
             ),

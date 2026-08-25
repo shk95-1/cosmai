@@ -98,7 +98,8 @@ def wish(
 
 
 def by_key(rows):
-    return {r.need_key: r for r in rows}
+    """카테고리 합 행만 — 제품 축 행은 같은 need_key 를 product_ref 만 달리해 다시 낸다 (#41)."""
+    return {r.need_key: r for r in rows if r.product_ref == ""}
 
 
 def test_reviews_and_comments_are_counted_on_separate_axes():
@@ -187,12 +188,12 @@ def test_the_aspectless_sentinel_is_excluded_from_the_need_metrics():
         need("", "만족", ref="b/2", product="oy:b", month="2026-02"),
     ]
     rows = RuleAggregator().need_metrics(mentions, [], "선블록")
-    assert [r.need_key for r in rows] == ["밀림"]
+    assert {r.need_key for r in rows} == {"밀림"}
     # 센티널은 집합 전체를 세는 분모에도 들어가지 않는다 — 어떤 분자도 닿지 못하는 달·제품이다.
-    assert (rows[0].persist_months_total, rows[0].persist_products_total) == (1, 1)
+    assert (by_key(rows)["밀림"].persist_months_total, by_key(rows)["밀림"].persist_products_total) == (1, 1)
     # 롤업의 canonical 접기도 센티널을 되살리지 않는다.
     rollup = RuleAggregator(canonical={"밀림": "밀림들뜸"}).need_metrics(mentions, [], "all")
-    assert [r.need_key for r in rollup] == ["밀림들뜸"]
+    assert {r.need_key for r in rollup} == {"밀림들뜸"}
 
 
 def test_wish_metrics_splits_the_cross_tab_from_its_margins():
@@ -257,3 +258,56 @@ def test_a_label_with_no_source_category_expands_to_nothing():
 def test_no_scope_still_writes_every_source_category_and_the_rollup():
     mentions = [labelled(SOURCE_CATEGORY, "선블록"), labelled("쿠션", "쿠션")]
     assert scopes_for(None, mentions) == ["01 > 선케어 > 선블록", "all", "쿠션"]
+
+
+def products(rows, need_key):
+    """제품 축 행만 — 카테고리 합 행과 같은 need_key 를 product_ref 만 달리해 다시 낸다 (#41)."""
+    return {r.product_ref: r for r in rows if r.need_key == need_key and r.product_ref}
+
+
+def test_the_product_axis_repeats_each_need_key_for_the_products_that_mention_it():
+    rows = RuleAggregator().need_metrics(
+        [
+            need("밀림", "불만", ref="a/1", product="oy:a", month="2026-01"),
+            need("밀림", "만족", ref="a/2", product="oy:a", month="2026-01"),
+            need("밀림", "불만", ref="b/1", product="oy:b", month="2026-02"),
+        ],
+        [],
+        "선블록",
+    )
+    # 카테고리 합 행은 그대로다 — 화면 1 과 골든이 그것을 본다.
+    assert (by_key(rows)["밀림"].neg, by_key(rows)["밀림"].pos) == (2, 1)
+    per = products(rows, "밀림")
+    assert sorted(per) == ["oy:a", "oy:b"]
+    assert (per["oy:a"].neg, per["oy:a"].pos, per["oy:a"].unresolved) == (1, 1, 0.5)
+    assert (per["oy:b"].neg, per["oy:b"].pos, per["oy:b"].unresolved) == (1, 0, 1.0)
+    # 제품 축 행은 그 제품만으로 좁힌 모집단에 같은 식을 다시 적용한 것이다.
+    assert (per["oy:a"].persist_months, per["oy:a"].persist_months_total) == (1, 1)
+    assert (per["oy:a"].persist_products, per["oy:a"].persist_products_total) == (1, 1)
+    # PK 는 (run_id, scope, need_key, month, product_ref) 다 — 월 축을 쓰지 않으니 충돌하지 않는다.
+    assert all(r.month == "" for r in rows)
+    assert len({(r.scope, r.need_key, r.month, r.product_ref) for r in rows}) == len(rows)
+
+
+def test_a_product_row_measures_the_low_band_against_that_products_own_denominator():
+    rows = RuleAggregator().need_metrics(
+        [
+            need("밀림", "불만", ref="a/1", product="oy:a", rating=1),
+            need("밀림", "불만", ref="b/1", product="oy:b", rating=1),
+        ],
+        [denom("a", low=10, site=1000), denom("b", low=5, site=500)],
+        "선블록",
+    )
+    assert (by_key(rows)["밀림"].low_mentioning, by_key(rows)["밀림"].denom_low) == (2, 15)
+    per = products(rows, "밀림")
+    assert (per["oy:a"].low_mentioning, per["oy:a"].denom_low, per["oy:a"].denom_site) == (1, 10, 1000)
+    assert (per["oy:a"].low_share, per["oy:b"].low_share) == (0.1, 0.2)
+    # interfaces.md §수식: 제품 하나짜리 집합에서 그 식은 제품 단위 정의로 그대로 되돌아간다.
+    assert (per["oy:a"].population_share_pct, per["oy:b"].population_share_pct) == (1.0, 2.0)
+
+
+def test_a_mention_that_names_no_product_lands_only_in_the_category_sum():
+    """B6 과 같은 자리: 제품을 모르는 언급은 제품 축에 행을 만들지 못한다."""
+    mention = replace(need("밀림", "불만", product=None), source_product_key=None)
+    rows = RuleAggregator().need_metrics([mention], [], "선블록")
+    assert [r.product_ref for r in rows] == [""]

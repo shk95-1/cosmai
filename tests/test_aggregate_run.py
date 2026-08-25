@@ -135,8 +135,11 @@ def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: 
             run(conn)
         conn.rollback()
         run_id = run(conn, scope="선블록", extractors=("slice-suncare",))
+        # 카테고리 합 행끼리 견준다 — 같은 run 이 제품 축 행도 낸다 (#41).
         cur.execute(
-            "SELECT need_key, neg, pos FROM metrics_need WHERE run_id = %s ORDER BY need_key", (run_id,)
+            "SELECT need_key, neg, pos FROM metrics_need WHERE run_id = %s AND month = '' "
+            "AND product_ref = '' ORDER BY need_key",
+            (run_id,),
         )
         got = cur.fetchall()
         cur.execute(
@@ -145,3 +148,7 @@ def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: 
             "ORDER BY need_key"
         )
         assert got == cur.fetchall()
+        # 그 모집단은 제품 축에도 그대로 실린다 — 화면 3 이 읽는 행이다.
+        cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s AND product_ref <> ''", (run_id,))
+        per_product = cur.fetchone()
+        assert per_product is not None and per_product[0] > 0

@@ -88,3 +88,24 @@ test('runCaption: need·wish run의 versions·note를 보인다 (#87)', () => {
   assert.match(caption, /"aggregate":"1\.1\.0"/);
   assert.equal(runCaption(null, null), '데이터 없음');
 });
+
+// #41: 제품 축 행은 scope 마다 한 벌씩 나온다 — 같은 제품이 자기 카테고리와 롤업('all')에서
+// 두 번 걸리면 상위 20이 중복으로 찬다. 롤업이 있으면 롤업만 본다.
+test('productRows: 롤업 scope 가 있으면 제품이 두 번 나오지 않는다 (#41)', () => {
+  const need = [
+    { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: '', neg: 9, unresolved: 0.6 },
+    { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+    { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+    { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:B2', neg: 2, unresolved: 0.5 },
+  ];
+  const rows = productRows(need, 5);
+  assert.deepEqual(rows.map((r) => [r.scope, r.product_ref]), [['all', 'oy:A1'], ['all', 'oy:B2']]);
+});
+
+// --scope 로 좁혀 돈 run 에는 'all' 이 없다 — 그때는 있는 scope 를 그대로 쓴다.
+test('productRows: 롤업이 없는 run 은 카테고리 scope 의 제품 행을 낸다 (#41)', () => {
+  const need = [
+    { run_id: 6, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+  ];
+  assert.deepEqual(productRows(need, 6).map((r) => r.product_ref), ['oy:A1']);
+});
