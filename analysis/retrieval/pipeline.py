@@ -10,7 +10,7 @@ import hashlib
 import os
 import pickle
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -20,7 +20,13 @@ import psycopg
 
 from analysis.retrieval import corpus
 from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
-from analysis.retrieval.chunks import MAX_CHARS, check_rows, split_text
+from analysis.retrieval.chunks import (
+    MAX_CHARS,
+    SAMPLES_PER_KIND,
+    check_rows,
+    problem_kind,
+    split_text,
+)
 from analysis.retrieval.normalize import normalize_text
 
 WRITE_BATCH = 1000
@@ -61,7 +67,12 @@ class ChunkOutcome:
             # 하드스톱(1000자) 미만이라 problems 는 아니지만, "[통과]"가 500 위반 없음으로 읽혀
             # 남의 청크 27건이 묻힌 적이 있다(ydc v0.2.0) -- 몇 건인지는 항상 보여야 한다.
             head += f"; 목표 상한 초과 {self.over_target:,}건 (최대 {self.over_target_max:,}자)"
-        return head if not self.problems else f"{head}; 계약 위반 {len(self.problems)}종"
+        if not self.problems:
+            return head
+        # problems 는 종류별 표본 몇 건이지 위반 건수가 아니다 -- 그 길이를 "종" 이라 부르면
+        # 한 종류의 표본 3건이 "3종" 으로 읽힌다(#18 M12).
+        kinds = len({problem_kind(p) for p in self.problems})
+        return f"{head}; 계약 위반 {kinds}종"
 
 
 def chunk_rows(documents: Iterable[corpus.Document]) -> Iterator[dict]:
@@ -100,6 +111,8 @@ def run(
     total = written = pruned = over_target = over_target_max = 0
     batch: list[dict] = []
     problems: list[str] = []
+    samples: Counter = Counter()  # 종류별로 몇 건을 이미 남겼는가
+    seen_problems: set[str] = set()
 
     def flush() -> None:
         nonlocal written, pruned
@@ -120,7 +133,17 @@ def run(
     def validate_and_flush() -> None:
         nonlocal over_target, over_target_max
         found, _per_source, lengths, _docs = check_rows(batch)
-        problems.extend(p for p in found if p not in problems)
+        # check_rows 의 종류별 3건 상한은 배치 안에서만 걸린다 -- 실측 규모(381,950청크 = 382배치)
+        # 에서 배치마다 리셋되면 한 종류가 천 줄을 넘겨 보고가 다시 읽을 수 없게 된다(#18 M12).
+        for problem in found:
+            kind = problem_kind(problem)
+            # 배치마다 행 번호가 2 부터 다시 세어지므로 같은 메시지가 여러 배치에서 나온다. 집합으로
+            # 거른다 -- 앞의 `p not in problems` 는 problems 가 길어질수록 배치마다 다시 훑었다.
+            if problem in seen_problems or samples[kind] >= SAMPLES_PER_KIND:
+                continue
+            seen_problems.add(problem)
+            samples[kind] += 1
+            problems.append(problem)
         # 하드스톱(1000자, check_rows)은 problems 로만 올린다 -- 500 을 그대로 problems 에 얹으면
         # 우리 split_text 는 500 이하만 내놓으니 걸릴 일이 없지만, 외부 청크를 검사할 때는
         # 지금 종료 코드 0 인 실행이 1 로 바뀐다. 그건 이 이슈가 아니라 M11 이 명시적으로 남겨둔 경계다.
@@ -338,4 +361,8 @@ def search(
             ([chunk_id for chunk_id, _ in hits],),
         )
         texts = dict(cur.fetchall())
+    # 여기서 커밋하지 않으면 부르는 쪽이 연결을 놓을 때까지 idle in transaction 으로 남는다 --
+    # 그 트랜잭션은 vacuum 을 막고 needs_runtime 의 idle_in_transaction_session_timeout(15초)이
+    # 끊을 때까지 산다(cosmai#58). 이 파일의 다른 SELECT 들은 이미 그렇게 하고 있다.
+    conn.commit()
     return [(chunk_id, score, texts.get(chunk_id, "")) for chunk_id, score in hits]

@@ -13,9 +13,11 @@ from analysis.retrieval import corpus
 from analysis.retrieval.chunks import FIELDS
 from cosmai.cli import RETRIEVAL_SOURCES
 
-DDL = Path(__file__).resolve().parents[2] / "contracts" / "ddl" / "needs" / "020_retrieval_chunk.sql"
-ENTRYPOINTS = Path(__file__).resolve().parents[2] / "contracts" / "entrypoints.md"
-INTERFACES = Path(__file__).resolve().parents[2] / "contracts" / "interfaces.md"
+ROOT = Path(__file__).resolve().parents[2]
+DDL = ROOT / "contracts" / "ddl" / "needs" / "020_retrieval_chunk.sql"
+ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
+INTERFACES = ROOT / "contracts" / "interfaces.md"
+INDEX = ROOT / "contracts" / "README.md"
 SEARCH_HEADER = "| mode | engine | 질의 | P@10 | MRR@10 | Hit@10 |"
 
 
@@ -86,10 +88,17 @@ def test_the_ddl_lives_in_this_branchs_number_block():
     assert DDL.name.startswith("020_")
 
 
-def test_the_ddl_is_additive_only():
-    body = re.sub(r"--[^\n]*", "", DDL.read_text(encoding="utf-8"))
-    for forbidden in ("DROP ", "ALTER COLUMN", "TRUNCATE", "DELETE FROM", "REVOKE"):
-        assert forbidden not in body.upper(), forbidden
+def test_the_contracts_index_carries_a_row_for_the_chunk_ddl():
+    """`contracts/README.md` 의 표가 계약 파일의 색인이고 셋째 칸이 "무엇이 이것을 검사하는가" 다.
+    020 은 그 표에 없어서, 색인만 읽으면 이 유닛의 계약이 아예 없는 것으로 보였다(#18 M18).
+    추가만 검사는 여기 두지 않는다 -- tests/test_ddl_additive_only.py 가 이 디렉터리의 파일
+    전부를 더 넓은 어휘로 훑으므로, 여기 사본을 두면 좁은 쪽이 통과 도장처럼 읽힌다."""
+    rows = [line for line in INDEX.read_text(encoding="utf-8").splitlines() if DDL.name in line]
+    assert len(rows) == 1, rows
+    checkers = [c.strip("`") for c in re.findall(r"`[^`]+`", rows[0]) if c.strip("`").endswith(".py")]
+    assert checkers, rows[0]
+    for checker in checkers:
+        assert (ROOT / checker).exists(), checker
 
 
 @pytest.mark.postgres

@@ -33,6 +33,8 @@ NOUN_TAGS = frozenset({"NNG", "NNP"})
 # 0 으로 두면 등록해도 기존 분석을 못 이겨 `신제품` 이 신(XPN) + 제품(NNG) 으로 갈린다.
 USER_WORD_SCORE = 3.0
 
+# 정본은 이 디렉터리다. analysis/slices/ydc/seeds/ 에 md5 가 같은 사본이 있지만 그쪽은 이식 전
+# 원본(읽기 전용 참조, #9 가 지운다)이라 고쳐도 색인에 아무 일도 일어나지 않는다(#18 M15).
 DICT_DIR = Path(__file__).resolve().parent / "dict"
 DICTIONARIES = (DICT_DIR / "user_dictionary.tsv", DICT_DIR / "ingredient_dictionary.tsv")
 # 토큰을 정하는 입력 전부. topics.py 가 여기 드는 이유는 그 별칭이 Kiwi 사용자 단어로 등록되고
@@ -43,6 +45,9 @@ TOKENIZER_INPUTS = (*DICTIONARIES, Path(topics.__file__).resolve())
 _kiwi = None
 _topic_words: list[str] | None = None
 _expand_words: list[str] | None = None
+# 상한을 두지 않는다: 토큰 하나에 항목 하나라 코퍼스 어휘 수에서 멎고(실측 3,000청크 -> 항목
+# 3,013개 · 약 92B, 이어 돈 질의 150번이 더한 것은 2개), 그 어휘로 세운 postings 를 같은
+# 프로세스가 이미 훨씬 크게 물고 있다 -- 프로세스는 CLI 한 번이다(#18 M16).
 _expanded: dict[str, tuple[str, ...]] = {}
 
 

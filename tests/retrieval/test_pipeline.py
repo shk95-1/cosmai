@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from sqlalchemy.engine import make_url
 
-from analysis.retrieval import corpus, pipeline, vectors
+from analysis.retrieval import chunks, corpus, pipeline, vectors
 
 pytestmark = pytest.mark.postgres
 
@@ -263,6 +263,14 @@ def test_search_finds_an_ingredient_by_its_exact_name(conn, _schema_name):
     assert [h[0] for h in hits][:1] == ["youtube_comment:c3#0"]
 
 
+def test_search_leaves_no_open_transaction(conn, _schema_name):
+    """마지막 SELECT 뒤에 커밋이 없으면 연결이 idle in transaction 으로 남는다 -- 그 트랜잭션은
+    vacuum 을 막고, 끊는 것은 15초짜리 idle_in_transaction_session_timeout 뿐이다(#18 M13)."""
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert pipeline.search(conn, "백탁", top=3, cache_dir=None)
+    assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+
+
 def test_search_on_an_empty_index_returns_nothing(conn):
     assert pipeline.search(conn, "백탁", cache_dir=None) == []
 
@@ -342,3 +350,33 @@ def test_a_store_made_before_chunked_at_max_still_searches_and_says_so(encoded, 
     hits = pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
     assert hits
     assert "chunked_at_max" in capsys.readouterr().err
+
+
+def test_the_sample_cap_holds_across_the_whole_run(conn, owner, _schema_name, monkeypatch):
+    """check_rows 의 종류별 3건 상한은 한 배치 안에서만 걸린다 -- 실측 규모(381,950청크 = 382배치)
+    에서 배치마다 리셋되면 한 종류가 천 줄 넘게 쌓여 보고가 다시 읽을 수 없어진다(#18 M12)."""
+    monkeypatch.setattr(pipeline, "split_text", lambda text: [text])  # 하드스톱 초과를 그대로 흘린다
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # 문서 하나가 배치 하나
+    with owner.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES (%s,%s,%s,now())",
+            [("v9", f"c1{i}", "백" * 1100) for i in range(10)],
+        )
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert sum(1 for p in outcome.problems if p.startswith("너무 긺")) == chunks.SAMPLES_PER_KIND
+
+
+def test_the_note_counts_kinds_not_samples(conn, owner, _schema_name, monkeypatch):
+    # 한 종류의 표본 3건이 "3종" 으로 읽히면 위반의 폭을 잘못 본다.
+    monkeypatch.setattr(pipeline, "split_text", lambda text: [text])
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)
+    with owner.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES (%s,%s,%s,now())",
+            [("v9", f"c1{i}", "백" * 1100) for i in range(10)],
+        )
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert len(outcome.problems) > 1
+    assert "계약 위반 1종" in outcome.note

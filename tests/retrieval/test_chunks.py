@@ -5,7 +5,14 @@ from __future__ import annotations
 
 import pytest
 
-from analysis.retrieval.chunks import FIELDS, MAX_CHARS, check_rows, split_text
+from analysis.retrieval.chunks import (
+    FIELDS,
+    MAX_CHARS,
+    SAMPLES_PER_KIND,
+    check_rows,
+    problem_kind,
+    split_text,
+)
 
 
 def _row(**over):
@@ -85,7 +92,15 @@ def test_violations_of_one_kind_are_capped_at_three():
     # 같은 종류가 수만 건 나올 수 있다. 보고서가 그걸 다 담으면 읽을 수 없다.
     rows = [_row(chunk_id=f"s:{i}#0", doc_id=f"s:{i}", source="") for i in range(10)]
     problems, *_ = check_rows(rows)
-    assert sum(1 for p in problems if p.startswith("source 없음")) == 3
+    assert sum(1 for p in problems if p.startswith("source 없음")) == SAMPLES_PER_KIND
+
+
+def test_the_kind_the_cap_counts_is_the_text_before_the_colon():
+    """상한이 세는 단위를 부르는 쪽도 세어야 한다(pipeline.run 은 실행 전체에 같은 상한을 건다) --
+    두 곳이 다른 규칙이면 한쪽만 걸린다(#18 M12)."""
+    rows = [_row(chunk_id=f"s:{i}#0", doc_id=f"s:{i}", source="") for i in range(10)]
+    problems, *_ = check_rows(rows)
+    assert {problem_kind(p) for p in problems} == {"source 없음"}
 
 
 def test_check_rows_accepts_a_generator():
