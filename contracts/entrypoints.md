@@ -86,11 +86,18 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
 - 그 모집단 안에서 **극성 구현은 scope 마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가 한
   `lexicon_category` 를 한 `polarity_version` 에 배정하고, 주인이 아닌 실행은 그 scope 의 `need_mention`
-  행을 쓰지도 지우지도 않는다 — 005 의 자연키가 `polarity_version` 을 담지 않아 소유는 행이 아니라
-  scope 단위로만 성립하기 때문이다. 주인 없는 `lexicon_category` 와 `lexicon_category IS NULL` 인
-  행(유튜브 댓글·카테고리를 못 붙인 리뷰)은 지금처럼 규칙이 갱신한다.
-- 그래서 **한 문장에는 라벨이 하나뿐이다** — 두 구현이 공존해도 같은 문장이 두 번 세어지지 않는다.
-  다만 `metrics_need` 의 `scope` 축은 `lexicon_category` 가 아니라 원천 카테고리이고 rollup
+  행을 쓰지도 지우지도 않는다(삭제문과 `DO UPDATE` 에 같이 선 소유 술어가 그것을 세운다) — 005 의
+  자연키가 `polarity_version` 을 담지 않아 소유는 행이 아니라 scope 단위로만 성립하기 때문이다. 주인
+  없는 `lexicon_category` 와 `lexicon_category IS NULL` 인 행(유튜브 댓글·카테고리를 못 붙인 리뷰)은
+  지금처럼 규칙이 갱신한다.
+- 그래서 한 문장의 라벨은 그 문장의 `lexicon_category` 를 소유한 구현의 것 하나다 — 그 카테고리가
+  움직이지 않는 동안은. `rank_snapshot` 의 최신 행과 `category_map` 이 매일 다시 계산하므로 제품은
+  카테고리를 옮겨 다니고, 옮겨간 뒤 옛 scope 에 남은 주인의 행은 아무도 지우지 못한다(주인 아닌 실행은
+  손대지 않고, 주인의 `--scope` 삭제는 자기 판본 행을 남긴다). 그 위에 새 scope 의 구현이 같은 문장을
+  자기 것으로 뽑으므로, **두 구현이 다른 `need_key` 를 고르면 그 동안 한 문장이 두 행을 갖고 집계도 둘을
+  센다** — 같은 `need_key` 면 자연키가 겹치고 소유 술어가 갱신을 막아 주인의 행 하나로 남는다. 옛 행은
+  주인의 `polarity_version` 이 오르는 첫 실행이 치운다.
+- `metrics_need` 의 `scope` 축은 `lexicon_category` 가 아니라 원천 카테고리이고 rollup
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
   돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.

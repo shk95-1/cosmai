@@ -682,3 +682,63 @@ def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
     assert dict(OWNERS) == {"선블록": "llm-ollama-gemma4:latest-fs2-20260824"}
     assert OWNERS["선블록"] == OllamaPolarity().version
+
+
+# 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
+# 다시 계산하니 한 제품의 카테고리는 움직인다. 그때 주인의 행은 옛 scope 에 남고, 규칙은 같은 문장을 새
+# scope 로 다시 뽑는다. P2/R5 는 오늘 '샴푸'로, 규칙은 그 문장에서 '트러블'을 낸다.
+MOVED = ("P2/R5", "비듬이 너무 심해서 최악이에요")
+RULE_KEY = "트러블"
+
+
+def test_an_unscoped_rule_run_does_not_overwrite_an_owned_row_whose_scope_moved(
+    loaded: str, _schema_name: str
+):
+    """두 구현이 같은 need_key 를 고르면 자연키(005)가 통째로 겹친다 — 삭제를 피한 주인의 행을 제자리
+    upsert 가 갈아 끼운다. 삭제문에 있는 소유 술어가 갱신문에도 있어야 한다."""
+    ref, sentence = MOVED
+    _label(loaded, ref, RULE_KEY, sentence, GEMMA4)
+    with connect(loaded) as conn:  # 크론이 부르는 모양 그대로: 배송 표가 선다
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    assert _labels(loaded, ref) == [(RULE_KEY, "만족", GEMMA4)]
+
+
+def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scopes(
+    loaded: str, _schema_name: str
+):
+    """need_key 가 갈리면 두 행이 나란히 남는다 — entrypoints.md §분석 이 '한 문장에 라벨 하나'를
+    어디까지 약속할 수 있는지가 여기서 정해진다. 옛 scope 의 행은 주인의 판본이 오를 때 치워진다."""
+    ref, sentence = MOVED
+    _label(loaded, ref, "백탁", sentence, GEMMA4)
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    assert _labels(loaded, ref) == [("백탁", "만족", GEMMA4), (RULE_KEY, "불만", "rule-v2.2")]
+
+
+class DriftedPolarity(OwnerPolarity):
+    """두 번째 실행의 판정자 — 판본도 aspect 도 앞 실행과 다르다. aspect 가 같으면 옛 행이 제자리
+    upsert 로 갱신돼 삭제문이 실제로 그 행을 잡는지 볼 수 없다 (자연키에 need_key 가 있다)."""
+
+    version = "stub-drifted-v9"
+
+    def classify(
+        self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
+    ) -> PolarityResult:
+        return PolarityResult(aspect="끈적유분", polarity="불만", reason="drifted", version=self.version)
+
+
+def _comment_versions(url: str) -> list[str]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT polarity_version FROM need_mention WHERE src = 'yt_comment' ORDER BY 1")
+        return [row[0] for row in cur.fetchall()]
+
+
+def test_a_rerun_with_a_new_version_clears_the_rows_that_have_no_lexicon_category(
+    loaded: str, _schema_name: str
+):
+    """댓글 행에는 lexicon_category 가 없다. 배송 표가 서면 삭제문의 소유 술어가 `NULL <> ALL(...)` 을
+    묻게 되는데 그 값은 NULL 이라, IS NULL 갈래가 빠지면 옛 판본 행이 어떤 재실행으로도 사라지지 않는다."""
+    _run(loaded, _schema_name, polarity=StubPolarity(), owners=OWNERS)
+    assert _comment_versions(loaded) == [StubPolarity.version]
+    _run(loaded, _schema_name, polarity=DriftedPolarity(), owners=OWNERS)
+    assert _comment_versions(loaded) == [DriftedPolarity.version]

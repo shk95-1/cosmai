@@ -86,7 +86,12 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
+WHERE need_mention.lexicon_category IS NULL OR need_mention.lexicon_category <> ALL(%s::text[])
 """
+# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category 가 남의 scope 면 갱신도 하지 않는다.
+# 저장된 scope 와 지금 매핑이 갈리면(rank_snapshot 최신 행·category_map 이 매일 다시 계산한다) 이 실행은
+# 그 문장을 자기 것으로 보고 다시 뽑는다: 두 구현이 같은 need_key 를 고르면 자연키가 통째로 겹쳐, 삭제를
+# 피한 주인의 행을 제자리 upsert 가 갈아 끼운다. WISH_UPSERT 가 쓰는 그 자리(DO UPDATE ... WHERE)다.
 WISH_UPSERT: LiteralString = """
 INSERT INTO wish_mention
   (src, ref, video_id, channel_id, channel_is_brand_owner, product_ref, observed_at,
@@ -395,15 +400,15 @@ class PolarityStage:
         self.conn.commit()
         return replaced
 
-    def _write(self, statement: LiteralString, rows: Sequence[Any]) -> None:
-        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md).
+    def _write(self, statement: LiteralString, rows: Sequence[Any], extra: tuple[Any, ...] = ()) -> None:
+        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md) + DO UPDATE 의 술어 인자.
         for start in range(0, len(rows), self.batch):
             with self.conn.cursor() as cur:
-                cur.executemany(statement, [astuple(r) for r in rows[start : start + self.batch]])
+                cur.executemany(statement, [astuple(r) + extra for r in rows[start : start + self.batch]])
             self.conn.commit()
 
     def flush(self, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]) -> None:
-        self._write(NEED_UPSERT, needs)
+        self._write(NEED_UPSERT, needs, (list(self.foreign),))
         self._write(WISH_UPSERT, wishes)
 
 
