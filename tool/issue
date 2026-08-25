@@ -1,0 +1,38 @@
+#!/bin/sh
+# Reads both repos as one issue graph and answers the three questions #60's rules
+# need answered: what is startable, what breaks a rule, what has drifted.
+#
+# There is no write subcommand on purpose. The rules in #60 live or die on being
+# readable -- `gh issue list` shows neither sub-issue order nor blockedBy -- and a
+# boot that loses this tool degrades to `gh issue list -l ch:<x>`, which is worse
+# but cannot damage anything.
+
+set -e
+
+# ${0%/*} rather than dirname: the degrade path must still reach prerequisite on a
+# host that is missing coreutils, not die with "dirname: not found".
+case "$0" in */*) issue_tool_dir=${0%/*} ;; *) issue_tool_dir=. ;; esac
+. "$issue_tool_dir/checks/prerequisite"
+require_command gh jq git
+
+usage() {
+    cat >&2 <<'EOF'
+usage: tool/issue <command>
+
+  ready [--user] [--json]   startable issues per channel, in queue order
+  lint [--json]             rule violations; exit 1 when there is one
+  audit                     drift report; exit 0
+EOF
+    exit 64
+}
+
+cmd=${1:-}
+[ -n "$cmd" ] || usage
+shift
+
+case "$cmd" in
+    ready) ;;
+    lint) ;;
+    audit) ;;
+    *) usage ;;
+esac
