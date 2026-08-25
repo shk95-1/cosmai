@@ -164,11 +164,22 @@ def run(
     return EmbedOutcome(model, revision, len(rows), out)
 
 
-def encode_query(query: str, *, out: Path = DEFAULT_STORE, device: str | None = None) -> list[float]:
+def encode_query(
+    query: str,
+    *,
+    out: Path = DEFAULT_STORE,
+    device: str | None = None,
+    store=None,
+    encoder=None,
+) -> list[float]:
     """질의 벡터. **모델과 프리픽스는 매니페스트에서 읽는다** -- 문서를 태운 것과 짝이 안 맞으면
-    순위가 조용히 틀어지고, 기본값을 여기 다시 적으면 그 순간 정본이 두 벌이 된다."""
-    store = load(out)
-    encoder = load_encoder(store.model or MODEL, device)
+    순위가 조용히 틀어지고, 기본값을 여기 다시 적으면 그 순간 정본이 두 벌이 된다.
+
+    `store` 와 `encoder` 를 넘기면 그것을 쓴다. 질의 61개를 연달아 채점하는데 매번 다시 읽으면
+    1.2GB 행렬과 모델을 61번 여는 셈이다.
+    """
+    store = store or load(out)
+    encoder = encoder or load_encoder(store.model or MODEL, device)
     vector = encoder.encode([store.query_prefix + query], normalize_embeddings=True, show_progress_bar=False)[
         0
     ]

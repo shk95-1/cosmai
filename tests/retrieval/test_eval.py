@@ -125,6 +125,53 @@ def test_cache_dir_none_leaves_no_files_behind(loaded, tmp_path, monkeypatch):
     assert list(tmp_path.glob("index-*.pkl"))
 
 
+def test_building_the_gold_leaves_no_open_transaction(loaded):
+    """서버 커서가 연 트랜잭션을 닫지 않으면, 뒤이어 1.2GB 벡터와 모델을 읽는 동안
+    needs_runtime 이 연결을 끊는다(2026-08-25, literal/vector 가 9분 만에 여기서 죽었다)."""
+    retrieval_eval.gold_from_chunks(loaded)
+    assert loaded.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+
+
+def test_the_vector_store_and_encoder_are_opened_once(loaded, monkeypatch, tmp_path):
+    """질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다. 결과는 같고 시간만 사라지므로
+    수치로는 드러나지 않는다."""
+    import numpy as np
+
+    from analysis.retrieval import embed, vectors
+
+    # 저장소는 청크와 같은 chunk_id 를 가져야 to_docs 가 정답과 맞물린다.
+    with loaded.cursor() as cur:
+        cur.execute("SELECT chunk_id, source FROM retrieval_chunk ORDER BY chunk_id")
+        rows = cur.fetchall()
+    loaded.commit()
+    matrix = np.zeros((len(rows), vectors.DIM), dtype="float32")
+    matrix[:, 0] = 1.0
+    out = tmp_path / "e5base"
+    vectors.save(out, matrix, rows, {"model": "m", "l2_normalized": True, "query_prefix": "query: "})
+
+    opened = {"store": 0, "encoder": 0}
+    real_load = vectors.load
+
+    def counting_load(path=vectors.DEFAULT_STORE):
+        opened["store"] += 1
+        return real_load(path)
+
+    class FakeEncoder:
+        def encode(self, texts, **_kw):
+            return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+    def counting_encoder(*_a, **_kw):
+        opened["encoder"] += 1
+        return FakeEncoder()
+
+    monkeypatch.setattr(vectors, "load", counting_load)
+    monkeypatch.setattr(embed, "load_encoder", counting_encoder)
+
+    rows_out = retrieval_eval.run(loaded, "literal", engine="vector", store=out, cache_dir=None)
+    assert rows_out, "질의가 하나도 채점되지 않았다"
+    assert opened == {"store": 1, "encoder": 1}, opened
+
+
 def test_an_unknown_mode_is_refused(loaded):
     with pytest.raises(ValueError):
         retrieval_eval.run(loaded, "vibes", cache_dir=None)

@@ -87,6 +87,9 @@ def gold_from_chunks(conn: psycopg.Connection) -> dict[str, set[str]]:
         for doc_id, text in cur:
             for topic in match_topics(text):
                 gold[topic].add(doc_id)
+    # 서버 커서는 트랜잭션을 연다. 닫지 않고 나가면 뒤이어 벡터 저장소(1.2GB)와 모델을 읽는
+    # 동안 연결이 idle-in-transaction 으로 끊긴다 -- 실측으로 여기서 끊겼다.
+    conn.commit()
     return gold
 
 
@@ -149,6 +152,14 @@ def run(
     index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
     gold_all = gold_from_chunks(conn)
 
+    # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
+    vector_store = encoder = None
+    if engine != "bm25":
+        from analysis.retrieval import embed, vectors
+
+        vector_store = vectors.load(store or vectors.DEFAULT_STORE)
+        encoder = embed.load_encoder(vector_store.model or vectors.MODEL)
+
     rows: list[Row] = []
     for topic_id, query in queries(mode):
         gold = set(gold_all.get(topic_id, ()))
@@ -168,6 +179,8 @@ def run(
             store=store,
             cache_dir=_cache(cache_dir),
             index=index,  # 위에서 세운 것을 넘긴다 -- 질의마다 다시 읽으면 61번 푼다
+            vector_store=vector_store,
+            encoder=encoder,
         )
         ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)

@@ -186,11 +186,13 @@ def ranked_chunks(
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
     index: Index | None = None,
+    vector_store=None,
+    encoder=None,
 ) -> list[tuple[str, float]]:
     """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
 
-    `index` 를 넘기면 그것을 쓴다. eval 은 질의 61개를 연달아 돌리는데 매번 다시 읽으면 38만
-    청크짜리 피클을 61번 푸는 셈이라, 세워 둔 것을 넘겨 받아야 한다.
+    `index` · `vector_store` · `encoder` 를 넘기면 그것을 쓴다. eval 은 질의 61개를 연달아 돌리는데
+    매번 다시 읽으면 96MB 피클과 1.2GB 행렬과 모델을 61번씩 여는 셈이다.
 
     점수의 뜻은 엔진마다 다르다(BM25 는 클수록, 벡터는 코사인 거리라 작을수록 가깝다). 그래서
     비교는 언제나 순위로 한다 -- RRF 를 쓰는 이유도 같다.
@@ -202,8 +204,8 @@ def ranked_chunks(
     from analysis.retrieval import embed, vectors
 
     out = store or vectors.DEFAULT_STORE
-    loaded = vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
-    query_vector = embed.encode_query(query, out=out)
+    loaded = vector_store or vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
+    query_vector = embed.encode_query(query, out=out, store=loaded, encoder=encoder)
     if engine == "vector":
         return vectors.search(loaded, query_vector, top=top, sources=sources)
     if engine == "hybrid":
