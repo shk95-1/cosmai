@@ -1,0 +1,5 @@
+[
+  {"run_id": 1, "status": "ok", "finished_at": "2026-01-01T00:00:00Z", "versions": {"aggregate": "1.0.0"}, "note": "aggregate:1.0.0:all"},
+  {"run_id": 2, "status": "ok", "finished_at": "2026-02-01T00:00:00Z", "versions": {"aggregate": "1.1.0"}, "note": "aggregate:1.1.0:all"},
+  {"run_id": 3, "status": "ok", "finished_at": "2026-02-02T00:00:00Z", "versions": {"aggregate": "1.1.0"}, "note": "aggregate:1.1.0:wish"}
+]
