@@ -102,9 +102,15 @@ def _role(product_ref: str, product_key: str) -> str:
 def _suncare(slices: Path) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     refs: list[tuple[Any, ...]] = []
     members: list[tuple[Any, ...]] = []
-    for r in read_csv(slices / "slice-suncare" / "product_ref.csv"):
-        # TODO(#91): a member without ':' dies with an IndexError that names neither file nor row.
-        pairs = [m.split(":", 1) for m in r["members"].split(";") if m]
+    ref_csv = "slice-suncare/product_ref.csv"
+    for row_no, r in enumerate(read_csv(slices / "slice-suncare" / "product_ref.csv"), start=2):
+        pairs = []
+        for m in r["members"].split(";"):
+            if not m:
+                continue
+            if ":" not in m:
+                raise ValueError(f"{ref_csv}:{row_no}: member '{m}' has no ':'")
+            pairs.append(m.split(":", 1))
         refs.append(
             (
                 r["product_ref"],
