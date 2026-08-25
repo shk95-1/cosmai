@@ -37,6 +37,10 @@ SOURCE_TABLES = ("review", "rank_snapshot", "product")
 TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"
 # 덤프 전체를 한 스키마에 부으면 trend_radar 와 부딪힌다 — polarity 가 읽는 두 표만 세운다.
 TUBEDEPTH_TABLES = ("comments", "video_snapshots")
+# link 은 제목·자막·댓글 셋을 모두 돈다 (analysis/linker/pipeline.py DOCUMENTS).
+LINK_TUBEDEPTH_TABLES = ("comments", "video_snapshots", "transcripts")
+# aggregate 의 run_ranking 이 읽는 나머지 두 표 (analysis/aggregate/ranking.py).
+RANKING_TABLES = ("price_point", "review_stats")
 
 # P1 은 선블록(주인 있는 scope), P2 는 샴푸(주인 없는 scope) — 한 페이지에 둘 다 실려야 규칙 실행도
 # 스코프 실행도 판정을 한 번은 부른다.
@@ -462,3 +466,99 @@ def test_a_month_finished_before_the_run_died_is_not_called_stale(
             conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=NO_OWNERS
         )
     assert found.status == "ok", found.note
+
+
+# --- 결함 4: 단독 stage 실행의 partial 이 운영 뷰에 남는다 ----------------------------------------
+# 종료 코드는 크론 메일에만 있다. 계약이 "운영자가 보는 것은 그 행이다"라고 한 곳은 analysis_run 이고,
+# 아무도 메우지 않는 유일한 종류의 구멍(주인 있는 scope 의 반쪽 달)을 찾아내는 실행이 바로 단독 실행이다.
+
+
+@pytest.fixture
+def wired_youtube(loaded: str, needs_schema: str, _schema_name: str) -> str:
+    """link 이 읽는 tubedepth 세 표가 다 서 있고 다 열린 상태 (analysis/linker/pipeline.py DOCUMENTS)."""
+    dump = TUBEDEPTH_DDL.read_text(encoding="utf-8")
+    ddl = "\n".join(
+        dump.split(f"CREATE TABLE tubedepth.{table} (")[1]
+        .split(");")[0]
+        .join((f'CREATE TABLE "{_schema_name}"."{table}" (', ");"))
+        for table in LINK_TUBEDEPTH_TABLES
+    )
+    engine = create_engine(needs_schema)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(ddl)
+            for table in LINK_TUBEDEPTH_TABLES:
+                conn.exec_driver_sql(f'GRANT SELECT ON "{_schema_name}"."{table}" TO needs_runtime')
+    finally:
+        engine.dispose()
+    return loaded
+
+
+def _reported(url: str, dead: int) -> list[tuple[str, str, bool]]:
+    """죽은 run 이 아닌 행 중 그 달을 이름으로 말하는 partial 행."""
+    return [
+        row
+        for run_id, row in _rows(url).items()
+        if run_id != dead and row[0] == "partial" and f"review/{MONTH}/{SUNBLOCK}" in row[1]
+    ]
+
+
+def test_a_solo_polarity_pass_closes_its_own_run_as_partial(loaded: str, _schema_name: str):
+    """주인의 gemma4 패스가 정확히 이 경로다: `analyze polarity --scope 선블록`.
+
+    그 run 은 polarity 가 자기 손으로 `ok` 로 닫은 뒤다 — 구멍을 찾은 실행이 그 행을 다시 닫지 않으면
+    analysis_health 에는 `ok` 만 남고, 종료 코드 1 은 크론 메일과 함께 사라진다.
+    """
+    dead = _open_rival(loaded, f"{RIVAL_NOTE} rewriting=review/{MONTH}/{SUNBLOCK}")
+    with connect(loaded) as conn:
+        found = run_stage(
+            conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=OWNERS
+        )
+    assert found.status == "partial" and found.run_id is not None
+    status, note, finished = _rows(loaded)[found.run_id]
+    assert status == "partial", f"analysis_health still says {status} for run {found.run_id}"
+    assert f"review/{MONTH}/{SUNBLOCK}" in note and finished
+    assert dead != found.run_id
+    # 판본은 그대로다 — 닫는 쪽이 versions 를 덮으면 무엇으로 라벨했는지가 뷰에서 사라진다.
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT versions ->> 'polarity' FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        assert cur.fetchone() == (RulePolarity.version,)
+
+
+def test_a_solo_aggregate_run_reports_the_half_month_without_taking_its_notes_key(
+    loaded: str, needs_schema: str, _schema_name: str
+):
+    """aggregate 의 note 는 `_run_id` 가 run 을 되찾는 자연키다 — 거기에 보고를 적으면 다음 실행이
+    그 행을 못 찾아 run 을 하나 더 쌓는다. 그래서 보고는 락 양보와 같은 자리에 자기 행으로 남는다.
+    """
+    for table in RANKING_TABLES:
+        _open(needs_schema, _schema_name, table)
+    with connect(loaded) as conn:
+        # aggregate 는 자기가 셀 언급이 없으면 실패한다 — 먼저 규칙 패스가 한 달을 라벨해 둔다.
+        assert (
+            run_stage(
+                conn,
+                "polarity",
+                commerce_schema=_schema_name,
+                youtube_schema=_schema_name,
+                owners=NO_OWNERS,
+            ).status
+            == "ok"
+        )
+    dead = _open_rival(loaded, f"{RIVAL_NOTE} rewriting=review/{MONTH}/{SUNBLOCK}")
+    with connect(loaded) as conn:
+        found = run_stage(conn, "aggregate", commerce_schema=_schema_name)
+    assert found.status == "partial", found.note
+    assert _reported(loaded, dead), _rows(loaded)
+    notes = [note for _, note, _ in _rows(loaded).values()]
+    assert any(note.startswith("aggregate:") for note in notes), notes
+
+
+def test_a_solo_link_run_reports_the_half_month_it_found(wired_youtube: str, _schema_name: str):
+    """link 은 자기 run 행이 없다 — 그래도 구멍은 말해야 하고, 말할 자리는 락을 양보한 실행이 이미
+    쓰는 그 자리다 (analysis_run 의 partial 행 하나)."""
+    dead = _open_rival(wired_youtube, f"{RIVAL_NOTE} rewriting=review/{MONTH}/{SUNBLOCK}")
+    with connect(wired_youtube) as conn:
+        found = run_stage(conn, "link", commerce_schema=_schema_name, youtube_schema=_schema_name)
+    assert found.status == "partial", found.note
+    assert _reported(wired_youtube, dead), _rows(wired_youtube)

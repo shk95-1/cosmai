@@ -171,6 +171,27 @@ def _amend(outcome: StageOutcome, stale: Sequence[str]) -> StageOutcome:
     return replace(outcome, status=PARTIAL, detail=STALE.format(" ".join(stale)))
 
 
+def _reported(conn: psycopg.Connection[Any], outcome: StageOutcome) -> StageOutcome:
+    """단독 stage 실행이 찾아낸 구멍도 run 행에 남는다 — 종료 코드는 크론 메일에만 있고, 계약이
+    운영자에게 보라고 한 것은 `needs.analysis_health` 의 그 행이다 (entrypoints.md §분석 실행).
+
+    polarity 는 자기 run 을 열고 `ok` 로 닫은 뒤라 그 행을 partial 로 다시 닫는다 — `run_all` 과 같은
+    한 행이고, versions 를 합치기만 하므로 그 패스가 무엇으로 라벨했는지는 그대로 남는다. aggregate 의
+    note 는 `_run_id` 가 run 을 되찾는 자연키이고 (analysis/aggregate/pipeline.py) link 은 run 행 자체가
+    없어, 그 둘은 락을 양보한 실행이 이미 쓰는 자리에 보고 행 하나를 남긴다.
+    """
+    if outcome.status == OK:
+        return outcome
+    if outcome.stage in OPENS_RUN and outcome.run_id is not None:
+        return _close(conn, outcome, {})
+    conn.rollback()
+    # 수는 싣지 않는다 — 이 행에는 metrics 가 매달리지 않아 뷰의 수와 note 의 수가 어긋난다.
+    with conn.cursor() as cur:
+        cur.execute(RUN_SKIPPED, (StageOutcome(outcome.stage, PARTIAL, None, {}, outcome.detail).note,))
+    conn.commit()
+    return outcome
+
+
 def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
     outcome = StageOutcome(stage, PARTIAL, None, {}, SKIPPED)
     conn.rollback()
@@ -366,7 +387,8 @@ def _one(
             linked = link_stage.run(
                 conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
             )
-            return _amend(StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS}), stale)
+            done = StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
+            return _reported(conn, _amend(done, stale))
         if stage == "polarity":
             # 이 단계는 자기 run 을 열고 닫는다 — 단독 실행의 run 은 polarity 것이다.
             found = polarity_stage.run(
@@ -380,7 +402,7 @@ def _one(
                 on_run_open=opened,
             )
             counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
-            return _amend(StageOutcome(stage, OK, found.run_id, counts), stale)
+            return _reported(conn, _amend(StageOutcome(stage, OK, found.run_id, counts), stale))
         aggregated = aggregate_stage.run(
             conn,
             scope=scope,
@@ -388,8 +410,11 @@ def _one(
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        outcome = _amend(StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated)), stale)
-        return _amend_silent_scope(conn, outcome, scope, close_run=True)
+        counted = StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated))
+        # 순서가 곧 불변식이다: `_amend_silent_scope` 는 자기 run 행을 SILENT_CLOSE 로 partial 로 닫으므로,
+        # 그것을 `_reported` 안쪽에 두면 침묵 하나에 보고 행까지 붙어 partial 행이 둘 남는다.
+        reported = _reported(conn, _amend(counted, stale))
+        return _amend_silent_scope(conn, reported, scope, close_run=True)
     except FAILURES as failure:
         outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
         if stage not in OPENS_RUN:

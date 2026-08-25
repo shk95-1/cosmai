@@ -434,6 +434,30 @@ def test_analyze_aggregate_alone_stops_being_quiet_on_the_same_mismatch(
         assert CATEGORY in note
 
 
+def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sources: tuple[str, str]):
+    """#38 의 침묵과 #16 의 stale 보고 행은 `_one` 의 aggregate 분기에서 만나고, 만나는 **순서**가
+    불변식이다: `_amend_silent_scope(..., close_run=True)` 는 자기 run 행을 partial 로 닫고
+    `_reported` 는 status 가 OK 가 아니면 보고 행을 하나 넣는다. 후자가 바깥이어야 한다 — 안팎이
+    뒤집히면 표식 하나 없는 이 침묵 한 건에 partial 행이 둘 남고, "한 사건에 한 행"이 깨진다.
+
+    이 자리를 지키는 것이 사람의 주의력뿐이면 다음 리베이스에서 조용히 뒤집힌다.
+    """
+    commerce, _youtube = sources
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "partial" and found.counts["metrics_need"] == 0, found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT run_id, note FROM analysis_run WHERE status = 'partial' ORDER BY run_id")
+        partial_rows = cur.fetchall()
+    assert [int(r[0]) for r in partial_rows] == [found.run_id], (
+        f"one scope-silence must leave exactly the aggregate's own run partial, got {partial_rows}"
+    )
+    assert CATEGORY in (partial_rows[0][1] or "")
+
+
 def test_the_predicate_fires_on_need_alone_even_when_wish_is_not_empty(
     analysis_url: str, sources: tuple[str, str]
 ):
