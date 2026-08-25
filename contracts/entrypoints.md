@@ -157,7 +157,10 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
 - **`--vectors` 는 세 하위명령에서 같은 뜻이다**(벡터 저장소 경로). `--out` 은 `eval` 에서만 쓰고 점수 CSV 를 뜻한다.
 - **기본 `--engine bm25` 는 literal 용도 기준이다** — heldout 에서 bm25 는 P@10 0.000·Hit 0%, vector 는
   0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다. 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
-- 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음) · 2 blocked(연결 거절, 벡터 파일 없음).
+- 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음, `eval` 의 채점된 질의 0개 —
+  청크가 비었거나 사전이 안 얹혔다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수 없음 — 파일이
+  없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이 행렬과 어긋난 것이
+  같은 자리다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
 - **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
   BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + 사전 해시).
   둘 다 `var/` 라 레포에 들어가지 않고, 지워도 다시 만들어진다.

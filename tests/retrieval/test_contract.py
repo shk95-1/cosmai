@@ -14,11 +14,38 @@ from analysis.retrieval.chunks import FIELDS
 from cosmai.cli import RETRIEVAL_SOURCES
 
 DDL = Path(__file__).resolve().parents[2] / "contracts" / "ddl" / "needs" / "020_retrieval_chunk.sql"
+ENTRYPOINTS = Path(__file__).resolve().parents[2] / "contracts" / "entrypoints.md"
+
+
+def _search_section() -> list[str]:
+    lines = ENTRYPOINTS.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("## 검색"))
+    end = next(i for i, line in enumerate(lines[start + 1 :], start + 1) if line.startswith("## "))
+    return lines[start:end]
+
+
+def _exit_code_bullet() -> str:
+    section = _search_section()
+    at = next(i for i, line in enumerate(section) if line.startswith("- 종료 코드:"))
+    bullet = [section[at]]
+    for line in section[at + 1 :]:
+        if not line.startswith("  "):  # 이어지는 줄만. 다음 항목은 다시 `- ` 로 시작한다
+            break
+        bullet.append(line)
+    return "\n".join(bullet)
 
 
 def test_the_cli_source_list_matches_the_corpus_adapter():
     # cli.py 가 psycopg 를 안 끌어오려고 값을 다시 적는다. 갈리면 --source 가 조용히 빈 결과를 낸다.
     assert RETRIEVAL_SOURCES == corpus.SOURCES
+
+
+def test_the_exit_code_contract_covers_every_retrieval_subcommand():
+    """계약이 덮지 않는 하위명령은 종료 코드가 구현에만 있다 -- `eval` 의 "질의 0개 -> 1"(cli.py)과
+    `embed` 의 "언제나 0" 이 그랬다(#17 S6)."""
+    bullet = _exit_code_bullet()
+    for action in ("chunk", "search", "eval", "embed"):
+        assert f"`{action}`" in bullet, action
 
 
 def test_the_ddl_lives_in_this_branchs_number_block():
