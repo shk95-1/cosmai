@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from db.seed import labeled, lexicon, mentions, metrics, products
+from db.seed import labeled, lexicon, mentions, metrics, panel, products
 from db.seed._common import DEFAULT_SLICES, EVAL_DIR, connect
 
 # Order matters: product_ref before the mentions that reference it, analysis_run before the metrics.
-GROUP_NAMES = ("lexicon", "labeled", "products", "mentions", "metrics")
+GROUP_NAMES = ("lexicon", "panel", "labeled", "products", "mentions", "metrics")
 
 
 def run_all(
@@ -18,6 +18,7 @@ def run_all(
     slices_dir = Path(slices) if slices else DEFAULT_SLICES
     loaders = {
         "lexicon": (lexicon.load, EVAL_DIR),
+        "panel": (panel.load, EVAL_DIR),
         "labeled": (labeled.load, EVAL_DIR),
         "products": (products.load, slices_dir),
         "mentions": (mentions.load, slices_dir),
