@@ -24,6 +24,8 @@
 - 따뜻한 브라우저 프로필 `var/browser-profiles/{oliveyoung,glowpick}`(798M·3.2M)를 `collector-commerce`가 bind mount로 읽는다. 컨테이너는 `user: "1000:1000"` + `HOME=/tmp`.
 - DB `shared-postgres` 127.0.0.1:5434, database `app`(trend_radar · tubedepth · **needs**), `cosmai`(cosmai-old). 슈퍼유저 `platform`.
   - 수집기 롤 비밀번호는 스키마마다 다르다: `TREND_RADAR_DB_RUNTIME`·`TUBEDEPTH_DB_RUNTIME`. `COSMA_DB_RUNTIME`과 값이 다르니 공유하지 마라.
+  - **ydc 통합 흔적**(#57): `needs.schema_migration` 원장에 `020_retrieval_chunk`(2026-08-24 23:47)가 있다. **020번대는 포크 `slopindustries/cosmai-import-ydc` 의 것이고 upstream 은 `006~019` 만 쓴다.** `db/migrate.sh` 는 체크아웃에 있는 파일만 훑으므로 main 배포는 그 행을 그냥 지나간다.
+  - `needs.retrieval_chunk` **381,950행·256MB** 가 공유 DB 에 있다(DB `app` 1,118MB 의 23%) — `pg_dump -Fc app`(#10 조건 4)이 그만큼 커졌다. 통합 본체는 Draft PR #59 로만 온다.
 - **분석 파이프라인이 매일 05:00 UTC 에 전량을 다시 라벨한다**(`cosmai analyze all`, 규칙 극성). 규칙 전량 실행은 **47~88초**다 — 6시간대 숫자는 gemma4 LLM 패스의 것이지 이 줄의 것이 아니다.
   - gemma4 극성이 **선블록 한 scope의 주인**이다(`analysis/polarity/ownership.py`). 규칙 실행은 그 scope를 지우지도 덮지도 않는다. **운영 실증**: run 18(2026-08-25 06:28, 규칙 전량)이 선블록 gemma4 13,857행을 한 행도 안 지웠다.
   - 그 전량 패스의 소요가 처음 측정됐다 — run 16 = **6h44m**(선블록 하나, `attempted_need=13,857`). 크론 줄을 넣는 조건과 계산은 `stack/crontab.d/analyze` 에 적혀 있다.
@@ -42,7 +44,9 @@
 - **`docker start` 로 켜면 옛 이미지로 돈다.** 이미지를 바꿨으면 `up -d --force-recreate`.
 - **락은 구코드 실행을 못 본다.** analyze 동시성 락(`analysis/locks.py`) 이전에 시작된 프로세스는 락 밖이다.
 - **골든·시드 테스트 4종이 레포 밖 `architect/` 에 의존한다.** 없으면 조용히 skip 한다 — `877 passed` 는 그 트리가 있는 머신의 숫자다. 후보 경로 둘은 각각 주 체크아웃용과 워크트리용이라 어느 쪽도 죽은 경로가 아니다. → #42 M6
-- **이 머신에서 다른 Claude 세션이 동시에 작업할 수 있다**(pgvector·retrieval, 포트 55452). 스위트 포트가 겹치지 않게 고를 것.
+- **이 머신에서 다른 Claude 세션이 동시에 작업할 수 있다** — 포크 클론 `Main/cosmai-import-ydc`(retrieval, 포트 55452; 구 워크트리·브랜치 `feat/ydc-import` 는 폐기, 이 레포에서 쓰지 않는다). 스위트 포트가 겹치지 않게 고를 것.
+- **`tool/checks/ddl-drift` 는 needs 스키마를 안 본다.** 비교 대상은 `app:trend_radar`·`app:tubedepth`·`cosmai:cosmai` 뿐이라 운영 needs 가 계약과 어긋나도 잡는 검사가 없다(020 이 안 보이는 것도 이 때문이지 020 이 특별해서가 아니다).
+- **GPU 는 하나다.** `cosmai retrieval embed`(38만 청크, 유휴 GPU 20.6분)와 gemma4 패스가 겹치면 **5h38m** 이 되고 상대편도 같은 대가를 치른다(#28 실측). #32 의 크론 창은 이 겹침을 피해야 한다.
 - `tool/stack-build` 2단계는 `stack/.env` 없이는 compose interpolation 에서 죽는다(빌드 실패가 아니라 변수 미설정).
 
 ## 5. 다음
@@ -50,5 +54,5 @@
 - **gemma4 확장**: #32(컨테이너→ollama 배선 + 증분 크론) → #33(26개 카테고리 패스) → #34(카테고리 없는 리뷰 18,531행 = `category_map` 문제). #33 은 #38 의 축 정렬이 먼저 서야 6시간을 헛되이 쓰지 않는다.
 - **화면**: #41(집계 제품·월 축 + `analysis_run` 화이트리스트 + 화면 2 marginal).
 - **평가셋**: #40(wish blind60_v2 라벨 규약 충돌 재라벨). 이 충돌이 wish_class 만의 문제인지 자산 전체의 문제인지가 그 이슈의 첫 질문이다.
-- **운영**: #39(watch 재가동) · #36(UTC→KST) · #28(ydc 반입, 장수 브랜치 `feat/ydc-import`).
+- **운영**: #39(watch 재가동) · #36(UTC→KST) · #57(ydc 환경) → PR #59 리뷰. ydc 통합 본체는 포크 `cosmai-import-ydc` 가 원장이고 여기엔 PR 로만 온다.
 - **이월**: #42(전체 리뷰 10건) · #14 · #21 · #20 · #18 · #15.
