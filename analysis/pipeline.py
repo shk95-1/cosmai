@@ -79,7 +79,9 @@ ABANDONED_CLOSE: LiteralString = (
     "UPDATE analysis_run SET status = 'failed', finished_at = coalesce(finished_at, now()), "
     "note = note || %s WHERE run_id = %s"
 )
-# run 을 여는 단계는 polarity 뿐이다 — 나머지가 실패하면 닫을 행이 아예 없다.
+# polarity 는 자기 run 을 열고 실패해도 여기서 닫는다. aggregate 도 note 로 run 을 찾아 열거나 되살려
+# 'running' 으로 만들지만(analysis/aggregate/pipeline.py `_run_id`) 그 run_id 는 여기로 올라오지 않아,
+# 단독 `analyze aggregate` 가 실패하면 그 행은 'running' 인 채 남는다 — 표식이 없어 다음 실행도 못 찾는다.
 OPENS_RUN = ("polarity",)
 METRICS: LiteralString = (
     "SELECT (SELECT count(*) FROM metrics_need WHERE run_id = %s), "
