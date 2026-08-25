@@ -14,6 +14,7 @@ from analysis.retrieval.normalize import normalize_text
 
 MAX_CHARS = 500  # multilingual-e5 의 512토큰 상한, 한국어 ~1.5자/토큰 -> 약 330토큰
 FIELDS = ("chunk_id", "doc_id", "source", "ordinal", "text")
+SAMPLES_PER_KIND = 3  # 같은 종류가 수만 건 나올 수 있다 -- 종류별 표본만 남겨야 보고서를 읽는다
 
 # 자를 자리 우선순위. 문장 가운데를 자르면 그 청크만 뜻이 끊긴다.
 BREAKS = (". ", "! ", "? ", "다. ", "요. ", "\n", " ")
@@ -47,6 +48,12 @@ def split_text(text: str, limit: int = MAX_CHARS) -> list[str]:
     return out
 
 
+def problem_kind(message: str) -> str:
+    """위반 메시지의 종류. 상한을 세는 단위이자 보고의 "N종"이 세는 단위다 -- 두 곳이 다른 규칙을
+    쓰면 한쪽 상한만 걸리고 다른 쪽 숫자는 다른 것을 센다(#18 M12)."""
+    return message.split(":")[0]
+
+
 def check_rows(rows: Iterable[Mapping[str, object]]) -> tuple[list[str], Counter, list[int], int]:
     """(위반 목록, 소스별 개수, 길이 목록, 문서 수). 파일을 읽지 않으므로 어디서든 검사한다."""
     problems: list[str] = []
@@ -56,9 +63,10 @@ def check_rows(rows: Iterable[Mapping[str, object]]) -> tuple[list[str], Counter
     lengths: list[int] = []
 
     def note(message: str) -> None:
-        # 같은 종류가 수만 건 나올 수 있다. 종류별 3건까지만 남겨야 보고서를 읽을 수 있다.
-        kind = message.split(":")[0]
-        if sum(1 for p in problems if p.startswith(kind)) < 3:
+        # 이 상한은 **한 번의 check_rows 안에서만** 걸린다. 실행 전체의 상한은 부르는 쪽이
+        # 이어 세야 한다(pipeline.run) -- 배치마다 다시 부르면 여기서는 매번 0부터다.
+        kind = problem_kind(message)
+        if sum(1 for p in problems if problem_kind(p) == kind) < SAMPLES_PER_KIND:
             problems.append(message)
 
     for line, row in enumerate(rows, 2):
