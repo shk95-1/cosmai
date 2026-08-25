@@ -91,6 +91,11 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     ev.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     ev.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    tm = actions.add_parser("terms", help="Show the frequent words the topic dictionary misses.")
+    tm.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
+    tm.add_argument("--top", type=int, default=40, help="How many unmatched terms to print.")
+    tm.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
     emb = actions.add_parser("embed", help="Encode chunks into a vector store on disk.")
     emb.add_argument("--model", default=None, help="Sentence-transformers model; default is e5-base.")
     emb.add_argument("--device", default=None, help="cuda, cpu, ...; default is what torch picks.")
@@ -237,6 +242,8 @@ def _run_retrieval(args: argparse.Namespace) -> int:
                 return _run_retrieval_eval(conn, args, sources, store)
             if args.action == "embed":
                 return _run_retrieval_embed(conn, args, store)
+            if args.action == "terms":
+                return _run_retrieval_terms(conn, args, sources)
             hits = pipeline.search(
                 conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
             )
@@ -251,6 +258,15 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
     return 0
+
+
+def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:
+    from analysis.retrieval import terms
+
+    scanned = terms.scan(conn, sources=sources)
+    print(terms.render(scanned, top=args.top))
+    # 문서를 하나도 못 봤으면 표가 아니라 빈 표다 -- `eval` 의 "채점된 질의 0개"와 같은 자리다.
+    return 0 if sum(scanned.documents.values()) else 1
 
 
 def _run_retrieval_embed(conn: Any, args: argparse.Namespace, store: Path | None) -> int:

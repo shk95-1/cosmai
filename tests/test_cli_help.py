@@ -20,6 +20,7 @@ COMMANDS = (
     ("retrieval", "search"),
     ("retrieval", "eval"),
     ("retrieval", "embed"),
+    ("retrieval", "terms"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

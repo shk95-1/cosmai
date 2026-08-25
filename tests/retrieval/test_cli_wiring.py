@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from cosmai.cli import RETRIEVAL_ENGINES, RETRIEVAL_SOURCES, build_parser, main
@@ -42,7 +44,7 @@ def refuse_connection(monkeypatch):
 @pytest.fixture
 def worked(monkeypatch):
     """연결을 통과시키고 일하는 함수를 가짜로 바꾼다. 무엇이 어떤 인자로 불렸는지 남긴다."""
-    from analysis.retrieval import embed, pipeline
+    from analysis.retrieval import embed, pipeline, terms
     from analysis.retrieval import eval as retrieval_eval
     from cosmai import cli
 
@@ -65,10 +67,16 @@ def worked(monkeypatch):
         calls["embed"] = kw
         return embed.EmbedOutcome("m", "r", 1, kw["out"])
 
+    def look(_conn, **kw):
+        calls["terms"] = kw
+        return SimpleNamespace(documents={"topical": 1})
+
     monkeypatch.setattr(pipeline, "run", chunk)
     monkeypatch.setattr(pipeline, "search", search)
     monkeypatch.setattr(retrieval_eval, "run", score)
     monkeypatch.setattr(embed, "run", encode)
+    monkeypatch.setattr(terms, "scan", look)
+    monkeypatch.setattr(terms, "render", lambda _scanned, **_kw: "표")
     return calls
 
 
@@ -79,6 +87,7 @@ def worked(monkeypatch):
         ["retrieval", "search", "--query", "백탁"],
         ["retrieval", "eval", "--mode", "literal"],
         ["retrieval", "embed"],
+        ["retrieval", "terms"],
     ],
     ids=lambda a: a[1],
 )
@@ -95,6 +104,7 @@ def test_a_refused_connection_is_blocked_not_failed(argv, refuse_connection, cap
         (["retrieval", "search", "--query", "백탁"], "search"),
         (["retrieval", "eval", "--mode", "literal"], "eval"),
         (["retrieval", "embed"], "embed"),
+        (["retrieval", "terms"], "terms"),
     ],
     ids=lambda a: a if isinstance(a, str) else a[1],
 )
@@ -146,3 +156,11 @@ def test_the_engine_and_source_vocabularies_are_shared():
     assert args.engine in RETRIEVAL_ENGINES
     assert args.source == ["commerce_review"]
     assert set(args.source) <= set(RETRIEVAL_SOURCES)
+
+
+def test_a_scan_that_saw_no_document_is_partial(worked, monkeypatch):
+    """빈 표는 "사전이 다 잡았다" 로 읽힌다 -- 청크가 비었다는 뜻인데도 초록이면 그게 더 나쁘다."""
+    from analysis.retrieval import terms
+
+    monkeypatch.setattr(terms, "scan", lambda *_a, **_kw: SimpleNamespace(documents={}))
+    assert main(["retrieval", "terms"]) == 1

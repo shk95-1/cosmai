@@ -48,13 +48,14 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai retrieval --help
-usage: cosmai retrieval [-h] {chunk,search,eval,embed} ...
+usage: cosmai retrieval [-h] {chunk,search,eval,terms,embed} ...
 
 positional arguments:
-  {chunk,search,eval,embed}
+  {chunk,search,eval,terms,embed}
     chunk               Load needs.retrieval_chunk from the source schemas.
     search              Rank chunks against a query.
     eval                Score the retriever against the topic dictionary.
+    terms               Show the frequent words the topic dictionary misses.
     embed               Encode chunks into a vector store on disk.
 
 options:
@@ -113,6 +114,18 @@ options:
   --batch BATCH      Texts per forward pass.
   --vectors VECTORS  Vector store path; default var/retrieval/...
   --url URL          SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval terms --help
+usage: cosmai retrieval terms [-h]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--top TOP] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --top TOP             How many unmatched terms to print.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
