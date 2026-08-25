@@ -206,6 +206,36 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
         assert cur.fetchone() == (1,)
 
 
+def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """#41: 화면 3 은 product_ref <> '' 행만 읽는다 — 집계가 그 축을 내지 않으면
+    실제 run 에서 영원히 0행이다."""
+    found = _all(analysis_url, sources)
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT scope, need_key, product_ref, neg, pos, unresolved FROM metrics_need "
+            "WHERE run_id = %s AND month = ''",
+            (found.run_id,),
+        )
+        rows = cur.fetchall()
+
+    per_product = [r for r in rows if r[2]]
+    sums = {(r[0], r[1]): r for r in rows if not r[2]}
+    assert per_product, "제품 축 행이 하나도 없다 — 화면 3 이 빈다"
+    # 화면 3 이 정렬·막대에 쓰는 값이다. 리뷰가 있는 제품 행은 unresolved 가 차 있어야 한다.
+    assert any(r[5] is not None for r in per_product)
+    # 카테고리 합 행은 그대로 남는다 — 제품 축은 그 위에 얹히는 것이지 대체가 아니다 (화면 1·골든).
+    assert sums and {(r[0], r[1]) for r in per_product} <= set(sums)
+    for scope, need_key, _, neg, pos, _ in per_product:
+        # 한 제품의 몫은 그 (scope, need_key) 합을 넘지 못한다 — 제품을 모르는 언급은 합에만 남는다.
+        assert neg <= sums[(scope, need_key)][3] and pos <= sums[(scope, need_key)][4]
+    # 롤업은 제품마다 need_key 당 한 행이다 — 화면 3 이 그 scope 로 중복을 지운다 (screens.js).
+    rolled = [(r[1], r[2]) for r in per_product if r[0] == "all"]
+    assert rolled and len(set(rolled)) == len(rolled)
+
+
 def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):
     """크론이 부르는 모양 그대로다: 소유 표를 아무도 인자로 말하지 않아도 배송값(#31)이 선다. 이 픽스처의
     리뷰는 전부 선블록이라 규칙은 리뷰를 한 건도 쓰지 않고, 주인이 라벨한 행은 그 자리에 남는다."""

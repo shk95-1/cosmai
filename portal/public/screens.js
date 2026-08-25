@@ -36,8 +36,15 @@ export function wishRowsForScope(wish, runId, scope) {
   return (wish || []).filter((r) => r.run_id === runId && r.scope === scope);
 }
 
+// 제품 축 행은 scope 마다 한 벌씩 나온다(카테고리별 + 롤업 'all', #41). 같은 제품이
+// 자기 카테고리와 'all'에서 두 번 걸리면 상위 20이 중복으로 채워지므로, 롤업이 있으면
+// 롤업만 본다 — 'all'은 동의어를 접은 뒤의 전 제품을 한 번씩 담는다. --scope 로 좁혀 돈
+// run 에는 'all'이 없어서, 그때는 있는 scope 를 그대로 쓴다.
 export function productRows(need, runId, limit = 20) {
-  return sortRows((need || []).filter((r) => r.run_id === runId && r.product_ref !== ''), 'unresolved', 'desc').slice(0, limit);
+  // month 는 카테고리 합·제품 축 모두 ''다. 월 축이 생기면 그 행은 여기 섞이면 안 된다.
+  const rows = (need || []).filter((r) => r.run_id === runId && r.product_ref !== '' && r.month === '');
+  const rolled = rows.filter((r) => r.scope === 'all');
+  return sortRows(rolled.length ? rolled : rows, 'unresolved', 'desc').slice(0, limit);
 }
 
 // run 하나를 "#id (note, versions)"로 적는다 — 손 재집계 직후 화면이 그 run을 골랐는지

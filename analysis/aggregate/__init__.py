@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
@@ -78,6 +78,36 @@ class RuleAggregator:
         def key(need_key: str) -> str:
             return self._canonical.get(need_key, need_key) if rollup else need_key
 
+        out = self._rows(scope, "", rows, denoms, key)
+        # 제품 축 (#41): 같은 식을 그 제품만으로 좁힌 모집단에 다시 적용한다. 카테고리 합 행은
+        # product_ref='' 로 남으므로 PK (run_id, scope, need_key, month, product_ref) 가 겹치지 않는다.
+        groups: dict[str, list[NeedMentionRow]] = {}
+        for mention in rows:
+            if product := _product(mention):
+                groups.setdefault(product, []).append(mention)
+        # 제품 키는 사이트 안에서만 유일하고, 그 쌍 하나에 captured_at 이 여럿 달린다 (001 의 PK).
+        by_key: dict[tuple[str, str | None], list[DenominatorRow]] = {}
+        for d in denoms:
+            by_key.setdefault((d.source, d.product_key), []).append(d)
+        for product, group in groups.items():
+            # 분모도 그 제품의 것만 남긴다 — 제품 하나짜리 집합에서 population_share_pct 는 제품 단위
+            # 정의로 그대로 되돌아간다 (interfaces.md §수식).
+            keys = {(m.site, m.source_product_key) for m in group}
+            mine = [d for k in keys if k in by_key for d in by_key[k]]
+            out += self._rows(scope, product, group, mine, key)
+        # product_ref 까지 세 번째 키로 둔다 — 같은 (neg, need_key) 에 제품 축 행이 여럿 걸린다.
+        out.sort(key=lambda r: (-r.neg, r.need_key, r.product_ref))
+        return out
+
+    def _rows(
+        self,
+        scope: str,
+        product_ref: str,
+        rows: Sequence[NeedMentionRow],
+        denoms: Sequence[DenominatorRow],
+        key: Callable[[str], str],
+    ) -> list[MetricsNeedRow]:
+        """한 모집단(카테고리 전체 또는 제품 하나)의 need_key 별 행. 총계는 그 모집단 안에서 잰다."""
         reviews = [m for m in rows if m.src == REVIEW]
         comments = [m for m in rows if m.src == COMMENT]
         months_total = len({m.month for m in reviews})
@@ -95,29 +125,38 @@ class RuleAggregator:
         denom_low = sum(d.low_collected or 0 for d in complete) if denoms else None
         denom_site = sum(d.site_review_count or 0 for d in complete) if denoms else None
         site_low_pct = _ratio(sum(d.site_low_est or 0 for d in complete), denom_site or 0)
-        low_rated = [
-            m
-            for m in rows
-            if m.rating is not None
-            and m.rating <= LOW_RATING
-            and (m.site, m.source_product_key) in complete_keys
-        ]
+
+        # need_key 로 한 번만 나눈다 — scope 하나에 5만 행이 들어오므로 키마다 다시 훑으면 곱이 된다.
+        by_need: dict[str, list[NeedMentionRow]] = {}
+        for mention in rows:
+            by_need.setdefault(key(mention.need_key), []).append(mention)
 
         out: list[MetricsNeedRow] = []
-        for need_key in {key(m.need_key) for m in rows}:
-            neg = [m for m in reviews if key(m.need_key) == need_key and m.polarity == NEGATIVE]
-            pos = [m for m in reviews if key(m.need_key) == need_key and m.polarity == POSITIVE]
+        for need_key, group in by_need.items():
+            neg = [m for m in group if m.src == REVIEW and m.polarity == NEGATIVE]
+            pos = [m for m in group if m.src == REVIEW and m.polarity == POSITIVE]
             strengths = [m.strength for m in neg if m.strength is not None]
             low_mentioning = (
-                len({m.ref for m in low_rated if key(m.need_key) == need_key}) if denoms else None
+                len(
+                    {
+                        m.ref
+                        for m in group
+                        if m.rating is not None
+                        and m.rating <= LOW_RATING
+                        and (m.site, m.source_product_key) in complete_keys
+                    }
+                )
+                if denoms
+                else None
             )
             low_share = _ratio(low_mentioning, denom_low or 0) if low_mentioning is not None else None
-            scopes = [m.aspect_scope for m in rows if key(m.need_key) == need_key and m.aspect_scope]
+            scopes = [m.aspect_scope for m in group if m.aspect_scope]
             out.append(
                 MetricsNeedRow(
                     run_id=0,  # 순수 함수는 run 을 모른다 — 기록하는 쪽이 채운다.
                     scope=scope,
                     need_key=need_key,
+                    product_ref=product_ref,
                     neg=len(neg),
                     pos=len(pos),
                     yt_neg=sum(1 for m in comments if key(m.need_key) == need_key and m.polarity == NEGATIVE)
@@ -148,7 +187,6 @@ class RuleAggregator:
                     aspect_scope=scopes[-1] if scopes else None,
                 )
             )
-        out.sort(key=lambda r: (-r.neg, r.need_key))
         return out
 
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]:
