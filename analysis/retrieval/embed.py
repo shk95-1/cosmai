@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import psycopg
@@ -81,8 +82,12 @@ def load_encoder(model: str = MODEL, device: str | None = None):
 
 def chunks_to_encode(
     conn: psycopg.Connection, sources: tuple[str, ...] = ENCODED_SOURCES
-) -> list[tuple[str, str, str]]:
-    """(chunk_id, source, text). chunk_id 순으로 -- 다시 태워도 행 순서가 같아야 대조가 된다.
+) -> list[tuple[str, str, str, datetime]]:
+    """(chunk_id, source, text, chunked_at). chunk_id 순으로 -- 다시 태워도 행 순서가 같아야 대조가 된다.
+
+    `chunked_at` 을 같이 읽는 것은 매니페스트의 `chunked_at_max` 를 **인코딩한 행에서** 뽑기
+    위해서다. 따로 `max(chunked_at)` 을 물으면 그 사이 들어온 청크가 저장소에는 없으면서
+    매니페스트에는 적히고, 그러면 커버리지 가드가 어긋남을 덮는다(pipeline.coverage_note).
 
     한 번에 다 읽고 **커밋한 뒤** 인코딩한다. 스트리밍하면 트랜잭션이 인코딩 내내 열려 있고,
     needs_runtime 은 15초만 놀아도 연결을 끊는다(load_index 가 같은 이유로 같은 모양이다).
@@ -91,7 +96,8 @@ def chunks_to_encode(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT chunk_id, source, text FROM retrieval_chunk WHERE source = ANY(%s) ORDER BY chunk_id",
+            "SELECT chunk_id, source, text, chunked_at FROM retrieval_chunk "
+            "WHERE source = ANY(%s) ORDER BY chunk_id",
             (list(sources),),
         )
         rows = cur.fetchall()
@@ -117,6 +123,7 @@ def run(
     rows: list[tuple[str, str]] = []
     blocks: list = []
     pack: list[str] = []
+    latest: datetime | None = None
 
     def flush() -> None:
         if not pack:
@@ -135,9 +142,10 @@ def run(
         )
         pack.clear()
 
-    for chunk_id, source, text in chunks_to_encode(conn, sources):
+    for chunk_id, source, text, chunked_at in chunks_to_encode(conn, sources):
         rows.append((chunk_id, source))
         pack.append(text)
+        latest = chunked_at if latest is None else max(latest, chunked_at)
         if len(pack) >= batch:
             flush()
     flush()
@@ -159,6 +167,9 @@ def run(
             "dim": DIM,
             "batch": batch,
             "sources": list(sources),
+            # 개수만으로는 "같은 수, 다른 집합" 을 못 잡는다. 빈 코퍼스에는 최댓값이 없으므로
+            # None 을 적는다 -- 모르는 것을 아는 척하면 가드가 거짓으로 안심한다.
+            "chunked_at_max": latest.isoformat() if latest is not None else None,
         },
     )
     return EmbedOutcome(model, revision, len(rows), out)

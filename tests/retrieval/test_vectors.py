@@ -152,3 +152,10 @@ def test_search_on_an_empty_store_returns_nothing(tmp_path):
     out = tmp_path / "empty"
     vectors.save(out, np.zeros((0, vectors.DIM), dtype="float32"), [], MANIFEST)
     assert vectors.search(vectors.load(out), _unit(0)) == []
+
+
+def test_chunked_at_max_is_not_a_required_key(store):
+    """운영 저장소(2026-08-24 인코딩분)에는 이 키가 없다 -- 필수 키로 올리면 지금 도는 vector·hybrid
+    검색이 통째로 StoreMissing 이 된다. 커버리지 가드가 없으면 없다고 말할 자리다(#12)."""
+    assert "chunked_at_max" not in vectors.REQUIRED_MANIFEST
+    assert vectors.load(store).manifest.get("chunked_at_max") is None
