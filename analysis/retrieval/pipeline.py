@@ -361,4 +361,8 @@ def search(
             ([chunk_id for chunk_id, _ in hits],),
         )
         texts = dict(cur.fetchall())
+    # 여기서 커밋하지 않으면 부르는 쪽이 연결을 놓을 때까지 idle in transaction 으로 남는다 --
+    # 그 트랜잭션은 vacuum 을 막고 needs_runtime 의 idle_in_transaction_session_timeout(15초)이
+    # 끊을 때까지 산다(cosmai#58). 이 파일의 다른 SELECT 들은 이미 그렇게 하고 있다.
+    conn.commit()
     return [(chunk_id, score, texts.get(chunk_id, "")) for chunk_id, score in hits]

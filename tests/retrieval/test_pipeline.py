@@ -263,6 +263,14 @@ def test_search_finds_an_ingredient_by_its_exact_name(conn, _schema_name):
     assert [h[0] for h in hits][:1] == ["youtube_comment:c3#0"]
 
 
+def test_search_leaves_no_open_transaction(conn, _schema_name):
+    """마지막 SELECT 뒤에 커밋이 없으면 연결이 idle in transaction 으로 남는다 -- 그 트랜잭션은
+    vacuum 을 막고, 끊는 것은 15초짜리 idle_in_transaction_session_timeout 뿐이다(#18 M13)."""
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert pipeline.search(conn, "백탁", top=3, cache_dir=None)
+    assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+
+
 def test_search_on_an_empty_index_returns_nothing(conn):
     assert pipeline.search(conn, "백탁", cache_dir=None) == []
 
