@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 from analysis.aggregate import LIKE_CAP, RuleAggregator
+from analysis.aggregate.pipeline import scopes_for
 from analysis.types import DenominatorRow, NeedMentionRow, WishMentionRow
 
 
@@ -222,3 +224,36 @@ def test_like_cap_bounds_one_loud_comment():
     # 2025-01 은 상대시각 복원분(resolution='year')이라 존재 월로 세지 않는다.
     assert (row.months_present, row.first_month, row.last_month) == (1, "2025-01", "2026-01")
     assert (row.videos, row.channels) == (1, 1)
+
+
+# --- #38: --scope 는 두 축을 다 받는다 -------------------------------------------------------------
+
+SOURCE_CATEGORY = "01 > 선케어 > 선블록"
+
+
+def labelled(category: str | None, lexicon: str) -> NeedMentionRow:
+    """라벨 축(lexicon_category)과 원천 축(category)이 다른 언급 — #38 이 어긋난 그 자리다."""
+    return replace(need("백탁", "불만"), category=category, lexicon_category=lexicon)
+
+
+def test_a_lexicon_scope_expands_to_the_source_categories_its_labels_sit_on():
+    """실측(run 16): `--scope 선블록` 이 라벨한 13,857행의 원천 카테고리는 '01 > 선케어 > 선블록' 등
+    네 갈래였고, aggregate 는 그 축으로 거른다 — 펼치지 않으면 교집합이 비어 0행이 된다."""
+    mentions = [labelled(SOURCE_CATEGORY, "선블록"), labelled("쿠션", "쿠션")]
+    assert scopes_for("선블록", mentions) == ["01 > 선케어 > 선블록", "선블록"]
+
+
+def test_a_source_category_scope_stays_the_one_scope_it_names():
+    """옛 축을 그대로 준 실행은 지금과 똑같이 돈다 — 펼침은 추가이지 대체가 아니다."""
+    assert scopes_for(SOURCE_CATEGORY, [labelled(SOURCE_CATEGORY, "선블록")]) == [SOURCE_CATEGORY]
+
+
+def test_a_label_with_no_source_category_expands_to_nothing():
+    """제품명 정규식(name_keyword)으로 붙은 라벨은 원천 카테고리가 없다 (analysis/units.py) — 펼칠
+    값이 없으니 그 행은 어떤 카테고리 scope 로도 세어지지 않는다. 침묵 감시(#38 택3)가 그것을 말한다."""
+    assert scopes_for("선블록", [labelled(None, "선블록")]) == ["선블록"]
+
+
+def test_no_scope_still_writes_every_source_category_and_the_rollup():
+    mentions = [labelled(SOURCE_CATEGORY, "선블록"), labelled("쿠션", "쿠션")]
+    assert scopes_for(None, mentions) == ["01 > 선케어 > 선블록", "all", "쿠션"]

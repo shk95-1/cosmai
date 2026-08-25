@@ -42,7 +42,7 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   --since SINCE         Only units observed on or after this date.
-  --scope SCOPE         Restrict to one lexicon category.
+  --scope SCOPE         Restrict to one lexicon or source category.
   --impl IMPL           Registered polarity factory, e.g. ollama:gemma4:latest.
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 

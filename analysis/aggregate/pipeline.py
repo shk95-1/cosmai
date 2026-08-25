@@ -13,7 +13,7 @@ from analysis.aggregate import ROLLUP_SCOPE, WISH_SCOPES, RuleAggregator
 from analysis.aggregate.ranking import WRITE_BATCH, run_ranking
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
-__all__ = ["load_denominators", "load_needs", "load_wishes", "population_of", "run"]
+__all__ = ["load_denominators", "load_needs", "load_wishes", "population_of", "run", "scopes_for"]
 
 NEED_COLUMNS = (
     "src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, "
@@ -209,6 +209,27 @@ def _write(
         conn.commit()
 
 
+def scopes_for(scope: str | None, mentions: Sequence[NeedMentionRow]) -> list[str]:
+    """Which metrics_need scopes this run writes — `--scope` names either axis (#38).
+
+    polarity scopes by `lexicon_category`, this stage by the source category, and the two are not the
+    same string: `--scope 선블록` labelled 13,857 rows whose `category` was `01 > 선케어 > 선블록`
+    (run 16), so filtering on the given string alone aggregated none of them. A lexicon value expands
+    to the source categories its own labels sit on — the mapping is not invertible from
+    `needs.category_map` alone (an unlisted leaf maps to itself, and a name_keyword label carries no
+    source category at all), so the answer comes from the run's own population.
+
+    The given string is kept whatever axis it belongs to: a source category names exactly the scope it
+    always did, and a label whose rows carry no source category still writes nothing under it — which
+    is what `_amend_silent_scope` (analysis/pipeline.py) reports rather than closing quietly.
+    """
+    if scope:
+        # 셈은 그대로다: 펼침은 어느 카테고리에 쓸지를 고를 뿐, 그 안에서 무엇이 세어지는지는 스코프
+        # 없는 실행이 그 카테고리에 쓰는 것과 같다 (need_metrics 는 category 로만 거른다).
+        return sorted({m.category for m in mentions if m.category and m.lexicon_category == scope} | {scope})
+    return sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
+
+
 def run(
     conn: psycopg.Connection[Any],
     scope: str | None = None,
@@ -243,7 +264,7 @@ def run(
             run_id = _run_id(cur, note, _versions(aggregator, cur, population))
         conn.commit()
 
-    scopes = [scope] if scope else sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
+    scopes = scopes_for(scope, mentions)
     need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
     # wish scope 는 카테고리 축이 아니다 — --scope 로 좁혀도 같은 세 scope 를 그대로 낸다.
     wish_rows = [r for s in WISH_SCOPES for r in aggregator.wish_metrics(wishes, s)]

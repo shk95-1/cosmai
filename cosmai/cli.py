@@ -50,7 +50,7 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("analyze", help="Run one analysis stage over the needs schema.")
     p.add_argument("stage", choices=STAGES)
     p.add_argument("--since", default=None, help="Only units observed on or after this date.")
-    p.add_argument("--scope", default=None, help="Restrict to one lexicon category.")
+    p.add_argument("--scope", default=None, help="Restrict to one lexicon or source category.")
     p.add_argument("--impl", default=None, help="Registered polarity factory, e.g. ollama:gemma4:latest.")
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."

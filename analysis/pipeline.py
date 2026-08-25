@@ -49,15 +49,17 @@ SKIPPED = (
 )
 STALE = "half-written month(s) left behind by a run that died: {}"
 # #38: polarity scopes need_mention by lexicon_category, aggregate scopes metrics by the source
-# category (need_mention.category) — a --scope can own the first axis and miss the second entirely,
-# so a multi-hour pass writes labels and aggregates none of them. metrics_wish ignores --scope
-# altogether (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every
-# time, scoped or not), so it carries no signal about this scope and never enters the predicate —
-# only a scoped run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
+# category (need_mention.category). `scopes_for` bridges the two axes, but it can only expand a label
+# into source categories its own rows carry — a name_keyword label carries none — so a scoped pass can
+# still write labels and aggregate none of them. metrics_wish ignores --scope altogether
+# (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every time, scoped
+# or not), so it carries no signal about this scope and never enters the predicate — only a scoped
+# run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
 SILENT_SCOPE = (
-    "--scope {scope!r} wrote 0 metrics_need rows: aggregate scopes by the source category "
-    "(need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
-    "the source category: {categories}"
+    "--scope {scope!r} wrote 0 metrics_need rows: nothing in this run's population sits in that scope "
+    "on either axis — no mention carries it as its source category, and no mention labelled with it "
+    "carries a source category to expand into. Source categories seen for that lexicon_category: "
+    "{categories}"
 )
 SCOPE_CATEGORIES: LiteralString = (
     "SELECT DISTINCT category FROM need_mention WHERE lexicon_category = %s ORDER BY 1"
@@ -202,7 +204,11 @@ def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
 
 
 def _scope_categories(conn: psycopg.Connection[Any], scope: str) -> tuple[str, ...]:
-    """The source category values aggregate actually filters on for this scope's lexicon_category."""
+    """The source category values this scope's lexicon_category is seen on, over the whole table.
+
+    Wider than the expansion `scopes_for` does (that one sees only this run's population), and the
+    gap is itself a reason a scope can be silent: the labels sit under another extractor_version.
+    """
     with conn.cursor() as cur:
         cur.execute(SCOPE_CATEGORIES, (scope,))
         found = tuple(str(r[0]) for r in cur.fetchall() if r[0])
