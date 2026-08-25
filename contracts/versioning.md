@@ -7,3 +7,4 @@
 - `needs.analysis_run.versions` 가 그 run 의 모든 버전을 기록한다. 화면은 최신 run 만 본다.
 - 예외 (A19): `metrics_need`·`metrics_wish` 는 `*_version` 컬럼을 갖지 않는다 — 자연키의 `run_id` 가 `analysis_run.versions` 를 가리키고 그것이 그 행을 만든 모든 버전이다. run 을 거치지 않는 `product_denominator`·`rank_daily`·`price_event` 는 `aggregate_version` 을 가진다(002).
 - 평가셋(`labeled_set`)은 버전이 없다. 라벨이 바뀌면 `labeled_at` 과 `labeler` 가 바뀐 새 행으로 대체한다.
+- DDL 파일 번호 블록: upstream 은 `contracts/ddl/needs/006~019`, 포크 `cosmai-import-ydc` 는 `020~`. 원장(`needs.schema_migration`)에 남의 번호가 있어도 `db/migrate.sh` 는 체크아웃에 있는 파일만 훑으므로 배포는 무해하다 — 대신 그 객체는 `tool/checks/ddl-drift` 의 제외 목록(#75)에 선언한다.

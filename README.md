@@ -2,7 +2,7 @@
 
 화장품 소비자 니즈 분석 시스템 — 수집 → 원본 보존 → 정규화 → 분석 → 결과.
 
-2026-08-23 `architect/REBUILD.md`의 재구성 사양에 따라 새로 시작한 모노레포다. 기존 레포(`cosmai-old`, `trend-radar`, `yt-scrapper`, `Research_Paper`, `stack`, `data-portal`)는 archive(읽기전용)되었고, 이 저장소가 **코드만** 옮겨 심는다 — 문서·훅·메타테스트·개발 철학은 가져오지 않으며 `playbook/`에 따로 추출한다.
+2026-08-23 재구성 사양에 따라 **히스토리 비공유로** 새로 시작한 모노레포다. 구 cosmai 는 `slopindustries/cosmai-old`(archived)로 이동했고, 필요한 자산은 `contracts/`·`playbook/` 으로 이관이 끝났다 — 옛 클론을 fetch 하면 공통 조상이 없어 실패하는 것이 정상이다. 기존 레포(`cosmai-old`, `trend-radar`, `yt-scrapper`, `Research_Paper`, `stack`, `data-portal`)는 archive(읽기전용)되었고, 이 저장소가 **코드만** 옮겨 심는다 — 문서·훅·메타테스트·개발 철학은 가져오지 않으며 `playbook/`에 따로 추출한다.
 
 ## 구조 (계약 우선)
 
