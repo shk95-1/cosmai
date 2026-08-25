@@ -305,6 +305,12 @@ class MetricsWishRow:  # → needs.metrics_wish
 
 
 @dataclass(frozen=True)
+class PanelRosterRow:  # → needs.panel_roster (포크 #3). 명부 판본 한 줄 — panel_version 이 가리킬 부모
+    version: int
+    note: str | None = None  # 이 판본이 무엇인지 (seed:channels_v1 …)
+
+
+@dataclass(frozen=True)
 class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 명부; 값은 시드가 채운다 (#31)
     channel_id: str
     version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
@@ -320,7 +326,8 @@ class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 �
 class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
     run_id: int
     scope: str  # 카테고리명 | 'all' (metrics_need.scope 와 같은 어휘)
-    need_key: str  # 주제 id. 주제 사전이 aspect_lexicon(ruleset='retrieval-topic') 이라 어휘가 같다
+    # 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다
+    topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
     quarter: str  # 'YYYYQn'
     source: str  # youtube_video | youtube_comment — 영상 설명과 댓글은 합치지 않고 나란히 낸다
     content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
@@ -328,8 +335,8 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
     panel_role: str  # 그 명부의 어느 모집단인지. product | expert
     mentions: int  # 분자: 이 주제가 걸린 문서 수
     documents: int  # 그 분기 그 모집단의 문서 수
-    quarter_mentions: int  # 구성비의 분모: 그 분기 전 주제의 언급 합
-    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수
+    quarter_mentions: int  # 구성비의 분모: 그 분기 trend_use 주제들의 언급 합
+    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
     composition: float | None = None
     velocity_yoy: float | None = None
     persistence: float | None = None
