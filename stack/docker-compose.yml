@@ -109,7 +109,7 @@ services:
       # uid 1000 has no /etc/passwd entry in this image (no useradd ran for it), so Chromium's
       # search for a home directory fails unless $HOME is set directly -- and it needs one writable,
       # for its own cache/config dirs beside the profile's user_data_dir. /tmp is world-writable
-      # (sticky bit) in the bookworm-slim base by default.
+      # (sticky bit) in the trixie-slim base by default.
       HOME: /tmp
     volumes:
       # `<<:` replaces the anchor's volumes: rather than adding to them (collector-youtube-work/
