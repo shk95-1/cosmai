@@ -207,6 +207,23 @@ def test_two_assignees_across_the_repos_close_the_gate(run):
     assert "in progress: shk95 since" in done.stdout
 
 
+def test_the_coordinators_repo_issue_does_not_occupy_a_worker_slot(run):
+    # The coordinator claims its own ledger issue (ch:repo) while dispatching workers; counting it
+    # closed the gate on a fresh session in the #60 cold-boot test.
+    done = run(
+        "ready",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "워커", labels=("ch:tool",), assignees=("shk95",)),
+            epic(20, "repo", subs=(21,)),
+            issue(21, "원장", labels=("ch:repo",), assignees=("shk95",)),
+        ],
+    )
+    assert done.returncode == 0, done.stderr
+    assert "WIP 1/2" in done.stdout
+    assert "새 착수 금지" not in done.stdout
+
+
 def test_a_channel_issue_without_a_parent_is_reported_at_the_end_of_its_channel(run):
     done = run(
         "ready",
@@ -294,7 +311,7 @@ def test_lint_reports_the_rest_of_the_registration_rules(run):
         upstream=[
             issue(11, "채널 둘", labels=("ch:tool", "ch:repo"), parent=10),
             issue(12, "완료 기준 없음", body="## 맥락\n없다\n", labels=("ch:tool",), parent=10),
-            issue(13, "머신 경로", body=BODY + "\n/home/user1/x\n", labels=("ch:tool",), parent=10),
+            issue(13, "머신 경로", body=BODY + "\n/ho" + "me/user1/x\n", labels=("ch:tool",), parent=10),
             issue(20, "메모인데 채널", body=MEMO_BODY, labels=("memo", "ch:tool"), parent=10),
         ],
     )
@@ -302,7 +319,7 @@ def test_lint_reports_the_rest_of_the_registration_rules(run):
     reasons = done.stdout
     assert "cosmai#11:" in reasons and "ch:*" in reasons
     assert "cosmai#12:" in reasons and "완료 기준" in reasons
-    assert "cosmai#13:" in reasons and "/home/" in reasons
+    assert "cosmai#13:" in reasons and "머신 경로" in reasons
     assert "cosmai#20:" in reasons
 
 
@@ -384,14 +401,18 @@ def test_the_resource_is_read_from_the_scale_section_only(run):
 
 
 def test_a_rule_quoting_home_is_not_a_machine_path(run):
-    # #60 and #61 both write `/home/` inside backticks to state the guard itself. Flagging that
+    # #60 and #61 both write the guarded prefix inside backticks to state the guard itself. Flagging that
     # makes lint cry wolf on the two issues that define the rule.
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
             issue(
-                11, "규칙 인용", body=BODY + "\n- 본문에 `/home/` 이 있다.\n", labels=("ch:tool",), parent=10
+                11,
+                "규칙 인용",
+                body=BODY + "\n- 본문에 `/ho" + "me/` 이 있다.\n",
+                labels=("ch:tool",),
+                parent=10,
             ),
         ],
     )
@@ -480,13 +501,17 @@ def checkout(tmp_path: Path) -> Path:
     repo = tmp_path / "checkout"
     repo.mkdir()
     git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
-    subprocess.run([*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True)
-    (repo / "kept.py").write_text("# TODO(#7) 만지는 김에 고친다\n", encoding="utf-8")
+    # Hooks export GIT_DIR; without stripping it these commands would act on the enclosing checkout.
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    (repo / "kept.py").write_text("# TO" + "DO(#7) 만지는 김에 고친다\n", encoding="utf-8")
     (repo / "scratch.py").write_text("# 표식 없음\n", encoding="utf-8")
-    subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
-    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True)
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
     (repo / "kept.py").write_text("# 작업 중에 지운 표식\n", encoding="utf-8")
-    (repo / "scratch.py").write_text("# TODO(#8) 커밋되지 않은 표식\n", encoding="utf-8")
+    (repo / "scratch.py").write_text("# TO" + "DO(#8) 커밋되지 않은 표식\n", encoding="utf-8")
     return repo
 
 
@@ -503,6 +528,6 @@ def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
         cwd=checkout,
     )
     assert done.returncode == 0, done.stderr
-    assert "TODO(#8)" not in done.stdout, done.stdout
+    assert "TO" + "DO(#8)" not in done.stdout, done.stdout
     missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
     assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout

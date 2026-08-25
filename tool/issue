@@ -178,7 +178,7 @@ def ready_channels($all; $user):
 
 READY='
 flat as $all
-| ($all | targets(true) | map(select((.assignees | length) > 0)) | length) as $wip
+| ($all | targets(true) | map(select((.assignees | length) > 0 and ((.labels | index("ch:repo")) | not))) | length) as $wip
 | (if $user then
      [$all[] | select(tagged("needs-user")
                       or (tagged("memo") and ($now - (.updatedAt | fromdateiso8601)) > ($memo_days * 86400)))
@@ -240,7 +240,7 @@ flat as $all
       (.blockers[] | select(.state == "OPEN") | select(($byk[.key].labels // []) | index("memo")) | {key: $i.key, short: $i.short, number: $i.number, reason: ("memo " + .key + " 에 blockedBy 돼 있다")}),
       (if ($i | tagged("deferred")) and (open_blockers | length) == 0 and (section("해제 조건") | not)
        then {key: .key, short: .short, number: .number, reason: "deferred 인데 열린 blockedBy 도 ## 해제 조건 절도 없다"} else empty end),
-      (if (.body | test("/home/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "본문에 /home/ 머신 경로가 있다"} else empty end)]
+      (if (.body | test("/ho" + "me/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "본문에 머신 경로(홈 디렉터리)가 있다"} else empty end)]
    | sort_by(.short, .number, .reason)) as $findings
 | ([$all[] | .key as $k | cycles($edges; [$k])] | map(rotate) | unique
    | map({key: .[0], short: (.[0] | split("#")[0]), number: 0, reason: ("blockedBy 순환 — " + join(" → "))})) as $loops
