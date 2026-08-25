@@ -57,8 +57,49 @@ def runtime_url(host: str | None = None, port: int | str | None = None, database
     )
 
 
+# --- the connection budget (#25) ---------------------------------------------------------------
+# Parallel lanes made connections a thing to count. `storage/locks.py` pins one connection for the
+# whole of a lane's walk, so a run now holds one per *walking* source rather than the one a
+# sequential run ever needed, and the sink and the journal each take one more out of the pool per
+# call on top of that.
+#
+# The role is not the one db/bootstrap.sql creates. That script's `<schema>_runtime` (CONNECTION
+# LIMIT 12) is run for `needs` only; commerce connects as `trend_radar_runtime`, which the old stack
+# created and nothing here alters, and its CONNECTION LIMIT is 8 -- read out of production on
+# 2026-08-24 with `pg_db_role_setting` (storage/locks.py records that reading).
+ROLE_CONNECTION_LIMIT = 8
+# And that 8 belongs to more than one run at a time. contracts/entrypoints.md §스케줄 records the
+# hourly ranking walk still running when 02:10 product and 04:15 review start -- the overlap the
+# per-source advisory lock exists to make harmless. A per-process ceiling is therefore half a budget.
+OVERLAPPING_RUNS = 2
+POOL_SIZE = ROLE_CONNECTION_LIMIT // OVERLAPPING_RUNS
+# Strictly under POOL_SIZE, and that is the load-bearing part: a lane's lock connection is held for
+# the length of its walk, so lanes == POOL_SIZE leaves the lanes' own workers nothing to write
+# through and the run waits out `pool_timeout` instead of collecting. One slot is enough because a
+# write is milliseconds against intervals of 1 to 30 seconds -- it is the original collector's single
+# writer task, spelled as a pool bound rather than as a queue.
+MAX_CONCURRENT_LANES = POOL_SIZE - 1
+# Long enough that a queue of short writes never trips it, short enough that a run stuck on the pool
+# still ends inside its cron hour rather than into the next one.
+POOL_TIMEOUT_S = 60.0
+
+
 def create_engine(url: str) -> Engine:
-    return sa.create_engine(url, pool_pre_ping=True, connect_args={"application_name": "cosmai-commerce"})
+    """The pool every part of a run draws on: lane locks, the sink and the journal alike.
+
+    Bounded explicitly, because SQLAlchemy's default (5 plus 10 of overflow) is nearly twice the
+    whole role's limit from a single process, and the failure it buys is `FATAL: too many
+    connections for role` in whichever run asks last -- possibly the other cron line's. With
+    `max_overflow=0` an over-subscribed moment is a wait instead.
+    """
+    return sa.create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_size=POOL_SIZE,
+        max_overflow=0,
+        pool_timeout=POOL_TIMEOUT_S,
+        connect_args={"application_name": "cosmai-commerce"},
+    )
 
 
 def write_records(connection: sa.Connection, records: Sequence) -> None:

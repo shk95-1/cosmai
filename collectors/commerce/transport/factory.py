@@ -2,8 +2,9 @@
 
 origin: service/trend-radar/src/trend_radar/transport/factory.py -- de-asynced for #10, plus
 `LiveFetchers`, which the original had no need for: its CLI built one fetcher per source because it
-ran a lane per source, while `engine.collect` here walks sources in sequence behind a single
-`fetcher` argument. That argument is why `engine.FetcherFor` exists.
+ran a lane per source, while `engine.collect` takes a single `fetcher` argument for the whole run.
+That argument is why `engine.FetcherFor` exists -- and since #25 those lanes run together here too,
+so `LiveFetchers` is asked for its per-source fetchers from several threads at once.
 
 A source is not always one transport. oliveyoung's ranking sits behind a Cloudflare challenge and
 needs a real browser; its review API is on a host that answers plain HTTP and only accepts POST,
@@ -129,22 +130,28 @@ class LiveFetchers:
         self._headless = headless
         self._http_transport = http_transport
         self._by_source: dict[str, DispatchingFetcher] = {}
+        # Since #25 `engine.collect` builds its lanes in parallel, so this is called from one thread
+        # per source at once -- the same reason DispatchingFetcher above holds a lock.
+        self._lock = threading.Lock()
 
     def __call__(self, source: Source) -> Fetcher:
-        existing = self._by_source.get(source.key)
-        if existing is not None:
-            return existing
-        built = build_fetcher(
-            source.policy,
-            source_key=source.key,
-            profile_dir=self._profile_dir,
-            headless=self._headless,
-            http_transport=self._http_transport,
-        )
-        self._by_source[source.key] = built
-        return built
+        with self._lock:
+            existing = self._by_source.get(source.key)
+            if existing is not None:
+                return existing
+            built = build_fetcher(
+                source.policy,
+                source_key=source.key,
+                profile_dir=self._profile_dir,
+                headless=self._headless,
+                http_transport=self._http_transport,
+            )
+            self._by_source[source.key] = built
+            return built
 
     def close(self) -> None:
-        for fetcher in self._by_source.values():
+        with self._lock:
+            built = list(self._by_source.values())
+            self._by_source.clear()
+        for fetcher in built:
             fetcher.close()
-        self._by_source.clear()

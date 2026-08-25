@@ -177,6 +177,9 @@ def run(
                 # Only here. This is the entrypoint cron runs, and two cron lines overlapping on one
                 # source is the whole reason the lock exists.
                 lock=PostgresSourceLock(engine),
+                # And the lock is why this is here too: every walking lane holds a connection of its
+                # own for its whole walk, so the lane count is a draw on the same pool below.
+                max_lanes=storage_db.MAX_CONCURRENT_LANES,
             )
         except BaseException as exc:
             log.finish(run_id, status="failed", note=f"{type(exc).__name__}: {exc}")
@@ -193,9 +196,10 @@ def run(
         return exit_code_for(report)
     finally:
         # This returns rather than exits, so the pool outlives the run for any in-process caller --
-        # and `trend_radar_runtime` is capped at 8 connections while a walk holds at most 3 (the
-        # source lock plus the widest concurrency shipped, hwahae's 2). That cap is not set anywhere
-        # in this repo; storage/locks.py records where it does come from and when it was read.
+        # and the pool is what keeps the run inside `trend_radar_runtime`'s CONNECTION LIMIT now that
+        # lanes are parallel: at most `storage_db.POOL_SIZE` connections leave this process, of which
+        # `MAX_CONCURRENT_LANES` may be lane locks held for a whole walk. That cap is not set
+        # anywhere in this repo; storage/locks.py records where it comes from and when it was read.
         engine.dispose()
 
 
