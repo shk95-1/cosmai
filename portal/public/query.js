@@ -43,6 +43,19 @@ export function rangeLength(header) {
   return end - start + 1;
 }
 
+// 다음 페이지의 offset, 더 받을 것이 없으면 null. 서버가 이번 페이지에서
+// 실제로 보낸 행 수(rangeLength)와 전체 개수(parseContentRange)로 판단한다 —
+// '*'(개수 모름)일 때도 이번 페이지가 PAGE_SIZE 보다 짧으면 마지막 페이지다.
+export function nextPageOffset(offset, header) {
+  const got = rangeLength(header);
+  if (got === 0) return null;
+  const total = parseContentRange(header);
+  const next = offset + got;
+  if (total !== null && next >= total) return null;
+  if (got < PAGE_SIZE) return null;
+  return next;
+}
+
 // CSV 페이지를 이어붙인다. 두 번째 페이지부터는 헤더 줄을 버린다.
 export function appendCsvPage(accumulated, page, isFirst) {
   if (isFirst) return page;

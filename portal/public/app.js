@@ -3,18 +3,23 @@
 // 그래서 이 파일에는 테스트가 없다(data-portal/public/app.js 와 같은 분리).
 import {
   buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
+  PAGE_SIZE, nextPageOffset,
 } from './query.js';
 import { latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption } from './screens.js';
 import { renderDivergingBars, renderMagnitudeBars, renderTopBars } from './render.js';
 
 // PostgREST 는 이 페이지를 서빙한 호스트의 3000 번 — 머신이 바뀌어도 고쳐 쓸 것이 없다.
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:3000`;
-const HEADERS = { 'Accept-Profile': 'needs' };
+// count=exact 가 있어야 서버가 Content-Range 에 전체 개수를 담아 보낸다 —
+// 없으면 총량을 몰라 잘렸는지(#81) 판단할 수 없다.
+const HEADERS = { 'Accept-Profile': 'needs', Prefer: 'count=exact' };
 
 const $ = (id) => document.getElementById(id);
 function showError(text) { $('error').textContent = text || ''; }
 
-async function api(path) {
+// 한 페이지를 받아 rows 와 Content-Range 헤더를 함께 돌려준다 — 잘림 판단은
+// 호출자(apiAll)의 몫이라 헤더를 감추지 않는다.
+async function apiPage(path) {
   let res;
   try {
     res = await fetch(`${API_BASE}${path}`, { headers: HEADERS });
@@ -26,7 +31,23 @@ async function api(path) {
     try { body = await res.json(); } catch { /* JSON 아닌 오류 본문 */ }
     throw new Error(describeError(body));
   }
-  return res.json();
+  return { rows: await res.json(), range: res.headers.get('content-range') };
+}
+
+// PGRST_DB_MAX_ROWS(#81)에 잘린 응답을 offset 을 옮겨 이어 받는다 — query.js 가
+// 이미 내놓은 PAGE_SIZE/nextPageOffset 을 그대로 쓴다(새 페이징 방식을 만들지 않는다).
+async function apiAll(basePath, { select, order }) {
+  const rows = [];
+  let offset = 0;
+  for (;;) {
+    const q = buildQuery({ select, order, limit: PAGE_SIZE, offset });
+    const page = await apiPage(`${basePath}?${q}`);
+    rows.push(...page.rows);
+    const next = nextPageOffset(offset, page.range);
+    if (next === null) break;
+    offset = next;
+  }
+  return rows;
 }
 
 const state = { need: [], wish: [], needRunId: null, wishRunId: null };
@@ -120,11 +141,16 @@ async function boot() {
   showError('');
   try {
     const needSelect = ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved', 'population_share_pct'];
-    const needQ = buildQuery({ select: needSelect, order: 'run_id.desc', limit: 5000 });
+    // order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해
+    // offset 페이징 중 행이 빠지거나 겹칠 수 있다(query.js 상단 주석과 같은 이유).
+    const needOrder = 'run_id.desc,scope,need_key,month,product_ref';
     const wishSelect = ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'];
-    const wishQ = buildQuery({ select: wishSelect, order: 'run_id.desc', limit: 5000 });
+    const wishOrder = 'run_id.desc,scope,format,attribute,brand'; // metrics_wish PK 전체
 
-    const [need, wish] = await Promise.all([api(`/metrics_need?${needQ}`), api(`/metrics_wish?${wishQ}`)]);
+    const [need, wish] = await Promise.all([
+      apiAll('/metrics_need', { select: needSelect, order: needOrder }),
+      apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
+    ]);
     state.need = need;
     state.wish = wish;
     const { needRunId, wishRunId } = latestRuns(need, wish);
