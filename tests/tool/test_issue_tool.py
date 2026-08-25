@@ -343,3 +343,41 @@ def test_the_tool_says_it_is_unverified_when_gh_is_missing(tmp_path: Path):
     )
     assert done.returncode == 69, (done.returncode, done.stdout, done.stderr)
     assert "gh" in done.stderr
+
+
+def test_the_resource_is_read_from_the_scale_section_only(run):
+    # #61's own body quotes the word 자원 while describing this rule; a whole-body search printed
+    # that sentence as the issue's resource.
+    body = "## 할 일\n각 줄에 `자원:` 값을 붙인다\n\n## 채널·자리 / 등급 / 규모\n규모 M · 자원: 공유DB 읽기\n"
+    done = run(
+        "ready",
+        "--json",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "규모 절", body=body, labels=("ch:tool",))],
+    )
+    assert json.loads(done.stdout)["channels"][0]["items"][0]["resource"] == "공유DB 읽기"
+
+
+def test_a_rule_quoting_home_is_not_a_machine_path(run):
+    # #60 and #61 both write `/home/` inside backticks to state the guard itself. Flagging that
+    # makes lint cry wolf on the two issues that define the rule.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, "규칙 인용", body=BODY + "\n- 본문에 `/home/` 이 있다.\n", labels=("ch:tool",), parent=10
+            ),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+
+
+def test_audit_counts_the_same_queue_ready_prints(run):
+    # #60 Phase 4.1 wants the two to agree; they agree because they are one computation.
+    fixture = [
+        epic(10, "tool", subs=(11,)),
+        issue(11, "제자리", labels=("ch:tool",), parent=10),
+        issue(12, "떠돌이", labels=("ch:tool",)),
+    ]
+    assert "ch:tool (cosmai#10) · 2건" in run("audit", upstream=fixture).stdout
+    assert len(json.loads(run("ready", "--json", upstream=fixture).stdout)["channels"][0]["items"]) == 2

@@ -15,6 +15,13 @@ case "$0" in */*) issue_tool_dir=${0%/*} ;; *) issue_tool_dir=. ;; esac
 . "$issue_tool_dir/checks/prerequisite"
 require_command gh jq git
 
+# One graph, two repos: the fork's issues block upstream's (cosmai#55 <- fork#6).
+REPOS=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-ydc"}
+WIP_LIMIT=2
+STALE_HOURS=24
+MEMO_DAYS=14
+SHARED_LABELS='["channel","goal","decision","memo","when-touched","needs-user"]'
+
 usage() {
     cat >&2 <<'EOF'
 usage: tool/issue <command>
@@ -26,13 +33,281 @@ EOF
     exit 64
 }
 
+# The repository is named inline rather than passed as a variable so that anything
+# reading the call -- a log, the offline test's fake gh -- can tell the repos apart.
+query_for() {
+    cat <<EOF
+query(\$cursor: String) {
+  repository(owner: "${1%%/*}", name: "${1##*/}") {
+    nameWithOwner
+    labels(first: 100) { nodes { name } }
+    issues(first: 100, states: OPEN, after: \$cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number title updatedAt body
+        labels(first: 20) { nodes { name } }
+        assignees(first: 5) { nodes { login } }
+        parent { number }
+        subIssues(first: 100) { nodes { number } }
+        blockedBy(first: 50) { nodes { number state repository { nameWithOwner } } }
+      }
+    }
+  }
+}
+EOF
+}
+
+fetch_repo() {
+    query=$(query_for "$1")
+    cursor=
+    while :; do
+        if [ -z "$cursor" ]; then
+            page=$(gh api graphql -f query="$query")
+        else
+            page=$(gh api graphql -f query="$query" -F cursor="$cursor")
+        fi
+        printf '%s\n' "$page"
+        printf '%s' "$page" | jq -e '.data.repository.issues.pageInfo.hasNextPage' >/dev/null || break
+        cursor=$(printf '%s' "$page" | jq -r '.data.repository.issues.pageInfo.endCursor')
+    done
+}
+
+MERGE='
+[.[].data.repository]
+| reduce .[] as $r ({order: [], by: {}};
+    (if (.by | has($r.nameWithOwner)) then .
+     else (.order += [$r.nameWithOwner]
+           | .by[$r.nameWithOwner] = {repo: $r.nameWithOwner, labels: [$r.labels.nodes[].name], issues: []})
+     end)
+    | .by[$r.nameWithOwner].issues += [$r.issues.nodes[]])
+| . as $s | [$s.order[] | $s.by[.]]
+'
+
+graph() {
+    for repo in $REPOS; do
+        fetch_repo "$repo"
+    done | jq -s "$MERGE"
+}
+
+# Shared vocabulary for every subcommand's jq. `key` is repo-short + "#" + number
+# because the two repos share a number space in the output but not in reality.
+JQ_LIB='
+def shortname: sub("^[^/]*/"; "");
+def flat:
+  [ .[] as $r | $r.issues[]
+    | { repo: $r.repo,
+        short: ($r.repo | shortname),
+        number: .number,
+        title: .title,
+        body: (.body // ""),
+        updatedAt: .updatedAt,
+        labels: [.labels.nodes[].name],
+        assignees: [.assignees.nodes[].login],
+        parent: (.parent.number),
+        subs: [.subIssues.nodes[].number],
+        blockers: [.blockedBy.nodes[] | {key: ((.repository.nameWithOwner | shortname) + "#" + (.number | tostring)), state: .state}] }
+    | .key = (.short + "#" + (.number | tostring)) ];
+def tagged($name): (.labels | index($name)) != null;
+def channel_labels: [.labels[] | select(startswith("ch:"))];
+def channel: (channel_labels | first // null);
+def open_blockers: [.blockers[] | select(.state == "OPEN") | .key];
+def section($name): (.body | test("(^|\n)#{1,6}[ \t]*" + $name));
+def scale_lines:
+  (.body | split("\n")) as $l
+  | [range(0; $l | length) | select($l[.] | test("^#{1,6}.*규모"))] as $heads
+  | if ($heads | length) == 0 then $l
+    else ($heads | last) as $start
+      | ([range($start + 1; $l | length) | select($l[.] | test("^#{1,6}[ \t]"))] | first // ($l | length)) as $end
+      | $l[$start + 1:$end] end;
+def resource: (scale_lines | join("\n") | (capture("자원:[ \t]*(?<v>[^\n]*)").v // "")) | sub("[ \t\r]+$"; "");
+def excluded_from_ready: (tagged("memo") or tagged("channel") or tagged("goal") or tagged("deferred"));
+def targets($user): map(select((excluded_from_ready | not) and ($user or (tagged("needs-user") | not))));
+def status_of:
+  if (.assignees | length) > 0 then {status: "in progress", detail: (.assignees[0] + " since " + .updatedAt)}
+  elif (open_blockers | length) > 0 then {status: "blocked", detail: (open_blockers | join(", "))}
+  else {status: "ready", detail: null} end;
+def item($note): status_of + {key: .key, title: .title, resource: resource, note: $note};
+def stray_note: (if .parent == null then "부모 없음" else "에픽 밖" end);
+def ready_channels($all; $user):
+  ($all | targets($user)) as $t
+  | ($t | map({(.key): .}) | add // {}) as $byk
+  | ($all | map(select(tagged("channel")))
+     | map({channel: (channel // .title), epic: .key, epic_title: .title,
+            order: [.subs[] as $n | (.short + "#" + ($n | tostring))]})) as $groups
+  | ([$groups[].order[]] | map({(.): true}) | add // {}) as $claimed
+  | ($t | map(select($claimed[.key] == null))) as $rest
+  | ($groups | map(. as $g | {channel: $g.channel, epic: $g.epic, epic_title: $g.epic_title,
+        items: ([$g.order[] | select($byk[.] != null) | $byk[.] | item(null)]
+                + [$rest[] | select(channel == $g.channel) | item(stray_note)])})) as $named
+  | (([$rest[] | channel | select(. != null)] | unique) - ($named | map(.channel))) as $loose
+  | ($loose | map(. as $c | {channel: $c, epic: null, epic_title: null,
+        items: [$rest[] | select(channel == $c) | item(stray_note)]})) as $unepic
+  | [$rest[] | select(channel == null) | item(stray_note)] as $nochan
+  | $named + $unepic
+    + (if ($nochan | length) > 0 then [{channel: null, epic: null, epic_title: null, items: $nochan}] else [] end);
+'
+
+READY='
+flat as $all
+| ($all | targets(true) | map(select((.assignees | length) > 0)) | length) as $wip
+| (if $user then
+     [$all[] | select(tagged("needs-user")
+                      or (tagged("memo") and ($now - (.updatedAt | fromdateiso8601)) > ($memo_days * 86400)))
+      | . as $i
+      | {key: .key, title: .title, short: .short,
+         kind: (if ($i | tagged("needs-user")) then "needs-user" else "memo" end),
+         unblocks: ([$all[] | select([.blockers[] | select(.state == "OPEN") | .key] | index($i.key))] | length)}]
+     | sort_by(-.unblocks, .short, .key) | map(del(.short))
+   else [] end) as $queue
+| {wip: $wip, limit: $limit, gate: ($wip >= $limit),
+   channels: ready_channels($all; $user), user_queue: $queue}
+'
+
+RENDER_READY='
+def head:
+  if .channel == null then "(채널 없음)"
+  elif .epic != null then .channel + " — " + .epic_title + " (" + .epic + ")"
+  else .channel + " — (에픽 없음)" end;
+["WIP " + (.wip | tostring) + "/" + (.limit | tostring) + (if .gate then " — 새 착수 금지" else "" end)]
++ ([.channels[] | ["", head]
+    + (if (.items | length) == 0 then ["  (없음)"]
+       else [.items[] | "  " + .key + " · " + .title
+             + " · " + (if .status == "ready" then "ready" else .status + ": " + .detail end)
+             + (if .resource != "" then " · 자원: " + .resource else "" end)
+             + (if .note != null then " (" + .note + ")" else "" end)]
+       end)] | add // [])
++ (if (.user_queue | length) > 0
+   then ["", "사용자 큐"] + [.user_queue[] | "  " + .key + " · " + .title + " · " + .kind + " · 푸는 이슈 " + (.unblocks | tostring)]
+   else [] end)
+| .[]
+'
+
+# jq has no cycle primitive, so paths are walked and the first repeat is the cycle.
+# The depth cap only stops a pathological graph from exhausting the stack.
+LINT='
+def cycles($edges; $path):
+  ($path | last) as $node
+  | ($edges[$node] // [])[] as $next
+  | ($path | index($next)) as $seen
+  | if $seen != null then ($path[$seen:] + [$next])
+    elif ($path | length) > 60 then empty
+    else cycles($edges; $path + [$next]) end;
+def rotate: .[0:-1] as $c | ($c | index(($c | min))) as $i | ($c[$i:] + $c[0:$i]) | . + [.[0]];
+flat as $all
+| ($all | map({(.key): .}) | add // {}) as $byk
+| (reduce $all[] as $i ({}; .[$i.key] = ($i | open_blockers))) as $edges
+| ([$all[] | . as $i
+    | (if ($i | tagged("memo") or tagged("goal") or tagged("channel")) then empty
+       else
+         (if (channel_labels | length) != 1 then {key: .key, short: .short, number: .number, reason: "ch:* 라벨이 정확히 하나가 아니다"} else empty end),
+         (if .parent == null then {key: .key, short: .short, number: .number, reason: "부모 에픽이 없다"} else empty end),
+         (if section("완료 기준") then empty else {key: .key, short: .short, number: .number, reason: "본문에 ## 완료 기준 이 없다"} end)
+       end),
+      (if ($i | tagged("memo")) then
+         (if (channel_labels | length) > 0 then {key: .key, short: .short, number: .number, reason: "memo 에 ch:* 라벨이 있다"} else empty end),
+         (if .parent != null then {key: .key, short: .short, number: .number, reason: "memo 에 부모가 있다"} else empty end),
+         (if section("완료 기준") then {key: .key, short: .short, number: .number, reason: "memo 본문에 ## 완료 기준 이 있다"} else empty end)
+       else empty end),
+      (.blockers[] | select(($byk[.key].labels // []) | index("memo")) | {key: $i.key, short: $i.short, number: $i.number, reason: ("memo " + .key + " 에 blockedBy 돼 있다")}),
+      (if ($i | tagged("deferred")) and (open_blockers | length) == 0 and (section("해제 조건") | not)
+       then {key: .key, short: .short, number: .number, reason: "deferred 인데 열린 blockedBy 도 ## 해제 조건 절도 없다"} else empty end),
+      (if (.body | test("/home/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "본문에 /home/ 머신 경로가 있다"} else empty end)]
+   | sort_by(.short, .number, .reason)) as $findings
+| ([$all[] | .key as $k | cycles($edges; [$k])] | map(rotate) | unique
+   | map({key: .[0], short: (.[0] | split("#")[0]), number: 0, reason: ("blockedBy 순환 — " + join(" → "))})) as $loops
+| $findings + $loops
+'
+
+AUDIT='
+. as $repos
+| flat as $all
+| {
+  channels: [ready_channels($all; true)[]
+    | {channel: (.channel // "(채널 없음)"), epic: (.epic // "에픽 없음"), length: (.items | length),
+       head: (.items | first | if . == null then null else .key + " · " + .title end)}],
+  stale_in_progress: [$all[] | select((.assignees | length) > 0 and ($now - (.updatedAt | fromdateiso8601)) > ($stale_hours * 3600))
+    | {key: .key, assignee: .assignees[0], hours: ((($now - (.updatedAt | fromdateiso8601)) / 3600) | floor)}],
+  old_memos: ([$all[] | select(tagged("memo") and ($now - (.updatedAt | fromdateiso8601)) > ($memo_days * 86400)) | .key]),
+  stale_open: [$all[] | select(.short == $primary) | . as $i
+    | ($merged | map(select(test("/" + ($i.number | tostring) + "-")))) as $branches
+    | select(($branches | length) > 0) | {key: $i.key, branches: $branches}],
+  todo_without_issue: [$todos[] | . as $line | ($line | capture("TODO\\(#(?<n>[0-9]+)\\)").n | tonumber) as $n
+    | select([$all[] | select(.short == $primary and .number == $n and tagged("when-touched"))] | length == 0)
+    | $line],
+  when_touched_without_todo: [$all[] | select(.short == $primary and tagged("when-touched"))
+    | . as $i | select([$todos[] | select(test("TODO\\(#" + ($i.number | tostring) + "\\)"))] | length == 0) | .key],
+  merged_worktrees: [$worktrees[] | split("\t") | {path: .[0], branch: .[1]}
+    | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
+  missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)]
+}
+'
+
+RENDER_AUDIT='
+def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  없음"] else $lines end);
+block("채널별 대기열"; [.channels[] | "  " + .channel + " (" + .epic + ") · " + (.length | tostring) + "건 · 머리 " + (.head // "없음")])
++ block("착수 후 방치 (24h 이상 무변경)"; [.stale_in_progress[] | "  " + .key + " · " + .assignee + " · " + (.hours | tostring) + "h"])
++ block("14일 넘은 memo (" + (.old_memos | length | tostring) + "건)"; [.old_memos[] | "  " + .])
++ block("stale-open (머지된 브랜치가 있는데 열려 있다)"; [.stale_open[] | "  " + .key + " ← " + (.branches | join(", "))])
++ block("TODO(#n) 표식인데 열린 when-touched 이슈가 아니다"; [.todo_without_issue[] | "  " + .])
++ block("열린 when-touched 이슈인데 코드에 표식이 없다"; [.when_touched_without_todo[] | "  " + .])
++ block("머지됐는데 남은 워크트리"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
++ block("두 레포에 없는 공통 라벨"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
+| .[]
+'
+
 cmd=${1:-}
 [ -n "$cmd" ] || usage
 shift
 
+as_json=0
+as_user=false
+for arg in "$@"; do
+    case "$arg" in
+        --json) as_json=1 ;;
+        --user) as_user=true ;;
+        *) usage ;;
+    esac
+done
+
+now=$(date -u +%s)
+
 case "$cmd" in
-    ready) ;;
-    lint) ;;
-    audit) ;;
+    ready)
+        model=$(graph | jq --argjson now "$now" --argjson user "$as_user" \
+            --argjson limit "$WIP_LIMIT" --argjson memo_days "$MEMO_DAYS" "$JQ_LIB $READY")
+        if [ "$as_json" = 1 ]; then
+            printf '%s\n' "$model"
+        else
+            printf '%s' "$model" | jq -r "$RENDER_READY"
+        fi
+        ;;
+    lint)
+        findings=$(graph | jq "$JQ_LIB $LINT")
+        if [ "$as_json" = 1 ]; then
+            printf '%s\n' "$findings"
+        else
+            printf '%s' "$findings" | jq -r '.[] | .key + ": " + .reason'
+        fi
+        printf '%s' "$findings" | jq -e 'length == 0' >/dev/null
+        ;;
+    audit)
+        [ "$as_json" = 0 ] || usage
+        # Local git is half of the audit: a branch or a worktree that outlived its issue is
+        # only visible from the checkout, never from the API.
+        merged=$(git branch --merged main --format='%(refname:short)' 2>/dev/null || true)
+        worktrees=$(git worktree list --porcelain \
+            | awk '/^worktree /{p=$2} /^branch /{b=$2; sub("refs/heads/", "", b); print p"\t"b}')
+        # :/ rather than . -- the marker survey must cover the tree from a subdirectory too.
+        todos=$(git grep -nE 'TODO\(#[0-9]+\)' -- :/ 2>/dev/null || true)
+        to_lines='split("\n") | map(select(length > 0))'
+        primary=${REPOS%% *}
+        graph | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
+            --argjson memo_days "$MEMO_DAYS" \
+            --arg primary "${primary##*/}" \
+            --argjson merged "$(printf '%s' "$merged" | jq -R -s "$to_lines")" \
+            --argjson worktrees "$(printf '%s' "$worktrees" | jq -R -s "$to_lines")" \
+            --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
+            "$JQ_LIB $AUDIT | $RENDER_AUDIT"
+        ;;
     *) usage ;;
 esac
