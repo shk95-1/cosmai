@@ -187,5 +187,5 @@ youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋�
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
 youtube: watch 1h · work 5m · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
-naver:   datalab 월 1회 (키워드 사전 기준)
+naver:   datalab 월 1회 (키워드 사전 기준) · blog 월 1회
 ```
