@@ -9,10 +9,11 @@ from __future__ import annotations
 import hashlib
 import os
 import pickle
+import sys
 from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import psycopg
@@ -146,6 +147,73 @@ def run(
 CACHE_DIR = Path("var/retrieval/bm25")
 
 
+def chunk_census(conn: psycopg.Connection, sources: tuple[str, ...] | None) -> tuple[int, datetime | None]:
+    """(청크 수, 최신 `chunked_at`). 코퍼스가 지금 어디까지 와 있는지를 재는 한 자리다.
+
+    BM25 캐시 키(index_signature)와 벡터 커버리지 가드(coverage_note)가 **같은 질의**를 봐야
+    한다 -- 둘이 갈리면 한쪽은 따라가고 다른 쪽은 못 따라가는 지금의 어긋남이 다시 생긴다.
+    """
+    where, params = "", ()
+    if sources:
+        where, params = "WHERE source = ANY(%s)", (list(sources),)
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT count(*), max(chunked_at) FROM retrieval_chunk {where}", params)  # noqa: S608
+        count, latest = cur.fetchone() or (0, None)
+    conn.commit()  # 뒤이어 형태소 분석이나 1.2GB 행렬 읽기가 붙는다 -- 트랜잭션을 열어 둔 채로 나가지 않는다
+    return int(count or 0), latest
+
+
+def _manifest_moment(value: object) -> datetime | None:
+    """매니페스트의 ISO 문자열을 DB 의 timestamptz 옆에 놓는다. 못 읽으면 None -- 읽을 수 없는
+    값은 어긋난 값이고, 어긋남은 아래에서 경고가 된다."""
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def coverage_note(conn: psycopg.Connection, store) -> str | None:
+    """벡터 저장소가 지금 청크 집합을 덮는가. 덮으면 None, 아니면 사람이 읽을 한 줄.
+
+    **멈추지 않는다.** 옛 코퍼스를 일부러 검색하는 것도 정상 용법이라 거부하면 그 길까지 막힌다 --
+    막아야 하는 것은 조용한 것뿐이다. 어긋남을 고치는 것은 전량 재인코딩이지 이 함수가 아니다.
+
+    대조 범위는 **저장소가 태운 소스**(매니페스트 `sources`)다. 검색의 `--source` 좁힘으로 재면
+    좁힘 밖의 청크가 매번 "안 덮인다"로 나온다.
+
+    `chunked_at_max` 는 필수 키가 아니다(vectors.REQUIRED_MANIFEST). 이 키가 생기기 전에 구운
+    저장소를 거부하면 지금 도는 vector·hybrid 검색이 통째로 멈추므로, 없으면 개수만 대조하고
+    그 사실을 말한다 -- 이 이슈가 정한 "멈추지 말고 알려라"와 같은 자리다.
+    """
+    scope = tuple(store.manifest.get("sources") or ()) or None
+    count, latest = chunk_census(conn, scope)
+    covered = len(store.chunk_ids)
+    drift: list[str] = []
+    if covered < count:
+        drift.append(
+            f"청크 {count:,}건 중 {covered:,}건만 벡터에 있다 -- "
+            f"새 청크 {count - covered:,}건은 벡터 검색에 안 나온다"
+        )
+    elif covered > count:
+        drift.append(f"벡터 {covered:,}건이 청크 {count:,}건보다 많다 -- 지워진 청크가 저장소에 남아 있다")
+    blind = ""
+    if "chunked_at_max" not in store.manifest:
+        blind = (
+            "매니페스트에 chunked_at_max 가 없어 개수만 대조했다 -- 같은 수 다른 집합은 다시 태워야 잡힌다"
+        )
+    elif (recorded := _manifest_moment(store.manifest["chunked_at_max"])) != latest:
+        drift.append(
+            f"청크는 {latest} 까지 바뀌었는데 벡터는 {recorded} 까지다 -- 수가 같아도 같은 집합이 아니다"
+        )
+    notes = drift + ([blind] if blind else [])
+    if not notes:
+        return None
+    fix = " `cosmai retrieval embed` 로 전량 다시 태워야 맞는다." if drift else ""
+    return "경고: " + "; ".join(notes) + "." + fix
+
+
 def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -> str:
     """이 색인이 무엇 위에 세워졌는지. 하나라도 달라지면 캐시를 다시 만들어야 한다.
 
@@ -154,13 +222,7 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
     주제 사전 topics.py)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의
     캐시 키와 같은 발상).
     """
-    where, params = "", ()
-    if sources:
-        where, params = "WHERE source = ANY(%s)", (list(sources),)
-    with conn.cursor() as cur:
-        cur.execute(f"SELECT count(*), max(chunked_at) FROM retrieval_chunk {where}", params)  # noqa: S608
-        count, latest = cur.fetchone() or (0, None)
-    conn.commit()  # 뒤이어 형태소 분석이 붙으므로 트랜잭션을 열어 둔 채로 나가지 않는다
+    count, latest = chunk_census(conn, sources)
     parts = [str(count), str(latest), ",".join(sources or ())]
     for path in TOKENIZER_INPUTS:
         parts.append(hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "-")
@@ -234,7 +296,13 @@ def ranked_chunks(
     from analysis.retrieval import embed, vectors
 
     out = store or vectors.DEFAULT_STORE
-    loaded = vector_store or vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
+    loaded = vector_store
+    if loaded is None:
+        loaded = vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
+        # 저장소를 연 쪽이 커버리지를 묻는다 -- eval 은 한 저장소로 질의 61개를 도므로 자기가 한 번
+        # 묻고 그 답을 채점표에 싣는다(여기서 물으면 61번 세고 같은 줄을 61번 찍는다).
+        if note := coverage_note(conn, loaded):
+            print(note, file=sys.stderr)
     query_vector = embed.encode_query(query, out=out, store=loaded, encoder=encoder)
     if engine == "vector":
         return vectors.search(loaded, query_vector, top=top, sources=sources)

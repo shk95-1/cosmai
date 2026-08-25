@@ -123,3 +123,27 @@ def test_an_empty_corpus_still_writes_a_readable_store(needs_schema, needs_runti
         connection.close()
     assert outcome.encoded == 0
     assert vectors.load(tmp_path / "e5base").chunk_ids == []
+
+
+def test_the_manifest_records_how_far_the_chunks_had_been_rebuilt(conn, fake, tmp_path):
+    """`count` 만 적으면 "같은 수, 다른 집합" 을 아무도 못 잡는다 -- 커버리지 가드가 읽는 값이라
+    인코딩한 행에서 직접 뽑는다(#12)."""
+    embed.run(conn, out=tmp_path / "e5base")
+    _, _, manifest_path = vectors.paths(tmp_path / "e5base")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    with conn.cursor() as cur:
+        cur.execute("SELECT max(chunked_at) FROM retrieval_chunk")
+        latest = cur.fetchone()[0]  # pyright: ignore[reportOptionalSubscript]
+    conn.commit()
+    assert manifest["chunked_at_max"] == latest.isoformat()
+
+
+def test_an_empty_corpus_records_no_chunked_at_max(needs_schema, needs_runtime_url, fake, tmp_path):
+    # 빈 코퍼스에는 최댓값이 없다. 모르는 것을 아는 척하는 값을 적으면 가드가 거짓으로 안심한다.
+    connection = _connect(needs_runtime_url)
+    try:
+        embed.run(connection, out=tmp_path / "e5base")
+    finally:
+        connection.close()
+    _, _, manifest_path = vectors.paths(tmp_path / "e5base")
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["chunked_at_max"] is None

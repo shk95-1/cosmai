@@ -4,13 +4,14 @@ needs_schema 픽스처가 만든 스키마에 원천 테이블을 직접 세운�
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import psycopg
 import pytest
 from sqlalchemy.engine import make_url
 
-from analysis.retrieval import corpus, pipeline
+from analysis.retrieval import corpus, pipeline, vectors
 
 pytestmark = pytest.mark.postgres
 
@@ -264,3 +265,80 @@ def test_search_finds_an_ingredient_by_its_exact_name(conn, _schema_name):
 
 def test_search_on_an_empty_index_returns_nothing(conn):
     assert pipeline.search(conn, "백탁", cache_dir=None) == []
+
+
+class _FakeEncoder:
+    """질의를 태우는 자리만 채운다 -- 여기서 재는 것은 순위가 아니라 "저장소가 청크를 덮는가" 다."""
+
+    def encode(self, texts, **_kw):
+        return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+
+@pytest.fixture
+def encoded(conn, _schema_name, monkeypatch, tmp_path):
+    """청크를 적재하고 그 위에 저장소를 굽는다. 이 뒤에 청크가 늘어나는 것이 #12 의 어긋남이다."""
+    from analysis.retrieval import embed
+
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    monkeypatch.setattr(embed, "load_encoder", lambda *a, **k: _FakeEncoder())
+    monkeypatch.setattr(embed, "model_revision", lambda model: "revsha")
+    out = tmp_path / "e5base"
+    embed.run(conn, out=out, sources=(corpus.YOUTUBE_COMMENT,))
+    return out
+
+
+def _one_more_chunk(conn, chunk_id: str = "youtube_comment:c9#0") -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES (%s, %s, 'youtube_comment', 0, '백탁이 새로 생겼다', 'x')",
+            (chunk_id, chunk_id.split("#")[0]),
+        )
+    conn.commit()
+
+
+def test_vector_search_warns_about_the_chunks_the_store_does_not_cover(encoded, conn, capsys):
+    """재청킹으로 청크가 늘면 BM25 는 캐시 키로 따라가지만 벡터는 오류 없이 옛 코퍼스 위에서만
+    답한다 -- 아무도 검사하지 않으면 그 어긋남은 틀린 순위로도 안 나타난다(#12)."""
+    _one_more_chunk(conn)
+    hits = pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
+    assert hits  # 멈추지 않는다 -- 옛 코퍼스를 일부러 검색하는 정상 용법이 막히면 안 된다
+    err = capsys.readouterr().err
+    assert "경고" in err and "1건" in err
+
+
+def test_hybrid_search_warns_on_the_same_drift(encoded, conn, capsys):
+    # hybrid 도 같은 저장소를 쓴다 -- 융합이 어휘 쪽을 섞는다고 빠진 벡터가 채워지지 않는다.
+    _one_more_chunk(conn)
+    pipeline.ranked_chunks(conn, "백탁", engine="hybrid", store=encoded, cache_dir=None)
+    assert "경고" in capsys.readouterr().err
+
+
+def test_a_store_that_covers_the_corpus_says_nothing(encoded, conn, capsys):
+    # 매번 찍히는 경고는 아무도 안 읽는다. 덮고 있으면 조용해야 한다.
+    pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
+    assert capsys.readouterr().err == ""
+
+
+def test_the_same_count_with_changed_text_is_caught_by_chunked_at_max(encoded, conn, owner, _schema_name):
+    """`count` 만으로는 "같은 수, 다른 집합" 을 못 잡는다 -- 매니페스트의 chunked_at_max 가
+    그 자리다(#12 완료 기준 3)."""
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '백탁이 아주 심하다' WHERE comment_id = 'c1'")
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    store = vectors.load(encoded)
+    assert len(store.chunk_ids) == pipeline.chunk_census(conn, (corpus.YOUTUBE_COMMENT,))[0]
+    assert pipeline.coverage_note(conn, store) is not None
+
+
+def test_a_store_made_before_chunked_at_max_still_searches_and_says_so(encoded, conn, capsys):
+    """운영 저장소(2026-08-24 인코딩분)에는 이 키가 없다. 필수 키로 올리면 지금 도는 vector·hybrid
+    검색이 통째로 거부된다 -- 없으면 말해 줄 자리이지 멈출 자리가 아니다."""
+    _, _, manifest_path = vectors.paths(encoded)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["chunked_at_max"]
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    hits = pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
+    assert hits
+    assert "chunked_at_max" in capsys.readouterr().err
