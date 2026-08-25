@@ -110,7 +110,8 @@ def _columns_from(paths: Iterable[Path], table: str) -> tuple[str, ...]:
             for line in created.group(1).splitlines():
                 for part in re.sub(r"--.*", "", line).split(","):
                     name = re.match(r"\s*([a-z_]+)\s+\S", part)
-                    if name and not part.strip().upper().startswith(("PRIMARY KEY", "UNIQUE", "CHECK")):
+                    constraint = re.match(r"(PRIMARY KEY|UNIQUE|CHECK)\b", part.strip(), re.IGNORECASE)
+                    if name and not constraint:
                         columns.append(name.group(1))
         columns += [
             column

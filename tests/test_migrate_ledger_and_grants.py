@@ -15,7 +15,12 @@ MIGRATIONS = sorted(
     p.stem for p in (Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "needs").glob("*.sql")
 )
 WHITELIST = ["metrics_need", "metrics_wish", "entity_lexicon", "aspect_lexicon", "product_ref"]
-NOT_WHITELISTED = ["need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member"]
+# metrics_topic_quarter 는 metrics_* 인데도 화이트리스트 밖이다 (포크 #3): 아직 행이 없고, 이 표를
+# 화면에 여는 판단은 그것을 서빙하는 쪽(#5)의 것이다. GRANT 는 나중에 더해도 추가만이다.
+NOT_WHITELISTED = [
+    "need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member",
+    "panel_channel", "metrics_topic_quarter",
+]  # fmt: skip
 
 
 @pytest.fixture
