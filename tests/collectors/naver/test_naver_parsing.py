@@ -31,7 +31,7 @@ def test_parse_datalab_response_unrolls_series_into_points():
             },
         ],
     }
-    points = parsing.parse_datalab_response(body, category="선블록", captured_at=NOW)
+    points = parsing.parse_datalab_response(body, category="선블록", captured_at=NOW, request_key="abc123")
     assert len(points) == 3
     first = points[0]
     assert first.category == "선블록"
@@ -40,17 +40,42 @@ def test_parse_datalab_response_unrolls_series_into_points():
     assert first.ratio == 10.36074
     assert first.terms == ("선크림 백탁", "썬크림 백탁", "선크림 하얗게")
     assert first.captured_at == NOW
+    # every point this response yields carries the same boundary -- one HTTP call, one scaling.
+    assert {p.request_key for p in points} == {"abc123"}
+
+
+def test_request_key_is_stable_for_the_same_params():
+    params = {
+        "keywordGroups": [{"groupName": "백탁", "keywords": ["선크림 백탁"]}],
+        "startDate": "2016-01-01",
+        "endDate": "2026-08-23",
+        "timeUnit": "month",
+    }
+    assert parsing.datalab_request_key(params) == parsing.datalab_request_key(dict(params))
+
+
+def test_request_key_differs_when_the_window_differs():
+    # a later run's endDate moves -- NAVER recomputes the 0-100 scaling over the new window, so the
+    # two runs are different requests even though the same groups were asked.
+    base = {
+        "keywordGroups": [{"groupName": "백탁", "keywords": ["선크림 백탁"]}],
+        "startDate": "2016-01-01",
+        "endDate": "2026-08-23",
+        "timeUnit": "month",
+    }
+    moved = dict(base, endDate="2026-09-23")
+    assert parsing.datalab_request_key(base) != parsing.datalab_request_key(moved)
 
 
 def test_parse_datalab_response_skips_a_point_with_no_ratio_gracefully():
     body = {"results": [{"title": "밀림", "keywords": [], "data": [{"period": "2016-01-01"}]}]}
-    points = parsing.parse_datalab_response(body, category="선블록", captured_at=NOW)
+    points = parsing.parse_datalab_response(body, category="선블록", captured_at=NOW, request_key="k")
     assert len(points) == 1
     assert points[0].ratio is None
 
 
 def test_parse_datalab_response_with_no_results_key_returns_nothing():
-    assert parsing.parse_datalab_response({}, category="선블록", captured_at=NOW) == []
+    assert parsing.parse_datalab_response({}, category="선블록", captured_at=NOW, request_key="k") == []
 
 
 def test_parse_blog_response_strips_markup_and_parses_postdate():

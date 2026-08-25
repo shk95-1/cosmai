@@ -156,7 +156,12 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
             blocked.append(category)
             continue
         journal.record(query=category, status=200, attempt=1)
-        points = parsing.parse_datalab_response(body, category=category, captured_at=now)
+        # request_key from the params actually sent -- not the response, which never echoes them
+        # back reliably enough to reconstruct the boundary (#44).
+        request_key = parsing.datalab_request_key(spec.params)
+        points = parsing.parse_datalab_response(
+            body, category=category, captured_at=now, request_key=request_key
+        )
         if not points:
             blocked.append(category)
             continue

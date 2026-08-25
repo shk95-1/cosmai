@@ -33,6 +33,24 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 - `brand_mention` 은 `ref_id` 를 쓰고 src 어휘가 다르다: `yt_title→title` · `yt_transcript→transcript` · `yt_comment→comment` (B12).
 - `labeled_set.ref` 는 별도 이름공간이다(`sun:<split>:<i>:<review_ref>` · `p1:<split>:<i>` · wish 는 `comment_id` 단독 · `<sample>:<src>/<ref_id>/<brand>` · `<v1|v2>:<i>`). 언급 행과 조인하려면 변환이 필요하다.
 
+## NAVER DataLab: ratio 는 요청 안에서만 비교 가능 (#44)
+NAVER DataLab 은 **요청 하나 안에서** 시리즈들의 최댓값을 100 으로 맞춰 나머지를 그 비율로 되돌린다(벤더
+문서). 그래서 `needs.naver_datalab_point.ratio` 는 **같은 요청으로 나온 행끼리만** 크기를 비교할 수 있다
+— 다른 요청(다른 `category`, 또는 같은 category 라도 다른 실행)에서 나온 행과 비교하면, 각자 다른 100 을
+기준으로 정규화된 숫자를 같은 잣대인 양 취급하는 것이라 **오류 없이 그럴듯한 틀린 숫자**가 나온다.
+`category`·`group_key` 로 GROUP BY 해서 순위를 매기는 정도는 안전하지만, 서로 다른 `request_key` 를 가진
+행을 비교·합산하기 전에는 **앵커 재척도**(전역 앵커 키워드를 여러 요청에 공통으로 넣어 그 비율로 되돌리는
+것 — 이슈 #90 이 앵커 선정과 재척도 시점을 결정한다)가 선행해야 한다. 이 계약은 재척도 없이 요청을 가로지른
+비교를 하지 말라는 제약이고, #90 은 어떻게 재척도하는지를 정한다.
+
+**요청 경계는 `naver_datalab_point.request_key` 로 행에서 읽는다**(`contracts/ddl/needs/006_naver_request.sql`,
+결정 (가): `terms` 는 그룹 하나의 검색어 감사용일 뿐 `startDate`/`endDate`/`timeUnit` 을 담지 않아 같은
+그룹의 다른 실행을 구별하지 못한다). `request_key` = 실제로 보낸 요청 바디
+(`keywordGroups`·`startDate`·`endDate`·`timeUnit`) 의 canonical JSON(`json.dumps(sort_keys=True)`) 을
+sha256 한 hex digest(`collectors/naver/parsing.py:datalab_request_key`) — 같은 파라미터는 같은 키를,
+`endDate` 가 하루라도 움직이면(그 창이 다시 스케일되므로) 다른 키를 낸다. 한 응답이 만든 모든 행은 같은
+`request_key` 를 공유한다.
+
 ## 스칼라 컬럼에 들어가는 목록 (A12)
 `wish_mention.format` · `wish_mention.attribute` 는 `;` 로 구분하고 **최대 3개**, **첫 번째가 주 값**이다. 집계는 첫 값만 쓴다.
 `product_line_mention.line_key` = `brand || ' ' || line_tokens` (A14).
