@@ -1,4 +1,8 @@
-"""Aggregator 계약의 규칙 구현 (contracts/interfaces.md). 순수 함수: 입력은 Iterable, DB 없음."""
+"""Aggregator 계약의 규칙 구현 (contracts/interfaces.md). 순수 함수: 입력은 Iterable, DB 없음.
+
+집계·랭킹 상수는 slice-p9/aggregate.py 와 slice-p2/{q1_churn,q4_price_rank}.py 를
+옮긴 것이다(슬라이스는 import 하지 않는다).
+"""
 
 from __future__ import annotations
 
