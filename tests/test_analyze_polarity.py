@@ -662,6 +662,21 @@ def test_a_run_that_names_a_scope_it_does_not_own_is_refused(loaded: str, _schem
         _run(loaded, _schema_name, scope="선블록", owners=OWNERS)
 
 
+def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quietly(
+    loaded: str, _schema_name: str
+):
+    """entrypoints.md §분석 이 약속하는 모양: 거절은 `analysis_run.status='failed'` 로 남고 CLI 는 1 을
+    낸다 — 열린 채 남는 run 도, 아무 일 없었다는 듯한 종료 코드 0 도 아니다."""
+    with connect(loaded) as conn:
+        found = run_stage(
+            conn, "polarity", scope="선블록", commerce_schema=_schema_name, youtube_schema=_schema_name
+        )
+    assert found.status == "failed" and GEMMA4 in found.detail
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, finished_at IS NOT NULL FROM analysis_run")
+        assert cur.fetchall() == [("failed", True)]
+
+
 def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""

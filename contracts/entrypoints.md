@@ -84,6 +84,19 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   기록한다. 한 단계라도 실패하면 그 run 은 `status='failed'` + note 로 닫히고 종료 코드는 1 이다.
 - `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
+- 그 모집단 안에서 **극성 구현은 scope 마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가 한
+  `lexicon_category` 를 한 `polarity_version` 에 배정하고, 주인이 아닌 실행은 그 scope 의 `need_mention`
+  행을 쓰지도 지우지도 않는다 — 005 의 자연키가 `polarity_version` 을 담지 않아 소유는 행이 아니라
+  scope 단위로만 성립하기 때문이다. 주인 없는 `lexicon_category` 와 `lexicon_category IS NULL` 인
+  행(유튜브 댓글·카테고리를 못 붙인 리뷰)은 지금처럼 규칙이 갱신한다.
+- 그래서 **한 문장에는 라벨이 하나뿐이다** — 두 구현이 공존해도 같은 문장이 두 번 세어지지 않는다.
+  다만 `metrics_need` 의 `scope` 축은 `lexicon_category` 가 아니라 원천 카테고리이고 rollup
+  scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
+  scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
+  돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.
+- 주인이 아닌 실행이 `--scope <남의 scope>` 를 지정하면 **거절한다** — 조용한 무동작이 아니라 그 단계가
+  실패로 끝나고(`analysis_run.status='failed'`, 종료 코드 1) 메시지가 주인의 `polarity_version` 과 소유
+  표의 경로를 말한다.
 
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
