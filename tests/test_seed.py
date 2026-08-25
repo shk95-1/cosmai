@@ -96,6 +96,8 @@ FILLED = {
     "select count(*) from metrics_wish where videos is null or example is null": 0,
     # suncare 2,266(전부 선블록) + p1 의 lexicon_category 있는 11,537, 충돌 0 (B10 · 005)
     "select count(*) from need_mention where lexicon_category is not null": 13803,
+    # #92: seeded runs must close out like production runs, not linger with finished_at NULL.
+    "select count(*) from analysis_run where finished_at is null": 0,
 }
 
 

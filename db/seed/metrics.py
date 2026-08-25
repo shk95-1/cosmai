@@ -66,7 +66,6 @@ SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels, videos = EXCLUDE
 """
 
 
-# TODO(#92): seeded runs leave finished_at NULL; production runs fill it.
 def analysis_run(cur: psycopg.Cursor[Any], key: str) -> int:
     """Found by note, created only when absent -- re-seeding must not pile up runs."""
     note, versions = RUNS[key]
@@ -80,7 +79,10 @@ def analysis_run(cur: psycopg.Cursor[Any], key: str) -> int:
     )
     created = cur.fetchone()
     assert created is not None
-    return int(created[0])
+    run_id = int(created[0])
+    # seeded runs never actually run -- close them out with the same started_at value production fills in.
+    cur.execute("UPDATE analysis_run SET finished_at = started_at WHERE run_id = %s", (run_id,))
+    return run_id
 
 
 def _ratio(value: str) -> int | None:
