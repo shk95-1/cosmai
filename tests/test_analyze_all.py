@@ -378,6 +378,132 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
     assert aggregate.status == "ok" and aggregate.counts["metrics_need"] > 0
 
 
+def test_analyze_all_stops_being_quiet_when_the_scope_axes_miss_each_other(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """#38: polarity scopes by lexicon_category ('선블록') but aggregate scopes by the source category
+    ('스킨케어 > 선크림') — this fixture's reviews sit exactly on that mismatch, so a 6-hour pass that
+    labels 13,857 rows and aggregates none must not close as 'ok'."""
+    found = _all(analysis_url, sources, scope="선블록")
+    assert found.counts["attempted_need"] > 0, "polarity must have actually run for this scope"
+    assert found.counts["metrics_need"] == 0
+    assert found.status == "partial", found.detail
+    assert "선블록" in found.detail
+    assert CATEGORY in found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        assert row is not None
+        status, note = row
+        assert status == "partial"
+        assert CATEGORY in note
+
+
+def _insert_need(url: str, category: str) -> None:
+    """The one shape of need_mention this file's --scope 선블록 tests all need: label matches, source
+    category doesn't — the #38 mismatch itself, not a stand-in for it."""
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
+            "observed_at_resolution, month, sentence, category, lexicon_category, "
+            "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
+            "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
+            (category, EXTRACTOR_VERSION, POLARITY_VERSION),
+        )
+        conn.commit()
+
+
+def test_analyze_aggregate_alone_stops_being_quiet_on_the_same_mismatch(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """standalone `analyze aggregate` closes its own run — the override has to reach that row too."""
+    commerce, _youtube = sources
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.counts["metrics_need"] == 0
+    assert found.status == "partial", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        assert row is not None
+        status, note = row
+        assert status == "partial"
+        assert CATEGORY in note
+
+
+def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sources: tuple[str, str]):
+    """#38 의 침묵과 #16 의 stale 보고 행은 `_one` 의 aggregate 분기에서 만나고, 만나는 **순서**가
+    불변식이다: `_amend_silent_scope(..., close_run=True)` 는 자기 run 행을 partial 로 닫고
+    `_reported` 는 status 가 OK 가 아니면 보고 행을 하나 넣는다. 후자가 바깥이어야 한다 — 안팎이
+    뒤집히면 표식 하나 없는 이 침묵 한 건에 partial 행이 둘 남고, "한 사건에 한 행"이 깨진다.
+
+    이 자리를 지키는 것이 사람의 주의력뿐이면 다음 리베이스에서 조용히 뒤집힌다.
+    """
+    commerce, _youtube = sources
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "partial" and found.counts["metrics_need"] == 0, found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT run_id, note FROM analysis_run WHERE status = 'partial' ORDER BY run_id")
+        partial_rows = cur.fetchall()
+    assert [int(r[0]) for r in partial_rows] == [found.run_id], (
+        f"one scope-silence must leave exactly the aggregate's own run partial, got {partial_rows}"
+    )
+    assert CATEGORY in (partial_rows[0][1] or "")
+
+
+def test_the_predicate_fires_on_need_alone_even_when_wish_is_not_empty(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """review round 1 #2: the brief's original 'both at 0' predicate was wrong. wish ignores --scope
+    entirely and always recounts the whole population (WISH_SCOPES), so #33's plan to run this scope by
+    scope repeatedly will keep the wish population non-empty — metrics_need alone has to carry this."""
+    commerce, _youtube = sources
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO wish_mention (src, ref, video_id, observed_at, observed_at_resolution, month, "
+            "wish_class, brand, format, sentence, extractor_version) VALUES ('yt_comment', 'V1/C1', "
+            "'V1', '2026-03-05', 'day', '2026-03', 'a', '라네즈', '쿠션', '쿠션으로도 출시해주세요', %s)",
+            (EXTRACTOR_VERSION,),
+        )
+        conn.commit()
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.counts["metrics_wish"] > 0, "the fixture must actually exercise a non-empty wish pass"
+    assert found.counts["metrics_need"] == 0
+    assert found.status == "partial", found.detail
+    assert "metrics_wish" not in found.detail
+
+
+def test_stale_and_scope_silence_both_land_in_one_note(analysis_url: str, sources: tuple[str, str]):
+    """review round 1 #3: an abandoned run's stale marker must not swallow this run's own scope-silence
+    reason — both PARTIAL causes have to show up together, not whichever `_amend` ran first."""
+    commerce, _youtube = sources
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO analysis_run (status, versions, note) "
+            "VALUES ('failed', '{}'::jsonb, 'analyze:polarity rewriting=review/2026-03')"
+        )
+        conn.commit()
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "partial", found.detail
+    assert "half-written" in found.detail, "the stale reason must not disappear"
+    assert "선블록" in found.detail and CATEGORY in found.detail, "the scope-silence reason must show too"
+
+
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):

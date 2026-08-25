@@ -48,6 +48,23 @@ SKIPPED = (
     "month the other has half-rewritten"
 )
 STALE = "half-written month(s) left behind by a run that died: {}"
+# #38: polarity scopes need_mention by lexicon_category, aggregate scopes metrics by the source
+# category (need_mention.category) — a --scope can own the first axis and miss the second entirely,
+# so a multi-hour pass writes labels and aggregates none of them. metrics_wish ignores --scope
+# altogether (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every
+# time, scoped or not), so it carries no signal about this scope and never enters the predicate —
+# only a scoped run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
+SILENT_SCOPE = (
+    "--scope {scope!r} wrote 0 metrics_need rows: aggregate scopes by the source category "
+    "(need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
+    "the source category: {categories}"
+)
+SCOPE_CATEGORIES: LiteralString = (
+    "SELECT DISTINCT category FROM need_mention WHERE lexicon_category = %s ORDER BY 1"
+)
+SILENT_CLOSE: LiteralString = (
+    "UPDATE analysis_run SET status = 'partial', note = note || %s WHERE run_id = %s"
+)
 # 재현에 필요한 것은 첫 줄이다 — psycopg 는 여기에 쿼리 전문을 붙여 note 를 통째로 삼킨다.
 DETAIL_CHARS = 160
 
@@ -154,6 +171,27 @@ def _amend(outcome: StageOutcome, stale: Sequence[str]) -> StageOutcome:
     return replace(outcome, status=PARTIAL, detail=STALE.format(" ".join(stale)))
 
 
+def _reported(conn: psycopg.Connection[Any], outcome: StageOutcome) -> StageOutcome:
+    """단독 stage 실행이 찾아낸 구멍도 run 행에 남는다 — 종료 코드는 크론 메일에만 있고, 계약이
+    운영자에게 보라고 한 것은 `needs.analysis_health` 의 그 행이다 (entrypoints.md §분석 실행).
+
+    polarity 는 자기 run 을 열고 `ok` 로 닫은 뒤라 그 행을 partial 로 다시 닫는다 — `run_all` 과 같은
+    한 행이고, versions 를 합치기만 하므로 그 패스가 무엇으로 라벨했는지는 그대로 남는다. aggregate 의
+    note 는 `_run_id` 가 run 을 되찾는 자연키이고 (analysis/aggregate/pipeline.py) link 은 run 행 자체가
+    없어, 그 둘은 락을 양보한 실행이 이미 쓰는 자리에 보고 행 하나를 남긴다.
+    """
+    if outcome.status == OK:
+        return outcome
+    if outcome.stage in OPENS_RUN and outcome.run_id is not None:
+        return _close(conn, outcome, {})
+    conn.rollback()
+    # 수는 싣지 않는다 — 이 행에는 metrics 가 매달리지 않아 뷰의 수와 note 의 수가 어긋난다.
+    with conn.cursor() as cur:
+        cur.execute(RUN_SKIPPED, (StageOutcome(outcome.stage, PARTIAL, None, {}, outcome.detail).note,))
+    conn.commit()
+    return outcome
+
+
 def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
     outcome = StageOutcome(stage, PARTIAL, None, {}, SKIPPED)
     conn.rollback()
@@ -161,6 +199,55 @@ def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
         cur.execute(RUN_SKIPPED, (outcome.note,))
     conn.commit()
     return outcome
+
+
+def _scope_categories(conn: psycopg.Connection[Any], scope: str) -> tuple[str, ...]:
+    """The source category values aggregate actually filters on for this scope's lexicon_category."""
+    with conn.cursor() as cur:
+        cur.execute(SCOPE_CATEGORIES, (scope,))
+        found = tuple(str(r[0]) for r in cur.fetchall() if r[0])
+    conn.rollback()
+    return found
+
+
+def _amend_silent_scope(
+    conn: psycopg.Connection[Any], outcome: StageOutcome, scope: str | None, close_run: bool = False
+) -> StageOutcome:
+    """A scoped run that reached aggregate and wrote 0 metrics_need rows is not a quiet success (#38).
+
+    Unscoped runs (the 05:00 cron) never take this branch — that predicate never fires without a scope.
+    Runs only `_amend`(stale) already ran on: this must still speak even when that already made the
+    outcome PARTIAL, so both reasons land in the one note instead of the second silently winning
+    (review round 1 #3) — never called on a FAILED outcome, so status here is always OK or PARTIAL.
+    """
+    if scope is None or outcome.status == FAILED or "metrics_need" not in outcome.counts:
+        return outcome
+    if outcome.counts.get("metrics_need"):
+        return outcome
+    # The category lookup is a nicety, not the finding — losing it must never leave the run open
+    # (review round 1 #1): a `statement_timeout` here used to escape uncaught past `run_all`/`_one`
+    # and `cosmai/cli.py`, killing the process with the run still 'running' and nothing said.
+    try:
+        categories = _scope_categories(conn, scope)
+        hint = ", ".join(categories) if categories else "none found for that lexicon_category"
+    except psycopg.Error as lookup_failure:
+        conn.rollback()
+        hint = f"category lookup failed: {str(lookup_failure).splitlines()[0][:DETAIL_CHARS]}"
+    silent_detail = SILENT_SCOPE.format(scope=scope, categories=hint)
+    detail = f"{outcome.detail}; {silent_detail}" if outcome.detail else silent_detail
+    amended = replace(outcome, status=PARTIAL, detail=detail)
+    # standalone `analyze aggregate` already closed its own run as 'ok' before we could see the counts.
+    if close_run and outcome.run_id is not None:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(SILENT_CLOSE, (f" {PARTIAL}:{detail}", outcome.run_id))
+            conn.commit()
+        except psycopg.Error as close_failure:
+            # same convention as _close(): a write that can't land must say so, not vanish silently.
+            conn.rollback()
+            tail = f"run-not-closed {str(close_failure).splitlines()[0][:DETAIL_CHARS]}"
+            return replace(amended, status=FAILED, detail=f"{detail} {tail}")
+    return amended
 
 
 def _metrics_counts(conn: psycopg.Connection[Any], run_id: int) -> dict[str, int]:
@@ -247,7 +334,8 @@ def run_all(
     except FAILURES as failure:
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
         return _close(conn, outcome, versions)
-    return _close(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), versions)
+    outcome = _amend_silent_scope(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), scope)
+    return _close(conn, outcome, versions)
 
 
 def run_stage(
@@ -299,7 +387,8 @@ def _one(
             linked = link_stage.run(
                 conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
             )
-            return _amend(StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS}), stale)
+            done = StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
+            return _reported(conn, _amend(done, stale))
         if stage == "polarity":
             # 이 단계는 자기 run 을 열고 닫는다 — 단독 실행의 run 은 polarity 것이다.
             found = polarity_stage.run(
@@ -313,7 +402,7 @@ def _one(
                 on_run_open=opened,
             )
             counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
-            return _amend(StageOutcome(stage, OK, found.run_id, counts), stale)
+            return _reported(conn, _amend(StageOutcome(stage, OK, found.run_id, counts), stale))
         aggregated = aggregate_stage.run(
             conn,
             scope=scope,
@@ -321,7 +410,11 @@ def _one(
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        return _amend(StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated)), stale)
+        counted = StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated))
+        # 순서가 곧 불변식이다: `_amend_silent_scope` 는 자기 run 행을 SILENT_CLOSE 로 partial 로 닫으므로,
+        # 그것을 `_reported` 안쪽에 두면 침묵 하나에 보고 행까지 붙어 partial 행이 둘 남는다.
+        reported = _reported(conn, _amend(counted, stale))
+        return _amend_silent_scope(conn, reported, scope, close_run=True)
     except FAILURES as failure:
         outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
         if stage not in OPENS_RUN:

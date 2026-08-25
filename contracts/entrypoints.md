@@ -108,6 +108,13 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
   돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.
+- 그 두 축의 어긋남이 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
+  `metrics_need` 를 0행 쓰면 그 run 은 락을 놓친 실행과 같은 어휘·같은 자리로 `partial` + 종료 코드 **1**
+  로 닫히고, note 와 stdout 이 준 scope 값과 그 scope 가 실제로 걸려야 할 원천 category 문자열을 말한다.
+  **`metrics_wish` 는 이 술어에 들어가지 않는다** — `analysis/aggregate/pipeline.py` 의 wish 집계는
+  `--scope` 를 아예 보지 않고 그 모집단의 위시 전량을 매번 다시 세므로(`WISH_SCOPES` 는 스코프 인자와
+  무관), 0 이든 아니든 이 scope 에 대해 아무것도 말해주지 않는다. `--scope` 없는 실행(05:00 크론)은 이
+  술어를 절대 타지 않는다.
 - 주인이 아닌 실행이 `--scope <남의 scope>` 를 지정하면 **거절한다** — 조용한 무동작이 아니라 그 단계가
   실패로 끝나고(`analysis_run.status='failed'`, 종료 코드 1) 메시지가 주인의 `polarity_version` 과 소유
   표의 경로를 말한다.
@@ -164,9 +171,12 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
 소요도 둘이다: `seeds()` 길이만 도는 **씨드 기준**과 `max_requests_per_run`까지 차는 **예산 기준**. 예산 기준으로는
 매시 ranking이 한 시간의 절반 가까이를 점유해 02:10 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
-풀 겹침이 아니라 어드바이저리 락(#10 §A-8-1)이 닫을 겹침이라, 그때까지
-`tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`가 씨드 기준은 항상 검사하고
-예산 기준은 xfail(strict)로 붙들어 둔다.
+풀 겹침이 아니라 소스별 어드바이저리 락(#10 §A-8-1, `collectors/commerce/storage/locks.py`)이 닫는 겹침이고,
+그 락은 이미 운영 진입점에 무조건 배선돼 있다(`collectors/commerce/cli.py`,
+`tests/collectors/commerce/test_source_lock.py`가 그 자리를 붙든다). 간격 산술은 락을 볼 수 없으므로
+`tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py`는 씨드 기준만 항상 검사하고,
+그 두 쌍의 예산 기준은 **영구히** xfail(strict)로 남는다 — 그 strict 가 잡는 것은 락의 착륙이 아니라
+예산이 줄어 겹침 자체가 사라지는 날이다.
 
 **둘 다 상한이 아니라 하한이다.** 위 계산은 정책이 *선언한* 페이스를 쓰는데, `Gate._back_off`는 사이트가
 403·429·503으로 답하면 살아 있는 인터벌을 `Gate.MAX_INTERVAL_S`(300초)까지 벌린다 — daisomall의 30초가
@@ -175,9 +185,9 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 간격이 아니라 락이 준다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
 무해하므로 이 규칙에서 제외된다. 다만 `analyze all` 에도 간격 규칙이 하나 있고 그것은 락이 세운다:
 같은 락을 쓰는 주인의 극성 패스와 겹치면 뒤에 온 쪽이 그 밤을 통째로 건너뛰므로, 그 패스에 크론 줄이
-생기는 날 그 줄과 `0 5` 사이의 간격은 패스의 최악 소요보다 넓어야 한다. **그 소요는 아직 재지 않았다**:
-선블록 하나(리뷰 언급 11,341행)를 도는 실측 run 이 5시간을 넘겨서도 끝나지 않았고 최종값은 미확정이다 —
-그러니 `0 2`(간격 3h)는 이미 아니고 `0 0`(5h)도 보장이 아니다. **줄은 상한을 잰 뒤에 넣는다**, 그것도
+생기는 날 그 줄과 `0 5` 사이의 간격은 패스의 최악 소요보다 넓어야 한다. **전량 패스의 실측은 하나 있다**:
+선블록 하나를 도는 run 16 이 6h44m 만에 끝났다 — 그러니 `0 2`(간격 3h)도 `0 0`(5h)도 실측으로 탈락한다.
+**줄은 상한을 잰 뒤에 넣는다**, 그것도
 #32 의 `--since` 증분이 붙은 뒤 크론이 실제로 돌릴 명령으로 잰 값으로(전량 패스의 소요와 증분 패스의
 소요는 다른 수다). 계산은 `stack/crontab.d/analyze` 에 적혀 있다.
 
