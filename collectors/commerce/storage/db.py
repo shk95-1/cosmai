@@ -5,10 +5,11 @@ de-async'd (sync SQLAlchemy + psycopg, matching this repo's stack) and pointed a
 `collectors.commerce`'s own `trend_radar` schema via `db.secrets` instead of trend-radar's own
 Settings/pydantic-settings object.
 
-Connection credentials: this schema predates the `needs`-style per-schema bootstrap (contracts/README.md),
-so it shares the repo's general `COSMA_DB_MIGRATOR`/`COSMA_DB_RUNTIME` secret pair rather than a
-`TREND_RADAR_DB_*` pair of its own, with role names following the schema's existing
-`trend_radar_owner`/`trend_radar_runtime` convention (storage/schema.py).
+Connection credentials: `TREND_RADAR_DB_RUNTIME`, its own key (contracts/secrets.md) -- not the repo's
+general `COSMA_DB_RUNTIME`. The old stack still runs `trend_radar_runtime` with its own password from
+its own `.env`, and that password differs from `COSMA_DB_RUNTIME`'s, so reading the shared key here
+connected as `trend_radar_runtime` with the wrong password (#29). Role names follow the schema's
+existing `trend_radar_owner`/`trend_radar_runtime` convention (storage/schema.py).
 """
 
 from __future__ import annotations
@@ -33,9 +34,14 @@ from db.runtime import host_and_port
 
 COLLECTOR_VERSION = "commerce-0.1"
 
+# #29: this role's production password is its own, distinct from COSMA_DB_RUNTIME and from
+# tubedepth_runtime's password -- no fallback to COSMA_DB_RUNTIME, or a missing key here would
+# silently connect with the wrong role's secret instead of failing by name.
+RUNTIME_SECRET_KEY = "TREND_RADAR_DB_RUNTIME"
+
 
 def runtime_url(host: str | None = None, port: int | str | None = None, database: str = "app") -> str:
-    """The production runtime connection: `db/secrets.py`'s `COSMA_DB_RUNTIME` password, the schema's
+    """The production runtime connection: `db/secrets.py`'s `RUNTIME_SECRET_KEY` password, the schema's
     own runtime role, search_path pointed at `trend_radar` -- `storage/tables.py`'s Table objects are
     schema-unqualified so the same tables module works against a per-test schema too (tests/conftest.py's
     `trend_radar_schema` fixture sets its own search_path the same way).
@@ -43,7 +49,7 @@ def runtime_url(host: str | None = None, port: int | str | None = None, database
     Only the host and the port move, and they move through `db.runtime`'s COSMAI_DB_HOST/COSMAI_DB_PORT
     -- the role, the database and the secret key stay this schema's own (contracts/entrypoints.md
     §DB 접속 노브)."""
-    password = secrets.require(["COSMA_DB_RUNTIME"])["COSMA_DB_RUNTIME"]
+    password = secrets.require([RUNTIME_SECRET_KEY])[RUNTIME_SECRET_KEY]
     host, port = host_and_port(host, port)
     url = make_url(f"postgresql+psycopg://{SERVICE_SCHEMA}_runtime:{password}@{host}:{port}/{database}")
     return url.update_query_dict({"options": f"-csearch_path={SERVICE_SCHEMA},pg_catalog"}).render_as_string(
