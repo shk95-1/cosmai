@@ -104,6 +104,15 @@ def test_every_subcommand_calls_its_worker(argv, key, worked, capsys):
     assert capsys.readouterr().out.strip()
 
 
+def test_an_eval_that_scores_no_query_is_partial(worked, monkeypatch):
+    """청크가 비었거나 사전이 안 얹히면 질의가 하나도 채점되지 않는다 -- 조용한 0 은 녹색으로
+    읽히므로 partial 이다(계약 §검색 종료 코드, #17 S6)."""
+    from analysis.retrieval import eval as retrieval_eval
+
+    monkeypatch.setattr(retrieval_eval, "run", lambda *_a, **_kw: [])
+    assert main(["retrieval", "eval", "--mode", "literal"]) == 1
+
+
 def test_the_vector_store_path_reaches_the_worker(worked, tmp_path):
     out = tmp_path / "e5base"
     assert main(["retrieval", "embed", "--vectors", str(out)]) == 0

@@ -4,6 +4,8 @@ needs_schema 픽스처가 만든 스키마에 원천 테이블을 직접 세운�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 from sqlalchemy.engine import make_url
@@ -123,6 +125,44 @@ def test_a_long_comment_becomes_several_ordinals(conn, owner, _schema_name):
     assert ordinals == list(range(len(ordinals)))
 
 
+def test_a_shrunken_document_drops_its_stale_ordinals(conn, owner, _schema_name):
+    """원천이 짧아지면 옛 ordinal 이 영구 잔존해 계약("0 부터 연속",
+    contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는
+    check_rows 는 그 문서를 다시 다 봤다고 여기므로 위반을 못 낸다(#17 S9)."""
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
+            ("백탁. " * 400,),
+        )
+    owner.commit()
+    first = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert first.pruned == 0
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '백탁이 조금 있다' WHERE comment_id = 'c7'")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT ordinal FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c7' ORDER BY ordinal"
+        )
+        assert [r[0] for r in cur.fetchall()] == [0]
+    assert outcome.pruned > 0
+    assert outcome.problems == []
+
+
+def test_pruning_the_tail_stays_idempotent(conn, owner, _schema_name):
+    # 지울 꼬리가 없는 재실행은 아무 행도 건드리지 않는다 -- 안 그러면 매 실행이 죽은 튜플을 쌓는다.
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
+            ("백탁. " * 400,),
+        )
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    again = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert (again.written, again.pruned) == (0, 0)
+
+
 def test_a_document_split_across_write_batches_is_not_a_false_violation(
     conn, owner, _schema_name, monkeypatch
 ):
@@ -148,6 +188,24 @@ def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
     second, _ = pipeline.load_index(conn, cache_dir=tmp_path)
     assert second.search("백탁") == first.search("백탁")
     assert second.n == first.n
+
+
+def test_the_topic_dictionary_is_part_of_the_cache_key():
+    """topics.py 의 별칭은 Kiwi 사용자 단어이자 expand() 의 확장 목록이다 -- 사전 두 벌만 해시하면
+    주제를 고친 날 96MB 옛 색인이 그대로 재사용된다(#17 S3)."""
+    from analysis.retrieval import topics
+
+    assert Path(topics.__file__).resolve() in {p.resolve() for p in pipeline.TOKENIZER_INPUTS}
+
+
+def test_a_changed_tokenizer_input_invalidates_the_signature(conn, tmp_path, monkeypatch):
+    # 토큰을 정하는 입력이 바뀌면 같은 본문이 다른 토큰이 된다 -- 서명이 안 움직이면 옛 색인이 산다.
+    spare = tmp_path / "topics.py"
+    spare.write_text("TOPICS = []\n", encoding="utf-8")
+    monkeypatch.setattr(pipeline, "TOKENIZER_INPUTS", (spare,))
+    before = pipeline.index_signature(conn, None)
+    spare.write_text("TOPICS = ['백탁']\n", encoding="utf-8")
+    assert pipeline.index_signature(conn, None) != before
 
 
 def test_new_chunks_invalidate_the_cache(conn, owner, _schema_name, tmp_path):

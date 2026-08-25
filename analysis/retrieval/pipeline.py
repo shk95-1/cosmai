@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import pickle
+from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
@@ -17,7 +18,7 @@ from pathlib import Path
 import psycopg
 
 from analysis.retrieval import corpus
-from analysis.retrieval.bm25 import DICTIONARIES, Index
+from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
 from analysis.retrieval.chunks import check_rows, split_text
 from analysis.retrieval.normalize import normalize_text
 
@@ -31,8 +32,12 @@ ON CONFLICT (chunk_id) DO UPDATE SET
 WHERE retrieval_chunk.text_md5 IS DISTINCT FROM EXCLUDED.text_md5
 """
 
-# 청크를 지우고 다시 넣지 않는 이유: 원천이 줄어드는 일은 정상이 아니고(수집기는 추가만 한다),
-# 지웠다 넣으면 그 사이 검색이 빈다. 다시 돌리면 바뀐 조각만 UPDATE 된다.
+PRUNE = "DELETE FROM retrieval_chunk WHERE doc_id = %(doc_id)s AND ordinal >= %(ordinal)s"
+
+# 문서를 통째로 지우고 다시 넣지는 않는다 -- 지웠다 넣으면 그 사이 검색이 빈다. 지우는 것은 원천이
+# 짧아진 문서의 꼬리뿐이고(새 조각 수 이상의 ordinal), 그 꼬리가 남으면 "ordinal 은 0 부터 연속"
+# (contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는 check_rows 는
+# 그 문서를 다시 다 봤으므로 위반을 못 낸다. 같은 트랜잭션에서 UPSERT 뒤에 돈다.
 
 
 @dataclass(frozen=True)
@@ -41,10 +46,14 @@ class ChunkOutcome:
     chunks: int
     written: int
     problems: list[str]
+    pruned: int = 0
 
     @property
     def note(self) -> str:
         head = f"문서 {self.documents:,} -> 청크 {self.chunks:,} (변경 {self.written:,})"
+        if self.pruned:
+            # 원천이 짧아졌다는 뜻이라 조용히 넘어갈 일이 아니다 -- 수집기는 추가만 한다.
+            head += f"; 짧아진 문서의 꼬리 {self.pruned:,} 삭제"
         return head if not self.problems else f"{head}; 계약 위반 {len(self.problems)}종"
 
 
@@ -81,17 +90,23 @@ def run(
         sources=sources,
     )
     seen_docs: set[str] = set()
-    total = written = 0
+    total = written = pruned = 0
     batch: list[dict] = []
     problems: list[str] = []
 
     def flush() -> None:
-        nonlocal written
+        nonlocal written, pruned
         if not batch:
             return
+        # 배치는 문서 경계에서만 끊기므로(아래) 여기 있는 문서는 조각이 다 모여 있다.
+        tails: dict[str, int] = defaultdict(int)
+        for row in batch:
+            tails[row["doc_id"]] = max(tails[row["doc_id"]], int(row["ordinal"]) + 1)
         with conn.cursor() as cur:
             cur.executemany(UPSERT, batch)
             written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            cur.executemany(PRUNE, [{"doc_id": doc, "ordinal": tail} for doc, tail in tails.items()])
+            pruned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         conn.commit()
         batch.clear()
 
@@ -111,7 +126,7 @@ def run(
         total += 1
         batch.append(row)
     validate_and_flush()
-    return ChunkOutcome(len(seen_docs), total, written, problems)
+    return ChunkOutcome(len(seen_docs), total, written, problems, pruned)
 
 
 CACHE_DIR = Path("var/retrieval/bm25")
@@ -121,8 +136,9 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
     """이 색인이 무엇 위에 세워졌는지. 하나라도 달라지면 캐시를 다시 만들어야 한다.
 
     청크 수와 최신 `chunked_at` 이면 충분하다 -- UPSERT 가 본문이 바뀐 행만 `chunked_at` 을
-    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 사전이 바뀌면 같은 본문이
-    다른 토큰이 되므로 사전 해시도 넣는다(ydc bm25.py 의 캐시 키와 같은 발상).
+    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 토큰을 정하는 입력(사전 두 벌과
+    주제 사전 topics.py)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의
+    캐시 키와 같은 발상).
     """
     where, params = "", ()
     if sources:
@@ -132,7 +148,7 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
         count, latest = cur.fetchone() or (0, None)
     conn.commit()  # 뒤이어 형태소 분석이 붙으므로 트랜잭션을 열어 둔 채로 나가지 않는다
     parts = [str(count), str(latest), ",".join(sources or ())]
-    for path in DICTIONARIES:
+    for path in TOKENIZER_INPUTS:
         parts.append(hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "-")
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
 

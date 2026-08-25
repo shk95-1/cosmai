@@ -39,6 +39,14 @@ ENGINES = ("bm25", "vector", "hybrid")
 # 그래서 "안 넘겼음"을 나타내는 표식을 따로 둔다.
 _DEFAULT_CACHE = Path("<default>")
 
+GOLD_PAGE = 2000  # 정답을 만들 때 한 번에 물어 오는 청크 수 (corpus.BATCH 와 같은 규모)
+GOLD_SQL = """
+SELECT chunk_id, doc_id, text FROM retrieval_chunk
+WHERE chunk_id > %s{source}
+ORDER BY chunk_id
+LIMIT %s
+"""
+
 
 def _cache(cache_dir: Path | None) -> Path | None:
     from analysis.retrieval.pipeline import CACHE_DIR
@@ -80,23 +88,30 @@ def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None =
 
     `sources` 는 색인·검색과 같은 판으로 좁힌다 -- 좁힌 소스 밖의 문서는 어떤 엔진으로도
     나올 수 없으므로, 정답에 남으면 P@k·Hit@k 를 깎고 `gold_size` 가 틀린다.
+
+    한 페이지씩 키셋으로 훑고 페이지마다 커밋한다(`corpus._keyset` 과 같은 방식). 서버 커서로 38만
+    행을 한 흐름에 훑으면 그 트랜잭션이 매칭이 끝날 때까지 열려 있는데, needs_runtime 의
+    `transaction_timeout`(60초, db/bootstrap.sql:48)은 트랜잭션 **총 수명**의 상한이라 도중에 끊는다.
+    주제 매칭은 커밋한 뒤에 도는 것도 그래서다 -- 느린 쪽이 트랜잭션 밖에 있어야 한다.
     """
     from analysis.retrieval.topics import match_topics
 
-    where, params = "", ()
+    narrow, params = "", ()
     if sources:
-        where, params = "WHERE source = ANY(%s)", (list(sources),)
+        narrow, params = " AND source = ANY(%s)", (list(sources),)
     gold: dict[str, set[str]] = defaultdict(set)
-    with conn.cursor(name="retrieval_gold") as cur:  # 서버 커서: 30만 행을 한꺼번에 물지 않는다
-        cur.itersize = 2000
-        cur.execute(f"SELECT doc_id, text FROM retrieval_chunk {where}", params)  # noqa: S608
-        for doc_id, text in cur:
+    cursor = ""  # 마지막 행의 chunk_id 가 다음 페이지의 커서다
+    while True:
+        with conn.cursor() as cur:
+            cur.execute(GOLD_SQL.format(source=narrow), (cursor, *params, GOLD_PAGE))  # noqa: S608
+            rows = cur.fetchall()
+        conn.commit()
+        for _chunk_id, doc_id, text in rows:
             for topic in match_topics(text):
                 gold[topic].add(doc_id)
-    # 서버 커서는 트랜잭션을 연다. 닫지 않고 나가면 뒤이어 벡터 저장소(1.2GB)와 모델을 읽는
-    # 동안 연결이 idle-in-transaction 으로 끊긴다 -- 실측으로 여기서 끊겼다.
-    conn.commit()
-    return gold
+        if len(rows) < GOLD_PAGE:
+            return gold
+        cursor = rows[-1][0]
 
 
 def docs_with_tokens(index: bm25.Index, query: str) -> set[str]:
@@ -164,7 +179,7 @@ def run(
         from analysis.retrieval import embed, vectors
 
         vector_store = vectors.load(store or vectors.DEFAULT_STORE)
-        encoder = embed.load_encoder(vector_store.model or vectors.MODEL)
+        encoder = embed.load_encoder(vector_store.model)
 
     rows: list[Row] = []
     for topic_id, query in queries(mode):
