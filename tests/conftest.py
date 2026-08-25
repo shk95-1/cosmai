@@ -29,6 +29,19 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(SNAPSHOT_UPDATE, action="store_true", help="Rewrite CLI snapshots instead of comparing.")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _default_registrations_survive_the_suite() -> Iterator[None]:
+    """analysis.registry 는 process 전역 딕셔너리다 — 어떤 테스트가 register()/unregister() 를 오가며
+    기본 등록을 되돌리지 않으면 그 파일 하나가 아니라 뒤에 도는 아무 파일이나 '등록 없음'(exit 2)을
+    만난다. 이 부류가 두 번 나왔으니(#30) 세 번째를 세션 끝에서 잡는다."""
+    from analysis import registry
+
+    yield
+    registry.load_implementations()
+    missing = [task for task in registry.TASKS if registry.get(task) is None]
+    assert not missing, f"default registrations not restored by suite end: {missing}"
+
+
 @pytest.fixture
 def snapshot_update(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption(SNAPSHOT_UPDATE))

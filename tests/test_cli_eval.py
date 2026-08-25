@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterator, Sequence
 
 import pytest
@@ -18,6 +19,16 @@ pytestmark = pytest.mark.postgres
 def harness_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """이 파일은 하네스를 잰다 — 실제 구현체가 import 되면 아래 오라클을 덮어쓴다."""
     monkeypatch.setattr("analysis.registry.IMPLEMENTATIONS", ())
+
+
+@pytest.fixture(autouse=True)
+def _restore_default_registrations() -> Iterator[None]:
+    """등록 모듈은 import 캐시라 이 파일의 여러 테스트가 쓰는 unregister() 는 기본 등록을 되찾아
+    주지 않는다 — 되돌리지 않으면 뒤에 도는 파일(test_polarity.py)이 '등록 없음'(exit 2)을 만난다
+    (#30, test_linker.py 의 `registered` 픽스처와 같은 손질을 이 파일 전체에 편다)."""
+    yield
+    importlib.reload(importlib.import_module("analysis.predictors"))
+    importlib.reload(importlib.import_module("analysis.linker.evaluators"))
 
 
 @pytest.fixture
