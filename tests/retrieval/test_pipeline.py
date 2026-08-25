@@ -179,6 +179,31 @@ def test_a_document_split_across_write_batches_is_not_a_false_violation(
     assert outcome.problems == []
 
 
+def test_a_chunk_over_the_target_length_is_reported_but_not_blocking(conn, owner, _schema_name, monkeypatch):
+    """split_text 는 500 이하를 보장하므로 자체 생성분에는 안 나지만, 이미 조각난 텍스트를
+    그대로 흘려보내는 경로(외부 청크에 해당)에서는 날 수 있다 -- ydc v0.2.0 에서 27건이
+    `[통과]` 뒤에 묻힌 것이 이 자리다(#2). 600자는 목표(500) 초과지만 하드스톱(1000) 아래라
+    problems 를 건드리지 않는다(M11: 검증기가 500 에서 말하되, 실행 종료 코드는 그대로)."""
+    monkeypatch.setattr(pipeline, "split_text", lambda text: [text])
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v9', 'c9', %s, now())",
+            ("백" * 600,),
+        )
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert outcome.problems == []
+    assert outcome.over_target == 1
+    assert outcome.over_target_max == 600
+    assert "목표 상한 초과 1건 (최대 600자)" in outcome.note
+
+
+def test_no_over_target_line_when_all_chunks_are_within_target(conn, _schema_name):
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert outcome.over_target == 0
+    assert "목표 상한 초과" not in outcome.note
+
+
 def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     first, _ = pipeline.load_index(conn, cache_dir=tmp_path)

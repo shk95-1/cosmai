@@ -19,7 +19,7 @@ import psycopg
 
 from analysis.retrieval import corpus
 from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
-from analysis.retrieval.chunks import check_rows, split_text
+from analysis.retrieval.chunks import MAX_CHARS, check_rows, split_text
 from analysis.retrieval.normalize import normalize_text
 
 WRITE_BATCH = 1000
@@ -47,6 +47,8 @@ class ChunkOutcome:
     written: int
     problems: list[str]
     pruned: int = 0
+    over_target: int = 0
+    over_target_max: int = 0
 
     @property
     def note(self) -> str:
@@ -54,6 +56,10 @@ class ChunkOutcome:
         if self.pruned:
             # 원천이 짧아졌다는 뜻이라 조용히 넘어갈 일이 아니다 -- 수집기는 추가만 한다.
             head += f"; 짧아진 문서의 꼬리 {self.pruned:,} 삭제"
+        if self.over_target:
+            # 하드스톱(1000자) 미만이라 problems 는 아니지만, "[통과]"가 500 위반 없음으로 읽혀
+            # 남의 청크 27건이 묻힌 적이 있다(ydc v0.2.0) -- 몇 건인지는 항상 보여야 한다.
+            head += f"; 목표 상한 초과 {self.over_target:,}건 (최대 {self.over_target_max:,}자)"
         return head if not self.problems else f"{head}; 계약 위반 {len(self.problems)}종"
 
 
@@ -90,7 +96,7 @@ def run(
         sources=sources,
     )
     seen_docs: set[str] = set()
-    total = written = pruned = 0
+    total = written = pruned = over_target = over_target_max = 0
     batch: list[dict] = []
     problems: list[str] = []
 
@@ -111,8 +117,16 @@ def run(
         batch.clear()
 
     def validate_and_flush() -> None:
-        found, *_ = check_rows(batch)
+        nonlocal over_target, over_target_max
+        found, _per_source, lengths, _docs = check_rows(batch)
         problems.extend(p for p in found if p not in problems)
+        # 하드스톱(1000자, check_rows)은 problems 로만 올린다 -- 500 을 그대로 problems 에 얹으면
+        # 우리 split_text 는 500 이하만 내놓으니 걸릴 일이 없지만, 외부 청크를 검사할 때는
+        # 지금 종료 코드 0 인 실행이 1 로 바뀐다. 그건 이 이슈가 아니라 M11 이 명시적으로 남겨둔 경계다.
+        for length in lengths:
+            if length > MAX_CHARS:
+                over_target += 1
+                over_target_max = max(over_target_max, length)
         flush()
 
     for row in chunk_rows(documents):
@@ -126,7 +140,7 @@ def run(
         total += 1
         batch.append(row)
     validate_and_flush()
-    return ChunkOutcome(len(seen_docs), total, written, problems, pruned)
+    return ChunkOutcome(len(seen_docs), total, written, problems, pruned, over_target, over_target_max)
 
 
 CACHE_DIR = Path("var/retrieval/bm25")
