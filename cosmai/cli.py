@@ -130,6 +130,7 @@ def _run_analyze(args: argparse.Namespace) -> int:
 
     from analysis import predictors, registry
     from analysis.pipeline import run_stage
+    from analysis.polarity.ownership import OWNERS, unready
 
     if args.impl:
         registry.load_implementations()
@@ -146,6 +147,11 @@ def _run_analyze(args: argparse.Namespace) -> int:
             polarity = (
                 stack.enter_context(registry.open_classifier("polarity", args.impl)) if args.impl else None
             )
+            # 규칙이 아닌 구현은 소유 표가 자기 이름을 적어둔 자리에서만 돈다 — 사람이 손으로 치는
+            # 명령이라 순서(등록 → 패스)를 아는 곳이 여기밖에 없다 (analysis/polarity/ownership.py).
+            if polarity is not None and (blocked := unready(OWNERS, polarity.version, args.scope)):
+                print(blocked)
+                return 2
             conn = stack.enter_context(_connect(args.url))
         # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
         except (ValueError, LookupError, psycopg.Error) as refused:

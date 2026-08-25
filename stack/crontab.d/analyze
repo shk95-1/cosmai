@@ -17,3 +17,10 @@
 # 그때까지 선블록은 사람이 호스트에서 도는 전량 패스(~2.5시간)가 갱신하고, 위 줄이 그 결과를 지우지
 # 않는다는 것이 #31 이 고친 부분이다. 배선이 생기면 그 줄은 05:00 **앞**에 놓는다(예: 0 2 * * *):
 # 주인이 먼저 라벨해야 같은 새벽의 aggregate 가 그 라벨을 센다.
+#
+# 카테고리 하나를 더 gemma4 로 넘기는 절차는 두 걸음이고 순서가 있다:
+#   1) analysis/polarity/ownership.py 의 OWNERS 에 그 lexicon_category 와 gemma4 의 판본을 적어 배포한다.
+#   2) 그 다음에 cosmai analyze polarity --impl ollama:gemma4:latest --scope <그 카테고리> 를 돌린다.
+# 뒤집으면 패스는 성공한 채 끝나고 위 05:00 줄이 그날 밤 그 라벨을 규칙으로 도로 덮는다 -- 주인 없는
+# scope 는 이 줄의 몫이기 때문이다. 순서를 틀릴 수 없게 CLI 가 1) 없는 --scope 를 거절한다
+# (cosmai/cli.py -> analysis/polarity/ownership.py 의 unready).

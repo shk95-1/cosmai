@@ -104,8 +104,30 @@ def registered(monkeypatch: pytest.MonkeyPatch) -> _StubPolarity:
 def test_impl_hands_the_registered_classifier_to_the_stage(
     recorded: list[dict[str, Any]], registered: _StubPolarity
 ):
-    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest"]) == 0
-    assert recorded == [{"stage": "polarity", "since": None, "scope": None, "polarity": registered}]
+    """남의 scope(선블록의 주인은 gemma4 다)를 지정한 실행도 여기서 막지 않는다 — 그 거절은 단계의
+    몫이고 entrypoints.md 는 그것을 failed run + 종료 코드 1 로 약속한다."""
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "선블록"]) == 0
+    assert recorded == [{"stage": "polarity", "since": None, "scope": "선블록", "polarity": registered}]
+
+
+def test_a_free_impl_without_a_scope_is_refused_too(
+    recorded: list[dict[str, Any]], registered: _StubPolarity, capsys: pytest.CaptureFixture[str]
+):
+    """무료라서 위험이 없는 것이 아니다: 스코프 없는 gemma4 한 줄이 규칙 모집단 전량을 다시 라벨한다
+    (GPU 수십 시간). 기준은 유료 여부가 아니라 '규칙이 아닌 구현'이다."""
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest"]) == 2
+    assert not recorded
+    assert "--scope" in capsys.readouterr().out
+
+
+def test_an_impl_on_a_scope_with_no_owner_is_refused_before_the_pass_starts(
+    recorded: list[dict[str, Any]], registered: _StubPolarity, capsys: pytest.CaptureFixture[str]
+):
+    """주인 없는 scope 는 규칙이 매일 05:00 에 다시 라벨한다 — 등록 없이 돌면 성공하고도 다음 새벽에
+    사라진다. 주인 등록이 패스보다 먼저라는 순서를 여기서 강제한다 (analysis/polarity/ownership.py)."""
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "에센스"]) == 2
+    assert not recorded
+    assert "ownership.py" in capsys.readouterr().out
 
 
 def test_no_impl_still_leaves_the_rule_in_place(recorded: list[dict[str, Any]]):

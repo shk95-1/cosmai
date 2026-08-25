@@ -18,8 +18,9 @@ from sqlalchemy.engine import make_url
 
 from analysis import predictors, registry
 from analysis.pipeline import run_stage
+from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
-from analysis.polarity.ownership import NO_OWNERS, OWNERS
+from analysis.polarity.ownership import NO_OWNERS, OWNERS, unready
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -742,3 +743,15 @@ def test_a_rerun_with_a_new_version_clears_the_rows_that_have_no_lexicon_categor
     assert _comment_versions(loaded) == [StubPolarity.version]
     _run(loaded, _schema_name, polarity=DriftedPolarity(), owners=OWNERS)
     assert _comment_versions(loaded) == [DriftedPolarity.version]
+
+
+def test_only_the_rule_may_be_let_loose_without_a_scope():
+    """`--impl` 을 풀어줄지 마는지의 기준은 유료 여부가 아니라 '규칙이 아닌 구현'이다: 전량이 기본인
+    것은 05:00 의 규칙 하나뿐이고, 나머지는 시간이든 돈이든 자기 자리에서만 쓴다 (cosmai/cli.py)."""
+    assert unready(OWNERS, RulePolarity.version, None) is None
+    assert "--scope" in str(unready(OWNERS, GEMMA4, None))
+    # 아직 주인이 없는 카테고리 — 여기서 막지 않으면 성공하고도 다음 05:00 에 지워진다.
+    assert "ownership.py" in str(unready(OWNERS, GEMMA4, "에센스"))
+    assert unready(OWNERS, GEMMA4, "선블록") is None
+    # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
+    assert unready(OWNERS, "stub-v9", "선블록") is None

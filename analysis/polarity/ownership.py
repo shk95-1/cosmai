@@ -16,7 +16,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-__all__ = ["NO_OWNERS", "OWNERS", "foreign_scopes"]
+from analysis.polarity import VERSION as RULE_VERSION
+
+__all__ = ["NO_OWNERS", "OWNERS", "foreign_scopes", "unready"]
 
 # 2026-08-24 홀드아웃에서 gemma4 가 규칙을 넘었다 (interfaces.md §LLM 실측). 전 카테고리 패스는 ~40시간
 # 이라 선블록부터 넘겼다 — 나머지 카테고리는 주인이 없어 규칙이 그대로 돈다.
@@ -28,3 +30,27 @@ NO_OWNERS: Mapping[str, str] = MappingProxyType({})
 def foreign_scopes(owners: Mapping[str, str], polarity_version: str) -> tuple[str, ...]:
     """이 판정자가 손대면 안 되는 scope — 다른 구현이 주인인 자리다."""
     return tuple(sorted(scope for scope, owner in owners.items() if owner != polarity_version))
+
+
+def unready(owners: Mapping[str, str], version: str, scope: str | None) -> str | None:
+    """규칙이 아닌 구현을 손으로 풀어도 되는 자리인가 — 아니면 그 이유 한 줄 (cosmai/cli.py 가 부른다).
+
+    두 가지를 묻는다. 스코프를 이름 붙였는가: 안 붙인 한 줄은 규칙 모집단 전량을 다시 라벨한다(시간과
+    GPU 가 든다 — 유료 여부가 기준이 아닌 이유다). 그 scope 에 이미 주인이 있는가: 주인 없는 scope 는
+    규칙이 매일 05:00 에 다시 라벨하므로, 등록 없이 도는 패스는 성공하고도 다음 새벽에 사라진다.
+    남의 scope 를 지정한 실행은 여기서 걸러내지 않는다 — 그 거절은 단계의 몫이고 계약은 그것을
+    failed run + 종료 코드 1 로 약속한다 (contracts/entrypoints.md §분석).
+    """
+    if version == RULE_VERSION:
+        return None
+    if scope is None:
+        return (
+            f"--impl {version} would relabel every scope, not one; "
+            "name one with --scope <category> (analysis/polarity/ownership.py)"
+        )
+    if scope not in owners:
+        return (
+            f"{scope} has no owner, so the 05:00 rule run relabels it tonight; register it to "
+            f"{version} in analysis/polarity/ownership.py before this pass"
+        )
+    return None
