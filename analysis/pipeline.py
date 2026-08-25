@@ -48,6 +48,21 @@ SKIPPED = (
     "month the other has half-rewritten"
 )
 STALE = "half-written month(s) left behind by a run that died: {}"
+# #38: polarity scopes need_mention by lexicon_category, aggregate scopes metrics by the source
+# category (need_mention.category) — a --scope can own the first axis and miss the second entirely,
+# so a multi-hour pass writes labels and aggregates none of them. wish is never scoped (comments carry
+# no category), so it alone hitting 0 is normal; both hitting 0 after aggregate ran is not.
+SILENT_SCOPE = (
+    "--scope {scope!r} wrote 0 metrics_need and 0 metrics_wish rows: aggregate scopes by the source "
+    "category (need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
+    "the source category: {categories}"
+)
+SCOPE_CATEGORIES: LiteralString = (
+    "SELECT DISTINCT category FROM need_mention WHERE lexicon_category = %s ORDER BY 1"
+)
+SILENT_CLOSE: LiteralString = (
+    "UPDATE analysis_run SET status = 'partial', note = note || %s WHERE run_id = %s"
+)
 # 재현에 필요한 것은 첫 줄이다 — psycopg 는 여기에 쿼리 전문을 붙여 note 를 통째로 삼킨다.
 DETAIL_CHARS = 160
 
@@ -163,6 +178,38 @@ def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
     return outcome
 
 
+def _scope_categories(conn: psycopg.Connection[Any], scope: str) -> tuple[str, ...]:
+    """The source category values aggregate actually filters on for this scope's lexicon_category."""
+    with conn.cursor() as cur:
+        cur.execute(SCOPE_CATEGORIES, (scope,))
+        found = tuple(str(r[0]) for r in cur.fetchall() if r[0])
+    conn.rollback()
+    return found
+
+
+def _amend_silent_scope(
+    conn: psycopg.Connection[Any], outcome: StageOutcome, scope: str | None, close_run: bool = False
+) -> StageOutcome:
+    """A scoped run that reached aggregate and wrote 0 metrics rows is not a quiet success (#38).
+
+    Unscoped runs (the 05:00 cron) never take this branch — that predicate never fires without a scope.
+    """
+    if scope is None or outcome.status != OK or "metrics_need" not in outcome.counts:
+        return outcome
+    if outcome.counts.get("metrics_need") or outcome.counts.get("metrics_wish"):
+        return outcome
+    categories = _scope_categories(conn, scope)
+    hint = ", ".join(categories) if categories else "none found for that lexicon_category"
+    detail = SILENT_SCOPE.format(scope=scope, categories=hint)
+    amended = replace(outcome, status=PARTIAL, detail=detail)
+    # standalone `analyze aggregate` already closed its own run as 'ok' before we could see the counts.
+    if close_run and outcome.run_id is not None:
+        with conn.cursor() as cur:
+            cur.execute(SILENT_CLOSE, (f" {PARTIAL}:{detail}", outcome.run_id))
+        conn.commit()
+    return amended
+
+
 def _metrics_counts(conn: psycopg.Connection[Any], run_id: int) -> dict[str, int]:
     with conn.cursor() as cur:
         cur.execute(METRICS, (run_id, run_id))
@@ -247,7 +294,8 @@ def run_all(
     except FAILURES as failure:
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
         return _close(conn, outcome, versions)
-    return _close(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), versions)
+    outcome = _amend_silent_scope(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), scope)
+    return _close(conn, outcome, versions)
 
 
 def run_stage(
@@ -321,7 +369,8 @@ def _one(
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        return _amend(StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated)), stale)
+        outcome = _amend(StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated)), stale)
+        return _amend_silent_scope(conn, outcome, scope, close_run=True)
     except FAILURES as failure:
         outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
         if stage not in OPENS_RUN:

@@ -108,6 +108,12 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
   돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.
+- 그 두 축의 어긋남이 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
+  `metrics_need`·`metrics_wish` 를 **둘 다** 0행 쓰면 — wish 는 댓글에 카테고리가 없어 `--scope` 실행에서
+  항상 0 이므로(위 `analysis/polarity/pipeline.py`) 이 술어는 사실상 need 도 0 인가로 선다 — 그 run 은
+  락을 놓친 실행과 같은 어휘·같은 자리로 `partial` + 종료 코드 **1** 로 닫히고, note 와 stdout 이 준
+  scope 값과 그 scope 가 실제로 걸려야 할 원천 category 문자열을 말한다. `--scope` 없는 실행(05:00 크론)은
+  이 술어를 절대 타지 않는다.
 - 주인이 아닌 실행이 `--scope <남의 scope>` 를 지정하면 **거절한다** — 조용한 무동작이 아니라 그 단계가
   실패로 끝나고(`analysis_run.status='failed'`, 종료 코드 1) 메시지가 주인의 `polarity_version` 과 소유
   표의 경로를 말한다.

@@ -378,6 +378,58 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
     assert aggregate.status == "ok" and aggregate.counts["metrics_need"] > 0
 
 
+def test_analyze_all_stops_being_quiet_when_the_scope_axes_miss_each_other(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """#38: polarity scopes by lexicon_category ('선블록') but aggregate scopes by the source category
+    ('스킨케어 > 선크림') — this fixture's reviews sit exactly on that mismatch, so a 6-hour pass that
+    labels 13,857 rows and aggregates none must not close as 'ok'."""
+    found = _all(analysis_url, sources, scope="선블록")
+    assert found.counts["attempted_need"] > 0, "polarity must have actually run for this scope"
+    assert found.counts["metrics_need"] == 0
+    assert found.counts["metrics_wish"] == 0
+    assert found.status == "partial", found.detail
+    assert "선블록" in found.detail
+    assert CATEGORY in found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        assert row is not None
+        status, note = row
+        assert status == "partial"
+        assert CATEGORY in note
+
+
+def test_analyze_aggregate_alone_stops_being_quiet_on_the_same_mismatch(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """standalone `analyze aggregate` closes its own run — the override has to reach that row too."""
+    commerce, _youtube = sources
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
+            "observed_at_resolution, month, sentence, category, lexicon_category, "
+            "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
+            "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
+            (CATEGORY, EXTRACTOR_VERSION, POLARITY_VERSION),
+        )
+        conn.commit()
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.counts["metrics_need"] == 0
+    assert found.counts["metrics_wish"] == 0
+    assert found.status == "partial", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+        assert row is not None
+        status, note = row
+        assert status == "partial"
+        assert CATEGORY in note
+
+
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
