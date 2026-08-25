@@ -123,9 +123,50 @@ def test_a_long_comment_becomes_several_ordinals(conn, owner, _schema_name):
     assert ordinals == list(range(len(ordinals)))
 
 
+def test_a_document_split_across_write_batches_is_not_a_false_violation(
+    conn, owner, _schema_name, monkeypatch
+):
+    """실측(2026-08-25, 운영 381,950청크)에서 58건이 이렇게 났다 -- 자막 한 편이 최대 155조각이라
+    배치 경계에 걸리고, 뒤쪽 배치만 보면 ordinal 이 5 부터 시작하는 것으로 보인다."""
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 2)
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v9', 'c9', %s, now())",
+            ("백탁. " * 400,),  # 여러 조각으로 쪼개지는 한 문서
+        )
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert outcome.problems == []
+
+
+def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    first, _ = pipeline.load_index(conn, cache_dir=tmp_path)
+    files = list(tmp_path.glob("index-*.pkl"))
+    assert len(files) == 1
+    # 두 번째는 피클에서 온다. 같은 답을 줘야 캐시가 정본과 갈리지 않는다.
+    second, _ = pipeline.load_index(conn, cache_dir=tmp_path)
+    assert second.search("백탁") == first.search("백탁")
+    assert second.n == first.n
+
+
+def test_new_chunks_invalidate_the_cache(conn, owner, _schema_name, tmp_path):
+    # 서명이 안 움직이면 어제 색인으로 오늘 검색하게 되고, 그것은 오류가 아니라 빠진 결과다.
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    before = pipeline.index_signature(conn, None)
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) "
+            "VALUES ('v8', 'c8', '새 댓글이다', now())"
+        )
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert pipeline.index_signature(conn, None) != before
+
+
 def test_search_finds_the_chunk_that_contains_the_query(conn, _schema_name):
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
-    hits = pipeline.search(conn, "백탁", top=3)
+    hits = pipeline.search(conn, "백탁", top=3, cache_dir=None)
     assert hits
     assert hits[0][0] == "youtube_comment:c1#0"
     assert "백탁" in hits[0][2]
@@ -134,9 +175,9 @@ def test_search_finds_the_chunk_that_contains_the_query(conn, _schema_name):
 def test_search_finds_an_ingredient_by_its_exact_name(conn, _schema_name):
     # 성분 사전이 안 얹히면 여기가 조용히 빈다 -- 예외는 나지 않는다.
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
-    hits = pipeline.search(conn, "에칠헥실트리아존", top=3)
+    hits = pipeline.search(conn, "에칠헥실트리아존", top=3, cache_dir=None)
     assert [h[0] for h in hits][:1] == ["youtube_comment:c3#0"]
 
 
 def test_search_on_an_empty_index_returns_nothing(conn):
-    assert pipeline.search(conn, "백탁") == []
+    assert pipeline.search(conn, "백탁", cache_dir=None) == []
