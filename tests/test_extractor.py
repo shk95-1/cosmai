@@ -130,6 +130,45 @@ def test_the_wish_classes_the_p9_rules_separate(text: str, wish_class: str):
     assert found.sentence and found.marker
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "요즘 많이 나오길래 저도 하나 사봤어요",
+        "쿠팡입점해있는 업체가 엄청 많다고 들었어요",
+    ],
+)
+def test_a_launch_marker_buried_in_another_word_is_not_a_request(text: str):
+    """'나오길래'·'입점해있는' 은 출시 요청이 아니라 서술이다 — 표지가 낱말 안에 박혔을 뿐이다."""
+    assert RuleExtractor().wishes(comment(text), LEXICON) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "유분이 조금이라도 적게 나왔으면 좋겠어요",
+        "이번 여름엔 여드름이 안 나오면 좋겠어요",
+    ],
+)
+def test_a_hope_that_less_of_something_appears_is_a_plain_hope_not_a_launch(text: str):
+    """'적게/안 나왔으면' 의 주어는 제품이 아니라 증상이다 — a 는 브랜드에 대한 제품 요청뿐이다."""
+    found = RuleExtractor().wishes(comment(text), LEXICON)
+    assert found is not None and found.wish_class == "c"
+
+
+@pytest.mark.parametrize(
+    ("text", "wish_class"),
+    [
+        ("올영에도 리쥬란이 들어와 있지만 백화점과는 차이가 있네요", None),
+        ("한국에도 정식 출시해주세요", "a"),
+        ("올영에도없고 판매하는 곳을 찾기 힘드네요", "a"),
+    ],
+)
+def test_a_place_marker_counts_only_where_the_product_is_asked_for(text: str, wish_class: str | None):
+    """'올영에도' 는 그 자리에 없다/내달라일 때만 출시 요청이다 — 있다는 서술은 요청이 아니다."""
+    found = RuleExtractor().wishes(comment(text), LEXICON)
+    assert (found.wish_class if found else None) == wish_class
+
+
 def test_a_comment_with_no_wish_at_all_is_not_a_wish_row():
     assert RuleExtractor().wishes(comment("항상 잘 보고 있습니다 감사합니다"), LEXICON) is None
 
@@ -149,4 +188,4 @@ def test_format_and_attribute_stay_empty_while_those_lexicon_kinds_have_no_rows(
 def test_the_rule_extractor_is_the_contract_protocol():
     """candidates 의 lexicon_category 는 기본값이 있는 추가 인자다 — Protocol 호출은 그대로 맞는다."""
     found: Extractor = RuleExtractor()
-    assert found.version == "rule-v2.2"
+    assert found.version == "rule-v2.3"

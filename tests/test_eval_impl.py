@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Iterator, Sequence
+from decimal import Decimal
 
 import pytest
 
@@ -89,7 +90,7 @@ def test_a_split_limits_the_eval_sets_that_are_scored(labeled: str, oracle: None
 
 def test_the_adoption_bar_is_what_the_rule_actually_scored_not_the_contract_floor():
     """계약 바닥은 sun .77/.89 지만 규칙은 .870/.915 를 냈다 — 교체 조건은 뒤쪽이다 (이슈 #6)."""
-    assert RULE_MEASURED["polarity"]["sun holdout 100"] == {"acc": 0.870, "P:불만": 0.915}
+    assert RULE_MEASURED["polarity"]["sun holdout 100"] == {"acc": Decimal(".870"), "P:불만": Decimal(".915")}
     floor_only = {
         "sun holdout 100": {"acc": 0.80, "P:불만": 0.90},
         "p1 blind40": {"acc": 0.50, "P:불만": 0.70},

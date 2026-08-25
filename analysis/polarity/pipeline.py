@@ -7,12 +7,14 @@ idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징�
 쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
 자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
 (삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
+같은 계열 안에서 두 극성 구현이 공존하는 자리는 scope 로 갈린다 — 소유 표(ownership.py)가 배정한
+lexicon_category 는 그 주인만 쓰고 지운다.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import astuple, dataclass
 from datetime import date
 from typing import Any, LiteralString
@@ -23,7 +25,18 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
-from analysis.types import AspectLexicon, Lexicon, NeedMentionRow, TextUnit, WishMentionRow
+from analysis.polarity.ownership import OWNERS, foreign_scopes
+from analysis.types import (
+    AspectLexicon,
+    Candidate,
+    Lexicon,
+    NeedMentionRow,
+    Polarity,
+    PolarityRequest,
+    PolarityResult,
+    TextUnit,
+    WishMentionRow,
+)
 from analysis.units import CategoryMap, comment_unit, load_category_map, month_of, review_unit
 
 COMMERCE_SCHEMA = "trend_radar"
@@ -43,10 +56,20 @@ RUN_START: LiteralString = "INSERT INTO analysis_run (versions, note) VALUES (%s
 RUN_END: LiteralString = (
     "UPDATE analysis_run SET finished_at = now(), status = 'ok', note = %s WHERE run_id = %s"
 )
+RUN_NOTE: LiteralString = "UPDATE analysis_run SET note = %s WHERE run_id = %s"
+# `replace_stale` 의 DELETE 커밋과 그 달의 마지막 flush 사이가 그 달이 부분만 남아 있는 창이다. 실행이
+# 그 안에서 죽으면 원천은 그대로여도 그 달의 need_mention 은 반쪽이고, 주인 있는 scope 는 규칙이
+# 배제하므로(#31) 사람이 다시 돌릴 때까지 아무도 메우지 않는다. 창 안에 있다는 사실을 DB 가 말한다.
+MARKER = "rewriting="
 NEED_DELETE: LiteralString = """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
+AND (lexicon_category IS NULL OR lexicon_category <> ALL(%s::text[]))
 """
+# 마지막 줄이 남의 scope(ownership.py)를 삭제 밖에 둔다 — 빈 배열이면 <> ALL 이 전부 참이라 옛 동작이다.
+# --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
+# 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
+NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
 WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
@@ -68,7 +91,12 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
+WHERE need_mention.lexicon_category IS NULL OR need_mention.lexicon_category <> ALL(%s::text[])
 """
+# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category 가 남의 scope 면 갱신도 하지 않는다.
+# 저장된 scope 와 지금 매핑이 갈리면(rank_snapshot 최신 행·category_map 이 매일 다시 계산한다) 이 실행은
+# 그 문장을 자기 것으로 보고 다시 뽑는다: 두 구현이 같은 need_key 를 고르면 자연키가 통째로 겹쳐, 삭제를
+# 피한 주인의 행을 제자리 upsert 가 갈아 끼운다. WISH_UPSERT 가 쓰는 그 자리(DO UPDATE ... WHERE)다.
 WISH_UPSERT: LiteralString = """
 INSERT INTO wish_mention
   (src, ref, video_id, channel_id, channel_is_brand_owner, product_ref, observed_at,
@@ -95,14 +123,34 @@ class StageResult:
     wish_rows: int
     replaced: int
     captured_at_fallbacks: int  # formats.md: 0 이 아니게 되는 순간이 시간 규칙을 다시 볼 때다
+    polarity_version: str = RulePolarity.version
 
     @property
     def note(self) -> str:
         return (
-            f"analyze:polarity:{RulePolarity.version} units={self.units} need={self.need_rows} "
+            f"analyze:polarity:{self.polarity_version} units={self.units} need={self.need_rows} "
             f"wish={self.wish_rows} replaced={self.replaced} "
             f"captured_at_fallback={self.captured_at_fallbacks}"
         )
+
+
+@dataclass(frozen=True)
+class _Pending:
+    """한 페이지분의 후보 — 판정은 페이지가 다 모인 뒤에 사전별로 한 번씩 간다 (classify_many)."""
+
+    unit: TextUnit
+    lexicon_category: str | None
+    candidate: Candidate
+
+
+def _rewriting(base: str, src: str, month: str, scope: str | None) -> str:
+    return f"{base} {MARKER}{src}/{month}" + (f"/{scope}" if scope else "")
+
+
+def _note(conn: psycopg.Connection[Any], run_id: int, note: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute(RUN_NOTE, (note, run_id))
+    conn.commit()
 
 
 def _table(schema: str, table: str) -> pgsql.Composed:
@@ -231,11 +279,21 @@ def _channels(conn: psycopg.Connection[Any], schema: str) -> dict[str, tuple[str
 class PolarityStage:
     """사전·규칙을 한 번만 만들고 src×월 배치를 돌린다."""
 
-    def __init__(self, conn: psycopg.Connection[Any], batch: int = BATCH) -> None:
+    def __init__(
+        self,
+        conn: psycopg.Connection[Any],
+        batch: int = BATCH,
+        polarity: Polarity | None = None,
+        owners: Mapping[str, str] = OWNERS,
+    ) -> None:
         self.conn = conn
         self.batch = batch
         self.extractor = RuleExtractor()
+        # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
         self.rule = RulePolarity()
+        self.polarity: Polarity = polarity or self.rule
+        # 다른 구현이 주인인 scope — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
+        self.foreign = foreign_scopes(owners, self.polarity.version)
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
@@ -246,7 +304,7 @@ class PolarityStage:
     def versions(self) -> dict[str, Any]:
         return {
             "extractor": RuleExtractor.version,
-            "polarity": RulePolarity.version,
+            "polarity": self.polarity.version,
             "lexicon": {"entity": self.lexicon.version, "aspect": self.aspects[GENERIC_RULESET].version},
         }
 
@@ -256,40 +314,66 @@ class PolarityStage:
                 return pattern.scope
         return "generic"
 
-    def need_rows(self, unit: TextUnit, lexicon_category: str | None) -> Iterator[NeedMentionRow]:
+    def candidates(self, unit: TextUnit, lexicon_category: str | None) -> list[_Pending]:
         aspects = self.aspects[ruleset_for(lexicon_category)]
-        for candidate in self.extractor.candidates(unit, aspects, lexicon_category):
-            found = self.rule.classify(candidate.sentence, unit.rating, lexicon_category, aspects)
-            strength = (
-                round(1 - unit.rating / FIVE, 2)
-                if unit.src == "review" and unit.rating is not None
-                else unit.like_count
+        return [
+            _Pending(unit, lexicon_category, candidate)
+            for candidate in self.extractor.candidates(unit, aspects, lexicon_category)
+        ]
+
+    def need_rows(self, pending: Sequence[_Pending]) -> list[NeedMentionRow]:
+        """사전별로 묶어 classify_many 한 번씩 — 배치 API 를 가진 구현(#6)은 문장마다 왕복하면 정가다."""
+        grouped: dict[str, list[int]] = {}
+        for i, item in enumerate(pending):
+            grouped.setdefault(ruleset_for(item.lexicon_category), []).append(i)
+        rows: list[NeedMentionRow | None] = [None] * len(pending)
+        for ruleset, indexes in grouped.items():
+            aspects = self.aspects[ruleset]
+            found = self.polarity.classify_many(
+                [
+                    PolarityRequest(
+                        pending[i].candidate.sentence, pending[i].unit.rating, pending[i].lexicon_category
+                    )
+                    for i in indexes
+                ],
+                aspects,
             )
-            yield NeedMentionRow(
-                src=unit.src,
-                site=unit.site,
-                ref=unit.ref,
-                product_ref=None,  # #2 의 linker 가 analyze link 에서 채운다
-                source_product_key=unit.product_key,
-                category=unit.category,
-                lexicon_category=lexicon_category,
-                need_key=found.aspect or "",  # B8: aspect 없음은 '' 센티널
-                aspect_scope=self._scope_of(aspects, lexicon_category, found.aspect)
-                if found.aspect
-                else None,
-                polarity=found.polarity,
-                strength=strength,
-                rating=unit.rating,
-                observed_at=unit.observed_at,
-                observed_at_resolution=unit.observed_at_resolution,
-                month=month_of(unit.observed_at),
-                sentence=candidate.sentence,
-                kind=candidate.kind,
-                marker=candidate.marker,
-                polarity_reason=found.reason,
-                extractor_version=RuleExtractor.version,
-                polarity_version=RulePolarity.version,
-            )
+            for i, result in zip(indexes, found, strict=True):
+                rows[i] = self._row(pending[i], result, aspects)
+        return [row for row in rows if row is not None]
+
+    def _row(self, item: _Pending, found: PolarityResult, aspects: AspectLexicon) -> NeedMentionRow:
+        unit = item.unit
+        strength = (
+            round(1 - unit.rating / FIVE, 2)
+            if unit.src == "review" and unit.rating is not None
+            else unit.like_count
+        )
+        return NeedMentionRow(
+            src=unit.src,
+            site=unit.site,
+            ref=unit.ref,
+            product_ref=None,  # #2 의 linker 가 analyze link 에서 채운다
+            source_product_key=unit.product_key,
+            category=unit.category,
+            lexicon_category=item.lexicon_category,
+            need_key=found.aspect or "",  # B8: aspect 없음은 '' 센티널
+            aspect_scope=self._scope_of(aspects, item.lexicon_category, found.aspect)
+            if found.aspect
+            else None,
+            polarity=found.polarity,
+            strength=strength,
+            rating=unit.rating,
+            observed_at=unit.observed_at,
+            observed_at_resolution=unit.observed_at_resolution,
+            month=month_of(unit.observed_at),
+            sentence=item.candidate.sentence,
+            kind=item.candidate.kind,
+            marker=item.candidate.marker,
+            polarity_reason=found.reason,
+            extractor_version=RuleExtractor.version,
+            polarity_version=self.polarity.version,
+        )
 
     def wish_row(self, unit: TextUnit) -> WishMentionRow | None:
         found = self.extractor.wishes(unit, self.lexicon)
@@ -315,25 +399,31 @@ class PolarityStage:
             extractor_version=RuleExtractor.version,
         )
 
-    def replace_stale(self, src: str, month: str) -> int:
-        """자기 버전 계열의 옛 행만 지운다 — 그 자체로 한 트랜잭션이다."""
+    def replace_stale(self, src: str, month: str, scope: str | None = None) -> int:
+        """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다."""
+        versions = (RuleExtractor.version, self.polarity.version, list(self.foreign))
         with self.conn.cursor() as cur:
-            cur.execute(NEED_DELETE, (src, month, RuleExtractor.version, RulePolarity.version))
+            if scope is None:
+                cur.execute(NEED_DELETE, (src, month, *versions))
+            else:
+                cur.execute(NEED_DELETE_SCOPED, (src, month, *versions, scope))
             replaced = cur.rowcount
-            cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
-            replaced += cur.rowcount
+            # wish_mention 에는 lexicon_category 가 없고 스코프 실행은 wish 행을 하나도 만들지 않는다.
+            if scope is None:
+                cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
+                replaced += cur.rowcount
         self.conn.commit()
         return replaced
 
-    def _write(self, statement: LiteralString, rows: Sequence[Any]) -> None:
-        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md).
+    def _write(self, statement: LiteralString, rows: Sequence[Any], extra: tuple[Any, ...] = ()) -> None:
+        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md) + DO UPDATE 의 술어 인자.
         for start in range(0, len(rows), self.batch):
             with self.conn.cursor() as cur:
-                cur.executemany(statement, [astuple(r) for r in rows[start : start + self.batch]])
+                cur.executemany(statement, [astuple(r) + extra for r in rows[start : start + self.batch]])
             self.conn.commit()
 
     def flush(self, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]) -> None:
-        self._write(NEED_UPSERT, needs)
+        self._write(NEED_UPSERT, needs, (list(self.foreign),))
         self._write(WISH_UPSERT, wishes)
 
 
@@ -345,16 +435,31 @@ def run(
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     batch: int = BATCH,
+    polarity: Polarity | None = None,
+    owners: Mapping[str, str] = OWNERS,
+    on_run_open: Callable[[int], None] | None = None,
 ) -> StageResult:
-    stage = PolarityStage(conn, batch)
+    """`on_run_open` 은 run 행이 열린 그 순간 호출자에게 run_id 를 넘긴다 — 이 단계 안에서 죽어도
+    호출자가 *자기* run 을 안다. 그것을 모르면 닫을 행을 표에서 되찾아야 하고, 동시에 도는 남의 run 과
+    구별할 단서가 표에 없다 (analysis/pipeline.py)."""
+    stage = PolarityStage(conn, batch, polarity, owners)
+    version = stage.polarity.version
+    if scope is not None and scope in stage.foreign:
+        # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
+        raise ValueError(
+            f"{scope} is owned by {owners[scope]}, not {version} (analysis/polarity/ownership.py)"
+        )
     with conn.cursor() as cur:
         cur.execute(
             RUN_START,
-            (json.dumps(stage.versions(), ensure_ascii=False), f"analyze:polarity:{RulePolarity.version}"),
+            (json.dumps(stage.versions(), ensure_ascii=False), f"analyze:polarity:{version}"),
         )
         row = cur.fetchone()
     run_id = int(row[0]) if row else 0
     conn.commit()
+    if on_run_open is not None:
+        on_run_open(run_id)
+    base_note = f"analyze:polarity:{version}"
 
     months = units = need_rows = wish_rows = replaced = fallbacks = 0
 
@@ -363,7 +468,8 @@ def run(
         table = _table(commerce_schema, "review")
         for month in _months(conn, table, "written_at", "captured_at", since):
             months += 1
-            replaced += stage.replace_stale("review", month)
+            _note(conn, run_id, _rewriting(base_note, "review", month, scope))
+            replaced += stage.replace_stale("review", month, scope)
             for page in _pages(
                 conn,
                 table,
@@ -376,7 +482,7 @@ def run(
                 since,
                 batch,
             ):
-                needs: list[NeedMentionRow] = []
+                pending: list[_Pending] = []
                 for source, product_key, review_key, rating, body, written_at, captured_at in page:
                     fallbacks += written_at is None
                     unit = review_unit(
@@ -392,18 +498,25 @@ def run(
                     lexicon_category = stage.categories.lexicon_category(
                         source, unit.category, names.get((source, product_key))
                     )
-                    if scope and lexicon_category != scope:
+                    # 주인이 따로 있는 scope 는 판정 자체를 하지 않는다: 자연키에 polarity_version 이
+                    # 없어 여기서 한 줄만 흘러도 upsert 가 주인의 라벨을 제자리에서 덮는다.
+                    if lexicon_category in stage.foreign or (scope and lexicon_category != scope):
                         continue
                     units += 1
-                    needs.extend(stage.need_rows(unit, lexicon_category))
+                    pending.extend(stage.candidates(unit, lexicon_category))
+                needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 stage.flush(needs, ())
+            _note(conn, run_id, base_note)
 
-    if _exists(conn, youtube_schema, "comments"):
+    # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
+    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다).
+    if scope is None and _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
             months += 1
+            _note(conn, run_id, _rewriting(base_note, "yt_comment", month, None))
             replaced += stage.replace_stale("yt_comment", month)
             for page in _pages(
                 conn,
@@ -417,7 +530,7 @@ def run(
                 since,
                 batch,
             ):
-                needs = []
+                pending = []
                 wishes: list[WishMentionRow] = []
                 for video_id, comment_id, text, like_count, published_at, first_seen_at in page:
                     fallbacks += published_at is None
@@ -433,16 +546,16 @@ def run(
                         view_count=view_count,
                     )
                     # 댓글에는 제품 카테고리가 없다 — 카테고리 사전 없이 generic 규칙만 돈다.
-                    if scope:
-                        continue
                     units += 1
-                    needs.extend(stage.need_rows(unit, None))
+                    pending.extend(stage.candidates(unit, None))
                     wish = stage.wish_row(unit)
                     if wish is not None:
                         wishes.append(wish)
+                needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 wish_rows += len(wishes)
                 stage.flush(needs, wishes)
+            _note(conn, run_id, base_note)
 
     result = StageResult(
         run_id=run_id,
@@ -452,6 +565,7 @@ def run(
         wish_rows=wish_rows,
         replaced=replaced,
         captured_at_fallbacks=fallbacks,
+        polarity_version=version,
     )
     with conn.cursor() as cur:
         cur.execute(RUN_END, (result.note, run_id))

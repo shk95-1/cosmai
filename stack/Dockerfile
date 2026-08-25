@@ -7,7 +7,13 @@
 # The tag is `cosmai-needs:local`, not `cosmai`. On the deploy host `cosmai` is already the archived
 # fleet's app image and three shared-db containers are running it -- building over that tag would
 # take them with it, and a `compose build` that skipped this step would silently use it as the base.
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+#
+# trixie, not bookworm: the origin (service/trend-radar) rode `python:3.12-slim`, a floating tag that
+# had since moved to Debian 13, and pinning bookworm at port time quietly walked the image back an
+# OpenSSL major. That changes the TLS ClientHello, which is what oliveyoung's edge fingerprints -- so
+# the pinned image drew a Cloudflare challenge where the same code, same UA, ran clean everywhere
+# else. This tag's JA3/JA4 are byte-identical to the image that had been passing for months.
+FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 
 # db/migrate.sh resolves contracts/ddl/needs/*.sql and db/views/*.sql against the working directory,
 # and contracts/ has exactly one copy in this repo -- so the image carries the checkout rather than
@@ -28,6 +34,12 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 # --no-editable: the image runs the built wheel, so a file the build backend drops is missing here
 # instead of being quietly served by the source tree the way `tool/checks/test` sees it.
 RUN uv sync --frozen --no-dev --no-editable
+
+# Asserted rather than left to the FROM line, and after the sync so it reads the interpreter the
+# collection actually runs on: a tag names a suite, the handshake is decided by the OpenSSL behind
+# it, and a registry tag can move under a name that did not. Printed as well as checked, so
+# `tool/stack-build` leaves the stack that shipped in the build log.
+RUN python -c 'import ssl, sys; print(ssl.OPENSSL_VERSION); sys.exit(0 if ssl.OPENSSL_VERSION_INFO[:2] >= (3, 5) else f"{ssl.OPENSSL_VERSION} is below the TLS floor this image collects against")'
 
 # Chromium for oliveyoung, whose ranking answers plain HTTP with a Cloudflare wall
 # (collectors/commerce/transport/browser.py). In the base image and not in stack/Dockerfile.cron,

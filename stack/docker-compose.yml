@@ -90,6 +90,42 @@ services:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-commerce"]
     profiles: ["commerce"]
+    # #27 round 2: the bind-mounted profile below is host uid 1000 (user1's), and stack/Dockerfile
+    # declares no USER -- every *cron container is root by default. Root can write it regardless of
+    # ownership, but the files it creates then belong to root, and the next host-side `uv run cosmai
+    # login` (uid 1000, not root) cannot touch them. Pinning only this service to the host's uid/gid
+    # keeps every other *cron service on the anchor's root default -- they only touch named volumes
+    # (youtube-payloads), where no host-owned file is ever read back by a non-root process.
+    user: "1000:1000"
+    environment:
+      # `<<:` replaces the anchor's environment: wholesale too (the same trap volumes: has below),
+      # so every key the anchor set has to be repeated -- dropping one here is silent until whichever
+      # knob it was turns out unset at 03:00.
+      COSMAI_DB_HOST: shared-postgres
+      COSMAI_DB_PORT: "5432"
+      COSMAI_SECRET_FILE: /run/cosmai/env
+      PYTHONUNBUFFERED: "1"
+      TZ: UTC
+      # uid 1000 has no /etc/passwd entry in this image (no useradd ran for it), so Chromium's
+      # search for a home directory fails unless $HOME is set directly -- and it needs one writable,
+      # for its own cache/config dirs beside the profile's user_data_dir. /tmp is world-writable
+      # (sticky bit) in the trixie-slim base by default.
+      HOME: /tmp
+    volumes:
+      # `<<:` replaces the anchor's volumes: rather than adding to them (collector-youtube-work/
+      # -flatten below hit the same trap), so the secret mount has to be repeated here.
+      - ${COSMAI_SECRET_FILE_HOST:?stack-env-example 참고 - ~/.config/cosmai/env 의 호스트 절대경로}:/run/cosmai/env:ro
+      # #27: a bind mount, not a named volume -- a person authorises this by hand from the HOST with
+      # `uv run cosmai login --source <s>` (repo root), the way the old stack's
+      # TREND_RADAR_PROFILE_DIR did (service/stack/docker-compose.yml:156) and for the same reason: a
+      # named volume would force the login window through the container, which on WSL2 means wiring
+      # up display forwarding a person does not already have. The relative default resolves against
+      # this file's own directory (stack/), so `../var/browser-profiles` is the repo root's
+      # `var/browser-profiles` -- the same place `collectors/commerce/transport/browser.py`'s
+      # DEFAULT_PROFILE_DIR resolves to when `cosmai login`/`cosmai collect` run from the repo root
+      # on the host. Read-write: oliveyoung refreshes session cookies mid-run, so read-only would
+      # make every run after the first one collect against a stale session.
+      - ${COMMERCE_BROWSER_PROFILE_DIR:-../var/browser-profiles}:/srv/cosmai/var/browser-profiles
 
   # 네이버 API Hub. 커머스와 다른 호스트·다른 키(contracts/secrets.md 의 COSMA_SRC_NAVER_BLOG_*)라
   # 예산도 따로다 — 네이버 쿼터가 막혔다고 커머스를 멈출 이유가 없다.

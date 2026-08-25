@@ -10,7 +10,7 @@ from typing import Any, LiteralString
 
 import psycopg
 
-from analysis.baselines import EvalSet, for_task
+from analysis.baselines import EvalSet, for_task, meets
 from analysis.metrics import Scores, precision_over, score
 from analysis.registry import Implementation
 from analysis.types import LabeledRow
@@ -120,9 +120,9 @@ def evaluate(
         scores = score(pairs)
         metrics = _metrics(task, pairs, scores)
         misses = tuple(
-            f"{eval_set.name}: {check.metric} {metrics.get(check.metric, 0.0):.3f} < {check.threshold:.2f}"
+            f"{eval_set.name}: {check.metric} {metrics.get(check.metric, 0.0):.3f} < {check.threshold}"
             for check in eval_set.checks
-            if metrics.get(check.metric, 0.0) < check.threshold
+            if not meets(metrics.get(check.metric, 0.0), check.threshold)
         )
         results.append(SetResult(name=eval_set.name, scores=scores, metrics=metrics, misses=misses))
     return tuple(results)
