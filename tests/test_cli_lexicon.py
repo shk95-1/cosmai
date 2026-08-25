@@ -27,6 +27,11 @@ ASPECT_V2 = """aspect,scope,category,pattern,is_neutral_noun,ruleset,priority
 백탁,category,선블록,백탁|허옇,false,suncare-v2.3,0
 건조,generic,,건조|당김,false,suncare-v2.3,1
 """
+# 알려진 일곱 칸 밖의 열. 룰셋마다 필요한 사실이 달라 `extra` 로 간다 (021, formats.md).
+ASPECT_SPARE = """aspect,scope,category,pattern,is_neutral_noun,ruleset,priority,term_kind,note
+백탁,generic,,백탁,false,retrieval-topic,1,ko,실측 근거
+백탁,generic,,하얘,false,retrieval-topic,1,ko,
+"""
 
 
 @pytest.fixture
@@ -129,3 +134,56 @@ def test_a_row_the_ddl_check_refuses_comes_back_as_blocked(seeded: str, tmp_path
     bad = _csv(tmp_path, "aspect_bad.csv", ASPECT_V2.replace("category,선블록", "정체불명,선블록"))
     assert main(["lexicon", "load", "--kind", "aspect", "--version", "2", bad, "--url", seeded]) == 2
     assert "aspect_lexicon_scope_check" in capsys.readouterr().out
+
+
+def test_a_spare_csv_column_lands_in_extra_and_shows_up_in_a_diff(seeded: str, tmp_path: Path, capsys):
+    """룰셋이 자기 어휘를 나르는 칸이라, 그 값이 바뀐 것도 사전 변경이다 -- diff 가 못 보면
+    사람은 무엇이 달라졌는지 행 목록으로만 알게 된다."""
+    csv = _csv(tmp_path, "aspect_spare.csv", ASPECT_SPARE)
+    assert main(["lexicon", "load", "--kind", "aspect", "--version", "3", csv, "--url", seeded]) == 0
+    with connect(seeded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT pattern, extra FROM aspect_lexicon WHERE version = 3 ORDER BY id")
+        assert cur.fetchall() == [
+            ("백탁", {"term_kind": "ko", "note": "실측 근거"}),
+            # 빈 칸은 값이 아니라 무기입이다 -- 넣으면 "지정하지 않음"과 "빈 문자열"이 섞인다.
+            ("하얘", {"term_kind": "ko"}),
+        ]
+    named = _csv(tmp_path, "aspect_extra.csv", ASPECT_SPARE.replace("term_kind", "extra"))
+    # 그 이름의 열은 자기 자신 안에 들어간다 -- 조용히 버리는 대신 blocked 다.
+    assert main(["lexicon", "load", "--kind", "aspect", "--version", "9", named, "--url", seeded]) == 2
+    assert "'extra' column" in capsys.readouterr().out
+    louder = ASPECT_SPARE.replace("실측 근거", "실측 근거 2026-08-26")
+    assert (
+        main(
+            [
+                "lexicon",
+                "load",
+                "--kind",
+                "aspect",
+                "--version",
+                "4",
+                _csv(tmp_path, "aspect_spare2.csv", louder),
+                "--url",
+                seeded,
+            ]
+        )
+        == 0
+    )
+    with connect(seeded) as conn, conn.cursor() as cur:
+        assert diff(cur, "aspect", 4, 3).changed == ("백탁 :: generic ::  :: 백탁",)
+
+
+def test_the_topic_dictionary_is_not_read_as_a_polarity_aspect(seeded: str):
+    """aspect 사전 한 버전에는 룰셋이 여럿 산다. 검색 유닛의 주제 별칭이 극성 쪽 사전으로 새면
+    `하얘` 가 aspect 패턴이 되어 라벨이 조용히 넓어진다 (formats.md B4: 로더는 ruleset 으로 읽는다)."""
+    from analysis.retrieval import topics
+    from db.lexicon import activate, insert_aspects
+    from tests.retrieval.conftest import csv_rows
+
+    with connect(seeded) as conn, conn.cursor() as cur:
+        before = len(load_aspects(conn, "suncare-v2.2").patterns)
+        insert_aspects(cur, csv_rows(), 1)
+        activate(cur, "aspect", 1)
+        conn.commit()
+        assert len(load_aspects(conn, "suncare-v2.2").patterns) == before
+        assert topics.load(conn).version == 1

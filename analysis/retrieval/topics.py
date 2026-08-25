@@ -1,179 +1,64 @@
 """주제 사전. BM25 의 토큰 확장과 검색 평가의 정답이 모두 여기서 나온다.
 
-사전 자체는 slices/ydc/topics.py (v0.1.0) 를 그대로 옮긴 것이다 -- 별칭 하나가 달라지면
-색인 단위와 평가 정답이 같이 움직이므로 손으로 다시 적지 않고 리터럴을 옮겼다.
+사전의 원천은 `needs.aspect_lexicon` 의 **활성 버전**(ruleset = `retrieval-topic`)이다. 리터럴로
+이 파일에 얼어 있던 동안은 사전을 고쳐도 `cosmai lexicon load/diff/activate` 를 타지 않아 변경이
+버전을 받지 못했다(포크 #8). 레포의 `dict/topics_v1.csv` 는 그 v1 의 적재 원본이고, 사전을 고치는
+길은 그 CSV 를 고쳐 **다음 버전으로 적재하고 켜는 것** 하나다.
+
+**활성 사전은 프로세스 전역이다.** `bm25.tokenize` 는 색인 한 벌을 세우는 동안 청크마다 불리는데
+그 아래로 커넥션을 들고 다닐 자리가 없다 -- DB 를 여는 입구(`pipeline.load_index` ·
+`eval.gold_from_chunks` · `terms`)가 `use_active(conn)` 로 세우고, 그 아래는 `active()` 로 읽는다.
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, LiteralString
 
-TOPICS: list[dict] = [
-    {
-        "topic": "백탁",
-        "topic_type": "attribute",
-        "ko": ["백탁", "하얗게", "하얘"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "백태·창백·유령·회끄무레는 실측 0건이라 제외",
-    },
-    {
-        "topic": "자극_눈시림",
-        "topic_type": "attribute",
-        "ko": ["눈시림", "눈 시림", "눈따가", "자극", "따갑", "붉어", "뒤집", "예민", "트러블", "알러지"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "눈시려·눈아파·눈매움 0건 제외. '눈물'은 감동 댓글과 섞여 제외",
-    },
-    {
-        "topic": "발림성",
-        "topic_type": "attribute",
-        "ko": ["발림성", "발림", "제형", "텍스처"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'발림'은 '발림성'보다 17편 더 잡는다(발림이 좋다 등). 둘 다 유지",
-    },
-    {
-        "topic": "촉촉함_건조함",
-        "topic_type": "attribute",
-        "ko": ["촉촉", "수분", "보습", "건조"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'건조'는 댓글(89)이 영상(38)보다 많다. 불만은 댓글에 쌓인다",
-    },
-    {
-        "topic": "끈적임_유분감",
-        "topic_type": "attribute",
-        "ko": ["끈적", "유분", "번들", "기름"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "미끌 0건 제외",
-    },
-    {
-        "topic": "밀림_들뜸",
-        "topic_type": "attribute",
-        "ko": ["밀림", "밀려", "들뜸", "뭉침"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'화장 궁합' 0건 제외",
-    },
-    {
-        "topic": "지속력_워터프루프",
-        "topic_type": "attribute",
-        "ko": ["지속력", "워터프루프", "무너짐", "재도포", "땀에", "방수"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'지속'만으로는 '지속적으로' 등 일반어에 걸려 제외",
-    },
-    {
-        "topic": "톤업_메이크업베이스",
-        "topic_type": "attribute",
-        "ko": ["톤업", "톤 업", "메이크업베이스", "피부톤", "화이트닝"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'베이스'(83)는 단독으로 화장품 일반어라 제외",
-    },
-    {
-        "topic": "무기자차",
-        "topic_type": "formula",
-        "ko": ["무기자차", "징크", "티타늄", "미네랄"],
-        "latin": ["ZnO", "TiO2"],
-        "mfds_inci": [
-            "징크옥사이드",
-            "티타늄디옥사이드",
-            "산화아연",
-            "이산화티타늄",
-            "Zinc Oxide",
-            "Titanium Dioxide",
-        ],
-        "trend_use": True,
-        "note": "유튜브는 '무기자차', 식약처는 '산화아연'. 표기 겹침 0건 -> 매핑 필수",
-    },
-    {
-        "topic": "유기자차",
-        "topic_type": "formula",
-        "ko": ["유기자차", "아보벤존", "옥토크릴렌", "화학적"],
-        "latin": [],
-        "mfds_inci": [
-            "에칠헥실트리아존",
-            "비스-에칠헥실옥시페놀메톡시페닐트리아진",
-            "메칠렌비스-벤조트리아졸릴테트라메칠부틸페놀",
-            "에칠헥실살리실레이트",
-            "에칠헥실메톡시신나메이트",
-            "부틸메톡시디벤조일메탄",
-            "옥토크릴렌",
-            "디에칠아미노하이드록시벤조일헥실벤조에이트",
-            "드로메트리졸트리실록산",
-            "테레프탈릴리덴디캠퍼설포닉애씨드",
-            "페닐벤즈이미다졸설포닉애씨드",
-            "벤조페논-3",
-            "4-메칠벤질리덴캠퍼",
-            "아보벤존",
-            "에틸헥실메톡시신나메이트",
-            "Avobenzone",
-            "Octocrylene",
-        ],
-        "trend_use": True,
-        "note": "케미컬·유비놀 0건 제외",
-    },
-    {
-        "topic": "혼합자차",
-        "topic_type": "formula",
-        "ko": ["혼합자차"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "19편뿐. 분기당 표본 부족 가능성 높음 -> 판정 시 확인",
-    },
-    {
-        "topic": "SPF_PA",
-        "topic_type": "spec",
-        "ko": ["차단지수"],
-        "latin": ["SPF", "PA", "UVA", "UVB"],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "경계 매칭 필수. 부분문자열은 coupang에 걸려 오탐 16%",
-    },
-    {
-        "topic": "성분_신제품",
-        "topic_type": "event",
-        "ko": ["성분", "신제품", "출시", "리뉴얼", "신상"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": True,
-        "note": "'신제품'만은 3편뿐. 전용 검색어 추가 대상(UnitA 4.1)",
-    },
-    {
-        "topic": "추천_재구매",
-        "topic_type": "genre",
-        "ko": ["재구매", "품절", "인생템", "추천"],
-        "latin": [],
-        "mfds_inci": [],
-        "trend_use": False,
-        "note": "'추천' 396/518=76%. 장르 표시일 뿐 주제가 아니다. 트렌드 판정 제외",
-    },
-    {
-        "topic": "선크림",
-        "topic_type": "product_category",
-        "ko": ["선크림", "썬크림", "자외선차단제", "선블록", "선스틱", "선쿠션", "선세럼", "선젤"],
-        "latin": [],
-        "mfds_inci": ["자외선차단제"],
-        "trend_use": False,
-        "note": "481/518=93%. 판별력 없음. 다른 소스에서 문서 필터로만 사용",
-    },
-]
+RULESET = "retrieval-topic"
+# 별칭의 표기 계열. ko 는 부분문자열, latin 은 경계 매칭이고 mfds_inci(식약처 성분명)는 매칭에
+# 쓰지 않는다 -- 표기가 유튜브 말과 겹치지 않아(실측 0건) 넣으면 매칭이 아니라 잡음이 는다.
+KINDS = ("ko", "latin", "mfds_inci")
+DICTIONARY_CSV = Path(__file__).resolve().parent / "dict" / "topics_v1.csv"
+FIX = f"`cosmai lexicon load --kind aspect --version <n> {DICTIONARY_CSV.name}` 뒤 `activate`"
+
+ACTIVE_SQL: LiteralString = """
+SELECT aspect, pattern, extra, version FROM aspect_lexicon
+WHERE active AND ruleset = %s ORDER BY id
+"""
+VERSION_SQL: LiteralString = """
+SELECT aspect, pattern, extra, version FROM aspect_lexicon
+WHERE version = %s AND ruleset = %s ORDER BY id
+"""
 
 
-def _latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
+class NoDictionary(LookupError):
+    """활성 주제 사전이 없다. 실패가 아니라 아직 적재하지 않은 것이라 CLI 에서는 blocked(2) 다 --
+    벡터 저장소가 없는 것(vectors.StoreMissing)과 같은 자리다."""
+
+
+_TRUE = frozenset({"true", "t", "yes", "1"})
+_FALSE = frozenset({"false", "f", "no", "0"})
+
+
+@dataclass(frozen=True)
+class Topics:
+    """사전 한 벌. `entries` 는 적재 순서를 지킨다 -- `match_topics` 가 그 순서로 답한다."""
+
+    entries: tuple[dict, ...]
+    version: int
+    fingerprint: str
+    _latin: dict[str, re.Pattern[str] | None] = field(default_factory=dict, repr=False)
+
+    def latin(self, topic: str) -> re.Pattern[str] | None:
+        return self._latin.get(topic)
+
+
+def latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
     """영문 토큰은 앞뒤가 영문자가 아닐 때만 매칭한다 (coupang -> PA 오탐 16% 차단)."""
     if not terms:
         return None
@@ -181,22 +66,165 @@ def _latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
     return re.compile(rf"(?<![A-Za-z]){alts}(?![A-Za-z])", re.IGNORECASE)
 
 
-_LATIN = {t["topic"]: _latin_pattern(t["latin"]) for t in TOPICS}
+def _flag(value: Any, where: str) -> bool:
+    text = str(value).strip().lower()
+    if text in _TRUE:
+        return True
+    if text in _FALSE:
+        return False
+    raise ValueError(f"{where}: trend_use 는 참/거짓이어야 한다 -- {value!r}")
 
 
-def match_topics(text: str, *, include_excluded: bool = False) -> list[str]:
+def _agree(entry: dict, key: str, value: Any, topic: str) -> None:
+    """주제 단위 사실은 그 주제의 행 아무 데나 한 번 적으면 된다. 두 행이 다른 값을 말하면 어느
+    쪽이 사전인지 알 수 없으므로 거절한다 -- 반쯤 고친 CSV 가 여기서 걸린다."""
+    if value is None or value == "":
+        return
+    if entry[key] is not None and entry[key] != value:
+        raise ValueError(f"주제 {topic!r} 의 {key} 가 두 값을 말한다: {entry[key]!r} vs {value!r}")
+    entry[key] = value
+
+
+def _fingerprint(entries: Iterable[Mapping[str, Any]]) -> str:
+    """사전 내용 전부의 지문. 색인 캐시 서명이 이것을 문다(pipeline.index_signature).
+
+    설명(note)까지 넣는다 -- 토큰을 바꾸지 않는 칸을 빼면 "사전이 바뀌면 캐시가 무효화된다"가
+    예외를 가진 규칙이 되고, 그 예외는 사전을 고친 사람이 아니라 다음 사람이 밟는다."""
+    payload = "\n".join(
+        "|".join(
+            [
+                entry["topic"],
+                entry["topic_type"],
+                "1" if entry["trend_use"] else "0",
+                ",".join(entry["ko"]),
+                ",".join(entry["latin"]),
+                ",".join(entry["mfds_inci"]),
+                entry["note"],
+            ]
+        )
+        for entry in entries
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
+def from_rows(rows: Iterable[tuple[str, str, Mapping[str, Any] | None]], version: int) -> Topics:
+    """(aspect, pattern, extra) 행들을 사전 한 벌로. DB 와 적재 CSV 가 같은 함수를 탄다."""
+    entries: dict[str, dict] = {}
+    for aspect, pattern, extra in rows:
+        spare = dict(extra or {})
+        kinds = [k for k in str(spare.get("term_kind", "")).split("|") if k]
+        where = f"{aspect} :: {pattern}"
+        if not kinds:
+            raise ValueError(f"{where}: term_kind 가 없다 ({'|'.join(KINDS)} 중 하나 이상)")
+        if unknown := [k for k in kinds if k not in KINDS]:
+            raise ValueError(f"{where}: 모르는 term_kind {unknown}")
+        entry = entries.setdefault(
+            aspect,
+            {
+                "topic": aspect,
+                "topic_type": None,
+                "ko": [],
+                "latin": [],
+                "mfds_inci": [],
+                "trend_use": None,
+                "note": None,
+            },
+        )
+        for kind in kinds:
+            entry[kind].append(pattern)
+        _agree(entry, "topic_type", spare.get("topic_type"), aspect)
+        _agree(entry, "note", spare.get("note"), aspect)
+        trend = spare.get("trend_use")
+        _agree(entry, "trend_use", None if trend in (None, "") else _flag(trend, where), aspect)
+    if not entries:
+        raise NoDictionary(f"활성 주제 사전이 비었다 (ruleset={RULESET!r}) -- {FIX}")
+    for entry in entries.values():
+        for key in ("topic_type", "trend_use"):
+            if entry[key] is None:
+                # 기본값을 정해 두면 평가에서 빠져야 할 주제가 조용히 들어온다(선크림 481/518=93%).
+                raise ValueError(f"주제 {entry['topic']!r} 에 {key} 가 없다")
+        entry["note"] = entry["note"] or ""
+    ordered = tuple(entries.values())
+    return Topics(
+        entries=ordered,
+        version=version,
+        fingerprint=_fingerprint(ordered),
+        _latin={e["topic"]: latin_pattern(e["latin"]) for e in ordered},
+    )
+
+
+def load(conn: Any, *, version: int | None = None) -> Topics:
+    """활성 버전(또는 지정한 버전)의 주제 사전. 읽고 나서 커밋한다 -- 뒤이어 형태소 분석이 붙는다."""
+    with conn.cursor() as cur:
+        if version is None:
+            cur.execute(ACTIVE_SQL, (RULESET,))
+        else:
+            cur.execute(VERSION_SQL, (version, RULESET))
+        rows = cur.fetchall()
+    conn.commit()
+    if not rows:
+        # 빈 사전은 오류 없이 정답 0건·질의 0개를 만들고, 그 초록은 "검색이 아무것도 못 찾는다"와
+        # 구분되지 않는다. 어디를 고쳐야 하는지까지 말하고 멈춘다.
+        at = "활성 버전" if version is None else f"v{version}"
+        raise NoDictionary(f"aspect_lexicon 의 {at} 에 주제 사전이 없다 (ruleset={RULESET!r}) -- {FIX}")
+    label = version if version is not None else max(row[3] for row in rows)
+    return from_rows(((row[0], row[1], row[2]) for row in rows), label)
+
+
+_active: Topics | None = None
+_listeners: list[Callable[[Topics | None], None]] = []
+
+
+def on_change(listener: Callable[[Topics | None], None]) -> None:
+    """활성 사전이 갈릴 때 부를 것. 사전에서 파생된 캐시(bm25 의 Kiwi·확장 목록)가 여기 붙는다 --
+    topics 가 bm25 를 import 하면 순환이라 방향을 뒤집었다."""
+    _listeners.append(listener)
+
+
+def use(dictionary: Topics) -> Topics:
+    """이 사전을 프로세스의 활성 사전으로 세운다."""
+    global _active
+    changed = _active is None or _active.fingerprint != dictionary.fingerprint
+    _active = dictionary
+    if changed:
+        for listener in _listeners:
+            listener(dictionary)
+    return dictionary
+
+
+def forget() -> None:
+    global _active
+    _active = None
+    for listener in _listeners:
+        listener(None)
+
+
+def active() -> Topics:
+    if _active is None:
+        raise NoDictionary(
+            f"활성 주제 사전이 세워지지 않았다 -- DB 를 여는 쪽이 use_active(conn) 로 세운다 ({FIX})"
+        )
+    return _active
+
+
+def use_active(conn: Any) -> Topics:
+    return use(load(conn))
+
+
+def match_topics(text: str, *, include_excluded: bool = False, dictionary: Topics | None = None) -> list[str]:
     """텍스트에 등장하는 주제 목록. 한 문서가 여러 주제에 걸릴 수 있다."""
     if not text:
         return []
+    known = dictionary or active()
     lowered = text.lower()
     hits = []
-    for entry in TOPICS:
+    for entry in known.entries:
         if not entry["trend_use"] and not include_excluded:
             continue
         if any(term.lower() in lowered for term in entry["ko"]):
             hits.append(entry["topic"])
             continue
-        pattern = _LATIN[entry["topic"]]
+        pattern = known.latin(entry["topic"])
         if pattern and pattern.search(text):
             hits.append(entry["topic"])
     return hits

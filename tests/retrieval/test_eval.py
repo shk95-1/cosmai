@@ -9,6 +9,7 @@ from sqlalchemy.engine import make_url
 
 from analysis.retrieval import eval as retrieval_eval
 from analysis.retrieval.bm25 import Index
+from tests.retrieval.conftest import install_topics
 
 pytestmark = pytest.mark.postgres
 
@@ -50,7 +51,9 @@ def test_held_out_docs_are_removed_by_token_not_by_substring():
 
 @pytest.fixture
 def loaded(needs_schema: str, needs_runtime_url: str):
-    """청크는 운영과 같은 needs_runtime 이 쓴다 -- migrator 는 needs_owner 소유 표에 못 쓴다."""
+    """청크는 운영과 같은 needs_runtime 이 쓴다 -- migrator 는 needs_owner 소유 표에 못 쓴다.
+
+    주제 사전도 같은 스키마에 세운다: 정답은 그 DB 의 활성 사전이 만든다(#8)."""
     parsed = make_url(needs_runtime_url)
     conn = psycopg.connect(
         host=parsed.host,
@@ -66,6 +69,7 @@ def loaded(needs_schema: str, needs_runtime_url: str):
         ("하얘서 못 쓰겠다", "d3"),
         ("발림성이 좋다", "d4"),
     ]
+    install_topics(conn)
     with conn.cursor() as cur:
         for text, doc in rows:
             cur.execute(

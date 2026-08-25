@@ -91,6 +91,11 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     ev.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     ev.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    tm = actions.add_parser("terms", help="Show the frequent words the topic dictionary misses.")
+    tm.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
+    tm.add_argument("--top", type=int, default=40, help="How many unmatched terms to print.")
+    tm.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
     emb = actions.add_parser("embed", help="Encode chunks into a vector store on disk.")
     emb.add_argument("--model", default=None, help="Sentence-transformers model; default is e5-base.")
     emb.add_argument("--device", default=None, help="cuda, cpu, ...; default is what torch picks.")
@@ -210,6 +215,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     import psycopg
 
     from analysis.retrieval import corpus, pipeline
+    from analysis.retrieval.topics import NoDictionary
     from analysis.retrieval.vectors import StoreMissing
 
     try:
@@ -236,11 +242,14 @@ def _run_retrieval(args: argparse.Namespace) -> int:
                 return _run_retrieval_eval(conn, args, sources, store)
             if args.action == "embed":
                 return _run_retrieval_embed(conn, args, store)
+            if args.action == "terms":
+                return _run_retrieval_terms(conn, args, sources)
             hits = pipeline.search(
                 conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
             )
-    # 벡터 파일이 없는 것은 실패가 아니라 막힘이다 -- embed 를 아직 안 돌렸다는 뜻이다.
-    except StoreMissing as blocked:
+    # 벡터 파일이 없는 것도, 주제 사전이 아직 안 켜진 것도 실패가 아니라 막힘이다 -- 각각
+    # `embed` 와 `cosmai lexicon load/activate` 를 아직 안 돌렸다는 뜻이다.
+    except (StoreMissing, NoDictionary) as blocked:
         print(blocked)
         return 2
     if not hits:
@@ -249,6 +258,15 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
     return 0
+
+
+def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:
+    from analysis.retrieval import terms
+
+    scanned = terms.scan(conn, sources=sources)
+    print(terms.render(scanned, top=args.top))
+    # 문서를 하나도 못 봤으면 표가 아니라 빈 표다 -- `eval` 의 "채점된 질의 0개"와 같은 자리다.
+    return 0 if sum(scanned.documents.values()) else 1
 
 
 def _run_retrieval_embed(conn: Any, args: argparse.Namespace, store: Path | None) -> int:
@@ -348,7 +366,7 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
     rows = read_csv(Path(path))
     if not rows:
         raise ValueError(f"{path} has no rows")
-    wanted = ASPECT_COLUMNS if kind == ASPECT_KIND else ENTITY_COLUMNS[1:]
+    wanted = ASPECT_COLUMNS[:-1] if kind == ASPECT_KIND else ENTITY_COLUMNS[1:]
     missing = [c for c in wanted if c not in rows[0]]
     if missing:
         raise ValueError(f"{path} is missing column(s): {', '.join(missing)}")
@@ -356,6 +374,13 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
     if mislabelled:
         raise ValueError(f"{path} carries kind(s) {', '.join(sorted(mislabelled))}, not {kind}")
     if kind == ASPECT_KIND:
+        # 알려진 칸 밖의 열은 `extra` 로 간다 -- 룰셋마다 필요한 사실이 다르고(주제 사전의 표기
+        # 계열·주제 유형), 그것을 공통 칸에 얹으면 한 컬럼이 룰셋마다 다른 뜻을 갖는다(021).
+        # 빈 칸은 값이 아니라 무기입이다: 넣으면 "지정하지 않음"과 "빈 문자열"이 섞인다.
+        if "extra" in rows[0]:
+            # 남는 열들이 모이는 자리라 그 이름의 열은 자기 자신 안에 들어간다 -- 조용히 버리지 않는다.
+            raise ValueError(f"{path} has an 'extra' column; spare columns become extra by name")
+        spare = [c for c in rows[0] if c not in ASPECT_COLUMNS]
         return [
             (
                 r["aspect"],
@@ -365,6 +390,7 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
                 boolean(r["is_neutral_noun"]),
                 r["ruleset"],
                 int(r["priority"]),
+                {c: r[c] for c in spare if r[c] != ""},
             )
             for r in rows
         ]

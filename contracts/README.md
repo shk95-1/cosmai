@@ -9,6 +9,7 @@
 | `ddl/needs/002_audit_additive.sql` | 2026-08-23 계약 감사(이슈 #17)가 요구한 **추가만** — 테이블 3(`need_key`, `category_map`, `product_ref_candidate`) + 컬럼 31. 합계 20 테이블 | 같은 테스트 + `tests/test_ddl_additive_only.py` |
 | `ddl/needs/005_need_mention_natural_key.sql` | `need_mention` 자연키 교체 — btree 2704B 상한(#5 운영 실패)과 시드·분석 충돌(#12 안 A)을 한 번에 푼다. `UNIQUE (src, ref, need_key, sentence)` → `UNIQUE INDEX (src, ref, need_key, extractor_version, md5(sentence))`. **추가만의 유일한 예외**(사용자 승인 2026-08-24) | `tests/test_ddl_additive_only.py` 의 `SANCTIONED_DESTRUCTIVE` 화이트리스트 + `tests/test_need_mention_natural_key.py` |
 | `ddl/needs/020_retrieval_chunk.sql` | 검색 유닛(#28)의 청크 저장소 `needs.retrieval_chunk` — 5칸 청크 계약(`analysis/retrieval/chunks.py` FIELDS) + 파생 2칸(`text_md5`·`chunked_at`). 번호 020 은 장수 브랜치 `feat/ydc-import` 의 블록이라 main 의 00N 과 파일명이 겹치지 않는다 | `tests/retrieval/test_contract.py` (컬럼·NOT NULL·GRANT·번호대) + `tests/test_ddl_additive_only.py` |
+| `ddl/needs/021_aspect_lexicon_extra.sql` | `aspect_lexicon.extra`(jsonb) — 룰셋마다 다른 사실을 담는 칸. 검색 유닛의 주제 사전(`ruleset='retrieval-topic'`, 포크 #8)이 별칭의 표기 계열·주제 유형·트렌드 사용 여부를 여기 싣는다. 기존 행은 `{}` 로 남는다(추가만) | `tests/retrieval/test_topics.py` (적재·활성·동등성) + `tests/test_ddl_additive_only.py` |
 | `ddl/needs/*.sql` | (위와 같은 디렉터리) | 적용 경로는 `db/migrate.sh` 하나 (운영·테스트 공용); 적용 여부는 원장 `needs.schema_migration`에 기록 |
 | `entrypoints.md` | CLI 진입점·종료 코드·run/fetch_log 공통 뷰 | CLI `--help` 스냅샷 + 뷰 존재 테스트 |
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입·수식, 평가 하네스가 넘어야 할 기준선 | `tests/test_contract_types.py` 가 `analysis/types.py` 와 대조 · `eval <task>` 가 기준선과 비교 |

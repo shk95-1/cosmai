@@ -26,8 +26,7 @@ from pathlib import Path
 
 import psycopg
 
-from analysis.retrieval import bm25
-from analysis.retrieval.topics import TOPICS
+from analysis.retrieval import bm25, topics
 
 K = 10
 FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit", "note")
@@ -68,10 +67,10 @@ class Row:
     note: str = ""  # 이 점수가 어느 코퍼스 위에서 나왔는지. 질의마다 같은 값이라 CSV 어느 줄을 봐도 읽힌다
 
 
-def queries(mode: str) -> list[tuple[str, str]]:
+def queries(mode: str, dictionary: topics.Topics | None = None) -> list[tuple[str, str]]:
     """(topic_id, 질의). 질의는 주제 별칭이다 -- 사람이 라벨을 만들지 않는다."""
     out = []
-    for entry in TOPICS:
+    for entry in (dictionary or topics.active()).entries:
         if not entry["trend_use"]:
             continue  # 판정에 안 쓰는 주제는 평가에서도 뺀다
         aliases = entry["ko"] + entry["latin"]
@@ -95,7 +94,9 @@ def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None =
     `transaction_timeout`(60초, db/bootstrap.sql:48)은 트랜잭션 **총 수명**의 상한이라 도중에 끊는다.
     주제 매칭은 커밋한 뒤에 도는 것도 그래서다 -- 느린 쪽이 트랜잭션 밖에 있어야 한다.
     """
-    from analysis.retrieval.topics import match_topics
+    # 정답을 만드는 사전은 **이 DB 의 활성 버전**이다 -- 프로세스에 남아 있던 사전으로 채점하면
+    # 그 점수가 어느 사전 위에서 나왔는지 아무도 답할 수 없다.
+    dictionary = topics.use_active(conn)
 
     narrow, params = "", ()
     if sources:
@@ -108,7 +109,7 @@ def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None =
             rows = cur.fetchall()
         conn.commit()
         for _chunk_id, doc_id, text in rows:
-            for topic in match_topics(text):
+            for topic in topics.match_topics(text, dictionary=dictionary):
                 gold[topic].add(doc_id)
         if len(rows) < GOLD_PAGE:
             return gold
