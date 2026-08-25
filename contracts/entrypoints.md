@@ -16,10 +16,13 @@ cosmai login --source <source>
   (#27). 호스트에 Chromium 이 없으면 최초 1회 `uv run playwright install chromium`.
 ```
 - 수집기는 **자기 스키마의 테이블에만** 쓴다 (`ddl/current`). 다른 스키마 읽기는 reader 롤로만.
-- HTTP 트랜스포트의 UA(`collectors/commerce/contract.py`의 `DEFAULT_UA`)는 우리가 고르는 값이 아니라
-  **사이트가 통과시키는 값**에 묶여 있다 — 2026-08-25 oliveyoung 실측(같은 엔드포인트·같은 시각대에서
-  UA 만 바꿔 403 vs 51×200)으로 바뀐 게 그 근거다. 바꾸려면 같은 종류의 A/B 실측이 있어야 하고,
-  "이름이 정확해 보이지 않는다"는 이유만으로 고치면 재차 막힐 수 있다.
+- HTTP 트랜스포트의 UA(`collectors/commerce/contract.py`의 `DEFAULT_UA`)는 **우리가 우리를 밝히는 이름**이다
+  — 브라우저 흉내도 아니고, 통과를 사려고 고르는 값도 아니다. 값은 테스트가 리터럴로 못 박는다.
+- **이미지 베이스는 TLS 지문을 바꾸므로 수집 성공/실패를 가른다.** 챌린지를 UA·레이트·IP 로 읽기 전에
+  베이스부터 본다: 같은 코드·같은 UA 로 호스트는 통과하고 컨테이너는 막히는 일이 실제로 있었고
+  (2026-08-25 oliveyoung), 가른 것은 베이스 이미지의 OpenSSL — 즉 ClientHello 지문(JA3/JA4) — 이었다.
+  그래서 `stack/Dockerfile` 의 베이스는 패키징 취향이 아니라 **수집 입력**이고, 빌드가 그 하한을 이미지
+  안에서 검사한다 (`tests/stack/test_image_tls_stack.py`). 브라우저 위장(지문 스푸핑)은 범위 밖이다.
 - 표본 설계는 상수로 세고 `collectors/<c>/scope.json` 에 기록한다 (scope.lock 의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사).
 - **한 소스는 한 번에 한 런만 걷는다.** 레이트 정책은 프로세스 안에서만 강제되므로(수집기마다 자기 게이트)
   겹친 크론 두 줄은 같은 사이트를 정책의 두 배로 때린다. 다른 런이 그 소스를 이미 걷고 있으면 **그 소스만

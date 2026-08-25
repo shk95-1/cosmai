@@ -18,16 +18,12 @@ from typing import ClassVar, Protocol, runtime_checkable
 from collectors.commerce.models import Dataset, Record
 
 # What this crawler calls itself, not a browser string -- so a site operator reading an access log
-# can tell who this is and ask it to stop. The string below is not this crawler's real name: it is
-# the previous crawler's ("trend-radar", this same operator's prior project), kept verbatim because
-# a 2026-08-25 A/B against oliveyoung's review-cursor API showed it is what Cloudflare lets through.
-# Same endpoint, same time window, UA the only variable: "cosmai-commerce/0.1 (+.../cosmai)" drew a
-# 403 cf-mitigated=challenge after 2-5 requests across three separate runs (03:30/04:15/04:45 UTC);
-# switching only the UA to this string ran 51 requests clean at 04:52 with no other change (rules
-# out request frequency and IP reputation, since the volume was higher, not lower). Do not "fix" the
-# mismatched name or make the version dynamic -- either edit produces a different string, and this
-# rule apparently keys on the exact bytes, not on what they claim to be true.
-DEFAULT_UA = "trend-radar/0.1 (+https://github.com/slopindustries/trend-radar)"
+# can tell who this is and ask it to stop. It carried the previous project's name for one commit,
+# on the reading that oliveyoung's Cloudflare challenge keyed on this string; the measurement that
+# closed it ran the *same* UA to a clean pass from the host and to a 403 from the container, so what
+# that edge answers is the image's TLS fingerprint (stack/Dockerfile), not the name. Kept honest and
+# pinned by test to the literal, since a UA that lies is a UA no operator can write to.
+DEFAULT_UA = "cosmai-commerce/0.1 (+https://github.com/slopindustries/cosmai)"
 
 
 class Transport(StrEnum):
