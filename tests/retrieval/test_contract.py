@@ -15,6 +15,20 @@ from cosmai.cli import RETRIEVAL_SOURCES
 
 DDL = Path(__file__).resolve().parents[2] / "contracts" / "ddl" / "needs" / "020_retrieval_chunk.sql"
 ENTRYPOINTS = Path(__file__).resolve().parents[2] / "contracts" / "entrypoints.md"
+INTERFACES = Path(__file__).resolve().parents[2] / "contracts" / "interfaces.md"
+SEARCH_HEADER = "| mode | engine | 질의 | P@10 | MRR@10 | Hit@10 |"
+
+
+def _search_baseline_rows() -> dict[tuple[str, str], dict[str, str]]:
+    lines = INTERFACES.read_text(encoding="utf-8").splitlines()
+    columns = [c.strip() for c in SEARCH_HEADER.strip("|").split("|")]
+    rows: dict[tuple[str, str], dict[str, str]] = {}
+    for line in lines[lines.index(SEARCH_HEADER) + 2 :]:
+        if not line.startswith("|"):
+            break
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        rows[(cells[0], cells[1])] = dict(zip(columns, cells, strict=True))
+    return rows
 
 
 def _search_section() -> list[str]:
@@ -46,6 +60,25 @@ def test_the_exit_code_contract_covers_every_retrieval_subcommand():
     bullet = _exit_code_bullet()
     for action in ("chunk", "search", "eval", "embed"):
         assert f"`{action}`" in bullet, action
+
+
+def test_the_search_baseline_table_carries_every_mode_and_engine():
+    """heldout 의 vector P@10 이 #28 단계 4 벡터 채택의 근거인데, 그 여섯 줄이 사는 곳이
+    지워질 리뷰 문서뿐이었다 -- 계약이 그 거처다(#17 S10)."""
+    from analysis.retrieval import eval as retrieval_eval
+
+    rows = _search_baseline_rows()
+    assert set(rows) == {(m, e) for m in retrieval_eval.MODES for e in retrieval_eval.ENGINES}
+
+
+def test_the_adoption_threshold_is_the_bm25_heldout_floor():
+    # heldout 에서 어휘 검색은 구조적으로 0 이다. 그 0 이 벡터가 넘어야 하는 선이라, 둘이 갈리면
+    # 채택 판정이 근거를 잃는다.
+    rows = _search_baseline_rows()
+    floor = float(rows[("heldout", "bm25")]["P@10"])
+    assert floor == 0.0
+    assert float(rows[("heldout", "vector")]["P@10"]) > floor
+    assert "P@10 > .000" in INTERFACES.read_text(encoding="utf-8")
 
 
 def test_the_ddl_lives_in_this_branchs_number_block():
