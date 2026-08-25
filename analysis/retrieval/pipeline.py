@@ -17,7 +17,7 @@ from pathlib import Path
 import psycopg
 
 from analysis.retrieval import corpus
-from analysis.retrieval.bm25 import DICTIONARIES, Index
+from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
 from analysis.retrieval.chunks import check_rows, split_text
 from analysis.retrieval.normalize import normalize_text
 
@@ -121,8 +121,9 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
     """이 색인이 무엇 위에 세워졌는지. 하나라도 달라지면 캐시를 다시 만들어야 한다.
 
     청크 수와 최신 `chunked_at` 이면 충분하다 -- UPSERT 가 본문이 바뀐 행만 `chunked_at` 을
-    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 사전이 바뀌면 같은 본문이
-    다른 토큰이 되므로 사전 해시도 넣는다(ydc bm25.py 의 캐시 키와 같은 발상).
+    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 토큰을 정하는 입력(사전 두 벌과
+    주제 사전 topics.py)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의
+    캐시 키와 같은 발상).
     """
     where, params = "", ()
     if sources:
@@ -132,7 +133,7 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
         count, latest = cur.fetchone() or (0, None)
     conn.commit()  # 뒤이어 형태소 분석이 붙으므로 트랜잭션을 열어 둔 채로 나가지 않는다
     parts = [str(count), str(latest), ",".join(sources or ())]
-    for path in DICTIONARIES:
+    for path in TOKENIZER_INPUTS:
         parts.append(hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "-")
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
 

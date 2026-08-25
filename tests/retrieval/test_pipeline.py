@@ -4,6 +4,8 @@ needs_schema 픽스처가 만든 스키마에 원천 테이블을 직접 세운�
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 from sqlalchemy.engine import make_url
@@ -148,6 +150,24 @@ def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
     second, _ = pipeline.load_index(conn, cache_dir=tmp_path)
     assert second.search("백탁") == first.search("백탁")
     assert second.n == first.n
+
+
+def test_the_topic_dictionary_is_part_of_the_cache_key():
+    """topics.py 의 별칭은 Kiwi 사용자 단어이자 expand() 의 확장 목록이다 -- 사전 두 벌만 해시하면
+    주제를 고친 날 96MB 옛 색인이 그대로 재사용된다(#17 S3)."""
+    from analysis.retrieval import topics
+
+    assert Path(topics.__file__).resolve() in {p.resolve() for p in pipeline.TOKENIZER_INPUTS}
+
+
+def test_a_changed_tokenizer_input_invalidates_the_signature(conn, tmp_path, monkeypatch):
+    # 토큰을 정하는 입력이 바뀌면 같은 본문이 다른 토큰이 된다 -- 서명이 안 움직이면 옛 색인이 산다.
+    spare = tmp_path / "topics.py"
+    spare.write_text("TOPICS = []\n", encoding="utf-8")
+    monkeypatch.setattr(pipeline, "TOKENIZER_INPUTS", (spare,))
+    before = pipeline.index_signature(conn, None)
+    spare.write_text("TOPICS = ['백탁']\n", encoding="utf-8")
+    assert pipeline.index_signature(conn, None) != before
 
 
 def test_new_chunks_invalidate_the_cache(conn, owner, _schema_name, tmp_path):

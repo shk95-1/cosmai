@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from analysis.retrieval import topics
 from analysis.retrieval.topics import TOPICS
 
 if TYPE_CHECKING:  # 타입 전용: 런타임에 kiwipiepy 를 끌어오면 --help 한 번에 모델이 뜬다.
@@ -34,6 +35,9 @@ USER_WORD_SCORE = 3.0
 
 DICT_DIR = Path(__file__).resolve().parent / "dict"
 DICTIONARIES = (DICT_DIR / "user_dictionary.tsv", DICT_DIR / "ingredient_dictionary.tsv")
+# 토큰을 정하는 입력 전부. topics.py 가 여기 드는 이유는 그 별칭이 Kiwi 사용자 단어로 등록되고
+# (kiwi()) 부분문자열 확장 목록도 되기 때문이다(expand()) -- 색인 캐시 서명이 이 전부를 걸어야 한다.
+TOKENIZER_INPUTS = (*DICTIONARIES, Path(topics.__file__).resolve())
 
 
 _kiwi = None
