@@ -125,6 +125,44 @@ def test_a_long_comment_becomes_several_ordinals(conn, owner, _schema_name):
     assert ordinals == list(range(len(ordinals)))
 
 
+def test_a_shrunken_document_drops_its_stale_ordinals(conn, owner, _schema_name):
+    """원천이 짧아지면 옛 ordinal 이 영구 잔존해 계약("0 부터 연속",
+    contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는
+    check_rows 는 그 문서를 다시 다 봤다고 여기므로 위반을 못 낸다(#17 S9)."""
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
+            ("백탁. " * 400,),
+        )
+    owner.commit()
+    first = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert first.pruned == 0
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '백탁이 조금 있다' WHERE comment_id = 'c7'")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT ordinal FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c7' ORDER BY ordinal"
+        )
+        assert [r[0] for r in cur.fetchall()] == [0]
+    assert outcome.pruned > 0
+    assert outcome.problems == []
+
+
+def test_pruning_the_tail_stays_idempotent(conn, owner, _schema_name):
+    # 지울 꼬리가 없는 재실행은 아무 행도 건드리지 않는다 -- 안 그러면 매 실행이 죽은 튜플을 쌓는다.
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
+            ("백탁. " * 400,),
+        )
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    again = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert (again.written, again.pruned) == (0, 0)
+
+
 def test_a_document_split_across_write_batches_is_not_a_false_violation(
     conn, owner, _schema_name, monkeypatch
 ):
