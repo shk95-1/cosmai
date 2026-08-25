@@ -66,6 +66,7 @@ SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels, videos = EXCLUDE
 """
 
 
+# TODO(#92): seeded runs leave finished_at NULL; production runs fill it.
 def analysis_run(cur: psycopg.Cursor[Any], key: str) -> int:
     """Found by note, created only when absent -- re-seeding must not pile up runs."""
     note, versions = RUNS[key]

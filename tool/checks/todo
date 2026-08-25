@@ -1,0 +1,10 @@
+#!/bin/sh
+# A bare marker is a plan living outside the issue ledger. The accepted shape is the marker of a
+# `when-touched` issue, TODO(#n), and tool/issue audit checks at boot that n is open -- the shape
+# is what an offline hook can enforce, the linkage is not.
+set -e
+hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/todo' | grep -E '^\+[^+]' | grep -E 'TODO' | grep -vE 'TODO\\*\(?#' || true)
+[ -z "$hits" ] && exit 0
+printf '%s\n' "$hits" >&2
+printf '\n✗ A staged marker has no issue: write TODO(#n) and open a when-touched issue for n.\n\n' >&2
+exit 1

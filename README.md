@@ -2,7 +2,9 @@
 
 화장품 소비자 니즈 분석 시스템 — 수집 → 원본 보존 → 정규화 → 분석 → 결과.
 
-2026-08-23 `architect/REBUILD.md`의 재구성 사양에 따라 새로 시작한 모노레포다. 기존 레포(`cosmai-old`, `trend-radar`, `yt-scrapper`, `Research_Paper`, `stack`, `data-portal`)는 archive(읽기전용)되었고, 이 저장소가 **코드만** 옮겨 심는다 — 문서·훅·메타테스트·개발 철학은 가져오지 않으며 `playbook/`에 따로 추출한다.
+**부팅은 `AGENTS.md`** — 부팅 순서·절대 규칙·규칙이 어디서 강제되는지. 할 일은 GitHub 이슈뿐이다(`tool/issue ready`). `CLAUDE.md` 는 그 파일을 임포트하는 한 줄이다.
+
+2026-08-23 재구성 사양에 따라 **히스토리 비공유로** 새로 시작한 모노레포다. 구 cosmai 는 `slopindustries/cosmai-old`(archived)로 이동했고, 필요한 자산은 `contracts/`·`playbook/` 으로 이관이 끝났다 — 옛 클론을 fetch 하면 공통 조상이 없어 실패하는 것이 정상이다. 기존 레포(`cosmai-old`, `trend-radar`, `yt-scrapper`, `Research_Paper`, `stack`, `data-portal`)는 archive(읽기전용)되었고, 이 저장소가 **코드만** 옮겨 심는다 — 문서·훅·메타테스트·개발 철학은 가져오지 않으며 `playbook/`에 따로 추출한다.
 
 ## 구조 (계약 우선)
 
@@ -18,7 +20,7 @@
 | `eval/` | labeled_set 660 · 회귀 픽스처 (제품 매핑 80쌍 등) | `architect/slice-*/` |
 | `playbook/` | 기존 레포에서 추출한 개발 방법론 카탈로그 (채택/변형/제외) | 추출 |
 
-`stack/` 의 이미지는 **빌드가 곧 검사다**: `stack/Dockerfile` 의 마지막 `RUN` 이 이미지 안에서 `cosmai --help` · `db/migrate.sh --help` · `ls contracts/ddl/needs/*.sql` · site-packages 를 통한 `scope_threshold()` 임포트를 실행한다. 그 빌드가 성공했다는 것이 #10 조건 2 의 "이미지 안 동작 확인" 의 근거다 — 따로 돌려 볼 절차가 없다. 스케줄러(supercronic)는 `stack/Dockerfile.cron` 이 그 이미지 위에 얹는다.
+`stack/` 의 이미지는 **빌드가 곧 검사다**: `stack/Dockerfile` 의 마지막 `RUN` 이 이미지 안에서 `cosmai --help` · `db/migrate.sh --help` · `ls contracts/ddl/needs/*.sql` · site-packages 를 통한 `scope_threshold()` 임포트를 실행한다. 그 빌드가 성공했다는 것이 컷오버 조건(닫힌 #10 의 조건 2) "이미지 안 동작 확인" 의 근거였고 지금도 같은 검사다 — 따로 돌려 볼 절차가 없다. 스케줄러(supercronic)는 `stack/Dockerfile.cron` 이 그 이미지 위에 얹는다.
 
 빌드는 두 단계이고 `tool/stack-build` 가 둘을 한 번에 돈다 (레포 루트에서):
 

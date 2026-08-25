@@ -103,6 +103,7 @@ def _suncare(slices: Path) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]
     refs: list[tuple[Any, ...]] = []
     members: list[tuple[Any, ...]] = []
     for r in read_csv(slices / "slice-suncare" / "product_ref.csv"):
+        # TODO(#91): a member without ':' dies with an IndexError that names neither file nor row.
         pairs = [m.split(":", 1) for m in r["members"].split(";") if m]
         refs.append(
             (

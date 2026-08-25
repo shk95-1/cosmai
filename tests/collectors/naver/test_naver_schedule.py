@@ -53,6 +53,7 @@ def _all_collector_times() -> list[tuple[str, tuple[str, ...]]]:
     return out
 
 
+# TODO(#93): commerce and youtube guard that the contract names every dataset's schedule; naver does not.
 def test_there_is_something_to_check():
     assert list(Dataset)
     assert _lines()

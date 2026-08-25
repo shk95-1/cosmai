@@ -10,13 +10,28 @@ require_command uv docker pg_isready
 # ModuleNotFoundError 가 되고, 그것은 "사전이 안 얹혔다"와 구분되지 않는다 (#28).
 uv sync --extra dev --extra retrieval --frozen
 
+# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
+# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
+# commit landed on a real branch during pre-push). The suite must see the same environment under
+# a hook as from a terminal.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+
 if [ -z "$TEST_POSTGRES_URL" ]; then
-    # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).
-    port=${COSMAI_TEST_PG_PORT:-55432}
+    # Every worktree gets its own throwaway container, so channels can run this concurrently. The
+    # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
+    # COSMAI_TEST_PG_PORT still overrides it (#60 2.10).
+    port=${COSMAI_TEST_PG_PORT:-$((55000 + $(pwd -P | cksum | cut -d' ' -f1) % 1000))}
     # 벡터는 지금 파일에 있으므로 확장이 필요 없다. pgvector 로 옮기는 날 이 기본값을
     # pgvector/pgvector:pg18 로 바꾸면 된다 (#28 후속).
     image=${COSMAI_TEST_PG_IMAGE:-postgres:18-alpine}
     name=cosmai-test-postgres-$port
+    # A different container on the same port belongs to another worktree or is a leak: name it and
+    # stop, rather than silently sharing or clobbering someone else's database.
+    holder=$(docker ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null | head -1)
+    if [ -n "$holder" ] && [ "$holder" != "$name" ]; then
+        printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
+        exit 1
+    fi
     secret_file=$(mktemp)
     # rm -v: postgres 이미지의 익명 볼륨까지 제거 (없으면 실행마다 ~1GB 볼륨이 누수됨)
     trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT
