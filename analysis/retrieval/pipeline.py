@@ -173,7 +173,7 @@ def run(
     )
     seen_docs: set[str] = set()
     scanned: Counter = Counter()  # 소스별로 훑어서 본 문서 수
-    total = written = pruned = emptied = over_target = over_target_max = 0
+    total = written = pruned = emptied = over_target = over_target_max = checked = 0
     batch: list[dict] = []
     empty_docs: list[str] = []  # 훑어서 본문이 빈 것을 본 문서. 다음 flush 에서 통째로 지운다
     problems: list[str] = []
@@ -204,14 +204,17 @@ def run(
         empty_docs.clear()
 
     def validate_and_flush() -> None:
-        nonlocal over_target, over_target_max
-        found, _per_source, lengths, _docs = check_rows(batch)
+        nonlocal over_target, over_target_max, checked
+        # 좌표 없는 행에 붙는 번호는 실행 전체로 이어 센다 -- 배치마다 2 부터면 한 좌표가 여러
+        # 문서를 가리키고, 그러면 사람이 원본을 찾아가라는 메시지의 목적이 없어진다(#27).
+        found, _per_source, lengths, _docs = check_rows(batch, first_line=checked + 2)
+        checked += len(lengths)
         # check_rows 의 종류별 3건 상한은 배치 안에서만 걸린다 -- 실측 규모(381,950청크 = 382배치)
         # 에서 배치마다 리셋되면 한 종류가 천 줄을 넘겨 보고가 다시 읽을 수 없게 된다(#18 M12).
         for problem in found:
             kind = problem_kind(problem)
-            # 배치마다 행 번호가 2 부터 다시 세어지므로 같은 메시지가 여러 배치에서 나온다. 집합으로
-            # 거른다 -- 앞의 `p not in problems` 는 problems 가 길어질수록 배치마다 다시 훑었다.
+            # 좌표가 같은 위반은 같은 행을 두 번 말하는 것이라 집합으로 거른다 -- 앞의
+            # `p not in problems` 는 problems 가 길어질수록 배치마다 다시 훑었다.
             if problem in seen_problems or samples[kind] >= SAMPLES_PER_KIND:
                 continue
             seen_problems.add(problem)

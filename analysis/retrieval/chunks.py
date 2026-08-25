@@ -54,8 +54,28 @@ def problem_kind(message: str) -> str:
     return message.split(":")[0]
 
 
-def check_rows(rows: Iterable[Mapping[str, object]]) -> tuple[list[str], Counter, list[int], int]:
-    """(위반 목록, 소스별 개수, 길이 목록, 문서 수). 파일을 읽지 않으므로 어디서든 검사한다."""
+def row_ref(row: Mapping[str, object], line: int) -> str:
+    """위반 메시지가 가리키는 좌표. 메시지는 사람이 원본을 찾아가라고 있는 것이므로 표의 기본키인
+    chunk_id 를 먼저 쓴다 -- `WHERE chunk_id = ...` 한 문장이 그 행을 낸다. 못 만들면 (doc_id,
+    ordinal) 인덱스, 그것도 없으면 훑은 순서뿐이다(그 번호는 부르는 쪽이 이어 세야 유일하다)."""
+    chunk_id = str(row.get("chunk_id") or "").strip()
+    if chunk_id:
+        return chunk_id
+    doc_id = str(row.get("doc_id") or "").strip()
+    if doc_id:
+        return f"doc_id={doc_id} ordinal={row.get('ordinal')!r}"
+    source = str(row.get("source") or "").strip()
+    return f"{line}행 (source={source})" if source else f"{line}행"
+
+
+def check_rows(
+    rows: Iterable[Mapping[str, object]], *, first_line: int = 2
+) -> tuple[list[str], Counter, list[int], int]:
+    """(위반 목록, 소스별 개수, 길이 목록, 문서 수). 파일을 읽지 않으므로 어디서든 검사한다.
+
+    `first_line` 은 좌표가 아예 없는 행에 붙일 번호의 시작이다. 배치로 나눠 부르는 쪽
+    (pipeline.run)이 이미 검사한 행 수만큼 밀어 주지 않으면 같은 번호가 배치마다 다시 나온다(#27).
+    """
     problems: list[str] = []
     seen_ids: set[str] = set()
     ordinals: dict[str, list[int]] = defaultdict(list)
@@ -69,34 +89,35 @@ def check_rows(rows: Iterable[Mapping[str, object]]) -> tuple[list[str], Counter
         if sum(1 for p in problems if problem_kind(p) == kind) < SAMPLES_PER_KIND:
             problems.append(message)
 
-    for line, row in enumerate(rows, 2):
+    for line, row in enumerate(rows, first_line):
         chunk_id = str(row.get("chunk_id") or "").strip()
         doc_id = str(row.get("doc_id") or "").strip()
         source = str(row.get("source") or "").strip()
         text = str(row.get("text") or "")
+        ref = row_ref(row, line)
 
         if not chunk_id:
-            note(f"chunk_id 없음: {line}행")
+            note(f"chunk_id 없음: {ref}")
         elif chunk_id in seen_ids:
-            note(f"chunk_id 중복: {line}행 {chunk_id}")
+            note(f"chunk_id 중복: {ref}")
         seen_ids.add(chunk_id)
 
         if not doc_id:
-            note(f"doc_id 없음: {line}행")
+            note(f"doc_id 없음: {ref}")
         if not source:
-            note(f"source 없음: {line}행")
+            note(f"source 없음: {ref}")
         if not text.strip():
-            note(f"text 비어 있음: {line}행 {chunk_id}")
+            note(f"text 비어 있음: {ref}")
         # 정규화 규칙이 소스마다 갈리면 소스 간 점수 비교가 무의미해진다.
         if text != normalize_text(text):
-            note(f"정규화 안 됨: {line}행 {chunk_id}")
+            note(f"정규화 안 됨: {ref}")
         if len(text) > MAX_CHARS * 2:
-            note(f"너무 긺: {line}행 {chunk_id} — {len(text)}자")
+            note(f"너무 긺: {ref} — {len(text)}자")
 
         try:
             ordinals[doc_id].append(int(row["ordinal"]))  # pyright: ignore[reportArgumentType]
         except (KeyError, TypeError, ValueError):
-            note(f"ordinal 이 정수가 아님: {line}행 {row.get('ordinal')!r}")
+            note(f"ordinal 이 정수가 아님: {ref} — {row.get('ordinal')!r}")
 
         per_source[source] += 1
         lengths.append(len(text))

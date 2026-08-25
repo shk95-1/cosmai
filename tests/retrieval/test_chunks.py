@@ -107,3 +107,33 @@ def test_check_rows_accepts_a_generator():
     # 30만 행을 리스트로 물리면 메모리에 두 벌이 된다.
     problems, per_source, _, docs = check_rows(_row() for _ in range(1))
     assert problems == [] and per_source == {"s": 1} and docs == 1
+
+
+def test_a_violation_points_with_the_chunk_id_not_a_row_number():
+    """좌표는 표의 기본키다 -- 사람이 `WHERE chunk_id = ...` 한 문장으로 원본에 간다. "몇 번째 행"은
+    CSV 줄이 아니라 이 호출이 훑은 순번이라 실행 전체에서는 여러 문서를 가리켰다(#27)."""
+    problems, *_ = check_rows([_row(text="백  탁")])
+    assert problems == ["정규화 안 됨: s:1#0"]
+
+
+def test_a_row_without_a_chunk_id_is_pointed_at_by_doc_id_and_ordinal():
+    # chunk_id 를 못 만드는 행에도 (doc_id, ordinal) 인덱스로 찾아갈 좌표가 남는다.
+    problems, *_ = check_rows([_row(chunk_id="", ordinal=2)])
+    assert any("doc_id=s:1" in p and "ordinal=2" in p for p in problems), problems
+
+
+def test_a_row_with_no_key_at_all_falls_back_to_its_place_in_the_run():
+    # 키가 될 칸이 다 비면 남는 좌표는 훑은 순서뿐이다 -- 그래도 무언가는 남아야 한다.
+    problems, *_ = check_rows([_row(chunk_id="", doc_id="")])
+    assert any(p.startswith("chunk_id 없음: 2행 (source=s)") for p in problems), problems
+    problems, *_ = check_rows([_row(chunk_id="", doc_id="", source="")])
+    assert any(p.startswith("chunk_id 없음: 2행") for p in problems), problems
+
+
+def test_the_place_in_the_run_continues_across_calls():
+    """pipeline.run 은 배치마다 check_rows 를 부른다 -- 번호가 매번 2 부터면 한 좌표가 여러
+    문서를 가리킨다(#27). 부르는 쪽이 이어 센 번호를 준다."""
+    problems, _per, lengths, _docs = check_rows([_row(chunk_id="", doc_id="", source="")])
+    later, *_ = check_rows([_row(chunk_id="", doc_id="", source="")], first_line=2 + len(lengths))
+    assert problems != later
+    assert any(p.startswith("chunk_id 없음: 3행") for p in later), later
