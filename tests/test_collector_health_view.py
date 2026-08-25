@@ -29,6 +29,8 @@ FINISHED_B = datetime(2026, 8, 23, 4, 5, tzinfo=UTC)
 RUN_A = UUID("11111111-1111-4111-8111-111111111111")  # commerce, fetch_log 두 dataset
 RUN_B = UUID("22222222-2222-4222-8222-222222222222")  # commerce, fetch_log 가 한 줄도 없는 run
 RUN_C = UUID("33333333-3333-4333-8333-333333333333")  # naver
+RUN_D = UUID("44444444-4444-4444-8444-444444444444")  # commerce, every source skipped (lock contention)
+RUN_E = UUID("55555555-5555-4555-8555-555555555555")  # commerce, one source errored (a real partial)
 
 # (dataset, http status, elapsed_ms, error). 404 는 계약이 세는 세 통(2xx / 403·429 / error·5xx)
 # 어디에도 들어가지 않는다 — requests 와의 차이로만 드러나는 것이 의도다.
@@ -67,9 +69,29 @@ def _seed_and_create_view(url: str, schema: str) -> None:
             " elapsed_ms, error) VALUES (%s, %s, 'oliveyoung', %s, 'https://x', %s, 1, %s, %s)",
             [(RUN_A, STARTED, d, s, ms, e) for d, s, ms, e in COMMERCE_FETCHES],
         )
+        # RUN_D 는 소스 전부가 잠금에 밀려 물러난 run 이고 RUN_E 는 소스 하나가 실제로 에러 난 run 이다 --
+        # 둘 다 run.status 는 엔진이 똑같이 'partial' 로 쓴다 (collectors/commerce/cli.py), 그래서
+        # collector_health 가 run_source.outcome 을 보지 않으면 뷰에서 구분이 안 된다.
+        conn.exec_driver_sql(
+            f'INSERT INTO "{schema}".run (id, captured_at, started_at, finished_at, status, sources,'
+            " datasets) VALUES (%s, %s, %s, %s, 'partial', 'oliveyoung,hwahae', 'rank'),"
+            "        (%s, %s, %s, %s, 'partial', 'oliveyoung,hwahae', 'rank')",
+            (RUN_D, STARTED_B, STARTED_B, FINISHED_B, RUN_E, STARTED_B, STARTED_B, FINISHED_B),
+        )
+        conn.exec_driver_sql(
+            f'INSERT INTO "{schema}".run_source (run_id, source, requests, records, retries, deduped,'
+            " dropped_over_depth, budget_exhausted, error_count, errors, outcome) VALUES"
+            " (%s, 'oliveyoung', 0, 0, 0, 0, 0, false, 0, 'skipped: locked', 'skipped'),"
+            " (%s, 'hwahae', 0, 0, 0, 0, 0, false, 0, 'skipped: locked', 'skipped'),"
+            " (%s, 'oliveyoung', 3, 0, 0, 0, 0, false, 1, 'boom', 'error'),"
+            " (%s, 'hwahae', 3, 3, 0, 0, 0, false, 0, NULL, 'ok')",
+            (RUN_D, RUN_D, RUN_E, RUN_E),
+        )
         # 원천 표는 collectors/commerce 소유다 — 운영에서 이 SELECT 를 여는 것이
         # db/grants/needs_runtime_reader.sql 의 needs_owner 블록이다.
-        conn.exec_driver_sql(f'GRANT SELECT ON "{schema}".run, "{schema}".fetch_log TO needs_owner')
+        conn.exec_driver_sql(
+            f'GRANT SELECT ON "{schema}".run, "{schema}".fetch_log, "{schema}".run_source TO needs_owner'
+        )
         conn.exec_driver_sql("SET ROLE needs_owner")
         conn.exec_driver_sql(
             f'INSERT INTO "{schema}".naver_run (id, dataset, captured_at, started_at, finished_at, status)'
@@ -95,7 +117,7 @@ def health_rows(
     engine = create_engine(needs_runtime_url)
     with engine.connect() as conn:
         rows = conn.execute(
-            text(f"SELECT {COLUMNS} FROM collector_health ORDER BY collector, dataset NULLS LAST")
+            text(f"SELECT {COLUMNS} FROM collector_health ORDER BY collector, dataset NULLS LAST, run_id")
         ).all()
     engine.dispose()
     return [tuple(r) for r in rows]
@@ -106,6 +128,8 @@ def test_both_arms_land_in_one_table_with_the_contracts_twelve_columns(health_ro
         ("commerce", "rank", str(RUN_A)),
         ("commerce", "review", str(RUN_A)),
         ("commerce", None, str(RUN_B)),  # fetch_log 가 없는 run 은 dataset 을 이름댈 수 없다
+        ("commerce", None, str(RUN_D)),  # 소스 전부가 skipped 여도 마찬가지다
+        ("commerce", None, str(RUN_E)),
         ("naver", "blog", str(RUN_C)),
     ]
     assert all(len(r) == 12 for r in health_rows)
@@ -118,6 +142,17 @@ def test_a_run_with_no_fetch_log_keeps_its_row_and_counts_zero(health_rows: list
     row = matching[0]
     assert (row[5], row[6], row[7], row[8], row[9]) == ("failed", 0, 0, 0, 0)
     assert row[11] is None  # 잰 요청이 없으니 백분위도 없다
+
+
+def test_a_run_where_every_source_yielded_reads_yielded_not_partial(health_rows: list[tuple[Any, ...]]):
+    # RUN_D 는 소스 전부가 스스로 물러났을 뿐 아무것도 실패하지 않았다 -- 소스 하나가 실제로 에러 난
+    # RUN_E 와 같은 값이면 대시보드에서 둘이 같은 색으로 보여 거짓 경보가 된다.
+    yielded = [r for r in health_rows if r[2] == str(RUN_D)]
+    partial = [r for r in health_rows if r[2] == str(RUN_E)]
+    assert len(yielded) == 1, yielded
+    assert len(partial) == 1, partial
+    assert yielded[0][5] == "yielded"
+    assert partial[0][5] == "partial"
 
 
 def test_403_and_429_count_as_blocked_and_2xx_as_ok(health_rows: list[tuple[Any, ...]]):
@@ -142,7 +177,7 @@ def test_p90_ms_is_the_real_percentile_not_the_max_or_the_mean(health_rows: list
 
 
 def test_queued_is_null_on_every_row_because_neither_arm_has_a_queue(health_rows: list[tuple[Any, ...]]):
-    assert [r[10] for r in health_rows] == [None, None, None, None]
+    assert [r[10] for r in health_rows] == [None] * len(health_rows)
 
 
 def test_started_and_finished_come_from_the_run_row_not_from_a_neighbour(
@@ -152,6 +187,8 @@ def test_started_and_finished_come_from_the_run_row_not_from_a_neighbour(
         (str(RUN_A), STARTED, FINISHED),
         (str(RUN_B), STARTED_B, FINISHED_B),
         (str(RUN_C), STARTED, FINISHED),
+        (str(RUN_D), STARTED_B, FINISHED_B),
+        (str(RUN_E), STARTED_B, FINISHED_B),
     }
 
 

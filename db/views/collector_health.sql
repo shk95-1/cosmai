@@ -16,6 +16,12 @@
 --
 -- db/migrate.sh (f) 가 배포마다 다시 적용한다. CREATE OR REPLACE 는 컬럼 이름·순서·타입이 그대로일 때만
 -- 성공하므로 DROP 을 앞세운다 -- 뷰를 넓히는 배포가 exit 1 로 멈추지 않게.
+--
+-- #78: commerce 는 소스 락에 밀려 전부 물러난 run 도, 소스가 실제로 에러 난 run 도 똑같이
+-- run.status='partial' 로 쓴다(collectors/commerce/cli.py) -- 둘을 가르는 사실은 이미
+-- trend_radar.run_source.outcome 에 있다(collectors/commerce/storage/db.py 의 outcome_of). 계약
+-- 컬럼을 늘리지 않고 그 표를 상관 서브쿼리로 들여다보는 것으로 족하다: run_source 행이 하나라도
+-- 있고 전부 'skipped' 면 양보고, 그렇지 않으면 기존 status 그대로다.
 
 DROP VIEW IF EXISTS needs.collector_health;
 CREATE VIEW needs.collector_health AS
@@ -27,7 +33,16 @@ SELECT
     r.id::text                                                           AS run_id,
     r.started_at                                                         AS started_at,
     r.finished_at                                                        AS finished_at,
-    r.status                                                             AS status,
+    CASE
+        WHEN r.status = 'partial'
+             AND EXISTS (SELECT 1 FROM trend_radar.run_source rs WHERE rs.run_id = r.id)
+             AND NOT EXISTS (
+                 SELECT 1 FROM trend_radar.run_source rs
+                 WHERE rs.run_id = r.id AND rs.outcome <> 'skipped'
+             )
+        THEN 'yielded'
+        ELSE r.status
+    END                                                                   AS status,
     count(f.id)::int                                                     AS requests,
     count(*) FILTER (WHERE f.status BETWEEN 200 AND 299)::int             AS ok,
     count(*) FILTER (WHERE f.status IN (403, 429))::int                   AS blocked,
