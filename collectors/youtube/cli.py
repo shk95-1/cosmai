@@ -84,6 +84,7 @@ def run(
     engine = storage_db.create_engine(database_url or storage_db.runtime_url())
     payloads = PayloadStore(payload_root or Path("var") / "youtube-payloads")
     try:
+        prune_result: PruneResult | None = None
         with engine.begin() as conn:
             if wanted is Dataset.WATCH:
                 return _run_watch(conn, watchlist_path or DEFAULT_WATCHLIST, now=now)
@@ -91,7 +92,16 @@ def run(
                 return _run_work(conn, payloads, fetcher or _RaisingFetcher(), now=now)
             if wanted is Dataset.FLATTEN:
                 return _run_flatten(conn, payloads, now=now)
-            return _run_prune(conn, now=now)
+            prune_result = _run_prune(conn, now=now)
+        # Row deletes just committed above (the `with` block exited); only now is it safe to unlink
+        # files -- a file delete can't roll back, so doing it before commit would strand rows over an
+        # orphan file on any later failure in the same transaction.
+        removed_files = sum(payloads.delete(kind, digest) for kind, digest in prune_result.orphaned)
+        print(
+            f"pruned {prune_result.removed_artifacts} artifact(s), "
+            f"{prune_result.removed_jobs} finished job(s), {removed_files} payload file(s)"
+        )
+        return 0
     finally:
         engine.dispose()
 
@@ -263,14 +273,54 @@ def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> 
     return 1 if report.errors else 0
 
 
-def _run_prune(conn: Connection, *, now: datetime) -> int:
+@dataclass
+class PruneResult:
+    removed_artifacts: int
+    removed_jobs: int
+    orphaned: list[tuple[str, str]]
+
+
+def _run_prune(conn: Connection, *, now: datetime) -> PruneResult:
+    # `payloads.put(job.kind, payload)` (see _collect_one) means an `artifacts` row and a `jobs` row
+    # can name the *same* file by the same (kind, digest) pair -- a cached artifact is reused across
+    # several jobs' payload_digest. So "still referenced" has to check both tables, not just the one
+    # whose row this prune pass is deleting.
     cutoff = now - timedelta(days=PRUNE_MAX_AGE_DAYS)
+    stale_artifacts = conn.execute(
+        sa.select(artifacts.c.kind, artifacts.c.digest).where(artifacts.c.fetched_at < cutoff)
+    ).all()
+    stale_jobs = conn.execute(
+        sa.select(jobs.c.kind, jobs.c.payload_digest).where(
+            jobs.c.state.in_(FINISHED_STATES),
+            jobs.c.finished_at < cutoff,
+            jobs.c.payload_digest.is_not(None),
+        )
+    ).all()
+    candidates = {(row.kind, row.digest) for row in stale_artifacts} | {
+        (row.kind, row.payload_digest) for row in stale_jobs
+    }
+
     removed_artifacts = conn.execute(sa.delete(artifacts).where(artifacts.c.fetched_at < cutoff)).rowcount
     removed_jobs = conn.execute(
         sa.delete(jobs).where(jobs.c.state.in_(FINISHED_STATES), jobs.c.finished_at < cutoff)
     ).rowcount
-    print(f"pruned {removed_artifacts} artifact(s), {removed_jobs} finished job(s)")
-    return 0
+
+    orphaned = [(kind, digest) for kind, digest in candidates if not _still_referenced(conn, kind, digest)]
+    return PruneResult(removed_artifacts=removed_artifacts, removed_jobs=removed_jobs, orphaned=orphaned)
+
+
+def _still_referenced(conn: Connection, kind: str, digest: str) -> bool:
+    """Same transaction as the deletes above, so this sees post-delete state -- a survivor row (a
+    different job/artifact that happens to name the same payload) is exactly what must keep the file."""
+    in_artifacts = conn.execute(
+        sa.select(sa.literal(1)).where(artifacts.c.kind == kind, artifacts.c.digest == digest).limit(1)
+    ).first()
+    if in_artifacts is not None:
+        return True
+    in_jobs = conn.execute(
+        sa.select(sa.literal(1)).where(jobs.c.kind == kind, jobs.c.payload_digest == digest).limit(1)
+    ).first()
+    return in_jobs is not None
 
 
 __all__ = ["run", "Fetcher", "FetchSpec"]
