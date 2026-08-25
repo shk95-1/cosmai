@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -12,25 +10,15 @@ from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate.pipeline import run
 from analysis.aggregate.ranking import run_ranking
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
-CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
 VERSION = AGGREGATE_VERSION
 CAPTURED_AT = date(2026, 8, 23)
 SEEDED_METRICS_NEED = 346
 SEEDED_METRICS_WISH = 601
 POPULATION = ("slice-p1", "slice-p9")
-
-
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in CANDIDATES if p.is_dir()]
-    if not found or not found[0].is_dir():
-        pytest.skip(f"no slice-*/ under {CANDIDATES}; pass COSMAI_SLICES_DIR")
-    return found[0]
 
 
 def _snapshots():
@@ -100,8 +88,8 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
     assert denoms == [("p", "선블록", 4, True)]
 
 
-def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         run_id = run(conn, extractors=POPULATION)
         cur.execute(
@@ -139,8 +127,8 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str,
         assert cur.fetchone() == mine
 
 
-def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         # 시드 need_mention 은 두 슬라이스를 담고 '선블록' 은 양쪽에 다 있다 — 이름을 대지 않으면 거절한다.
         with pytest.raises(ValueError):

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 import urllib.error
 from collections.abc import Iterator, Sequence
@@ -24,7 +23,7 @@ from analysis.polarity.ownership import NO_OWNERS, OWNERS, unready
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
@@ -255,21 +254,10 @@ def test_the_source_tables_are_read_as_needs_runtime(loaded: str, _schema_name: 
             cur.execute("CREATE TABLE nope (i int)")
 
 
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    """tests/test_seed.py 와 같은 탐색 — 시드 CSV 없이는 충돌을 실물로 재현할 수 없다."""
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in (DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect")]
-    for path in found:
-        if path.is_dir():
-            return path
-    return pytest.skip("no slice-*/ next to the repo; pass COSMAI_SLICES_DIR")
-
-
 @pytest.fixture
-def seeded(loaded: str, sources: str, slices: Path) -> Iterator[str]:
+def seeded(loaded: str, sources: str) -> Iterator[str]:
     """시드 언급 전량 + 그 시드 행과 같은 자연키를 만드는 원천 행."""
-    seed.run_all(loaded, slices=slices, only=("products", "mentions"))
+    seed.run_all(loaded, only=("products", "mentions"))
     site, product_key, review_key, _, _ = SEED_NEED
     video_id, comment_id = SEED_WISH
     with connect(sources) as conn, conn.cursor() as cur:

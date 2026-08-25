@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable, Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,14 +10,10 @@ import pytest
 from analysis.aggregate import WISH_SCOPES, RuleAggregator
 from analysis.aggregate.pipeline import load_denominators, load_needs, load_wishes
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
-# 두 후보는 한 디렉터리의 두 이름이 아니라 두 체크아웃 모양이다: 주 체크아웃은 `<repo>/../architect`
-# (`DEFAULT_SLICES`), 워크트리는 `cosmai-wt/<name>/` 한 단 아래라 `<repo>/../../architect` 다.
-# 뒤엣것을 지우면 워크트리에서 이 골든은 조용히 영구 skip 이 된다.
-CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
 TOLERANCE = 0.01
 SAMPLES = 6
 
@@ -46,15 +40,6 @@ EXPECTED: Mapping[str, Mapping[str, int]] = {
     # 시드가 wish_mention.channel_id 를 채우지 않는다 — 채널 수는 입력에 존재하지 않는다.
     "p9": {"missing": 0, "extra": 0, "channels": 601},
 }
-
-
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in CANDIDATES if p.is_dir()]
-    if not found or not found[0].is_dir():
-        pytest.skip(f"no slice-*/ under {CANDIDATES}; pass COSMAI_SLICES_DIR")
-    return found[0]
 
 
 def _golden(cur: Any, table: str, keys: str, columns: Sequence[str], note: str, extra: str = "") -> dict:
@@ -104,8 +89,8 @@ def _rows(rows: Iterable[Any], keys: Sequence[str], columns: Sequence[str]) -> d
     return {tuple(getattr(r, k) for k in keys): {c: getattr(r, c) for c in columns} for r in rows}
 
 
-def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     aggregator = RuleAggregator()
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         denominators = load_denominators(cur)
