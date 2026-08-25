@@ -1,0 +1,145 @@
+#!/bin/sh
+# Computes the operational facts #60 says STATE.md must stop hand-writing (containers, images,
+# db ledger, cron, gpu, test leftovers) instead of letting them go stale between boots.
+#
+# No `set -e`: one section's tool being absent or the operational DB being unreachable must not
+# stop the others from printing, so every fallible step is its own `... || echo "(unavailable)"`.
+
+# ${0%/*} rather than dirname: this must still find the repo root on a host missing coreutils.
+case "$0" in */*) status_tool_dir=${0%/*} ;; *) status_tool_dir=. ;; esac
+repo_root=$status_tool_dir/..
+
+header() {
+    printf '== %s ==\n' "$1"
+}
+
+section_containers() {
+    header containers
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "(unavailable)"
+        return
+    fi
+    if ! all=$(docker ps -a --format '{{.Names}}	{{.Status}}' 2>/dev/null); then
+        echo "(unavailable)"
+        return
+    fi
+    # cosmai-* is the new stack, shared-*/shared-postgres the old one, cosmai-test-postgres-*
+    # a suite leftover -- all three are worth seeing in one place, not just filtered away.
+    filtered=$(printf '%s\n' "$all" | grep -E '^(cosmai-|shared-)')
+    if [ -z "$filtered" ]; then
+        echo "(none)"
+    else
+        printf '%s\n' "$filtered"
+    fi
+}
+
+section_images() {
+    header images
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "(unavailable)"
+        return
+    fi
+    # The base image (trixie/OpenSSL 3.5 vs. an older one) is what decides collection success or
+    # failure (STATE §2), so Created alone is not enough -- the os-release/openssl line is read too.
+    for img in cosmai-needs:local cosmai-needs-cron:local; do
+        if ! created=$(docker image inspect "$img" --format '{{.Created}}' 2>/dev/null); then
+            printf '%s: (unavailable)\n' "$img"
+            continue
+        fi
+        if ! release=$(docker run --rm --network none --entrypoint sh "$img" \
+            -c 'cat /etc/os-release | head -1; openssl version' 2>/dev/null); then
+            release="(unavailable)"
+        fi
+        printf '%s created=%s\n%s\n' "$img" "$created" "$release"
+    done
+}
+
+section_db() {
+    header db
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "(unavailable)"
+        return
+    fi
+    # One `psql` call per fact rather than one multi-statement call: a single query failing (e.g.
+    # a column renamed under a migration in flight) must not blank out the rest of this section.
+    if versions=$(docker exec shared-postgres psql -U platform -d app -Atc \
+        "select version || ' ' || applied_at from needs.schema_migration order by version" 2>/dev/null); then
+        echo "ledger versions:"
+        printf '%s\n' "$versions"
+    else
+        echo "ledger versions: (unavailable)"
+    fi
+    if size=$(docker exec shared-postgres psql -U platform -d app -Atc \
+        "select pg_size_pretty(pg_database_size('app'))" 2>/dev/null); then
+        echo "app size: $size"
+    else
+        echo "app size: (unavailable)"
+    fi
+    if rows=$(docker exec shared-postgres psql -U platform -d app -Atc \
+        "select count(*) from needs.retrieval_chunk" 2>/dev/null); then
+        echo "retrieval_chunk rows: $rows"
+    else
+        echo "retrieval_chunk rows: (unavailable)"
+    fi
+    if conns=$(docker exec shared-postgres psql -U platform -d app -Atc \
+        "select count(*) from pg_stat_activity where usename like 'needs%'" 2>/dev/null); then
+        echo "needs% role connections: $conns"
+    else
+        echo "needs% role connections: (unavailable)"
+    fi
+}
+
+section_cron() {
+    header cron
+    dir="$repo_root/stack/crontab.d"
+    if [ ! -d "$dir" ]; then
+        echo "(unavailable)"
+        return
+    fi
+    lines=$(grep -h -v '^[[:space:]]*#' "$dir"/* 2>/dev/null | grep -v '^[[:space:]]*$')
+    if [ -z "$lines" ]; then
+        echo "(none)"
+    else
+        printf '%s\n' "$lines"
+    fi
+}
+
+section_gpu() {
+    header gpu
+    if ! command -v nvidia-smi >/dev/null 2>&1; then
+        echo "(unavailable)"
+        return
+    fi
+    if ! out=$(nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader 2>/dev/null); then
+        echo "(unavailable)"
+        return
+    fi
+    printf '%s\n' "$out"
+}
+
+section_test_leftovers() {
+    header test-leftovers
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "(unavailable)"
+        return
+    fi
+    if ! rows=$(docker ps -a --filter 'name=cosmai-test-postgres-' \
+        --format '{{.Names}}	created={{.CreatedAt}}' 2>/dev/null); then
+        echo "(unavailable)"
+        return
+    fi
+    if [ -z "$rows" ]; then
+        echo "(none)"
+    else
+        printf '%s\n' "$rows"
+    fi
+}
+
+section_containers
+section_images
+section_db
+section_cron
+section_gpu
+section_test_leftovers
+
+exit 0
