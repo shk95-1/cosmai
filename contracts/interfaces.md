@@ -300,6 +300,50 @@ class MetricsWishRow:  # → needs.metrics_wish
     example: str | None = None
 
 
+@dataclass(frozen=True)
+class PanelRosterRow:  # → needs.panel_roster (포크 #3). 명부 판본 한 줄 — panel_version 이 가리킬 부모
+    version: int
+    note: str | None = None  # 이 판본이 무엇인지 (seed:channels_v1 …)
+
+
+@dataclass(frozen=True)
+class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 명부; 값은 시드가 채운다 (#31)
+    channel_id: str
+    version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
+    panel_role: str  # product | expert — 명부에 없는 채널은 패널 밖이라 분모에 안 들어간다
+    handle: str | None = None
+    channel_title: str | None = None
+    role_basis: str | None = None  # 역할을 그렇게 정한 근거 (team_message | name_rule_verified …)
+    source_list: str | None = None
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
+    run_id: int
+    scope: str  # 카테고리명 | 'all' (metrics_need.scope 와 같은 어휘)
+    # 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다
+    topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
+    quarter: str  # 'YYYYQn'
+    source: str  # youtube_video | youtube_comment — 영상 설명과 댓글은 합치지 않고 나란히 낸다
+    content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
+    panel_version: int  # 이 비율의 모집단: panel_channel.version
+    panel_role: str  # 그 명부의 어느 모집단인지. product | expert
+    mentions: int  # 분자: 이 주제가 걸린 문서 수
+    documents: int  # 그 분기 그 모집단의 문서 수
+    quarter_mentions: int  # 구성비의 분모: 그 분기 trend_use 주제들의 언급 합
+    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
+    composition: float | None = None
+    velocity_yoy: float | None = None
+    persistence: float | None = None
+    persist_quarters: int | None = None
+    window_quarters: int | None = None
+    unique_ratio: float | None = None
+    channel_count: int | None = None
+    channel_diffusion: float | None = None
+    sample_ok: bool = False
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str
@@ -363,6 +407,70 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
     추정 총수이고, 제품 하나짜리 집합에서는 제품 단위 정의로 그대로 되돌아간다.
   - `low_share` = `low_mentioning / denom_low` (저평점 표본 내 비율)
   - B7: 시드의 `seed:slice-p1` 행은 이 식이 아니라 수집 표본 근사(`100 * low_mentioning / denom_site`)로 계산된 값이다. 2차 패스 목표는 두 값의 차 ±0.05 이고 골든이 아니다.
+- 분기 입자의 수식은 전부 **패널**을 분모로 쓴다 (`metrics_topic_quarter`, formats.md §패널 명부 CSV).
+  모집단은 행 안에 있다: `panel_version`(어느 명부인지) · `panel_role`(그 명부의 어느 모집단인지) ·
+  `denom_channels`(그 분기에 실제로 산출에 든 채널 수) · `documents` · `quarter_mentions`. 분모는 **장문
+  영상만**이다(`content_type='long_form'`): 쇼츠는 설명란이 비어 매칭률이 24%(장문 64%)인데 그 비중이
+  분기마다 55%~41%로 움직여, 한 분모에 넣으면 포맷 선택 변화가 주제 트렌드로 위장된다. 영상 설명과 댓글도
+  합치지 않고 `source` 로 나란히 낸다 — 둘은 다른 것을 잰다(설명은 스펙·포뮬러, 댓글은 사용감·불만).
+  `content_type` 이 키 안에 있으므로 `short_form` 행도 합법이다 — 두 포맷이 한 분모를 다투지 않고 각자의
+  `quarter_mentions`·`denom_channels` 를 갖는다. v1(ydc)은 `long_form` 행만 낸다.
+- **분기 문서 모집단** — 위 다섯 칸이 무엇을 센 것인지다. 그 `panel_version` 명부의 활성 행 중 그
+  `panel_role` 인 채널이 올린 영상 가운데 ① 길이가 있고 60초를 넘는 것(길이가 없는 영상 — 라이브 등 — 은
+  쇼츠와 같이 빠진다) ② 정규화한 **제목+설명**에 `scope` 카테고리의 사전어가 **부분문자열로** 걸리는 것
+  (ydc: `선크림` 주제의 별칭 목록) ③ 관측 월이 있는 것. 셋을 다 통과한 영상만 남고, 같은 영상이 여러 run
+  에 있어도 한 번만 센다. **`documents` 는 패널의 전체 영상 수가 아니다 — 카테고리로 잘린 뒤의 수다.**
+  전체 패널 영상 위에서 계산하면 이 표의 모든 비율이 오류 없이 달라진다.
+  - `source='youtube_video'`: 문서 하나 = 영상 하나(제목+설명)이고 `documents` 는 그 분기의 그 영상 수다.
+  - `source='youtube_comment'`: 문서 하나 = 그 영상들에 달린 댓글 하나. `documents` 는 **비어 있지 않고, 한
+    영상 안에서 정규화 후 같은 것을 하나로 접은** 댓글 수다(영상 간 중복은 접지 않는다 — 다른 영상에 달린
+    같은 말은 각각 실제 반응이다). 분기는 댓글 시각이 아니라 **부모 영상의 분기**다: 3년 전 영상에 어제
+    댓글이 달리므로 댓글 시각으로 분기를 만들면 분모가 정의되지 않는다.
+  - `denom_channels` 는 두 `source` 에서 **같다** — 그 분기에 위 세 조건을 통과한 영상을 낸 채널의 수다
+    (댓글은 채널이 아니라 영상에 달린다).
+- **분기 표의 행 집합** — 한 (`run_id`, `scope`, `source`, `content_type`, `panel_version`, `panel_role`)
+  안에서 이 표는 **조밀한 격자**다: `trend_use=true` 인 주제(현재 13개) × 그 산출에 존재하는 분기 전부에
+  행이 하나씩 있고, 언급이 0인 칸도 행이 된다(`mentions=0` · `composition=0` · `unique_ratio=1` ·
+  `sample_ok=false`). `trend_use=false` 인 주제(`추천_재구매`·`선크림` — 각각 영상의 76%·93%를 쳐서
+  판별력이 없다)는 필터·장르 표시로만 쓰이고 이 표에 행을 갖지 않는다. 그래서 두 불변식이 참이고, 뷰
+  `needs.metrics_topic_quarter_violation`(`db/views/`)이 저장된 행에 대고 그것을 되묻는다 — 비어 있으면 참이다.
+  1. 격자가 조밀하다: `count(*) = count(distinct topic_key) * count(distinct quarter)`.
+  2. 분모가 닫힌다: 한 분기의 `sum(mentions)` 가 그 분기 행들이 다 같이 들고 있는 `quarter_mentions` 다.
+  저장된 표에 `SUM(mentions) GROUP BY quarter` 를 돌리는 사람이 맞으려면 그 둘이 서 있어야 한다. 언급 0 셀을
+  지우면 첫째가 깨지고 `persistence` 의 기준선이 함께 올라간다.
+- **composition** (`metrics_topic_quarter`) = `mentions / quarter_mentions` — 문서 기준 share 가 아니라
+  **주제 간 구성비**다. 유튜버 설명란 길이 중앙값이 3년간 1,253자 → 709자로 줄어, share 는 분자만 줄고
+  분모는 그대로여서 13개 주제 중 10개가 동반 하락한다(합계 -28.6%p). 구성비는 분자·분모가 같이 줄어 상쇄된다.
+  `quarter_mentions` 가 0인 분기에서는 NULL 이 아니라 `0` 이다.
+- **velocity_yoy** (`metrics_topic_quarter`) = `ln(composition[q]) - ln(composition[전년 동분기])`. 조건은
+  셋이다: 전년 동분기가 그 산출에 **존재하는 분기**여야 하고(없으면 비교 상대가 없다), **양쪽 분기 모두
+  `mentions >= 5`** 여야 한다. 하나라도 아니면 NULL — 표본 부족을 급등으로 읽지 않는다. 전년 동분기인 것은
+  계절성 때문이다 (formats.md §시간).
+- **persistence** (`metrics_topic_quarter`) = 창 안에서 `composition` 이 그 주제의 전 기간 중앙값을 넘은
+  분기의 비율. 창은 **그 행의 분기에서 끝나는, 존재하는 분기 최대 4개**이고(전역 최신 4분기가 아니다)
+  `window_quarters` 가 그 길이다. 기준선의 "전 기간"은 그 산출에 존재하는 분기 전부이고 **언급 0 분기도
+  든다**. 기준선과 창은 `source` 별로 따로 잡는다. 그래서 이 값은 **run 상대**다 — 분기가 더 붙은 다음
+  run 은 같은 분기에 다른 값을 정당하게 내고, `run_id` 가 키에 있어 둘 다 남는다. 판정 규칙이 개수 단위로
+  쓰여 있어 `persist_quarters`·`window_quarters` 로 개수도 남긴다 — 창이 짧은 초기 분기에서는 비율만으로
+  개수를 복원할 수 없다.
+- **unique_ratio** (`metrics_topic_quarter`) = `mentions / 중복 포함 언급 수`. 한 영상 안에서 정규화 후 같은
+  댓글은 한 번만 세고(복붙 스팸, 실측 1.1%), 영상 간 중복은 지우지 않는다 — 다른 영상에 달린 같은 말은
+  각각 실제 반응이다. 중복 포함 언급 수가 0인 칸에서는 NULL 이 아니라 `1` 이다.
+- **sample_ok** — `mentions >= 5`. `velocity_yoy` 를 내는 조건과 같은 수이고, 022 의 CHECK 이 그 등식을
+  강제한다. 이 칸은 NOT NULL 이라 정의가 없으면 행이 자기 이름과 다른 것을 말한다.
+- **channel_diffusion** (`metrics_topic_quarter`) =
+  `0.5 * (그 주제를 낸 패널 채널 수 / denom_channels) + 0.5 * 정규화 섀넌 엔트로피(채널별 언급 분포)`.
+  두 항 다 **영상에서 나온 채널 분포**를 쓴다 — 그 분기 그 주제가 걸린 영상을 채널마다 몇 편씩 냈는지의
+  분포다. 그래서 이 컬럼은 `source` 에 의존하지 않고, 같은 (주제, 분기)의 `youtube_comment` 행은
+  `youtube_video` 행과 **같은 값**을 갖는다. 엔트로피의 정규화 분모는 `ln(그 분포에 든 채널 수)` 이지
+  `denom_channels` 가 아니다 — 한 채널이 독점하면 0, 그 채널들에 고르게 퍼지면 1이다. 그 분기에 패널 영상이
+  하나도 없으면 첫 항은 0이다. 옆 칸 `channel_count` 는 **다른 수**다: 그 행의 `source` 에서 그 주제를 낸
+  채널 수이고(`youtube_comment` 행에서는 그 주제의 댓글이 달린 영상들의 채널 수), 이름이 비슷하다고 첫 항의
+  분자로 쓰면 댓글 행의 확산도가 달라진다.
+- **저장 자리수** (`metrics_topic_quarter` 의 비율 칸) — 아래 자리수로 반올림해 저장한다. 판정 임계값(ydc
+  `judge.py` 의 `TAU`·`DIFFUSION_TAU`)이 반올림된 값 위에서 맞춰진 수라, 자리수가 곧 그 게이트의 해상도다.
+  022 가 `numeric(p,s)` 로 그 자리수를 들고 있어, 저장이 자리수를 지키는 것은 DDL 이 강제한다.
+  자리수: `composition` 5 · `velocity_yoy` 4 · `persistence` 3 · `unique_ratio` 4 · `channel_diffusion` 3.
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — RATING_ASC 표본 안에 3★ 이 섞였거나 ≤2★ 가 150 미만이면 ≤2★ 는 전수다. 150 은 수집 표본 상한(`REVIEW_PAGES 3 x 50`)이고 `collectors/commerce/scope.json`(#7)과 `formats.md` 가 같은 값을 갖는다.
 

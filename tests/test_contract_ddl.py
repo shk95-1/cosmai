@@ -33,12 +33,14 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_twentysix_contract_tables():
+def test_the_ddl_declares_the_twentynine_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
-    # + 1 from 020_retrieval_chunk.sql (issue #28; the 020 block is this branch's, see that file).
+    # + 1 from 020_retrieval_chunk.sql (issue #28; the 020 block is this branch's, see that file)
+    # + 3 from 022_panel_and_quarter.sql (fork issue #3: panel_roster, panel_channel,
+    # metrics_topic_quarter -- the roster is the parent panel_version points at).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 26
+    assert len(declared_tables()) == 29
 
 
 def test_every_declared_table_exists_in_the_database():
