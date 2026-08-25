@@ -681,8 +681,14 @@ def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quiet
 def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
-    assert dict(OWNERS) == {"선블록": "llm-ollama-gemma4:latest-fs2-20260824"}
     assert OWNERS["선블록"] == OllamaPolarity().version
+
+
+def test_every_registered_scope_names_the_same_owner_version():
+    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 27개 전부가
+    가리키는 값이 하나인지를 표 자체로 확인한다."""
+    assert len(OWNERS) == 27
+    assert set(OWNERS.values()) == {OllamaPolarity().version}
 
 
 # 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
@@ -708,11 +714,13 @@ def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scop
     loaded: str, _schema_name: str
 ):
     """need_key 가 갈리면 두 행이 나란히 남는다 — entrypoints.md §분석 이 '한 문장에 라벨 하나'를
-    어디까지 약속할 수 있는지가 여기서 정해진다. 옛 scope 의 행은 주인의 판본이 오를 때 치워진다."""
+    어디까지 약속할 수 있는지가 여기서 정해진다. 옛 scope 의 행은 주인의 판본이 오를 때 치워진다.
+    #31 이후 배송 표는 샴푸도 gemma4 소유라 새 scope 를 규칙이 못 건드린다 — 이 시나리오는 '새 scope 가
+    아직 주인이 없을 때'를 보이는 것이므로 표를 선블록 하나로 좁혀서 그 모양을 지킨다."""
     ref, sentence = MOVED
     _label(loaded, ref, "백탁", sentence, GEMMA4)
     with connect(loaded) as conn:
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners={"선블록": GEMMA4})
     assert _labels(loaded, ref) == [("백탁", "만족", GEMMA4), (RULE_KEY, "불만", "rule-v2.2")]
 
 
@@ -750,8 +758,8 @@ def test_only_the_rule_may_be_let_loose_without_a_scope():
     것은 05:00 의 규칙 하나뿐이고, 나머지는 시간이든 돈이든 자기 자리에서만 쓴다 (cosmai/cli.py)."""
     assert unready(OWNERS, RulePolarity.version, None) is None
     assert "--scope" in str(unready(OWNERS, GEMMA4, None))
-    # 아직 주인이 없는 카테고리 — 여기서 막지 않으면 성공하고도 다음 05:00 에 지워진다.
-    assert "ownership.py" in str(unready(OWNERS, GEMMA4, "에센스"))
+    # 아직 주인이 없는 카테고리(#31 의 27개에 없는 이름) — 안 막으면 성공하고도 다음 05:00 에 지워진다.
+    assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
     assert unready(OWNERS, GEMMA4, "선블록") is None
     # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
     assert unready(OWNERS, "stub-v9", "선블록") is None

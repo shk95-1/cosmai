@@ -125,7 +125,7 @@ def test_an_impl_on_a_scope_with_no_owner_is_refused_before_the_pass_starts(
 ):
     """주인 없는 scope 는 규칙이 매일 05:00 에 다시 라벨한다 — 등록 없이 돌면 성공하고도 다음 새벽에
     사라진다. 주인 등록이 패스보다 먼저라는 순서를 여기서 강제한다 (analysis/polarity/ownership.py)."""
-    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "에센스"]) == 2
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "미등록카테고리"]) == 2
     assert not recorded
     assert "ownership.py" in capsys.readouterr().out
 
