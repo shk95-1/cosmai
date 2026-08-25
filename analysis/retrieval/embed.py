@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,7 +35,6 @@ from analysis.retrieval.vectors import (
 )
 
 BATCH = 256
-READ_BATCH = 2000
 # 인코딩 대상. 성분 계열이 소스로 붙는 날 여기 한 줄로 제외한다.
 ENCODED_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
 
@@ -76,15 +74,22 @@ def load_encoder(model: str = MODEL, device: str | None = None):
 
 def chunks_to_encode(
     conn: psycopg.Connection, sources: tuple[str, ...] = ENCODED_SOURCES
-) -> Iterator[tuple[str, str, str]]:
-    """(chunk_id, source, text). chunk_id 순으로 -- 다시 태워도 행 순서가 같아야 대조가 된다."""
-    with conn.cursor(name="retrieval_encode") as cur:  # 서버 커서: 30만 행을 한꺼번에 물지 않는다
-        cur.itersize = READ_BATCH
+) -> list[tuple[str, str, str]]:
+    """(chunk_id, source, text). chunk_id 순으로 -- 다시 태워도 행 순서가 같아야 대조가 된다.
+
+    한 번에 다 읽고 **커밋한 뒤** 인코딩한다. 스트리밍하면 트랜잭션이 인코딩 내내 열려 있고,
+    needs_runtime 은 15초만 놀아도 연결을 끊는다(load_index 가 같은 이유로 같은 모양이다).
+    GPU 를 다른 작업과 나눠 쓰면 배치 하나가 그 15초를 넘기므로 스트리밍은 안전하지 않다.
+    38만 행 x 중앙 127자면 수십 MB 라 메모리에 들고 있어도 된다.
+    """
+    with conn.cursor() as cur:
         cur.execute(
             "SELECT chunk_id, source, text FROM retrieval_chunk WHERE source = ANY(%s) ORDER BY chunk_id",
             (list(sources),),
         )
-        yield from cur
+        rows = cur.fetchall()
+    conn.commit()
+    return rows
 
 
 def run(
