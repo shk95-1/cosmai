@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildQuery, parseContentRange, rangeLength, appendCsvPage, latestRunId,
+  buildQuery, parseContentRange, rangeLength, appendCsvPage, nextPageOffset, latestRunId,
   sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
 } from '../public/query.js';
 
@@ -47,6 +47,20 @@ test('appendCsvPage drops the header on later pages', () => {
 test('appendCsvPage handles a header-only later page', () => {
   const acc = appendCsvPage('a,b\n1,2', 'a,b\n', false);
   assert.equal(acc, 'a,b\n1,2');
+});
+
+test('nextPageOffset: 1080행을 PAGE_SIZE(1000)로 나누면 두 번째 페이지에서 멈춘다', () => {
+  assert.equal(nextPageOffset(0, '0-999/1080'), 1000);
+  assert.equal(nextPageOffset(1000, '1000-1079/1080'), null);
+});
+
+test('nextPageOffset: 총 개수를 모를 때(*)는 짧은 페이지로 마지막을 판단한다', () => {
+  assert.equal(nextPageOffset(0, '0-999/*'), 1000);
+  assert.equal(nextPageOffset(1000, '1000-1531/*'), null);
+});
+
+test('nextPageOffset: 빈 페이지는 더 받을 것이 없다', () => {
+  assert.equal(nextPageOffset(1000, '*/0'), null);
 });
 
 test('latestRunId returns the max run_id, null when empty', () => {
