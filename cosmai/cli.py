@@ -191,8 +191,8 @@ def _run_eval(args: argparse.Namespace) -> int:
         return 2
     if impl is None:
         print(
-            f"no implementation registered for {args.task!r}; the unit that owns it calls "
-            "analysis.registry.register() at import time"
+            f"no implementation registered for {args.task!r}; the unit that owns it adds its "
+            "module to analysis.registry.IMPLEMENTATIONS and registers in register_implementations()"
         )
         return 2
     import psycopg

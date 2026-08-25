@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,7 @@ import psycopg
 import pytest
 from sqlalchemy import create_engine
 
-from analysis import predictors
+from analysis import predictors, registry
 from analysis.lexicon import compile_lexicon
 from analysis.linker import LINKER_VERSION, RuleLinker, accepts, normalize_name, normalized
 from analysis.linker.evaluators import BrandLinkPredictor, ProductMatchPredictor
@@ -337,9 +336,8 @@ def registered(needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch) -> Itera
     yield needs_runtime_url
     unregister("brand_link")
     unregister("product_match")
-    # 등록 모듈은 import 캐시라 load_implementations() 가 기본 등록을 되찾아 주지 않는다 — 여기서
-    # 되돌리지 않으면 뒤에 도는 파일이 '등록 없음'(exit 2)을 만난다.
-    importlib.reload(importlib.import_module("analysis.linker.evaluators"))
+    # 여기서 되돌리지 않으면 뒤에 도는 파일이 '등록 없음'(exit 2)을 만난다 (#30).
+    registry.load_implementations()
 
 
 @pytest.mark.postgres

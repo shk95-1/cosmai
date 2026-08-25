@@ -1,4 +1,4 @@
-"""`cosmai eval polarity --impl llm:<model>` 의 팩터리. registry.IMPLEMENTATIONS 가 import 한다.
+"""`cosmai eval polarity --impl llm:<model>` 의 팩터리. registry.load_implementations() 가 꽂는다.
 
 한 실행이 두 사전(suncare-v2.2 · p1-v2.2)을 만나므로 시스템 프롬프트도 둘이다 — 사전별로 묶어
 배치를 따로 낸다. 그래야 400문장이 프롬프트 캐시 두 개만 만들고, 섞여서 캐시가 매번 깨지지 않는다.
@@ -141,6 +141,8 @@ def open_ollama(model: str) -> Iterator[Polarity]:
         yield _Blocking(OllamaPolarity(model, UsageLedger(conn)))
 
 
-register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
-# 무료·로컬이라 --split 강제(cli.is_paid)에 걸리지 않는다 — 홀드아웃을 첫 호출로 바로 돌려도 된다.
-register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False, classifier=open_ollama)
+def register_implementations() -> None:
+    """registry.load_implementations() 만이 등록을 일으킨다 (#99)."""
+    register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
+    # 무료·로컬이라 --split 강제(cli.is_paid)에 걸리지 않는다 — 홀드아웃을 첫 호출로 바로 돌려도 된다.
+    register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False, classifier=open_ollama)

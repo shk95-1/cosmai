@@ -37,8 +37,10 @@ def _default_registrations_survive_the_suite() -> Iterator[None]:
     from analysis import registry
 
     yield
-    registry.load_implementations()
+    # 재는 것이 먼저다: load_implementations() 는 이제 정말로 다시 등록하므로(#99), 먼저 부르면
+    # 스위트가 남긴 상태가 아니라 그 복구 결과를 재게 되어 이 가드가 절대 울리지 않는다.
     missing = [task for task in registry.TASKS if registry.get(task) is None]
+    registry.load_implementations()
     assert not missing, f"default registrations not restored by suite end: {missing}"
 
 
