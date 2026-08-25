@@ -78,6 +78,29 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
 
+## 검색 (#28, 장수 브랜치 feat/ydc-import — main 머지 전)
+```
+cosmai retrieval chunk  [--since <date>] [--source <s>]...
+cosmai retrieval search --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--vectors <path>]
+cosmai retrieval eval   --mode <m> [--engine <e>] [--source <s>]... [--out <csv>] [--vectors <path>]
+cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <path>]
+  source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
+  engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
+```
+- `chunk` 만 쓰기다(`needs.retrieval_chunk`). 나머지 셋은 그 표와 파일을 읽는다. 원천은 다른 스키마이고
+  `db/grants/needs_runtime_reader.sql` 의 SELECT 로만 닿는다 — 수집기가 자기 스키마에만 쓴다는 규칙의 반대편이다.
+- 멱등: `chunk` 는 `text_md5` 가 같은 행을 건드리지 않는다(재실행 = 변경 0). `embed` 는 전량 재인코딩이다.
+- **`--vectors` 는 세 하위명령에서 같은 뜻이다**(벡터 저장소 경로). `--out` 은 `eval` 에서만 쓰고 점수 CSV 를 뜻한다.
+- 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음) · 2 blocked(연결 거절, 벡터 파일 없음).
+- **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
+  BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + 사전 해시).
+  둘 다 `var/` 라 레포에 들어가지 않고, 지워도 다시 만들어진다.
+- **`embed` 는 크론이 아니라 사람이 GPU 호스트에서 돌린다.** 그래서 `sentence-transformers`·`torch` 는 `embed`
+  extra 에만 있고 `stack/Dockerfile` 에도 `tool/checks/test` 에도 들어가지 않는다 — 테스트는 이미지가 싣는
+  집합에서 돌아야 한다. 실행은 `uv run --extra retrieval --extra embed cosmai retrieval embed …` 로 한다.
+  `uv sync --extra embed` 로 깔아 두면 다음 `tool/checks/test` 가 지운다(그게 맞는 동작이다).
+- `analyze all` 과 같은 이유로 크론 간격 규칙에서 제외된다 — 외부 fetch 가 없는 DB·파일 전용 작업이다.
+
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가

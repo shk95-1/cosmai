@@ -68,7 +68,14 @@ def load_encoder(model: str = MODEL, device: str | None = None):
             SentenceTransformer,
         )
     except ImportError as missing:  # pragma: no cover - 무거운 의존이라 테스트에서 부르지 않는다
-        raise RuntimeError("uv sync --extra embed 로 sentence-transformers 를 깔아야 한다") from missing
+        # `uv sync --extra embed` 라고 하면 안 된다 -- 그렇게 깔아도 다음 `tool/checks/test` 가
+        # `--extra dev --extra retrieval --frozen` 으로 동기화하며 도로 지운다(그게 맞는 동작이다:
+        # 테스트는 이미지가 싣는 집합에서 돌아야 한다). 실행마다 extra 를 말하는 쪽이 지속된다.
+        raise RuntimeError(
+            "sentence-transformers 가 없다. "
+            "`uv run --extra retrieval --extra embed cosmai retrieval embed …` 로 실행한다 "
+            "-- `uv sync --extra embed` 로 깔아 두면 다음 tool/checks/test 가 지운다."
+        ) from missing
     return SentenceTransformer(model, device=device)
 
 
