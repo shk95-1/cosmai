@@ -14,7 +14,7 @@ lexicon_category 는 그 주인만 쓰고 지운다.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import astuple, dataclass
 from datetime import date
 from typing import Any, LiteralString
@@ -422,7 +422,11 @@ def run(
     batch: int = BATCH,
     polarity: Polarity | None = None,
     owners: Mapping[str, str] = OWNERS,
+    on_run_open: Callable[[int], None] | None = None,
 ) -> StageResult:
+    """`on_run_open` 은 run 행이 열린 그 순간 호출자에게 run_id 를 넘긴다 — 이 단계 안에서 죽어도
+    호출자가 *자기* run 을 안다. 그것을 모르면 닫을 행을 표에서 되찾아야 하고, 동시에 도는 남의 run 과
+    구별할 단서가 표에 없다 (analysis/pipeline.py)."""
     stage = PolarityStage(conn, batch, polarity, owners)
     version = stage.polarity.version
     if scope is not None and scope in stage.foreign:
@@ -438,6 +442,8 @@ def run(
         row = cur.fetchone()
     run_id = int(row[0]) if row else 0
     conn.commit()
+    if on_run_open is not None:
+        on_run_open(run_id)
 
     months = units = need_rows = wish_rows = replaced = fallbacks = 0
 

@@ -50,13 +50,8 @@ RUN_CLOSE: LiteralString = (
     "UPDATE analysis_run SET status = %s, finished_at = now(), versions = %s::jsonb, note = %s "
     "WHERE run_id = %s"
 )
-LAST_RUN: LiteralString = "SELECT coalesce(max(run_id), 0) FROM analysis_run"
-# polarity 가 자기 run 을 열고 바로 커밋하므로(analysis/polarity/pipeline.py) 그 안에서 죽으면 run_id 가
-# 밖으로 나오지 못한다. 이 실행이 시작한 뒤에 열린 것만 본다 — 남의 run 을 실패로 닫으면 안 된다.
-ORPHAN_RUN: LiteralString = (
-    "SELECT run_id FROM analysis_run WHERE run_id > %s AND status = 'running' "
-    "AND note LIKE 'analyze:polarity:%%' ORDER BY run_id DESC LIMIT 1"
-)
+# run 을 여는 단계는 polarity 뿐이다 — 나머지가 실패하면 닫을 행이 아예 없다.
+OPENS_RUN = ("polarity",)
 METRICS: LiteralString = (
     "SELECT (SELECT count(*) FROM metrics_need WHERE run_id = %s), "
     "(SELECT count(*) FROM metrics_wish WHERE run_id = %s)"
@@ -97,21 +92,6 @@ def _versions(conn: psycopg.Connection[Any], polarity_version: str = POLARITY_VE
     }
 
 
-def _last_run_id(conn: psycopg.Connection[Any]) -> int:
-    with conn.cursor() as cur:
-        cur.execute(LAST_RUN)
-        row = cur.fetchone()
-    conn.rollback()
-    return int(row[0]) if row else 0
-
-
-def _orphan_run_id(conn: psycopg.Connection[Any], mark: int) -> int | None:
-    with conn.cursor() as cur:
-        cur.execute(ORPHAN_RUN, (mark,))
-        row = cur.fetchone()
-    return int(row[0]) if row else None
-
-
 def _metrics_counts(conn: psycopg.Connection[Any], run_id: int) -> dict[str, int]:
     with conn.cursor() as cur:
         cur.execute(METRICS, (run_id, run_id))
@@ -124,14 +104,11 @@ def _close(
     conn: psycopg.Connection[Any],
     outcome: StageOutcome,
     versions: dict[str, Any],
-    mark: int | None = None,
 ) -> StageOutcome:
     payload = json.dumps(versions, ensure_ascii=False)
     try:
         conn.rollback()
         run_id = outcome.run_id
-        if run_id is None and mark is not None:
-            run_id = _orphan_run_id(conn, mark)
         with conn.cursor() as cur:
             if run_id is None:
                 cur.execute(RUN_FAILED, (payload, outcome.note))
@@ -158,8 +135,12 @@ def run_all(
     counts: dict[str, int] = {}
     versions: dict[str, Any] = {}
     run_id: int | None = None
-    mark: int | None = None
     stage = "link"
+
+    def opened(found_id: int) -> None:
+        nonlocal run_id
+        run_id = found_id
+
     try:
         versions = _versions(conn, polarity.version if polarity else POLARITY_VERSION)
         linked = link_stage.run(
@@ -167,7 +148,6 @@ def run_all(
         )
         counts.update({name: linked[name] for name in LINK_COUNTS})
         stage = "polarity"
-        mark = _last_run_id(conn)
         found = polarity_stage.run(
             conn,
             since=since,
@@ -176,8 +156,8 @@ def run_all(
             youtube_schema=youtube_schema,
             polarity=polarity,
             owners=owners,
+            on_run_open=opened,
         )
-        run_id = found.run_id
         # upsert 가 실제로 넣은 수가 아니라 시도한 수다 — 시드와 자연키가 겹치는 문장은 자기 행을 못 만든다.
         counts.update({"attempted_need": found.need_rows, "attempted_wish": found.wish_rows})
         stage = "aggregate"
@@ -189,10 +169,11 @@ def run_all(
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        counts.update(_metrics_counts(conn, run_id))
+        if run_id is not None:
+            counts.update(_metrics_counts(conn, run_id))
     except FAILURES as failure:
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
-        return _close(conn, outcome, versions, mark)
+        return _close(conn, outcome, versions)
     return _close(conn, StageOutcome("all", OK, run_id, counts), versions)
 
 
@@ -210,7 +191,12 @@ def run_stage(
 ) -> StageOutcome:
     if stage == "all":
         return run_all(conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners)
-    mark: int | None = None
+    run_id: int | None = None
+
+    def opened(found_id: int) -> None:
+        nonlocal run_id
+        run_id = found_id
+
     try:
         if stage == "link":
             linked = link_stage.run(
@@ -219,7 +205,6 @@ def run_stage(
             return StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
         if stage == "polarity":
             # 이 단계는 자기 run 을 열고 닫는다 — 단독 실행의 run 은 polarity 것이다.
-            mark = _last_run_id(conn)
             found = polarity_stage.run(
                 conn,
                 since=since,
@@ -228,23 +213,25 @@ def run_stage(
                 youtube_schema=youtube_schema,
                 polarity=polarity,
                 owners=owners,
+                on_run_open=opened,
             )
             counts = {"attempted_need": found.need_rows, "attempted_wish": found.wish_rows}
             return StageOutcome(stage, OK, found.run_id, counts)
-        run_id = aggregate_stage.run(
+        aggregated = aggregate_stage.run(
             conn,
             scope=scope,
             commerce_schema=commerce_schema,
             captured_at=captured_at,
             extractors=POPULATION,
         )
-        return StageOutcome(stage, OK, run_id, _metrics_counts(conn, run_id))
+        return StageOutcome(stage, OK, aggregated, _metrics_counts(conn, aggregated))
     except FAILURES as failure:
-        outcome = StageOutcome(stage, FAILED, None, {}, _detail(stage, failure))
-        if mark is None:  # run 을 여는 단계는 polarity 뿐이다 — 나머지는 닫을 행이 없다.
+        outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
+        if stage not in OPENS_RUN:
             try:
                 conn.rollback()
             except psycopg.Error:
                 pass
             return outcome
-        return _close(conn, outcome, {}, mark)
+        # 거절은 run 이 열리기 전에도 온다 (남의 scope) — 그때는 닫을 행이 없으니 새 failed 행을 남긴다.
+        return _close(conn, outcome, {})
