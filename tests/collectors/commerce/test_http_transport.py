@@ -67,6 +67,14 @@ def test_the_headers_the_engine_stamped_are_the_ones_that_go_out():
     assert sent["x-trace"] == "1"
 
 
+def test_default_ua_is_pinned_to_the_string_oliveyoung_let_through():
+    # 2026-08-25 A/B on the review-cursor endpoint: this exact string ran 51 requests clean where
+    # cosmai-commerce/... drew a Cloudflare challenge on the 2nd. Importing DEFAULT_UA and comparing
+    # it to itself (as the tests above do) would pass no matter what the constant said, so this
+    # pins the literal -- a future edit to the string must edit this assertion too.
+    assert DEFAULT_UA == "trend-radar/0.1 (+https://github.com/slopindustries/trend-radar)"
+
+
 def test_the_transport_names_no_user_agent_of_its_own():
     # Two places stamping a UA is how they disagree. The engine owns it; this owns the headers that
     # describe what a Korean site should answer with.
