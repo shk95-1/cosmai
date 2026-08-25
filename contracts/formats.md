@@ -28,7 +28,8 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 | yt_comment | `video_id/comment_id` | `need_mention` 과 `wish_mention` **둘 다** 이 문법. 댓글 하나가 두 테이블에서 같은 키를 갖는다 |
 | yt_transcript | `video_id` | |
 | yt_title | `video_id` | `TextUnit` 전용 — `need_mention` 에는 들어가지 않는다 |
-| naver_blog | `post_id` | 원천 테이블 `needs.naver_blog_post` (004_naver.sql, #9, T15) |
+| naver_blog | `post_id` | **예약됨(미구현, #96)** — 원천 테이블 `needs.naver_blog_post` (004_naver.sql, #9, T15)까지는 있고, 라이브 전송(`collectors/naver/cli.py:_RaisingFetcher`, #95)과 분석 갈래(`analysis/polarity/pipeline.py`)가 없어 이 src 의 `need_mention` 행은 아직 생기지 않는다 |
+- `needs.need_mention.src` 의 CHECK(001_needs.sql)는 이미 `naver_blog` 를 값으로 받아둔다 — DDL 은 추가만이라 예약을 미리 걸어도 해가 없다(#96).
 - `brand_mention` 은 `ref_id` 를 쓰고 src 어휘가 다르다: `yt_title→title` · `yt_transcript→transcript` · `yt_comment→comment` (B12).
 - `labeled_set.ref` 는 별도 이름공간이다(`sun:<split>:<i>:<review_ref>` · `p1:<split>:<i>` · wish 는 `comment_id` 단독 · `<sample>:<src>/<ref_id>/<brand>` · `<v1|v2>:<i>`). 언급 행과 조인하려면 변환이 필요하다.
 

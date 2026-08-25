@@ -15,7 +15,7 @@ from typing import Protocol
 # ---------- 입력 ----------
 @dataclass(frozen=True)
 class TextUnit:  # 분석 입력의 최소 단위
-    src: str  # review | yt_comment | yt_transcript | yt_title | naver_blog
+    src: str  # review | yt_comment | yt_transcript | yt_title | naver_blog (예약됨, #96: formats.md §ref)
     site: str
     ref: str  # 안정 키. 문법은 formats.md §ref
     text: str
