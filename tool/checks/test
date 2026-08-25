@@ -9,9 +9,18 @@ require_command uv docker pg_isready
 uv sync --extra dev --frozen
 
 if [ -z "$TEST_POSTGRES_URL" ]; then
-    # COSMAI_TEST_PG_PORT lets worktrees run this concurrently (one throwaway container each).
-    port=${COSMAI_TEST_PG_PORT:-55432}
+    # Every worktree gets its own throwaway container, so channels can run this concurrently. The
+    # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
+    # COSMAI_TEST_PG_PORT still overrides it (#60 2.10).
+    port=${COSMAI_TEST_PG_PORT:-$((55000 + $(pwd -P | cksum | cut -d' ' -f1) % 1000))}
     name=cosmai-test-postgres-$port
+    # A different container on the same port belongs to another worktree or is a leak: name it and
+    # stop, rather than silently sharing or clobbering someone else's database.
+    holder=$(docker ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null | head -1)
+    if [ -n "$holder" ] && [ "$holder" != "$name" ]; then
+        printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
+        exit 1
+    fi
     secret_file=$(mktemp)
     # rm -v: postgres 이미지의 익명 볼륨까지 제거 (없으면 실행마다 ~1GB 볼륨이 누수됨)
     trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT

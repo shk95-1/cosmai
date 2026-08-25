@@ -19,6 +19,7 @@ from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
 # versioning.md: `rule-vX.Y` 또는 `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
 
+# TODO(#94): OllamaPolarity(...).version is missing although it is the one non-rule version in production.
 VERSIONS = (
     ("analysis.linker.LINKER_VERSION", LINKER_VERSION),
     ("analysis.extractor.VERSION", EXTRACTOR_VERSION),

@@ -16,6 +16,16 @@ esac
 
 pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: .+$'
 
+# A branch named <channel>/<issue>-<slug> belongs to exactly one issue (issue #60 rules), and a
+# commit that does not name it cannot be traced back or auto-close it. Detached HEAD and other
+# branch shapes are not this rule's business.
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+issue=$(printf '%s' "$branch" | sed -nE 's|^[a-z0-9/-]+/([0-9]+)-[a-z0-9-]+$|\1|p')
+if [ -n "$issue" ] && ! grep -v '^#' "$1" | grep -q "#$issue\b"; then
+  printf '\n✗ Branch %s belongs to issue #%s; mention #%s in the commit message.\n\n' "$branch" "$issue" "$issue" >&2
+  exit 1
+fi
+
 if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
   cat >&2 <<EOF
 
