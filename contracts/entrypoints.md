@@ -142,7 +142,7 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   그 달을 되찾는 길은 사람이 주인의 패스를 그 달에 다시 돌리는 것 하나뿐이고, 그때까지 남는 증거는 죽은
   run 의 note 에 계속 붙어 있는 `rewriting=` 표식이다.
 
-## 검색 (#28, 장수 브랜치 feat/ydc-import — main 머지 전)
+## 검색 (#28 → 포크 cosmai-import-ydc, upstream PR #59)
 ```
 cosmai retrieval chunk  [--since <date>] [--source <s>]...
 cosmai retrieval search --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--vectors <path>]
@@ -155,6 +155,8 @@ cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <p
   `db/grants/needs_runtime_reader.sql` 의 SELECT 로만 닿는다 — 수집기가 자기 스키마에만 쓴다는 규칙의 반대편이다.
 - 멱등: `chunk` 는 `text_md5` 가 같은 행을 건드리지 않는다(재실행 = 변경 0). `embed` 는 전량 재인코딩이다.
 - **`--vectors` 는 세 하위명령에서 같은 뜻이다**(벡터 저장소 경로). `--out` 은 `eval` 에서만 쓰고 점수 CSV 를 뜻한다.
+- **기본 `--engine bm25` 는 literal 용도 기준이다** — heldout 에서 bm25 는 P@10 0.000·Hit 0%, vector 는
+  0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다. 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
 - 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음) · 2 blocked(연결 거절, 벡터 파일 없음).
 - **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
   BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + 사전 해시).

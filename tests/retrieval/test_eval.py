@@ -86,6 +86,36 @@ def test_gold_comes_from_the_topic_dictionary_over_the_chunks(loaded):
     assert "d4" not in gold["백탁"]
 
 
+@pytest.fixture
+def mixed_sources(loaded):
+    """소스가 둘인 코퍼스 -- 한 소스로 좁힌 평가는 이 코퍼스에서만 틀린 점수를 낸다."""
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES ('r1#0', 'r1', 'commerce_review', 0, %s, 'y')",
+            ("백탁이 남는다",),
+        )
+    loaded.commit()
+    return loaded
+
+
+def test_the_gold_is_narrowed_to_the_evaluated_sources(mixed_sources):
+    # 색인과 검색이 youtube_comment 로 좁혀지면 r1 은 어떤 엔진으로도 나올 수 없다.
+    gold = retrieval_eval.gold_from_chunks(mixed_sources, ("youtube_comment",))
+    assert gold["백탁"] == {"d1", "d2", "d3"}
+    # 소스를 안 넘기면 전 소스가 정답이다 -- 좁히기는 요구했을 때만 일어난다.
+    assert retrieval_eval.gold_from_chunks(mixed_sources)["백탁"] == {"d1", "d2", "d3", "r1"}
+
+
+def test_gold_size_counts_only_the_evaluated_sources(mixed_sources):
+    # 닿을 수 없는 문서가 정답에 남으면 P@10·Hit@10 이 깎이고 gold_size 가 거짓말을 한다.
+    rows = {
+        r.query: r
+        for r in retrieval_eval.run(mixed_sources, "literal", sources=("youtube_comment",), cache_dir=None)
+    }
+    assert rows["백탁"].gold_size == 3
+
+
 def test_literal_finds_the_documents_that_carry_the_query_word(loaded):
     rows = retrieval_eval.run(loaded, "literal", cache_dir=None)
     by_query = {r.query: r for r in rows}

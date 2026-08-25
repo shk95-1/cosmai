@@ -73,17 +73,23 @@ def queries(mode: str) -> list[tuple[str, str]]:
     return out
 
 
-def gold_from_chunks(conn: psycopg.Connection) -> dict[str, set[str]]:
+def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None = None) -> dict[str, set[str]]:
     """topic_id -> doc_id 집합. 청크 본문에 match_topics 를 돌려 만든다.
 
     문서 단위로 접는다 -- 정답이 chunk_id 면 한 문서의 조각 수가 점수를 좌우한다.
+
+    `sources` 는 색인·검색과 같은 판으로 좁힌다 -- 좁힌 소스 밖의 문서는 어떤 엔진으로도
+    나올 수 없으므로, 정답에 남으면 P@k·Hit@k 를 깎고 `gold_size` 가 틀린다.
     """
     from analysis.retrieval.topics import match_topics
 
+    where, params = "", ()
+    if sources:
+        where, params = "WHERE source = ANY(%s)", (list(sources),)
     gold: dict[str, set[str]] = defaultdict(set)
     with conn.cursor(name="retrieval_gold") as cur:  # 서버 커서: 30만 행을 한꺼번에 물지 않는다
         cur.itersize = 2000
-        cur.execute("SELECT doc_id, text FROM retrieval_chunk")
+        cur.execute(f"SELECT doc_id, text FROM retrieval_chunk {where}", params)  # noqa: S608
         for doc_id, text in cur:
             for topic in match_topics(text):
                 gold[topic].add(doc_id)
@@ -150,7 +156,7 @@ def run(
     from analysis.retrieval.pipeline import load_index, ranked_chunks
 
     index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
-    gold_all = gold_from_chunks(conn)
+    gold_all = gold_from_chunks(conn, sources)
 
     # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
     vector_store = encoder = None
