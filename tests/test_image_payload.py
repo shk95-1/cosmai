@@ -194,3 +194,13 @@ def test_the_image_runs_from_the_repo_root_db_migrate_sh_assumes():
     assert PurePosixPath(workdirs[-1]) in destinations, (
         f"WORKDIR {workdirs[-1]} is not where the checkout is COPYed ({destinations})"
     )
+
+
+def test_a_dot_env_at_any_depth_is_kept_out_of_the_image():
+    """`.dockerignore` promises "secrets never belong in an image layer" and `COPY . /srv/cosmai`
+    takes everything the file does not exclude. `stack/.env` is the one file a person edits by hand
+    during a deploy, so the day a value is pasted into it is the day it is in every layer forever --
+    and a root-anchored `*.env` never reached it.
+    """
+    for path in ("secrets.env", "stack/.env", "stack/prod.env", "a/b/c/.env"):
+        assert dockerignored(PurePosixPath(path)), f".dockerignore carries {path} into the image"

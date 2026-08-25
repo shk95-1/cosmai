@@ -16,10 +16,11 @@ dist
 .pytest_cache
 .ruff_cache
 
-# Runtime output and secrets never belong in an image layer.
+# Runtime output and secrets never belong in an image layer. `**/` because a slashless pattern is
+# anchored at the context root, and the .env a deploy edits by hand lives at stack/.env.
 data
 var
-*.env
+**/*.env
 
 # Not part of the runtime: the suite runs on the host (tool/checks/test), the playbook is prose, and
 # portal is its own image (stack/docker-compose.yml builds it from ../portal).
