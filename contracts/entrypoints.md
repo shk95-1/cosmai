@@ -42,6 +42,12 @@ COSMAI_DB_PORT   기본값 5434
 - 세 자리가 같은 규칙을 따른다: `db/runtime.py`(needs_runtime), `collectors/commerce/storage/db.py`,
   `collectors/youtube/storage/db.py`. 함수에 명시된 host/port 인자가 env 를 이긴다.
 - 롤·DB 이름·secret 키 이름은 노브가 아니다 (`contracts/secrets.md`).
+- **읽자마자 커밋한다. 서버 커서는 수명 내내 트랜잭션을 연다.** `needs_runtime` 롤은
+  `db/bootstrap.sql` 이 `statement_timeout = 30s` · `idle_in_transaction_session_timeout = 15s` ·
+  `transaction_timeout = 60s` 로 건다 — 트랜잭션을 연 채 느린 CPU/IO(토큰화, 큰 행렬 로드, LLM 왕복)를
+  하면 그 자리에서 끊긴다. 픽스처: `tests/test_aggregate_scale.py`(`IDLE_LIMIT`) ·
+  `tests/test_analyze_polarity.py`(`SQUEEZED_TIMEOUTS`) · `tests/test_ollama_predictor_connection.py`
+  (같은 이름) 가 세 한도를 압축해 재현한다. 새 DB 코드 리뷰는 이 불릿을 체크리스트로 쓴다.
 
 ## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
 ```sql
