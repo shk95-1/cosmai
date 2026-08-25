@@ -5,6 +5,7 @@ needs_schema 픽스처가 만든 스키마에 원천 테이블을 직접 세운�
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import psycopg
@@ -15,6 +16,10 @@ from analysis.retrieval import chunks, corpus, pipeline, vectors
 from tests.retrieval.conftest import csv_rows, install_topics
 
 pytestmark = pytest.mark.postgres
+
+# `now()` 로 넣은 행은 걸리고 2020년 행은 걸리지 않는 경계. `date.today()` 를 쓰면 컨테이너가
+# UTC 라 한국 시각으로 오전에는 오늘 넣은 행이 어제로 보여 훑기가 통째로 빈다(실측).
+SINCE = date(2021, 1, 1)
 
 COMMENTS_DDL = """
 CREATE TABLE comments (
@@ -166,6 +171,105 @@ def test_pruning_the_tail_stays_idempotent(conn, owner, _schema_name):
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     again = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     assert (again.written, again.pruned) == (0, 0)
+
+
+def test_an_emptied_document_loses_all_its_chunks(conn, owner, _schema_name):
+    """본문이 통째로 비면 조각이 0개라 그 문서는 배치에도 꼬리 삭제에도 들어가지 않았다 --
+    S9 가 덮은 것은 "짧아진" 문서뿐이고, 사라진 원천을 가리키는 청크가 검색에 계속 잡혔다(#23)."""
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
+            ("백탁. " * 400,),
+        )
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '' WHERE comment_id = 'c7'")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c7'")
+        assert cur.fetchone()[0] == 0
+        cur.execute("SELECT count(*) FROM retrieval_chunk")
+        assert cur.fetchone()[0] == 3  # 나머지 문서는 그대로다
+    assert outcome.emptied > 0
+    # 훑어서 본문이 빈 것을 직접 본 것이지, 안 나와서 사라졌다고 친 것이 아니다.
+    assert outcome.vanished == 0
+    assert "본문이 빈 문서의 청크" in outcome.note
+
+
+def test_a_row_that_vanished_from_the_source_loses_its_chunks(conn, owner, _schema_name):
+    # 본문만 비는 것과 행 자체가 사라지는 것은 원천에서 다른 일이다 -- 후자는 훑기에 아예 안 나온다.
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with owner.cursor() as cur:
+        cur.execute("DELETE FROM comments WHERE comment_id = 'c1'")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert outcome.vanished == 1
+    with conn.cursor() as cur:
+        cur.execute("SELECT doc_id FROM retrieval_chunk ORDER BY doc_id")
+        assert [r[0] for r in cur.fetchall()] == ["youtube_comment:c2", "youtube_comment:c3"]
+    assert "사라진 문서의 청크" in outcome.note
+
+
+def test_an_incremental_run_never_drops_what_it_did_not_scan(conn, owner, _schema_name):
+    """가장 위험한 자리. `--since` 범위 밖 문서는 훑지 않으므로 "안 나왔다"가 "사라졌다"의 근거가
+    될 수 없다 -- 그렇게 읽으면 증분 실행 한 번이 코퍼스 대부분을 지운다."""
+    with owner.cursor() as cur:
+        cur.execute(
+            "INSERT INTO comments (video_id, comment_id, text, published_at) "
+            "VALUES ('v4', 'c5', '오래된 댓글이다', '2020-01-01')"
+        )
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,), since=SINCE)
+    assert outcome.documents == 3  # 오래된 댓글은 범위 밖이라 이 실행이 보지 못했다
+    assert (outcome.vanished, outcome.pruned, outcome.emptied) == (0, 0, 0)
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c5'")
+        assert cur.fetchone()[0] == 1
+    assert "사라진 문서" in outcome.note  # 안 찾았다는 사실은 말한다
+
+
+def test_an_incremental_run_still_clears_a_body_it_scanned_as_empty(conn, owner, _schema_name):
+    # 빈 본문의 근거는 훑기 안에 있다 -- 증분이라고 미룰 이유가 없고, 미루면 그 청크가 계속 잡힌다.
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '' WHERE comment_id = 'c1'")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,), since=SINCE)
+    assert outcome.emptied == 1
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c1'")
+        assert cur.fetchone()[0] == 0
+
+
+def test_the_cleanup_stays_idempotent(conn, owner, _schema_name):
+    # 지울 것이 없는 재실행이 행을 건드리면 매 실행이 죽은 튜플을 쌓는다(#17 과 같은 자리).
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with owner.cursor() as cur:
+        cur.execute("UPDATE comments SET text = '' WHERE comment_id = 'c1'")
+        cur.execute("DELETE FROM comments WHERE comment_id = 'c2'")
+    owner.commit()
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    again = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert (again.written, again.pruned, again.emptied, again.vanished) == (0, 0, 0, 0)
+    assert "삭제" not in again.note
+
+
+def test_a_source_that_scanned_nothing_is_left_out_of_the_cleanup(conn, owner, _schema_name):
+    """훑어서 문서가 0건인 소스는 "다 사라졌다"와 "못 읽었다"(빈 스키마·안 돈 수집기)가 구분되지
+    않는다. 삭제는 되돌릴 수 없으므로 안전한 쪽으로 기울이되, 건너뛴 사실은 말한다."""
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    with owner.cursor() as cur:
+        cur.execute("DELETE FROM comments")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert outcome.vanished == 0
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM retrieval_chunk")
+        assert cur.fetchone()[0] == 3
+    assert corpus.YOUTUBE_COMMENT in outcome.note
 
 
 def test_a_document_split_across_write_batches_is_not_a_false_violation(

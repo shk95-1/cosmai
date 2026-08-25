@@ -41,10 +41,24 @@ WHERE retrieval_chunk.text_md5 IS DISTINCT FROM EXCLUDED.text_md5
 
 PRUNE = "DELETE FROM retrieval_chunk WHERE doc_id = %(doc_id)s AND ordinal >= %(ordinal)s"
 
-# 문서를 통째로 지우고 다시 넣지는 않는다 -- 지웠다 넣으면 그 사이 검색이 빈다. 지우는 것은 원천이
-# 짧아진 문서의 꼬리뿐이고(새 조각 수 이상의 ordinal), 그 꼬리가 남으면 "ordinal 은 0 부터 연속"
+# 훑은 소스에 청크가 남아 있는 doc_id 를 키셋으로 되짚는다. 38만 청크를 한 문장으로 훑으면
+# needs_runtime 의 statement_timeout(30초)에 걸린다 -- corpus.py 의 페이징과 같은 이유, 같은 모양이다.
+STORED_DOCS = """
+SELECT DISTINCT doc_id FROM retrieval_chunk
+WHERE source = ANY(%(sources)s) AND doc_id > %(cursor)s
+ORDER BY doc_id LIMIT %(limit)s
+"""
+
+DROP_DOCS = "DELETE FROM retrieval_chunk WHERE doc_id = ANY(%(doc_ids)s)"
+
+# 문서를 통째로 지우고 다시 넣지는 않는다 -- 지웠다 넣으면 그 사이 검색이 빈다. 짧아진 문서의
+# 꼬리(새 조각 수 이상의 ordinal)가 남으면 "ordinal 은 0 부터 연속"
 # (contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는 check_rows 는
 # 그 문서를 다시 다 봤으므로 위반을 못 낸다. 같은 트랜잭션에서 UPSERT 뒤에 돈다.
+#
+# 지우는 근거는 셋 다 **이번 실행이 훑은 범위 안에서 본 것**이다(#23). 짧아졌다·본문이 비었다는
+# 문서를 손에 들고 아는 사실이고, 사라졌다는 그렇지 않다 -- "훑기에 안 나왔다"는 증분 실행(--since)
+# 에서 "범위 밖이라 안 봤다"와 구분되지 않으므로, 그 판정은 전량 훑기에서만 선다(_drop_vanished).
 
 
 @dataclass(frozen=True)
@@ -56,6 +70,10 @@ class ChunkOutcome:
     pruned: int = 0
     over_target: int = 0
     over_target_max: int = 0
+    emptied: int = 0
+    vanished: int = 0
+    swept: bool = True
+    unscanned: tuple[str, ...] = ()
 
     @property
     def note(self) -> str:
@@ -63,6 +81,17 @@ class ChunkOutcome:
         if self.pruned:
             # 원천이 짧아졌다는 뜻이라 조용히 넘어갈 일이 아니다 -- 수집기는 추가만 한다.
             head += f"; 짧아진 문서의 꼬리 {self.pruned:,} 삭제"
+        if self.emptied:
+            # "짧아졌다"와 "통째로 비었다"는 원천에서 다른 일이라 세는 자리를 나눈다 -- 후자는
+            # 문서가 색인에서 빠졌다는 뜻이고, 그건 꼬리 몇 개보다 크게 읽혀야 한다.
+            head += f"; 본문이 빈 문서의 청크 {self.emptied:,} 삭제"
+        if self.vanished:
+            head += f"; 원천에서 사라진 문서의 청크 {self.vanished:,} 삭제"
+        if not self.swept:
+            # 안 한 일이라 조용히 넘어가면 "매일 --since 로 돌리니 정리도 된다"로 읽힌다.
+            head += "; 증분 범위라 사라진 문서는 찾지 않았다"
+        if self.unscanned:
+            head += f"; 문서 0건인 소스({', '.join(self.unscanned)})는 정리에서 제외"
         if self.over_target:
             # 하드스톱(1000자) 미만이라 problems 는 아니지만, "[통과]"가 500 위반 없음으로 읽혀
             # 남의 청크 27건이 묻힌 적이 있다(ydc v0.2.0) -- 몇 건인지는 항상 보여야 한다.
@@ -75,19 +104,54 @@ class ChunkOutcome:
         return f"{head}; 계약 위반 {kinds}종"
 
 
-def chunk_rows(documents: Iterable[corpus.Document]) -> Iterator[dict]:
-    """문서 하나를 0개 이상의 청크 행으로. 빈 본문은 색인에 넣지 않는다."""
+def document_rows(documents: Iterable[corpus.Document]) -> Iterator[tuple[corpus.Document, list[dict]]]:
+    """(문서, 그 문서의 청크 행). **조각이 0개인 문서도 낸다** -- 본문이 통째로 빈 문서를 여기서
+    삼키면 부르는 쪽은 그 문서를 훑었다는 사실조차 모르고, 옛 청크가 영구히 남는다(#23)."""
     for document in documents:
         pieces = split_text(normalize_text(document.text))
-        for ordinal, piece in enumerate(pieces):
-            yield {
-                "chunk_id": f"{document.doc_id}#{ordinal}",
-                "doc_id": document.doc_id,
-                "source": document.source,
-                "ordinal": ordinal,
-                "text": piece,
-                "text_md5": hashlib.md5(piece.encode()).hexdigest(),
-            }
+        yield (
+            document,
+            [
+                {
+                    "chunk_id": f"{document.doc_id}#{ordinal}",
+                    "doc_id": document.doc_id,
+                    "source": document.source,
+                    "ordinal": ordinal,
+                    "text": piece,
+                    "text_md5": hashlib.md5(piece.encode()).hexdigest(),
+                }
+                for ordinal, piece in enumerate(pieces)
+            ],
+        )
+
+
+def chunk_rows(documents: Iterable[corpus.Document]) -> Iterator[dict]:
+    """문서 하나를 0개 이상의 청크 행으로. 빈 본문은 색인에 넣지 않는다."""
+    for _document, rows in document_rows(documents):
+        yield from rows
+
+
+def _drop_vanished(conn: psycopg.Connection, sources: tuple[str, ...], kept: set[str]) -> int:
+    """훑은 소스에 남은 doc_id 중 이번 훑기에 안 나온 문서의 청크를 지우고, 지운 행 수를 준다.
+
+    **부르는 쪽이 전량 훑기임을 확인한 뒤에만 부른다.** 여기서 "사라졌다"의 근거는 "훑었는데
+    안 나왔다" 하나뿐이라, 증분 훑기(`--since`)에서 부르면 범위 밖 문서를 통째로 지운다.
+    """
+    dropped, cursor = 0, ""
+    while True:
+        with conn.cursor() as cur:
+            cur.execute(STORED_DOCS, {"sources": list(sources), "cursor": cursor, "limit": corpus.BATCH})
+            stored = [row[0] for row in cur.fetchall()]
+            gone = [doc_id for doc_id in stored if doc_id not in kept]
+            if gone:
+                cur.execute(DROP_DOCS, {"doc_ids": gone})
+                dropped += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        # 페이지마다 커밋한다 -- 38만 청크를 한 트랜잭션에 담으면 transaction_timeout(60초)에 걸린다.
+        conn.commit()
+        if len(stored) < corpus.BATCH:
+            return dropped
+        # 커서는 doc_id 오름차순이고 지운 것은 언제나 커서 앞이라, 삭제가 다음 페이지를 건너뛰지 않는다.
+        cursor = stored[-1]
 
 
 def run(
@@ -108,27 +172,36 @@ def run(
         sources=sources,
     )
     seen_docs: set[str] = set()
-    total = written = pruned = over_target = over_target_max = 0
+    scanned: Counter = Counter()  # 소스별로 훑어서 본 문서 수
+    total = written = pruned = emptied = over_target = over_target_max = 0
     batch: list[dict] = []
+    empty_docs: list[str] = []  # 훑어서 본문이 빈 것을 본 문서. 다음 flush 에서 통째로 지운다
     problems: list[str] = []
     samples: Counter = Counter()  # 종류별로 몇 건을 이미 남겼는가
     seen_problems: set[str] = set()
 
     def flush() -> None:
-        nonlocal written, pruned
-        if not batch:
+        nonlocal written, pruned, emptied
+        if not batch and not empty_docs:
             return
         # 배치는 문서 경계에서만 끊기므로(아래) 여기 있는 문서는 조각이 다 모여 있다.
         tails: dict[str, int] = defaultdict(int)
         for row in batch:
             tails[row["doc_id"]] = max(tails[row["doc_id"]], int(row["ordinal"]) + 1)
         with conn.cursor() as cur:
-            cur.executemany(UPSERT, batch)
-            written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            cur.executemany(PRUNE, [{"doc_id": doc, "ordinal": tail} for doc, tail in tails.items()])
-            pruned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            if batch:
+                cur.executemany(UPSERT, batch)
+                written += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                cur.executemany(PRUNE, [{"doc_id": d, "ordinal": t} for d, t in tails.items()])
+                pruned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            if empty_docs:
+                # 조각이 0개인 문서라 꼬리 삭제와 같은 문장으로 문서 전체가 지워진다. 다만 세는
+                # 자리는 나눈다 -- 적재와 같은 트랜잭션이라 검색이 빈 청크를 보는 순간이 없다.
+                cur.executemany(PRUNE, [{"doc_id": d, "ordinal": 0} for d in empty_docs])
+                emptied += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         conn.commit()
         batch.clear()
+        empty_docs.clear()
 
     def validate_and_flush() -> None:
         nonlocal over_target, over_target_max
@@ -153,18 +226,47 @@ def run(
                 over_target_max = max(over_target_max, length)
         flush()
 
-    for row in chunk_rows(documents):
+    for document, rows in document_rows(documents):
+        scanned[document.source] += 1
         # 배치는 **문서 경계에서만** 끊는다. "ordinal 이 0 부터 연속"은 문서 전체에 걸린 성질이라
         # 한 문서를 두 배치로 자르면 뒤쪽이 ordinal 5 부터 시작하는 것으로 보여 거짓 위반이 난다
         # (실측: 자막 한 편이 최대 155조각이라 자막에서만 수십 건). 30만 행을 리스트로 물리지
         # 않으려고 배치를 쓰는 것이므로, 상한을 넘긴 뒤 다음 문서가 시작될 때 끊는다.
-        if batch and len(batch) >= WRITE_BATCH and row["doc_id"] != batch[-1]["doc_id"]:
+        if len(batch) >= WRITE_BATCH or len(empty_docs) >= WRITE_BATCH:
             validate_and_flush()
-        seen_docs.add(row["doc_id"])
-        total += 1
-        batch.append(row)
+        if not rows:
+            # 본문이 빈 것을 **훑어서 직접 봤다**. 증분이든 아니든 근거가 이 실행 안에 있으므로
+            # 미룰 이유가 없다 -- 미루면 사라진 원천을 가리키는 청크가 계속 검색에 잡힌다(#23).
+            empty_docs.append(document.doc_id)
+            continue
+        seen_docs.add(document.doc_id)
+        total += len(rows)
+        batch.extend(rows)
     validate_and_flush()
-    return ChunkOutcome(len(seen_docs), total, written, problems, pruned, over_target, over_target_max)
+
+    # 사라진 문서 찾기는 전량 훑기에서만 선다. `--since` 는 범위 밖 문서를 아예 읽지 않으므로
+    # "안 나왔다"가 사라졌다는 근거가 되지 못한다 -- 그렇게 읽으면 증분 실행 한 번이 코퍼스를 지운다.
+    swept = since is None
+    unscanned = tuple(name for name in sources if not scanned[name]) if swept else ()
+    vanished = 0
+    if swept:
+        # 훑어서 문서가 0건인 소스는 "다 사라졌다"와 "못 읽었다"(빈 스키마·안 돈 수집기)가 구분되지
+        # 않는다. 삭제는 되돌릴 수 없으므로 그 소스는 범위에서 빼고, 뺐다는 사실을 note 가 말한다.
+        scope = tuple(name for name in sources if scanned[name])
+        vanished = _drop_vanished(conn, scope, seen_docs) if scope else 0
+    return ChunkOutcome(
+        len(seen_docs),
+        total,
+        written,
+        problems,
+        pruned,
+        over_target,
+        over_target_max,
+        emptied=emptied,
+        vanished=vanished,
+        swept=swept,
+        unscanned=unscanned,
+    )
 
 
 CACHE_DIR = Path("var/retrieval/bm25")
