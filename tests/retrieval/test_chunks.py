@@ -51,6 +51,13 @@ def test_clean_rows_have_no_problems():
     assert docs == 1
 
 
+def test_a_text_over_target_but_under_the_hard_stop_is_not_a_problem():
+    # 500 은 목표치, 1000 은 하드스톱 -- 그 사이는 problems 가 아니라 lengths 로만 드러난다(#2/M11).
+    problems, _per_source, lengths, _docs = check_rows([_row(text="가" * 600)])
+    assert problems == []
+    assert lengths == [600]
+
+
 @pytest.mark.parametrize(
     ("over", "expected"),
     [
