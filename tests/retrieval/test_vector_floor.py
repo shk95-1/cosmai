@@ -148,3 +148,34 @@ def test_the_criteria_were_written_into_the_contract_before_the_numbers():
     assert "결과를 보고 기준을 만들지 않는다" in body
     # 표본의 성질도 기준의 일부다 -- 가짜가 코퍼스에 있으면 그 수는 이 표의 수가 아니다.
     assert "종료 코드 1" in body
+
+
+def test_the_contract_carries_the_verdict_and_the_constants_it_was_measured_with():
+    """수만 옮겨 적고 상수가 갈리면 다음 사람이 다른 기준으로 잰 값을 이 표에 넣는다."""
+    floor = loaded()
+    body = section()
+    assert f"**{floor.UNUSABLE}**" in body
+    assert f"| 가짜 질의 (코퍼스에 없는 성분명) | {len(floor.FAKE)} |" in body
+    assert f"ydc 임시값 .{str(floor.YDC_TRIAL).split('.')[1]}" in body
+    # 판정이 어느 저장소 위에 섰는지 (#49). 없으면 다음 재측정이 무엇과의 델타인지 말할 수 없다.
+    assert "vectors=381950" in body
+
+
+def test_the_decision_and_the_size_of_the_overlap_are_still_written_down():
+    """수만 남고 결정이 사라지면 다음 사람이 하한선을 그냥 넣는다."""
+    body = section()
+    assert "하한선을 두지 않는다" in body
+    assert "결과를 보고 기준을 만들지 않는다" in body
+    # 겹침의 크기를 안 적으면 "스치듯 겹친다"로 읽히고, 그러면 문턱을 조금 올려 보자는 말이 선다.
+    assert "사분위 구간" in body
+    assert "**73.8%**" in body, "ydc 임시값이 우리 코퍼스에서 무엇을 버리는지가 이 절의 절반이다"
+    assert "§검색 실측" in body, "같은 질의 목록으로 잰 것이라 그쪽과 이어져 있어야 한다"
+
+
+def test_the_search_section_says_the_floor_is_absent_on_purpose():
+    """계약의 입구 쪽에 없으면 `--engine vector` 를 쓰는 사람은 이 결정을 영영 안 만난다."""
+    body = ENTRYPOINTS.read_text(encoding="utf-8")
+    start = body.index("## 검색 (")
+    search = body[start : body.index("\n## ", start)]
+    assert "유사도 하한선을 두지 않는다" in search
+    assert "§벡터 하한선" in search
