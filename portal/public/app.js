@@ -8,6 +8,7 @@ import {
 import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
+  productNameIndex, withProductNames,
 } from './screens.js';
 import {
   renderDivergingBars, renderMagnitudeBars, renderTopBars, renderScatter,
@@ -58,7 +59,7 @@ async function apiAll(basePath, { select, order, filters }) {
 
 // need 는 두 벌이다 — 화면 1·4 가 쓰는 카테고리 합 행과 화면 3 이 쓰는 제품 축 행.
 // #41 이 제품 행을 더한 뒤로 한 벌로 받으면 합 행 화면이 제 몫의 13배를 끌어온다.
-const state = { need: [], needProducts: [], wish: [], needRunId: null, wishRunId: null };
+const state = { need: [], needProducts: [], wish: [], productNames: new Map(), needRunId: null, wishRunId: null };
 
 // ---- 탭 --------------------------------------------------------------
 
@@ -136,13 +137,21 @@ function renderWishScreen(scope) {
 
 // ---- 화면 3: 제품별 미해결 ----------------------------------------------
 
+// 라벨 자리(PRODUCT_LABEL_W)와 말줄임 길이는 한 쌍이다 — 11px 한글이 글자당 약 11px 이라
+// 20 자면 240px 자리를 채우고 넘지 않는다.
+const PRODUCT_LABEL_W = 240;
+const PRODUCT_LABEL_MAX = 20;
+
 function renderProductScreen() {
-  const rows = productRows(state.needProducts, state.needRunId, 20);
+  const rows = withProductNames(
+    productRows(state.needProducts, state.needRunId, 20), state.productNames, PRODUCT_LABEL_MAX,
+  );
   $('product-chart').innerHTML = renderMagnitudeBars(rows, {
-    key: 'unresolved', labelKey: 'product_ref', hue: 'blue', fmt: (v) => v.toFixed(2),
-    width: CHART_W_WIDE, empty: '제품 축 행이 없음',
+    key: 'unresolved', labelKey: 'product_short', titleKey: 'product', hue: 'blue',
+    fmt: (v) => v.toFixed(2), width: CHART_W_WIDE, labelW: PRODUCT_LABEL_W, empty: '제품 축 행이 없음',
   });
-  fillTable($('product-table'), ['product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'], rows);
+  // ref 칼럼은 남긴다 — 링커가 못 붙인 행은 이름이 없어 ref 가 유일한 식별자다.
+  fillTable($('product-table'), ['product', 'product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'], rows);
 }
 
 // ---- 화면 4: 니즈의 성격 ------------------------------------------------
@@ -228,16 +237,21 @@ async function boot() {
     // analysis_run: "최신"의 근거(#87) — run_id 가 아니라 finished_at·status 로 고른다.
     const runSelect = ['run_id', 'finished_at', 'status', 'versions', 'note'];
     const runOrder = 'run_id.desc';
+    // 화면 3 의 ref 를 사람이 읽는 이름으로 바꾸는 카탈로그(#11 입력). 다른 넷과 같은
+    // 페이징 경로를 그대로 탄다.
+    const productRefSelect = ['product_ref', 'brand', 'name', 'name_norm'];
 
-    const [runs, need, needProducts, wish] = await Promise.all([
+    const [runs, need, needProducts, wish, productRefs] = await Promise.all([
       apiAll('/analysis_run', { select: runSelect, order: runOrder }),
       apiAll('/metrics_need', { select: needSelect, filters: needFilters, order: needOrder }),
       apiAll('/metrics_need', { select: productSelect, filters: productFilters, order: needOrder }),
       apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
+      apiAll('/product_ref', { select: productRefSelect, order: 'product_ref' }),
     ]);
     state.need = need;
     state.needProducts = needProducts;
     state.wish = wish;
+    state.productNames = productNameIndex(productRefs);
     const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
     state.needRunId = needRunId;
     state.wishRunId = wishRunId;

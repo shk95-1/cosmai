@@ -257,3 +257,16 @@ test('cellKind·isNumericCell: 숫자 셀만 우측 정렬 대상이다', () => 
   assert.equal(isNumericCell('need_key', '밀림'), false);
   assert.equal(isNumericCell('unresolved', null), false);
 });
+
+
+// 화면 3 의 라벨은 '브랜드 · 제품명' 이라 96px 자리로는 넘친다 — 라벨 자리 폭도,
+// 툴팁이 읽을 컬럼도 판이 정한다(자른 라벨과 전체 이름이 다른 컬럼에 있어서다).
+test('renderMagnitudeBars: labelW 로 라벨 자리를 넓히고 titleKey 로 툴팁을 따로 준다', () => {
+  const rows = [{ product_short: '메디힐 · 티트…', product: '메디힐 · 티트리 임팩트인 밸런싱 마스크', unresolved: 1 }];
+  const svg = renderMagnitudeBars(rows, {
+    key: 'unresolved', labelKey: 'product_short', titleKey: 'product', labelW: 240, width: CHART_W_WIDE,
+  });
+  assert.equal(rects(svg)[0].x, '240');
+  assert.match(svg, /<title>메디힐 · 티트리 임팩트인 밸런싱 마스크 — 1<\/title>/);
+  assert.match(svg, /class="viz-label">메디힐 · 티트…</);
+});

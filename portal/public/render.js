@@ -107,14 +107,16 @@ export function renderDivergingBars(rows, {
 // 단일 지표(unresolved 또는 population_share_pct) 를 need_key 별 순차(sequential)
 // 막대로. hue 는 'blue'(기본, unresolved) 또는 'amber'(population_share_pct —
 // 두 번째 순차 맥락은 다음 카테고리 슬롯 색을 쓴다는 팔레트 규칙).
+// labelW·titleKey 는 화면 3 을 위한 것이다 — '브랜드 · 제품명' 은 96px 자리를 넘고,
+// 자른 라벨과 전체 이름이 다른 컬럼에 있어 툴팁이 읽을 컬럼도 따로 정해야 한다.
 export function renderMagnitudeBars(rows, {
-  key, labelKey = 'need_key', hue = 'blue', fmt = (v) => v,
-  width = CHART_W_SMALL, empty = '',
+  key, labelKey = 'need_key', titleKey = labelKey, hue = 'blue', fmt = (v) => v,
+  width = CHART_W_SMALL, labelW = LABEL_W, empty = '',
 } = {}) {
   const data = rows || [];
   if (data.length === 0 && empty) return emptyNote(empty);
   const max = Math.max(1e-9, ...data.map((r) => Number(r[key]) || 0));
-  const barMax = Math.max(1, width - LABEL_W - VALUE_W);
+  const barMax = Math.max(1, width - labelW - VALUE_W);
   const yBottom = data.length * ROW_H;
   const height = yBottom + AXIS_H;
   const scale = (v) => Math.round((Math.max(0, v) / max) * barMax);
@@ -128,12 +130,12 @@ export function renderMagnitudeBars(rows, {
     const w = scale(v);
     return `
       <text x="0" y="${y0 + TEXT_MID}" class="viz-label">${name}</text>
-      <g><title>${name} — ${esc(fmt(v))}</title><rect x="${LABEL_W}" y="${y0}" width="${w}" height="${ROW_H - GAP}" class="${cls}" rx="4"/></g>
-      ${labelled.has(i) ? `<text x="${LABEL_W + w + 6}" y="${y0 + TEXT_MID}" class="viz-value">${esc(fmt(v))}</text>` : ''}
+      <g><title>${esc(r[titleKey])} — ${esc(fmt(v))}</title><rect x="${labelW}" y="${y0}" width="${w}" height="${ROW_H - GAP}" class="${cls}" rx="4"/></g>
+      ${labelled.has(i) ? `<text x="${labelW + w + 6}" y="${y0 + TEXT_MID}" class="viz-value">${esc(fmt(v))}</text>` : ''}
     `;
   }).join('');
 
-  const axis = barAxis(LABEL_W, LABEL_W + barMax, yBottom, fmt(max));
+  const axis = barAxis(labelW, labelW + barMax, yBottom, fmt(max));
   return `<svg class="viz-root" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(key)}">${axis}${bars}</svg>`;
 }
 

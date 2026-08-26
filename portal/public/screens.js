@@ -153,3 +153,44 @@ export function rowsWithValue(rows, key) {
     return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
   });
 }
+
+// ---- 화면 3: 제품 이름 -----------------------------------------------------
+
+// metrics_need 는 ref 만 갖고 있어 화면 3 의 막대 라벨이 'oy:A000000149577' 이었다.
+// needs.product_ref 에 brand·name 이 있고 anon 화이트리스트에도 들어 있다(#11 입력).
+// name 은 '[8월올영픽] … 80ml 1+1 기획' 처럼 기획 문구와 용량을 달고 있어 라벨에는
+// 그것을 걷어낸 name_norm 을 쓰고, 없을 때만 name 으로 내려간다.
+export function productNameIndex(rows) {
+  const index = new Map();
+  for (const r of rows || []) {
+    if (!r || !r.product_ref) continue;
+    index.set(r.product_ref, { brand: r.brand || '', name: r.name_norm || r.name || '' });
+  }
+  return index;
+}
+
+// 카탈로그에 없는 ref 는 ref 그대로 둔다. 링커가 못 붙인 mention 은 사이트의 원래 키가
+// 그대로 ref 가 되는데(aggregate 의 _product), 그 자리에 이름을 지어 주면 화면이
+// 파이프라인이 하지 않은 연결을 주장한다.
+export function productLabel(ref, index) {
+  const hit = index && typeof index.get === 'function' ? index.get(ref) : undefined;
+  if (!hit) return String(ref);
+  const parts = [hit.brand, hit.name].filter(Boolean);
+  return parts.length ? parts.join(' · ') : String(ref);
+}
+
+// 막대의 라벨 자리는 폭이 정해져 있어 긴 이름은 옆 막대 위로 넘친다 — 자른 라벨을 그리고
+// 전체 이름은 <title>(호버)이 갖는다.
+export function truncateLabel(text, max = 20) {
+  const s = String(text);
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+// 화면 3 의 행에 라벨 두 벌(전체·자른 것)을 얹는다. 원래 컬럼은 그대로 남는다 —
+// product_ref 는 표에도 남아야 링커가 못 붙인 자리를 알아볼 수 있다.
+export function withProductNames(rows, index, max = 20) {
+  return (rows || []).map((r) => {
+    const product = productLabel(r.product_ref, index);
+    return { ...r, product, product_short: truncateLabel(product, max) };
+  });
+}
