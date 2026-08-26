@@ -146,7 +146,13 @@ class Read:
 def load(
     conn: psycopg.Connection[Any], *, commerce_schema: str | None = None, source: str = COMMERCE_REVIEW
 ) -> Read:
-    """읽는다. `commerce_schema` 의 `None` 대 `""` 규약은 §대조 와 같다."""
+    """읽는다. `commerce_schema` 의 `None` 대 `""` 규약은 §대조 와 같다.
+
+    **주제 매칭은 트랜잭션 밖에서 돈다.** 네 질의는 연달아 돌고 끝나며, 본문을 다 받은 뒤에야 사전을
+    태운다 -- 커서를 연 채 매칭하면 `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에
+    걸린다(#6·#7 이 각각 밟은 자리). 모집단이 §대조 의 청크 전량이 아니라 선케어 리뷰 수천 건이라
+    페이징도 필요 없다.
+    """
     commerce_schema = COMMERCE_SCHEMA if commerce_schema is None else commerce_schema
     dictionary = topic_registry.use_active(conn)
     topic_keys = tuple(entry["topic"] for entry in dictionary.entries if entry["trend_use"])
