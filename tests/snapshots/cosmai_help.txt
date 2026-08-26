@@ -1,12 +1,13 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,login,analyze,retrieval,eval,lexicon} ...
+usage: cosmai [-h] {collect,login,analyze,retrieval,trend,eval,lexicon} ...
 
 positional arguments:
-  {collect,login,analyze,retrieval,eval,lexicon}
+  {collect,login,analyze,retrieval,trend,eval,lexicon}
     collect             Run one collector's dataset for one hour.
     login               Open a visible browser so a person can authorise one source's profile.
     analyze             Run one analysis stage over the needs schema.
     retrieval           Build the search corpus and query it.
+    trend               Build the panel's quarterly topic series.
     eval                Score one task against needs.labeled_set.
     lexicon             Load, compare and activate a dictionary version.
 
@@ -126,6 +127,23 @@ options:
                         Repeatable.
   --top TOP             How many unmatched terms to print.
   --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend --help
+usage: cosmai trend [-h] {quarter} ...
+
+positional arguments:
+  {quarter}
+    quarter   Load needs.metrics_topic_quarter from the active corpus snapshot.
+
+options:
+  -h, --help  show this help message and exit
+
+$ cosmai trend quarter --help
+usage: cosmai trend quarter [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
