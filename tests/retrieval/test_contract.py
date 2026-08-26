@@ -169,11 +169,13 @@ def test_the_baseline_splits_what_it_could_retrace_from_what_it_could_not():
     """되짚은 것과 못 되짚은 것을 한 낱말로 뭉치면 다음 사람은 번호표 `v1` 을 DB 가 대는 근거로
     읽는다 -- 그 근거는 없다 (#62, #49 가 벡터 축에서 한 것과 같은 가름)."""
     text = INTERFACES.read_text(encoding="utf-8")
-    assert "fingerprint=4afd3b25522a4d26" in text  # 얼어붙은 사본이 낸 값, 아래 테스트가 다시 잰다
-    assert "**되짚은 것 — 사전의 내용.**" in text
-    assert "**되짚을 수 없는 것 — 번호표와 지문.**" in text
+    # 줄바꿈은 서식이라 문장을 끊어 읽지 않는다 -- 재래핑 한 번에 빨개지면 아무도 안 고친다.
+    flat = " ".join(text.split())
+    assert "fingerprint=4afd3b25522a4d26" in flat  # 얼어붙은 사본이 낸 값, 아래 테스트가 다시 잰다
+    assert "**되짚은 것 — 사전의 내용.**" in flat
+    assert "**되짚을 수 없는 것 — 번호표와 지문.**" in flat
     # v1 행이 없다는 사실이 지워지면 그 번호표가 다시 근거처럼 읽힌다.
-    assert "v1 행이\n  없다" in text
+    assert "v1 행이 없다" in flat
 
 
 def test_the_baseline_names_the_store_the_vector_lines_stand_on():

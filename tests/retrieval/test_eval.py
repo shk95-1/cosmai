@@ -387,4 +387,19 @@ def test_the_dictionary_stamp_follows_the_dictionary_the_run_actually_read(loade
     after = {row.dictionary for row in retrieval_eval.run(loaded, "literal", cache_dir=None)}
     assert len(after) == 1
     assert after != before
-    assert "version=2" in after.pop()
+    after_one = after.pop()
+    assert "version=2" in after_one
+
+    # **켜져 있는 버전에 행을 더한다.** 그것도 별칭 수도 주제 수도 안 움직이는 계열(mfds_inci)로 --
+    # 판본 문자열에서 **지문만이** 이 변경을 본다. 지문이 없으면 이 실행은 앞 실행과 같은 판본을
+    # 주장하고, 그 거짓말은 오류가 아니라 그럴듯한 표로 나온다.
+    with loaded.cursor() as cur:
+        spare = {"term_kind": "mfds_inci"}
+        insert_aspects(cur, [("백탁", "generic", "", "티타늄디옥사이드", False, topics.RULESET, 1, spare)], 2)
+    loaded.commit()
+    widened = {row.dictionary for row in retrieval_eval.run(loaded, "literal", cache_dir=None)}
+    assert len(widened) == 1
+    stamped = widened.pop()
+    assert stamped != after_one
+    # 번호표도 별칭 수도 그대로다 -- 갈린 칸이 지문 하나라는 것이 이 테스트의 요점이다.
+    assert stamped.rsplit(" · ", 1)[0] == after_one.rsplit(" · ", 1)[0]
