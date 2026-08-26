@@ -1047,7 +1047,7 @@ chunked_at_max=키없음`, 활성 주제 사전 v2):
   (실측 2026-08-27 · 다시 재는 길은 `tool/measure-vector-floor` 의 `csv_queries` 칸이다 — 두 부분 다
   매번 낸다. `cosmai lexicon diff` 는 이 자리에 못 쓴다: **DB 버전끼리만** 비교하므로 CSV 와 맞대지
   못하고, 맞댈 상대인 v1 행이 없다). 그 v1 행이 사라진 것은 이 이슈가 만든 문제가 아니라 여기서 처음
-  글로 남긴 자리다 — 별도 이슈가 진다(번호 미정, 코디네이터가 채운다).
+  글로 남긴 자리다 — 포크 #62 가 진다.
 - **그래서 `vectors.search` 에 하한선을 두지 않는다.** 넣는 날 `tests/retrieval/test_vector_floor.py` 의
   `test_search_fills_top_k_however_far_the_query_is` 가 빨개지고, 그때 이 절을 함께 고쳐야 한다.
 
