@@ -1,0 +1,9 @@
+﻿doc_id,topic_id,topic_type,trend_use,matched_term,span_start
+youtube_video:VID_LONG_A1,선크림,product_category,false,선크림,0
+youtube_video:VID_LONG_A1,발림성,attribute,true,제형,16
+youtube_video:VID_LONG_A1,백탁,attribute,true,백탁,11
+youtube_video:VID_SHORT_B1,선크림,product_category,false,선크림,0
+youtube_video:VID_LONG_C1,선크림,product_category,false,선크림,11
+youtube_video:VID_LONG_B2,선크림,product_category,false,선크림,0
+youtube_video:VID_UNK_B3,선크림,product_category,false,선크림,0
+youtube_comment:CMT_A1_1,백탁,attribute,true,백탁,0
