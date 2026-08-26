@@ -62,7 +62,17 @@ report() { # $1 = db.schema label (also the $work filename), $2 = what expected 
 }
 
 # db:schema pairs, matching the contracts/ddl/current/<db>.<schema>.sql naming.
-for pair in app:trend_radar app:tubedepth cosmai:cosmai; do
+pairs='app:trend_radar app:tubedepth cosmai:cosmai'
+
+# Everything is built before anything is dumped, and no schema is dropped in between. That is not
+# tidiness. pg_dump orders objects by dependency, not by name, so a schema dumped alone sorts
+# differently from the same schema dumped beside the views that read it: since #77
+# db/views/collector_health.sql reads tubedepth.jobs, and production -- where that view exists --
+# hoists jobs to the front of the tubedepth dump, while a lone rebuild leaves it in alphabetical
+# place. Building one schema at a time and dropping it after its own dump also left db/migrate.sh
+# below with no tubedepth.jobs to bind to, so the view failed and the app.needs verdict vanished
+# altogether (#114). Expected is therefore assembled as the whole graph production carries.
+for pair in $pairs; do
     db=${pair%%:*}
     schema=${pair#*:}
     baseline=contracts/ddl/current/$db.$schema.sql
@@ -75,15 +85,6 @@ for pair in app:trend_radar app:tubedepth cosmai:cosmai; do
         [ -e "$add" ] || continue
         docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 -f - < "$add" > /dev/null
     done
-    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
-        | normalise > "$work/expected.$db.$schema"
-    docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
-        -c "DROP SCHEMA $schema CASCADE" > /dev/null
-
-    docker exec "$container" pg_dump -U "$superuser" -d "$db" --schema-only --no-owner -x -n "$schema" \
-        | normalise > "$work/actual.$db.$schema"
-
-    report "$db.$schema" "baseline + declared additive files"
 done
 
 # ---------------------------------------------------------------------------------------------
@@ -109,21 +110,41 @@ for object in $(sed 's/#.*//' "$foreign" | awk 'NF {print $1}'); do
     esac
 done
 
-# Same setup tool/checks/test uses: trend_radar first (db/views/collector_health.sql binds to it),
-# then migrate.sh. The two passwords are throwaway values for this container, not secrets.
+# The loop above already stood up every schema db/views/*.sql binds to, so migrate.sh deploys the
+# views here rather than skipping them. The two passwords are throwaway values for this container,
+# not secrets. Output is held back rather than passed through: migrate.sh's DROP VIEW IF EXISTS
+# prints two NOTICEs on a fresh database, and two stray lines in the middle of four verdicts read
+# like a fault.
 printf 'NEEDS_DB_MIGRATOR=drift\nNEEDS_DB_RUNTIME=drift-runtime\n' > "$work/needs.env"
-docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
-    -c 'SET client_min_messages = warning' -f - < contracts/ddl/current/app.trend_radar.sql > /dev/null
-# Held back rather than passed through: migrate.sh's DROP VIEW IF EXISTS prints two NOTICEs on a
-# fresh database, and two stray lines in the middle of four verdicts read like a fault.
 COSMAI_SECRET_FILE="$work/needs.env" db/migrate.sh --container "$name" --db drift --superuser drift \
     > /dev/null 2> "$work/migrate.err" || { cat "$work/migrate.err" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------------------------
+# Expected: all four off the finished graph, before anything is torn down for the needs replay.
+for pair in $pairs; do
+    db=${pair%%:*}
+    schema=${pair#*:}
+    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/expected.$db.$schema"
+done
 docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
     | normalise > "$work/expected.$needs_db.needs"
 
+# Actual: the three schemas this repo does not own come straight off production.
+for pair in $pairs; do
+    db=${pair%%:*}
+    schema=${pair#*:}
+    docker exec "$container" pg_dump -U "$superuser" -d "$db" --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/actual.$db.$schema"
+
+    report "$db.$schema" "baseline + declared additive files"
+done
+
 # pg_dump can exclude a table but not a column, so production's needs is replayed into the
-# throwaway (where the expected schema has just been dropped) and the foreign columns are dropped
-# there. Both sides then come off the same pg_dump against the same server version.
+# throwaway (where the expected schema is dropped first) and the foreign columns are dropped
+# there. Both sides then come off the same pg_dump against the same server version -- and the
+# replay lands beside the same trend_radar and tubedepth the expected dump was taken next to,
+# so the views it recreates sort the way they did a moment ago.
 docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
     -c 'DROP SCHEMA needs CASCADE' > /dev/null
 # shellcheck disable=SC2086 # $exclude is a built list of -T flags, and must word-split.
