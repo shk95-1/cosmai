@@ -62,7 +62,7 @@ def test_the_tool_still_runs_and_answers_in_the_shape_the_test_reads():
         ("근거가 선 픽스처 46셀 중 **23셀**에 동점이", "quoted_cells", "gates"),
         ("102행 중 **24행**에서 고르는 문서가 달라진다", "rows", "gates"),
         ("모집단 댓글 418건 = 청크 439개", "comments", "retrieval"),
-        ("주제 별칭 61개", "queries", "retrieval"),
+        ("주제 별칭 63개", "queries", "retrieval"),
     ],
 )
 def test_the_contract_still_says_what_the_fixture_measures(sentence: str, key: str, section: str):

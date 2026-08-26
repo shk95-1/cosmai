@@ -176,7 +176,7 @@ def test_ydc_published_queries_route_the_same_way_on_our_dictionary():
         ("오라우팅 **4/10**", "sample", "misrouted"),
         ("| **7/15** |", "sample", "topic_misrouted"),
         ("| **3/3** |", "ydc_published", "misrouted"),
-        ("`ko` 별칭 67개 중 토크나이저 사전에 있는 것 | **11** |", "dictionary", "ko_in_dictionary"),
+        ("`ko` 별칭 73개 중 토크나이저 사전에 있는 것 | **11** |", "dictionary", "ko_in_dictionary"),
         ("`mfds_inci` 표기 24개 중 토크나이저 사전에 있는 것 | **15** |", "dictionary", "inci_in_dictionary"),
     ],
 )

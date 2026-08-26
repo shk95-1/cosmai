@@ -226,9 +226,9 @@ def test_no_alias_and_no_eval_query_meets_the_list(installed):
     """`contracts/interfaces.md` §검색 실측 여섯 줄이 안 움직이는 근거. 겹침이 0 이면
     `tokenize_query` 가 `tokenize` 와 같은 토큰을 내므로 재실행 없이 성립한다."""
     aliases = sorted({a for e in topics_module.active().entries for a in e["ko"] + e["latin"]})
-    assert len(aliases) == 73
+    assert len(aliases) == 80  # v1 의 73 + 포크 #56 의 일곱
     assert not [a for a in aliases if set(bm25.tokenize(a)) & stopwords.active().words]
-    for mode, count in (("literal", 61), ("heldout", 60)):
+    for mode, count in (("literal", 63), ("heldout", 62)):
         queries = retrieval_eval.queries(mode)
         assert len(queries) == count
         assert all(bm25.tokenize_query(q) == bm25.tokenize(q) for _topic, q in queries)

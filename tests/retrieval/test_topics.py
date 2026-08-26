@@ -17,6 +17,7 @@ from analysis.retrieval import eval as retrieval_eval
 from cosmai.cli import main
 from tests.retrieval import frozen_topics
 from tests.retrieval.conftest import csv_topics, install_topics
+from tests.retrieval.test_lexicon_v3 import expected_entries
 
 # 상수판과 맞대는 텍스트. 별칭 전부 + 슬라이스 demo() 가 붙들던 경계(coupang 오탐·조사·활용형)다.
 CORPUS = [
@@ -59,8 +60,11 @@ def conn(needs_schema: str, needs_runtime_url: str):
 
 
 def _same_dictionary(loaded: topics.Topics) -> None:
+    """맞대는 상대는 얼어붙은 v1 **+ 포크 #56 의 판정 원장**이다. v1 그대로가 아닌 이유는 #56 이 별칭
+    일곱을 더했기 때문이고, 더한 것이 정확히 그 원장뿐이라는 것은 `test_lexicon_v3.py` 가 진다 --
+    여기서 상수판을 통째로 갈면 "무엇이 언제 늘었나"를 아무도 못 읽는다."""
     assert [e["topic"] for e in loaded.entries] == [e["topic"] for e in frozen_topics.TOPICS]
-    for got, frozen in zip(loaded.entries, frozen_topics.TOPICS, strict=True):
+    for got, frozen in zip(loaded.entries, expected_entries(), strict=True):
         assert got["ko"] == frozen["ko"], got["topic"]
         assert got["latin"] == frozen["latin"], got["topic"]
         assert got["topic_type"] == frozen["topic_type"], got["topic"]
@@ -72,9 +76,9 @@ def _same_dictionary(loaded: topics.Topics) -> None:
         assert set(got["mfds_inci"]) == set(frozen["mfds_inci"]), got["topic"]
 
 
-def test_the_repo_csv_is_the_frozen_dictionary():
-    """`dict/topics_v1.csv` 는 v1 의 적재 원본이다 -- 여기가 상수판과 갈리면 DB 에 들어가는 사전이
-    실측 표를 만든 사전이 아니게 된다."""
+def test_the_repo_csv_is_the_frozen_dictionary_plus_the_ledger():
+    """`dict/topics_v1.csv` 는 적재 원본이다 -- 여기가 상수판 + 원장과 갈리면 DB 에 들어가는 사전이
+    실측 표를 만든 사전도, 그 표가 어떤 델타 위에 있는지 말할 수 있는 사전도 아니게 된다."""
     _same_dictionary(csv_topics())
 
 
@@ -92,7 +96,7 @@ def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():
     frozen_queries = {
         mode: [
             (entry["topic"], alias)
-            for entry in frozen_topics.TOPICS
+            for entry in expected_entries()
             if entry["trend_use"]
             for alias in entry["ko"] + entry["latin"]
             if not (mode == "heldout" and len(entry["ko"] + entry["latin"]) < 2)
@@ -101,9 +105,9 @@ def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():
     }
     assert retrieval_eval.queries("literal") == frozen_queries["literal"]
     assert retrieval_eval.queries("heldout") == frozen_queries["heldout"]
-    assert len(frozen_queries["literal"]) == 61
+    assert len(frozen_queries["literal"]) == 63  # v1 의 61 + #56 이 판정 주제에 더한 둘
     assert bm25.expand_words() == sorted(
-        {a for e in frozen_topics.TOPICS for a in e["ko"] if " " not in a and len(a) >= 2}
+        {a for e in expected_entries() for a in e["ko"] if " " not in a and len(a) >= 2}
     )
 
 
