@@ -23,6 +23,7 @@ COMMANDS = (
     ("retrieval", "terms"),
     ("trend",),
     ("trend", "quarter"),
+    ("trend", "judge"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),
