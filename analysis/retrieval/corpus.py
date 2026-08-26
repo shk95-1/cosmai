@@ -103,10 +103,16 @@ def youtube_transcripts(
         yield Document(f"{YOUTUBE_TRANSCRIPT}:{video_id}", YOUTUBE_TRANSCRIPT, full_text)
 
 
+def review_doc_id(source: str, review_key: str) -> str:
+    """리뷰 하나의 `doc_id`. 청크를 원천 행으로 되짚는 쪽(포크 #7 의 대조)이 같은 문법을 두 번 적지
+    않도록 여기 한 자리에 둔다 -- 두 자리에 적히면 한쪽만 바뀌는 날 조인이 조용히 0행이 된다."""
+    return f"{COMMERCE_REVIEW}:{source}:{review_key}"
+
+
 def commerce_reviews(conn: psycopg.Connection, schema: str, since: date | None = None) -> Iterator[Document]:
     query = REVIEWS.format(schema=pgsql.Identifier(schema))
     for source, review_key, body in _keyset(conn, query, (since, since), key_len=2):
-        yield Document(f"{COMMERCE_REVIEW}:{source}:{review_key}", COMMERCE_REVIEW, body or "")
+        yield Document(review_doc_id(source, review_key), COMMERCE_REVIEW, body or "")
 
 
 def documents(
