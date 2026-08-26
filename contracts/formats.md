@@ -51,6 +51,55 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 - 적재는 `db/seed/panel.py`(`python -m db.seed --only panel`) 하나다 — 새 CLI 가 아니라 다른 시드와 같은 자리다(포크 #31). 원본은 슬라이스에 있었고 #9 가 그 디렉터리를 지우므로 `eval/` 로 옮겼다. 옮기며 **UTF-8 BOM 을 뗐다**: `db/seed/_common.read_csv` 는 utf-8 로 열어서 BOM 이 남으면 첫 열 이름이 `channel_id` 가 아니게 되고, 열 이름 11개는 그대로다.
 - **활성 판본은 언제나 하나다.** `active` 가 행 단위라 부분 인덱스는 두 판본이 동시에 켜진 상태를 막지 못하고, 그러면 `WHERE active` 를 타는 분모가 43 대신 86 이 된다. 부분 유니크 인덱스로는 "활성 행의 distinct version 이 하나"를 쓸 수 없으므로 이 불변식은 적재기가 진다 — 한 문장짜리 `SET active = (version = n)`(`db/seed/panel.activate`)과, 둘이면 답 대신 멈추는 `panel.active_version` (포크 #3 리뷰 L6 · #31).
 
+## 코퍼스 스냅샷 (→ `needs.corpus_snapshot` / `corpus_document` / `corpus_mention`, 포크 #4)
+한 줄 = 한 문서다. 영상과 댓글이 같은 표에 산다(`content_type` 이 가른다). 원본은 ydc 인계 CSV 세 장
+(`archive/yt-handoff/`, document 261,317 · mention 105,358 · channel 43행)이고, **그 자리는 읽기 전용**
+(`STATE.md` §3)이라 적재기가 경로를 인자로 받는다(`python -m db.corpus load <dir>`).
+
+**이 행들은 2026-08-19 의 관측이지 "지금의 유튜브"가 아니다.** 재수집으로 다시 만들 수 없다 — 댓글은
+계속 쌓이고 조회수·좋아요는 `collected_at` 시점의 값이다. 그래서 관측 판본(`snapshot_id`)이 유일키의
+**맨 앞**에 서고(`corpus_document` PK = `(snapshot_id, source, source_item_id)`), 재수집(#38)은 다른
+판본으로 들어와 옛 행 옆에 선다. 덮이지 않는 것은 적재기 규율이 아니라 키의 성질이다. 어느 판본을
+분석이 읽는지는 `corpus_snapshot.active` 한 칸이고, 판본당 한 행이라 그 불변식은 부분 유니크
+인덱스가 진다(023) — `panel_channel` 이 같은 문장을 적재기에 지운 것과 갈리는 자리다.
+
+`channel.csv` 는 **표가 되지 않는다.** 채널의 역할은 분모를 정하는 값이라 한 표(§패널 명부 CSV 의
+`panel_channel`)에만 살아야 하고, 두 표에 살면 두 분모가 생겨 나중 것이 앞선 것과 조용히 갈린다.
+반입은 대신 **대조한다**: 코퍼스가 언급하는 채널이 전부 활성 명부에 같은 역할로 있어야 하고, 아니면
+거절한다(`db/corpus.check_channels`). 그 파일의 `uploads_playlist_id` 도 표로 가지 않는다 — 43행 전부
+`'UU' || substr(channel_id, 3)` 이라 값이 아니라 유도식이다.
+
+### 매니페스트가 못박은 규칙 (`manifest.rules`, 그대로)
+1. 유일키는 source + source_item_id 다. doc_id 는 그 둘을 콜론으로 이은 값이다.
+2. 분기는 저장하지 않는다. published_at 의 연·월로 달력 분기를 만든다(수집 13,979편 전부 analysis_month 와 일치함을 확인).
+3. 댓글은 published_at 이 자기 시각이므로 분기 판정에 쓰지 않는다. parent_item_id 로 부모 영상에 조인해 부모의 분기에 배정한다.
+4. 트렌드 판정 분모는 content_type = video_long 만 쓴다. video_short 는 별도 계열, video_unknown 은 양쪽에서 제외한다.
+5. 판정·보고 모집단은 channel.panel_role = product 로 한정한다.
+6. 선크림 모집단 필터는 topic_id = 선크림(trend_use = false)으로 만든다.
+7. mention 은 주제 15개 전부를 담는다. 판정용 13개는 trend_use = true 로 필터한다.
+8. 행을 지우지 않는다. 품질 문제는 quality_flags 로 표시한다(empty_text, duplicate_in_parent).
+9. 언급량 집계에서는 quality_flags 가 빈 문서만 센다. duplicate_in_parent 는 같은 영상 안 복붙이라 반응 1건으로 보지 않는다.
+10. 댓글은 주제 사전에 걸린 영상만 수집했다. 전체 영상에 대한 댓글 분모는 존재하지 않는다.
+11. 태그를 판정 텍스트에 포함할지는 미결이다. 포함하면 선크림 장문이 962 → 1,019편이 되고 모든 composition 이 움직인다.
+
+규칙 3·4 는 이 파일이 처음 말하는 문장이 아니다: 댓글의 분기 귀속과 장문만인 분모는
+`interfaces.md` §수식 의 "분기 문서 모집단" 이 이미 지고 있고, 여기 있는 것은 그 문장이 **이 코퍼스의
+원 규칙과 같다**는 대조다. 이 11줄은 `db/corpus/contract.py` 에 상수로 서 있고, 적재기는 읽어 들인
+매니페스트가 그것과 다르면 반입을 거절한다 — 다른 규칙으로 만들어진 코퍼스가 같은 표에 섞이면 그
+표의 모든 비율이 오류 없이 달라진다.
+
+### text 의 뜻 (`manifest.text_rule`, 그대로)
+> 영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.
+
+- **cosmai 의 정규화와 대조**: `analysis/retrieval/normalize.py` 의 `normalize_text` 는 같은 네 단계를
+  **고정점까지** 돌리고, ydc `trend.py` 의 것은 한 번만 돌린다(이중 이스케이프 `&amp;lt;` 에서 갈린다).
+  두 구현이 다르므로 `text` 가 다른 뜻이 될 수 있는 자리인데, 이 코퍼스에서는 갈리지 않는다 — 실측
+  2026-08-26 기준 261,317행 전부가 한 번으로 이미 고정점이고(달라지는 행 0), 수집기가
+  `textFormat=plainText` 로 받아 HTML 이 애초에 들어오지 않기 때문이다. 재수집분에는 이 성질이
+  보장되지 않는다.
+- 한계 문장 여덟은 `interfaces.md` §모집단의 한계 가 진다 — 그것들은 포맷이 아니라 **숫자를 읽는
+  법**이라 수식 옆에 있어야 한다.
+
 ## 언급 행의 ref 문법 (A20)
 | src | `ref` | 비고 |
 |---|---|---|

@@ -158,7 +158,10 @@ def test_the_two_roles_add_up_to_the_seeded_panel():
 def test_the_ddl_lives_in_this_forks_number_block():
     # upstream 은 006~019, 포크는 020~ (contracts/versioning.md). 021 까지 운영에 적용돼 있다.
     assert DDL.name.startswith("022_")
-    assert sorted(p.name for p in DDL_DIR.glob("02*.sql"))[-1] == DDL.name
+    # 잡는 것은 "가장 큰 번호인가"가 아니라 **번호 충돌**이다: 원장(needs.schema_migration)의 키가
+    # 파일명이라, 같은 번호를 단 두 파일 중 뒤엣것은 배포에서 조용히 건너뛰어진다.
+    numbers = [name.split("_", 1)[0] for name in (path.name for path in DDL_DIR.glob("02*.sql"))]
+    assert len(numbers) == len(set(numbers)), sorted(numbers)
 
 
 def test_the_contracts_index_carries_a_row_for_this_ddl():
