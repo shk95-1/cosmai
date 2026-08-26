@@ -45,12 +45,14 @@ def test_the_stage_list_is_the_one_the_contract_names():
 @pytest.mark.parametrize("stage", STAGES)
 def test_every_stage_reaches_the_pipeline_and_exits_zero(stage: str, recorded: list[dict[str, Any]]):
     assert main(["analyze", stage]) == 0
-    assert recorded == [{"stage": stage, "since": None, "scope": None, "polarity": None}]
+    assert recorded == [{"stage": stage, "since": None, "scope": None, "missing": False, "polarity": None}]
 
 
 def test_since_and_scope_are_handed_to_the_stage(recorded: list[dict[str, Any]]):
     assert main(["analyze", "all", "--since", "2026-03-01", "--scope", "선블록"]) == 0
-    assert recorded == [{"stage": "all", "since": date(2026, 3, 1), "scope": "선블록", "polarity": None}]
+    assert recorded == [
+        {"stage": "all", "since": date(2026, 3, 1), "scope": "선블록", "missing": False, "polarity": None}
+    ]
 
 
 def test_a_since_that_is_not_a_date_is_blocked_before_anything_runs(
@@ -107,7 +109,20 @@ def test_impl_hands_the_registered_classifier_to_the_stage(
     """남의 scope(선블록의 주인은 gemma4 다)를 지정한 실행도 여기서 막지 않는다 — 그 거절은 단계의
     몫이고 entrypoints.md 는 그것을 failed run + 종료 코드 1 로 약속한다."""
     assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "선블록"]) == 0
-    assert recorded == [{"stage": "polarity", "since": None, "scope": "선블록", "polarity": registered}]
+    assert recorded == [
+        {"stage": "polarity", "since": None, "scope": "선블록", "missing": False, "polarity": registered}
+    ]
+
+
+def test_missing_reaches_the_stage_as_the_cron_will_type_it(
+    recorded: list[dict[str, Any]], registered: _StubPolarity
+):
+    """`--missing` 을 판정하는 곳은 단계다(소유가 없으면 거절) — CLI 는 그것을 나르기만 한다."""
+    argv = ["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "선블록", "--missing"]
+    assert main(argv) == 0
+    assert recorded == [
+        {"stage": "polarity", "since": None, "scope": "선블록", "missing": True, "polarity": registered}
+    ]
 
 
 def test_a_free_impl_without_a_scope_is_refused_too(
@@ -156,4 +171,6 @@ def test_a_paid_impl_without_a_scope_is_refused_before_a_single_call_goes_out(
     assert not recorded
     assert "spends money" in capsys.readouterr().out
     assert main(["analyze", "polarity", "--impl", "llm:claude-sonnet-5", "--scope", "선블록"]) == 0
-    assert recorded == [{"stage": "polarity", "since": None, "scope": "선블록", "polarity": registered}]
+    assert recorded == [
+        {"stage": "polarity", "since": None, "scope": "선블록", "missing": False, "polarity": registered}
+    ]

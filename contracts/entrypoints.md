@@ -97,7 +97,7 @@ run_id 를 갖지 않으므로(versioning.md A19) 각 단계가 만든 행 수�
 
 ## 분석
 ```
-cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>]
+cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
   stage ∈ {link, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
 cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
@@ -126,6 +126,28 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   규칙이 임시로 채우지 않는 것은 두 구현이 같은 문장에서 다른 `need_key` 를 고르면 그 임시 행이 주인의
   행 옆에 그대로 남아 집계가 한 문장을 두 번 세기 때문이다 — 아래 '카테고리가 움직인 문장' 문단이 같은
   자리를 말한다. 이 구멍의 수명은 주인 패스의 주기다.
+- **`--missing` 은 주인의 증분 실행이다**: 고르는 기준이 날짜가 아니라 **'이 실행이 지금 쓸 모양
+  (`extractor_version`+`polarity_version`)의 `need_mention` 행이 아직 없는 원천 행'** 이다. 한 페이지를
+  읽을 때마다 그 `(src, ref)` 들을 `need_mention` 에 묻고, 있으면 추출도 판정도 하지 않는다. 후보가
+  하나도 없는 리뷰는 어느 실행도 행을 만들지 않으므로 매번 추출을 다시 타지만 판정은 부르지 않는다
+  (추출은 규칙이라 싸다). **이 모드는 아무것도 지우지 않는다** — `replace_stale` 을 부르지 않고,
+  따라서 그 달이 반쪽으로 남는 창도 rewriting 표식도 없다. 없는 것을 더할 뿐이므로 갈아끼우기(역사
+  보정·판본 상승·`need_key` 가 바뀐 옛 행 청소)는 여전히 `--scope` 전량 경로의 몫이다. 소유가 없는
+  실행(규칙, 표에 없는 구현)에는 '내 판본 행'이 곧 규칙 모집단 전량이라 뜻이 없어 **거절한다** —
+  남의 scope 거절과 같은 자리·같은 모양이다(run 이 열리기 전, `status='failed'` + 종료 코드 1).
+  그 run 의 `note` 는 `missing=1` 을 달아 전량 패스와 갈린다(증분은 `replaced=0` 을 언제나 낸다).
+- `--since <date>` 와는 축이 다르다: `--since` 는 `coalesce(written_at, captured_at)` 로 **읽기와
+  삭제를 함께** 자르고, `--missing` 은 **이미 한 일**을 자른다. 수집이 늦게 오므로(`formats.md` §시간)
+  그 둘은 겹치지 않는다 — 어제 긁힌 옛 리뷰는 롤링 `--since` 가 놓치고, 고정 컷은 컷 이후 전부를 매일
+  다시 판정한다. 크론이 도는 것은 `--missing` 쪽이다.
+- **`--since D` 는 삭제도 같이 좁힌다**: D 가 든 달의 `observed_at >= D` 인 행만 지운다(`need_mention`·
+  `wish_mention` 둘 다). 좁히지 않으면 그 달의 D 이전 행은 지워지고 다시 쓰이지 않아, 매 실행이 같은
+  구멍을 판다. 삭제문의 `observed_at` 은 원천의 `coalesce(written_at, captured_at)` 과 같은 값이라
+  읽기 필터와 같은 행 집합을 가리킨다.
+- **주인 실행은 자기 `since` 앞의 달을 아예 훑지 않는다**: 그 달에는 소유 술어가 한 행도 통과시키지
+  않아 삭제도 0행, 쓰기도 0행이므로 순회가 순수한 비용이다. 자르는 기준은 그 실행이 닿는 `(scope,
+  since)` 들 중 가장 이른 `since` 이고(`--scope` 가 있으면 그 scope 의 것), `ALWAYS` 면 아무것도
+  자르지 않는다. 모드와 무관하다.
 - 그래서 한 문장의 라벨은 그 문장의 `lexicon_category` 를 소유한 구현의 것 하나다 — 그 카테고리가
   움직이지 않는 동안은. `rank_snapshot` 의 최신 행과 `category_map` 이 매일 다시 계산하므로 제품은
   카테고리를 옮겨 다니고, 옮겨간 뒤 옛 scope 에 남은 주인의 행은 아무도 지우지 못한다(주인 아닌 실행은
