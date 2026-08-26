@@ -2,10 +2,14 @@
 
 리뷰 갈래의 마지막 한 칸은 **손실 지점**이다. `trend_radar.review` 에는 `run_id` 가 없고 그 표는
 archive 된 남의 것이라 upstream 이 넣을 수 없다 — 이어지는 것은 `captured_at`(run 의 시간 버킷,
-`collectors/commerce/models.py`) 뿐이고, 같은 버킷에 두 번 시도한 run 은 두 행이다
-(`collectors/commerce/storage/db.py` 의 RunLog). 그래서 이 뷰는 **후보를 후보 그대로** 낸다:
-단일 확정 · 후보 여럿 · 미상 셋이 `match` 로 갈리고, 화면이 그것을 그대로 보인다(사용자 결정
+`collectors/commerce/models.py`) · `run.sources` · `run.datasets` 셋뿐이고, 같은 버킷에 두 번 시도한
+run 은 두 행이다(`collectors/commerce/storage/db.py` 의 RunLog). 그래서 이 뷰는 **후보를 후보 그대로**
+낸다: 단일 확정 · 후보 여럿 · 미상 셋이 `match` 로 갈리고, 화면이 그것을 그대로 보인다(사용자 결정
 2026-08-27). 하나로 찍거나 숨기는 것이 더 나쁘다.
+
+세 술어가 다 필요하다는 것이 이 파일의 절반이다. `datasets` 를 빼면 매시 도는 `ranking` run 이 모든
+버킷을 채워 **모든 리뷰의 후보**가 되고, unknown 이 도달 불가가 되어 사용자 결정 2 가 무너진다
+(운영 실측 리뷰 30,043건: sources 만 9,327/20,716/0 · +datasets 18,100/9,660/2,283).
 """
 
 from __future__ import annotations
@@ -26,12 +30,20 @@ VIEW = REPO_ROOT / "db" / "views" / "collection_lineage.sql"
 
 BUCKET = datetime(2026, 8, 20, 3, 0, tzinfo=UTC)  # run 의 시간 버킷 = review.captured_at
 OTHER_BUCKET = datetime(2026, 8, 21, 3, 0, tzinfo=UTC)
+LOW_BUCKET = datetime(2026, 8, 23, 3, 0, tzinfo=UTC)  # review_low 걸음만 돈 버킷
+MULTI_BUCKET = datetime(2026, 8, 24, 3, 0, tzinfo=UTC)  # dataset 을 둘 담은 run 의 버킷
 LONELY = datetime(2026, 8, 26, 3, 0, tzinfo=UTC)  # run 행이 하나도 없는 버킷 (glowpick 08-20~26 자리)
 
 RUN_ONE = UUID("11111111-1111-4111-8111-111111111111")  # 다른 버킷의 유일한 run
 RUN_A = UUID("22222222-2222-4222-8222-222222222222")  # glowpick, BUCKET 첫 시도
 RUN_B = UUID("33333333-3333-4333-8333-333333333333")  # glowpick, BUCKET 재시도
-RUN_C = UUID("44444444-4444-4444-8444-444444444444")  # BUCKET 이지만 sources 에 glowpick 이 없다
+# 아래 셋이 F1 의 자리다. 앞의 둘은 같은 버킷 · **같은 소스** 이면서 dataset 만 다르다 -- sources
+# 술어로는 하나도 안 걸러진다. 셋째는 소스만 다르다(sources 술어가 아직 필요하다는 반대 방향).
+RUN_RANK = UUID("44444444-4444-4444-8444-444444444444")  # glowpick, BUCKET, 매시 ranking
+RUN_STATS = UUID("55555555-5555-4555-8555-555555555555")  # glowpick, BUCKET, review_stats
+RUN_OTHER_SITE = UUID("66666666-6666-4666-8666-666666666666")  # oliveyoung, BUCKET, review
+RUN_LOW = UUID("77777777-7777-4777-8777-777777777777")  # glowpick, LOW_BUCKET, review_low
+RUN_MULTI = UUID("88888888-8888-4888-8888-888888888888")  # glowpick, MULTI_BUCKET, 'ranking, review'
 
 ART_OLD = "a" * 32
 ART_NEW = "b" * 32
@@ -78,7 +90,54 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                     "review",
                     "retry",
                 ),
-                (RUN_C, BUCKET, BUCKET, BUCKET + timedelta(minutes=2), "ok", "oliveyoung", "rank", None),
+                # 매시 ranking. 같은 버킷 · 같은 소스라 sources 술어로는 안 걸러지고, 리뷰 본문은
+                # 한 줄도 쓰지 않는다 -- 이것이 운영에서 후보를 20,716 까지 부풀린 부류다.
+                (RUN_RANK, BUCKET, BUCKET, BUCKET + timedelta(minutes=2), "ok", "glowpick", "ranking", None),
+                # review_stats 는 _stats_fetch·_summary_fetch 만 따라간다(oliveyoung.py 의
+                # _parse_ranking) -- strpos 로 'review' 를 찾으면 이것까지 후보가 된다.
+                (
+                    RUN_STATS,
+                    BUCKET,
+                    BUCKET,
+                    BUCKET + timedelta(minutes=3),
+                    "ok",
+                    "glowpick",
+                    "review_stats",
+                    None,
+                ),
+                # dataset 은 맞지만 소스가 다르다 -- datasets 를 더한 뒤에도 sources 술어가 필요하다.
+                (
+                    RUN_OTHER_SITE,
+                    BUCKET,
+                    BUCKET,
+                    BUCKET + timedelta(minutes=6),
+                    "ok",
+                    "oliveyoung",
+                    "review",
+                    None,
+                ),
+                # review_low 는 같은 레코드 타입을 다른 걸음으로 걷는다(models.py 의 Dataset docstring).
+                (
+                    RUN_LOW,
+                    LOW_BUCKET,
+                    LOW_BUCKET,
+                    LOW_BUCKET + timedelta(minutes=8),
+                    "ok",
+                    "glowpick",
+                    "review_low",
+                    None,
+                ),
+                # 여러 dataset 을 담은 run + 공백. 컬럼의 형식이 ",".join(...) 이라 IN 으로는 못 잡는다.
+                (
+                    RUN_MULTI,
+                    MULTI_BUCKET,
+                    MULTI_BUCKET,
+                    MULTI_BUCKET + timedelta(minutes=9),
+                    "ok",
+                    " glowpick , oliveyoung ",
+                    " ranking , review ",
+                    None,
+                ),
             ],
         )
         # 경로 7: 그 run 이 실제로 무엇을 요청했나. 2xx 만 ok 로 센다(collector_health 와 같은 선).
@@ -98,6 +157,8 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                 ("glowpick", "r:single", OTHER_BUCKET, "g:1", 3.0, "한 run 만 맞는 리뷰"),
                 ("glowpick", "r:many", BUCKET, "g:1", 3.0, "후보가 둘인 리뷰"),
                 ("glowpick", "r:none", LONELY, "g:1", 3.0, "run 행이 없는 리뷰"),
+                ("glowpick", "r:low", LOW_BUCKET, "g:1", 1.0, "review_low 걸음이 걷은 리뷰"),
+                ("glowpick", "r:multi", MULTI_BUCKET, "g:1", 3.0, "dataset 둘을 담은 run 의 리뷰"),
                 ("oliveyoung", "r:single", OTHER_BUCKET, "o:1", 3.0, "다른 사이트의 같은 키"),
             ],
         )
@@ -209,8 +270,37 @@ def test_two_attempts_in_the_same_bucket_stay_two_candidates(rows: list[dict[str
 
 
 def test_a_run_that_did_not_collect_that_site_is_not_a_candidate(rows: list[dict[str, Any]]):
-    # RUN_C 는 같은 버킷이지만 sources 에 glowpick 이 없다. 버킷만 보고 세면 후보가 셋이 된다.
-    assert all(r["collection_id"] != str(RUN_C) for r in _for(rows, "review", "glowpick", "r:many"))
+    # 버킷만 보고 세면 후보가 다섯이 된다. sources 가 그중 하나를 뺀다.
+    found = {r["collection_id"] for r in _for(rows, "review", "glowpick", "r:many")}
+    assert str(RUN_OTHER_SITE) not in found
+
+
+def test_a_run_that_does_not_write_review_bodies_is_not_a_candidate(rows: list[dict[str, Any]]):
+    """F1: `datasets` 술어가 빠지면 매시 도는 ranking run 이 모든 리뷰의 후보가 된다.
+
+    같은 버킷 · **같은 소스**라 sources 술어로는 하나도 안 걸러진다 -- 운영에서 후보 짝 64,648 중
+    22,673(리뷰를 한 줄도 안 걷은 run)이 이 부류였고, unknown 이 통째로 도달 불가가 됐다.
+    """
+    found = {r["collection_id"] for r in _for(rows, "review", "glowpick", "r:many")}
+    assert str(RUN_RANK) not in found, "ranking run 이 리뷰의 후보가 됐다"
+    # strpos(datasets, 'review') 로 찾으면 review_stats 까지 든다. 그 걸음은 _stats_fetch·
+    # _summary_fetch 만 따라가고 trend_radar.review 에 한 줄도 쓰지 않는다.
+    assert str(RUN_STATS) not in found, "review_stats run 이 리뷰의 후보가 됐다"
+    assert found == {str(RUN_A), str(RUN_B)}
+
+
+def test_review_low_is_the_same_bodies_by_another_walk(rows: list[dict[str, Any]]):
+    # models.py 의 Dataset docstring: REVIEW_LOW 는 REVIEW 와 같은 레코드 타입이다. 목록에서
+    # 빼면 저평점 전수 걸음이 걷은 리뷰가 통째로 '미상' 이 된다.
+    [row] = _for(rows, "review", "glowpick", "r:low")
+    assert (row["match"], row["collection_id"]) == ("single", str(RUN_LOW))
+
+
+def test_a_run_carrying_two_datasets_still_counts(rows: list[dict[str, Any]]):
+    # 컬럼의 형식은 ",".join(...) 이다(RunLog.start). IN 으로 적으면 이 run 이 조용히 빠지고,
+    # 공백이 섞인 목록도 같은 자리에서 죽는다.
+    [row] = _for(rows, "review", "glowpick", "r:multi")
+    assert (row["match"], row["collection_id"]) == ("single", str(RUN_MULTI))
 
 
 def test_no_candidate_still_yields_one_row_that_says_unknown(rows: list[dict[str, Any]]):

@@ -5,9 +5,11 @@ A19 는 뒤집지 않는다. `need_mention`·`wish_mention` 은 `run_id` 를 갖
 칸의 축(`category`·`need_key`·`month`·`product_ref`)을 필터 가능한 컬럼으로 내놓을 뿐, 스스로
 run 을 고르지 않는다.
 
-원문은 발췌만 나간다. anon 은 지금 유튜브 댓글 원문은 보지만 리뷰 본문은 못 본다
-(`db/grants/postgrest_anon_needs.sql:3`) — 이 뷰가 그 선을 무너뜨리지 않도록 120자에서 자른다
-(사용자 결정 2026-08-27).
+원문은 발췌만 나간다(사용자 결정 2026-08-27). 이유는 anon 이 리뷰 본문을 못 봐서가 **아니다** —
+운영에서 `postgrest_anon` 은 `trend_radar_reader` 의 멤버라 `trend_radar.review.body` 를 그대로 읽고,
+`db/grants/postgrest_anon_needs.sql` 은 `needs` 스키마만 다스린다(코디네이터 실측 2026-08-27).
+자르는 이유는 **이 뷰가 원문 전달 경로가 되지 않게** 하려는 것이다: 칸 하나에 언급 수천 건이 딸려
+나오는 자리라, 발췌가 아니면 여기가 사실상의 원문 덤프 출구가 된다.
 """
 
 from __future__ import annotations
@@ -201,8 +203,20 @@ def test_the_sentence_leaves_as_a_120_character_excerpt_only(rows: dict[tuple[st
 
 
 def test_no_column_carries_the_full_source_text(view: dict[str, Any]):
-    """anon 이 리뷰 본문을 못 보는 선(postgrest_anon_needs.sql:3)을 이 뷰가 무너뜨리지 않는다."""
+    """이 뷰는 원문 전달 경로가 되지 않는다 — 나가는 것은 발췌뿐이다.
+
+    이름 셋을 막는 것만으로는 `sentence_full` 같은 컬럼이 그대로 통과한다. 재는 것은 이름이 아니라
+    **값**이다: 어떤 text 컬럼도 120자를 넘지 않는다. 픽스처가 200자 문장과 300자 본문을 일부러
+    싣고 있어(LONG_SENTENCE·LONG_BODY) 자르지 않는 컬럼이 하나라도 생기면 여기서 걸린다.
+    """
     assert {"sentence", "body", "text"} & view["columns"] == set()
+    over = {
+        (key, column): len(value)
+        for key, row in view["rows"].items()
+        for column, value in row.items()
+        if isinstance(value, str) and len(value) > EXCERPT
+    }
+    assert not over, over
 
 
 def test_a_review_mention_reaches_its_source_row_by_site_and_review_key(rows: dict[tuple[str, str], Any]):

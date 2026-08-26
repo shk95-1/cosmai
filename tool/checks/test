@@ -59,6 +59,12 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     # tubedepth.comments (the source text behind a youtube mention) and tubedepth.artifacts (the
     # fetch that carried it). Still table-by-table, not the whole dump, so `analyze link`'s four
     # other tubedepth tables stay absent and test_analyze_all.py keeps failing for its own reason.
+    #
+    # One live consequence to know about: analysis/polarity/pipeline.py's `_exists(conn, youtube_
+    # schema, "comments")` now answers true here, so the polarity stage's youtube arm actually runs
+    # in this harness instead of being skipped -- over an empty table, so it yields nothing and
+    # nothing changes today. A test that starts asserting "the youtube arm did not run" would be
+    # asserting the absence of a table, not a behaviour.
     { echo 'CREATE SCHEMA IF NOT EXISTS tubedepth;'
       for t in jobs comments artifacts; do
           sed -n "/^CREATE TABLE tubedepth\.$t (/,/^);\$/p" contracts/ddl/current/app.tubedepth.sql
