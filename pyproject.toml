@@ -70,6 +70,7 @@ exclude = ["analysis/slices", "playbook"]  # 참조용 원본: 이식 시 패키
 extend-include = [
     "tool/compare-ydc-sensitivity",
     "tool/measure-query-routing",
+    "tool/measure-vector-floor",
     "tool/show-vector-stamp",
 ]
 
