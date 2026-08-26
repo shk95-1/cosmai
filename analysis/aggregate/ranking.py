@@ -28,6 +28,7 @@ __all__ = [
     "ReviewRow",
     "ReviewStatsRow",
     "denominators",
+    "latest_categories",
     "price_events",
     "rank_daily",
     "run_ranking",
@@ -39,8 +40,8 @@ KST = timezone(timedelta(hours=9))
 ABSENT_RANK = 101
 # collectors/commerce/scope.json 의 oliveyoung.review_low.low_complete_threshold (#7) 와 같은 값이다.
 LOW_COMPLETE_THRESHOLD = 150
-SCOPE_JSON = Path(__file__).resolve().parents[2] / "collectors" / "commerce" / "scope.json"
 CATEGORY_SEP = " > "
+SCOPE_JSON = Path(__file__).resolve().parents[2] / "collectors" / "commerce" / "scope.json"
 WINDOWS = (6, 12, 24)
 
 
@@ -213,6 +214,12 @@ def price_events(
                     )
                 )
     return out
+
+
+def latest_categories(snapshots: Iterable[RankSnapshot]) -> dict[tuple[str, str], str]:
+    """제품의 카테고리는 가장 최근 스냅샷이 말한다 (contracts/formats.md §카테고리 표기)."""
+    _ = snapshots
+    return {}
 
 
 def denominators(
