@@ -28,6 +28,9 @@ COMMON_LABELS = ["channel", "goal", "decision", "memo", "when-touched", "needs-u
 NOW = datetime.now(UTC)
 BODY = "## 맥락\n뭔가\n\n## 완료 기준\n기계로 검사된다\n\n## 채널·자리 / 등급 / 규모\n규모 S · 자원: 없음\n"
 MEMO_BODY = "## 맥락\n관찰만 적는다\n"
+# when-touched 의 완료 시점은 이 이슈가 아니라 그 파일을 만지는 다른 작업에 얹혀 있다 --
+# 그래서 완료 기준 대신 「언제 고치나」를 쓴다 (#137).
+WHEN_TOUCHED_BODY = "## 사실\n지금은 안 터진다\n\n## 언제 고치나\n그 파일을 만지는 작업이 함께 고친다\n"
 
 
 def stamp(days_ago: float = 0.0) -> str:
@@ -568,6 +571,33 @@ def test_a_partial_response_on_the_fork_names_the_fork(run):
     )
     assert done.returncode != 0, done.stdout
     assert FORK in done.stderr, done.stderr
+
+
+def test_a_when_touched_issue_needs_no_completion_criteria(run):
+    # 완료 시점이 다른 작업에 얹혀 있는 부류다. 완료 기준을 요구하면 라벨의 뜻과 어긋나고,
+    # 실제로 그 어긋남이 lint 를 계속 빨갛게 두었다(포크 #43·#44).
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "만질 때", body=WHEN_TOUCHED_BODY, labels=("ch:tool", "when-touched"), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+
+
+def test_a_when_touched_issue_without_when_to_fix_is_a_lint_error(run):
+    # 면제가 곧 무규칙은 아니다 -- 언제 고치는지는 여전히 적혀 있어야 한다.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "만질 때", body=BODY, labels=("ch:tool", "when-touched"), parent=10),
+        ],
+    )
+    assert done.returncode != 0, done.stdout
+    assert "언제 고치나" in done.stdout, done.stdout
 
 
 @pytest.fixture
