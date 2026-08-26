@@ -23,8 +23,10 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, text
 
+from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION
 from analysis.trend.pipeline import SCOPE, build, run
+from cosmai.cli import main
 from db import corpus, seed
 from db.corpus import verify
 from db.seed._common import connect
@@ -66,6 +68,14 @@ def _key(row: dict[str, str]) -> tuple[str, str, str, str]:
     return quarter, topic, source, content_type
 
 
+def _install_registry(url: str) -> None:
+    """주제 축의 레지스트리를 세우는 길은 운영과 같은 하나다 -- 픽스처가 사전을 손으로 다시 적으면
+    축이 두 벌이 되고, 그때부터 이 테스트는 자기 사본을 검사한다."""
+    where = ["--kind", "aspect", "--version", "1", "--url", url]
+    assert main(["lexicon", "load", *where, str(topic_registry.DICTIONARY_CSV)]) == 0
+    assert main(["lexicon", "activate", *where]) == 0
+
+
 def _golden() -> list[dict[str, str]]:
     with (FIXTURE / "ydc_trend_v0.2.csv").open(encoding="utf-8-sig", newline="") as handle:
         return list(csv.DictReader(handle))
@@ -81,6 +91,7 @@ def sampled(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str
     finally:
         engine.dispose()
     seed.run_all(needs_runtime_url, only=("panel",))
+    _install_registry(needs_runtime_url)
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
     return needs_runtime_url

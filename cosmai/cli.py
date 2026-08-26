@@ -324,7 +324,8 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
-    from analysis.trend.pipeline import NoPopulation, run
+    from analysis.retrieval.topics import NoDictionary
+    from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, run
 
     try:
         conn = _connect(args.url)
@@ -334,8 +335,9 @@ def _run_trend(args: argparse.Namespace) -> int:
     try:
         with conn:
             outcome = run(conn)
-    # 명부도 스냅샷도 아직 없는 것은 실패가 아니라 막힘이다 -- 시드와 반입을 아직 안 돌렸다는 뜻이다.
-    except NoPopulation as blocked:
+    # 명부도 스냅샷도 주제 사전도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운 것이고,
+    # 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
+    except (NoPopulation, TopicAxisDrift, NoDictionary) as blocked:
         print(blocked)
         return 2
     print(outcome.note)

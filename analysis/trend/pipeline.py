@@ -18,6 +18,7 @@ from typing import Any, LiteralString
 
 import psycopg
 
+from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION, Counts, VideoPanel, rows
 from analysis.types import MetricsTopicQuarterRow
 from db.corpus import active_snapshot
@@ -102,9 +103,11 @@ SELECT m.topic_id, v.quarter, c.quality_flags = '' AS counted,
  GROUP BY 1, 2, 3
 """
 )  # noqa: S608
-# 주제 축은 코퍼스가 스스로 선언한 것이다 (규칙 7): 그 사전으로 훑지 않은 주제의 0 행은 "언급이
-# 없다"가 아니라 "안 봤다"라서, 같은 표에 두면 두 뜻이 섞인다.
-TOPICS: LiteralString = (
+# 축의 두 변은 갈라져 있다 (interfaces.md §분기 표의 행 집합): 분기는 이 산출에 존재하는 것이고 주제는
+# 레지스트리(`aspect_lexicon(ruleset='retrieval-topic')`)의 `trend_use=true` 전부다. 관측 distinct 로
+# 축을 만들면 한 번도 안 걸린 주제가 표에서 조용히 사라지는데, 격자는 여전히 직사각형이라 불변식 뷰가
+# 그것을 잡지 못한다. 이 질의는 그래서 축이 아니라 축 밖의 관측을 찾는 데 쓴다.
+OBSERVED_TOPICS: LiteralString = (
     "SELECT DISTINCT topic_id FROM corpus_mention WHERE snapshot_id = %s AND trend_use ORDER BY 1"
 )
 
@@ -134,6 +137,11 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 
 VIOLATIONS: LiteralString = (
     "SELECT violation, quarter, detail FROM metrics_topic_quarter_violation WHERE run_id = %s"
 )
+
+
+class TopicAxisDrift(LookupError):
+    """스냅샷이 레지스트리 밖의 trend_use 주제를 들고 있다. 그 언급은 어느 행에도 quarter_mentions
+    에도 들지 못해 분모에서 조용히 빠지므로, 사전 버전이 갈린 채로 표를 세우지 않는다."""
 
 
 class NoPopulation(LookupError):
@@ -169,6 +177,19 @@ class QuarterOutcome:
 def note_of(scope: str, snapshot_id: int, panel_version: int) -> str:
     """persistence 는 run 상대라, 스냅샷이나 명부가 바뀌면 같은 분기가 다른 값을 갖는 새 run 이어야 한다."""
     return f"trend-quarter:{METRIC_VERSION}:{scope}:snapshot{snapshot_id}:panel{panel_version}"
+
+
+def topic_axis(conn: psycopg.Connection[Any], cur: psycopg.Cursor[Any], snapshot_id: int) -> list[str]:
+    """레지스트리의 `trend_use=true` 주제 전부. 순서는 사전 적재 순서이고 ydc `trend.py` 도 그렇다."""
+    axis = [entry["topic"] for entry in topic_registry.load(conn).entries if entry["trend_use"]]
+    cur.execute(OBSERVED_TOPICS, (snapshot_id,))
+    unknown = [topic for (topic,) in cur.fetchall() if topic not in set(axis)]
+    if unknown:
+        raise TopicAxisDrift(
+            f"snapshot {snapshot_id} mentions {unknown} with trend_use, but the active "
+            f"{topic_registry.RULESET} dictionary does not carry them -- {topic_registry.FIX}"
+        )
+    return axis
 
 
 def _run_id(cur: psycopg.Cursor[Any], note: str) -> int:
@@ -254,8 +275,7 @@ def build(
             "panel_role": panel_role,
             "topic_filter": TOPIC_FILTER,
         }
-        cur.execute(TOPICS, (snapshot,))
-        topics = [topic for (topic,) in cur.fetchall()]
+        topics = topic_axis(conn, cur, snapshot)
         video, video_panel = _video_counts(cur, params)
         comment = _comment_counts(cur, params)
         run_id = _run_id(cur, note_of(scope, snapshot, version))
