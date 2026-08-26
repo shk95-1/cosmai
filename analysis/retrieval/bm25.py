@@ -13,7 +13,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from analysis.retrieval import topics
+from analysis.retrieval import stopwords, topics
 
 if TYPE_CHECKING:  # 타입 전용: 런타임에 kiwipiepy 를 끌어오면 --help 한 번에 모델이 뜬다.
     from kiwipiepy import Kiwi
@@ -154,6 +154,15 @@ def tokenize(text: str) -> list[str]:
     return [t for token in out for t in expand(token)]
 
 
+def tokenize_query(text: str) -> list[str]:
+    """질의 토큰화. 색인 토큰화에 **질의 불용어 제거만** 얹는다 (포크 #46).
+
+    색인(`tokenize`)에서 빼지 않는 이유는 그러면 `소비자` 를 직접 찾는 질의를 못 하게 되기 때문이고,
+    전부 불용어일 때 지우지 않는 이유는 토큰 0개가 결과 0건이라 필러가 낀 순위보다 나빠서다.
+    """
+    return stopwords.active().keep(tokenize(text))
+
+
 class Index:
     """역색인 하나. 문서 수가 30만 규모라 메모리에 그냥 둔다."""
 
@@ -204,7 +213,8 @@ class Index:
         질의 글자가 든 문서를 빼고도 같은 주제를 찾아내는가."""
         banned = {self.position[d] for d in (skip or ()) if d in self.position}
         scores: dict[int, float] = defaultdict(float)
-        for term in set(tokenize(query)):
+        # 질의는 `tokenize_query`, 색인(위 __init__)은 `tokenize` -- 두 축이 갈리는 자리다(#46).
+        for term in set(tokenize_query(query)):
             weight = self.idf(term)
             if weight == 0.0:
                 continue

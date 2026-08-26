@@ -13,6 +13,11 @@
 - `retrieval-topic` 은 검색 유닛의 **주제 사전**이다(포크 #8, 적재 원본 `analysis/retrieval/dict/topics_v1.csv`). 한 행 = 한 주제의 한 별칭이고 `pattern` 은 정규식이 아니라 **표기 그대로**다 — 한글은 부분문자열, 라틴은 경계 매칭(`(?<![A-Za-z])…`)이라 매칭 방식이 계열마다 다르고, 그 별칭이 Kiwi 사용자 단어이자 확장 목록이라 정규식으로는 쓸 수 없다. `extra` 가 나머지를 나른다: `term_kind ∈ {ko, latin, mfds_inci}`(`|` 로 겹칠 수 있다 — 아보벤존은 ko 이자 식약처 표기다) · `topic_type` · `trend_use` · `note`. 뒤 셋은 주제 단위 사실이라 그 주제의 아무 행에 한 번만 적고(관례: 첫 행), 두 행이 다른 값을 말하면 적재가 아니라 `analysis/retrieval/topics.py` 가 거절한다.
 - 중립 명사 쌍둥이는 같은 `aspect` 이름을 갖는다(원본 사전의 `~` 접미는 CSV 에 남기지 않는다). 쌍둥이는 원본 순서 그대로 뒤에 온다 = 같은 priority, 큰 id.
 
+### entity 사전의 `kind='stopword'` — 질의 불용어 (포크 #46)
+- 한 줄 = 질의에서 지울 표기 하나. `canonical` 은 정본 표기가 아니라 **그 표기가 걸리는 축**이다 — 지금 값은 `query` 하나뿐이고, 색인·추출 축에는 불용어를 두지 않는다는 판단(`entrypoints.md` §검색, 포크 #8·#37)이 그대로 서 있다. 축을 `kind` 로 가르지 않은 이유는 `activate` 가 kind 단위라 축을 늘릴 때마다 새 버전 축이 생기기 때문이고, `tier` 로 가르지 않은 이유는 그 칸이 brand 전용 어휘를 이미 갖고 있어서다.
+- `surface` 는 정규식도 원형도 아니라 **`bm25.tokenize` 가 실제로 내놓는 토큰**이다 — 필터가 토큰 목록 위에서 돌기 때문이다(`관해서` → `관하`, `어떻게` → `어떻`). 그래서 목록을 고치는 사람은 표기가 아니라 토큰을 적어야 하고, `tests/retrieval/test_query_stopwords.py` 가 모든 행에 대해 그 토큰이 실제로 나오는지를 되묻는다 — 나오지 않는 행은 지우지 않고 `note` 가 그 사실을 적는다(판단은 같고 도달만 못 하므로, 형태소 분석기가 바뀌면 살아난다).
+- 적재 원본은 `analysis/retrieval/dict/query_stopwords_v1.csv`(13행)이고 길은 `cosmai lexicon load/diff/activate --kind stopword` 하나다. 버전은 aspect 와 **따로 돈다**(`entity_lexicon` 의 `activate` 는 `WHERE kind = %s`).
+
 ## need_key 레지스트리 CSV (→ `needs.need_key`, A17)
 `need_key,canonical,note` — 두 슬라이스 어휘의 합집합. `canonical` 은 동의어 묶음의 대표이고, 대표가 없으면 자기 자신이다.
 v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · `향→향냄새` · `발림텍스처→제형발림` · `지속력워터→지속력` · `톤업색상→색상발색`. `site_axis_map.need_key` 가 p1 어휘라서 대표를 그쪽으로 맞춘다. `scope='all'` 롤업은 `canonical` 기준으로 합산한다.
