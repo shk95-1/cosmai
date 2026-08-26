@@ -31,7 +31,7 @@ CAPTURED = datetime(2026, 8, 23, tzinfo=UTC)
 WRITTEN = datetime(2026, 3, 4, tzinfo=UTC)
 MONTH = "2026-03"
 SUNBLOCK = "선블록"
-GEMMA4 = OWNERS[SUNBLOCK]
+GEMMA4 = OWNERS[SUNBLOCK].version
 BOOM = "polarity boom"
 SOURCE_TABLES = ("review", "rank_snapshot", "product")
 TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"

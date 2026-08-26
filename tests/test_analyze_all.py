@@ -246,7 +246,7 @@ def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sour
             "observed_at_resolution, month, sentence, category, lexicon_category, "
             "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
             "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
-            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"]),
+            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"].version),
         )
         conn.commit()
     with connect(analysis_url) as conn:
@@ -260,7 +260,7 @@ def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sour
             "WHERE src = 'review'"
         )
         # 규칙이 이 문장을 다시 뽑았다면 '불만'/rule-v2.2 한 줄만 남았을 것이다 (제자리 upsert).
-        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"])]
+        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"].version)]
 
 
 def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(

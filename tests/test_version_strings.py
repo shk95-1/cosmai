@@ -28,7 +28,7 @@ VERSIONS = (
     ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
     # OllamaPolarity(...).version 은 인스턴스 속성이라 상수 import 가 안 된다 (analysis/polarity/ollama.py) —
     # 운영이 실제로 찍는 값은 OWNERS 에 등록된 그대로다.
-    ("analysis.polarity.ownership.OWNERS['선블록']", OWNERS["선블록"]),
+    ("analysis.polarity.ownership.OWNERS['선블록'].version", OWNERS["선블록"].version),
 )
 
 
@@ -46,6 +46,6 @@ def test_the_guard_refuses_the_shapes_the_contract_does_not_have():
 
 def test_every_operational_owner_version_is_registered_in_versions():
     registered = {version for _, version in VERSIONS}
-    for scope, version in OWNERS.items():
-        assert FORMAT.match(version), f"{scope} = {version!r}"
-        assert version in registered, f"{scope} = {version!r} missing from VERSIONS"
+    for scope, owner in OWNERS.items():
+        assert FORMAT.match(owner.version), f"{scope} = {owner.version!r}"
+        assert owner.version in registered, f"{scope} = {owner.version!r} missing from VERSIONS"

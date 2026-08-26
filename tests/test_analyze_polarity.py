@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import urllib.error
 from collections.abc import Iterator, Sequence
@@ -19,7 +20,7 @@ from analysis import predictors, registry
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
-from analysis.polarity.ownership import NO_OWNERS, OWNERS, unready
+from analysis.polarity.ownership import ALWAYS, NO_OWNERS, OWNERS, Owner, unready
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -538,7 +539,8 @@ def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _
 
 
 # 구현 소유권 (#31): 선블록은 gemma4 가, 나머지는 규칙이 갱신한다 — 표는 ownership.py 한 곳이다.
-GEMMA4 = OWNERS["선블록"]
+MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")  # need_mention.month 의 모양 (formats.md)
+GEMMA4 = OWNERS["선블록"].version
 # 규칙 실행이 다시 뽑지 않는 자리에 남은 주인의 행 — 삭제문이 이것을 지우는지 본다.
 OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 # 규칙 실행이 같은 자연키로 다시 쓰는 자리 — 005 의 자연키에 polarity_version 이 없어 제자리 upsert 가
@@ -546,14 +548,22 @@ OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 CONTESTED = ("P1/R2", "백탁", "백탁이 너무 심해서 최악이에요")
 
 
-def _label(url: str, ref: str, need_key: str, sentence: str, version: str, polarity: str = "만족") -> None:
+def _label(
+    url: str,
+    ref: str,
+    need_key: str,
+    sentence: str,
+    version: str,
+    polarity: str = "만족",
+    lexicon_category: str = "선블록",
+) -> None:
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
             " observed_at, observed_at_resolution, month, sentence, extractor_version,"
-            " polarity_version) VALUES ('review', 'oliveyoung', %s, '선블록', %s, %s, '2026-03-04',"
+            " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, '2026-03-04',"
             " 'day', '2026-03', %s, 'rule-v2.3', %s)",
-            (ref, need_key, polarity, sentence, version),
+            (ref, lexicon_category, need_key, polarity, sentence, version),
         )
         conn.commit()
 
@@ -625,7 +635,7 @@ def _by_scope(url: str) -> list[tuple[Any, ...]]:
 def test_the_owner_keeps_the_scope_a_later_unscoped_run_walks_over(loaded: str, _schema_name: str):
     """두 구현이 같은 문장을 두고 다툰다: 주인이 먼저 선블록을 라벨하고, 그 뒤 스코프 없는 실행이 전량을
     돈다. 주인의 scope 는 그대로, 나머지(샴푸)는 나중 실행의 것이다."""
-    owners = {"선블록": OwnerPolarity.version}
+    owners = {"선블록": Owner(OwnerPolarity.version, ALWAYS)}
     _run(loaded, _schema_name, scope="선블록", polarity=OwnerPolarity(), owners=owners)
     _run(loaded, _schema_name, polarity=RivalPolarity(), owners=owners)
     assert _by_scope(loaded) == [
@@ -669,14 +679,16 @@ def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quiet
 def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
-    assert OWNERS["선블록"] == OllamaPolarity().version
+    assert OWNERS["선블록"].version == OllamaPolarity().version
 
 
-def test_every_registered_scope_names_the_same_owner_version():
-    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 등록된 1개가
-    가리키는 값이 하나인지를 표 자체로 확인한다."""
-    assert len(OWNERS) == 1
-    assert set(OWNERS.values()) == {OllamaPolarity().version}
+def test_every_registered_scope_names_that_version_and_a_month_the_rows_carry():
+    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 표가 몇 줄이든
+    가리키는 판본은 하나여야 한다. since 는 need_mention.month 와 같은 입자여야 한다: 술어가 그 열과
+    문자열로 견주므로 다른 모양이 들어오면 조용히 어긋난다 (#97)."""
+    assert {owner.version for owner in OWNERS.values()} == {OllamaPolarity().version}
+    for scope, owner in OWNERS.items():
+        assert owner.since == ALWAYS or MONTH.match(owner.since), f"{scope} = {owner.since!r}"
 
 
 # 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
@@ -708,7 +720,12 @@ def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scop
     ref, sentence = MOVED
     _label(loaded, ref, "백탁", sentence, GEMMA4)
     with connect(loaded) as conn:
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners={"선블록": GEMMA4})
+        run(
+            conn,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            owners={"선블록": Owner(GEMMA4, ALWAYS)},
+        )
     assert _labels(loaded, ref) == [("백탁", "만족", GEMMA4), (RULE_KEY, "불만", "rule-v2.2")]
 
 
@@ -741,11 +758,69 @@ def test_a_rerun_with_a_new_version_clears_the_rows_that_have_no_lexicon_categor
     assert _comment_versions(loaded) == [DriftedPolarity.version]
 
 
-def test_only_the_rule_may_be_let_loose_without_a_scope():
-    """`--impl` 을 풀어줄지 마는지의 기준은 유료 여부가 아니라 '규칙이 아닌 구현'이다: 전량이 기본인
-    것은 05:00 의 규칙 하나뿐이고, 나머지는 시간이든 돈이든 자기 자리에서만 쓴다 (cosmai/cli.py)."""
+# --- (scope, 기간) 소유 (#97): 등록은 즉시, 과거분은 규칙이 계속 갱신한다 ----------------------------
+# loaded 의 리뷰는 두 달에 앉는다: 2026-03(written_at)과 2026-08(written_at NULL → captured_at).
+FUTURE = "2026-09"  # 그 두 달보다 뒤 — 등록은 했고 주인의 패스는 아직 한 번도 안 돈 상태다
+OWNER_SINCE = "2026-08"  # 주인이 8월분부터 책임진다: 3월분은 규칙 몫으로 남는다
+STALE_SHAMPOO = ("P2/R9", "백탁", "등록 전 규칙이 남긴 문장")
+
+
+def _by_month(url: str) -> list[tuple[Any, ...]]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT lexicon_category, month, polarity_version FROM need_mention WHERE src = 'review'"
+            " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+        )
+        return cur.fetchall()
+
+
+def test_a_scope_registered_from_a_later_month_is_still_the_rules_until_then(loaded: str, _schema_name: str):
+    """#31 의 소유는 scope 전체였다 — 26개를 등록만 하고 패스를 미루면 그 카테고리의 새 리뷰에 행이 아예
+    안 생겼다(#84 가 막힌 자리). 기간으로 자르면 등록과 패스가 분리된다: since 이전은 규칙이 계속 쓰고
+    지운다."""
+    owners = {"선블록": Owner(GEMMA4, ALWAYS), "샴푸": Owner(GEMMA4, FUTURE)}
+    ref, need_key, sentence = STALE_SHAMPOO
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", "불만", "샴푸")
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners=owners)
+    assert _by_month(loaded) == [("샴푸", "2026-03", RulePolarity.version)]
+    assert _stale(loaded, ref) == []
+
+
+def test_the_owner_leaves_the_months_before_its_since_to_the_rule(loaded: str, _schema_name: str):
+    """양방향이다: 규칙은 주인 기간을 비워 두고, 주인은 자기 기간 밖을 쓰지도 지우지도 않는다.
+
+    주인은 이제 `--scope` 없이 돌 수 있다 — 그 제약의 이유였던 '전량 재라벨'을 since 가 잘랐다.
+    """
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    _run(loaded, _schema_name, owners=owners)  # 05:00 크론의 자리
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)  # 주인의 패스
+    assert _by_month(loaded) == [
+        ("샴푸", "2026-03", RulePolarity.version),
+        ("선블록", "2026-03", RulePolarity.version),
+        ("선블록", "2026-08", OwnerPolarity.version),
+    ]
+
+
+def test_an_unscoped_owner_run_writes_nothing_that_has_no_lexicon_category(loaded: str, _schema_name: str):
+    """댓글과 위시에는 lexicon_category 가 없어 주인이 성립하지 않는다 — 주인의 스코프 없는 실행이
+    그 행을 가져가면 규칙 라벨이 사라지고 위시는 그 달에서 통째로 지워진다."""
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    _run(loaded, _schema_name, owners=owners)
+    wishes = _rows(loaded, "wish_mention")
+    assert wishes, "위시 행이 없으면 이 단언은 진공이다"
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)
+    assert _comment_versions(loaded) == [RulePolarity.version]
+    assert _rows(loaded, "wish_mention") == wishes
+
+
+def test_a_run_without_a_scope_must_own_one():
+    """`--impl` 을 풀어줄지 마는지의 기준은 유료 여부가 아니라 '표에 자기 자리가 있는가'다: 표에 없는
+    구현의 스코프 없는 한 줄은 여전히 전량 재라벨이다 (cosmai/cli.py)."""
     assert unready(OWNERS, RulePolarity.version, None) is None
-    assert "--scope" in str(unready(OWNERS, GEMMA4, None))
+    # 주인은 자기 scope 전부를 한 줄로 돈다 — 기간이 그 한 줄의 값을 정하므로 전량 재라벨이 아니다 (#97).
+    assert unready(OWNERS, GEMMA4, None) is None
+    assert "--scope" in str(unready(OWNERS, "stub-v9", None))
     # 아직 주인이 없는 카테고리(OWNERS 에 없는 이름) — 안 막으면 성공하고도 다음 05:00 에 지워진다.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
     assert unready(OWNERS, GEMMA4, "선블록") is None

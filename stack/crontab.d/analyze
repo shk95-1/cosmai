@@ -5,10 +5,11 @@
 # take the analysis of already-collected rows down with it.
 #
 # 이 줄에는 --impl 이 없으니 규칙 극성으로 돈다. 무엇을 다시 라벨할지는 이제 이 줄의 인자가 아니라
-# analysis/polarity/ownership.py 의 소유 표가 정한다 (#31): 주인이 있는 lexicon_category(오늘은
-# 선블록 → gemma4)의 행은 지우지도 덮지도 않고, 주인 없는 카테고리와 lexicon_category 가 없는
-# 행(유튜브 댓글·카테고리를 못 붙인 리뷰)만 매일 새로 라벨된다. 소유를 옮기는 곳은 그 파일 하나다 --
-# 크론 인자로 옮기면 이 줄과 아래 줄이 서로 어긋나도 아무도 모른다.
+# analysis/polarity/ownership.py 의 소유 표가 정한다 (#31, #97): 주인이 있는 (lexicon_category, 달)의
+# 행 -- 오늘은 선블록의 모든 달(gemma4, since=ALWAYS) -- 은 지우지도 덮지도 않고, 주인 없는 카테고리와
+# 주인의 since 앞의 달, lexicon_category 가 없는 행(유튜브 댓글·카테고리를 못 붙인 리뷰)이 매일 새로
+# 라벨된다. 소유를 옮기는 곳은 그 파일 하나다 -- 크론 인자로 옮기면 이 줄과 아래 줄이 서로 어긋나도
+# 아무도 모른다.
 0 5 * * *   cosmai analyze all
 #
 # 주인(gemma4)의 패스는 아직 여기 줄이 없다. 명령은
@@ -38,9 +39,15 @@
 # 그리고 크론에 들어갈 T 는 전량 패스의 T 가 아니다. #32 의 --since 증분이 붙으면 매일 밤 도는 것은
 # 그날치뿐이라 소요가 아예 다른 수가 된다 -- 재야 할 것은 크론이 실제로 돌릴 그 명령이다.
 #
-# 카테고리 하나를 더 gemma4 로 넘기는 절차는 두 걸음이고 순서가 있다:
-#   1) analysis/polarity/ownership.py 의 OWNERS 에 그 lexicon_category 와 gemma4 의 판본을 적어 배포한다.
-#   2) 그 다음에 cosmai analyze polarity --impl ollama:gemma4:latest --scope <그 카테고리> 를 돌린다.
-# 뒤집으면 패스는 성공한 채 끝나고 위 05:00 줄이 그날 밤 그 라벨을 규칙으로 도로 덮는다 -- 주인 없는
-# scope 는 이 줄의 몫이기 때문이다. 순서를 틀릴 수 없게 CLI 가 1) 없는 --scope 를 거절한다
-# (cosmai/cli.py -> analysis/polarity/ownership.py 의 unready).
+# 카테고리 하나를 더 gemma4 로 넘기는 절차는 여전히 두 걸음이지만, 두 걸음이 더 이상 붙어 있지 않다 (#97):
+#   1) analysis/polarity/ownership.py 의 OWNERS 에 그 lexicon_category, gemma4 의 판본, 그리고 주인이
+#      책임질 첫 달(since)을 적어 배포한다. since 를 다음 달로 적으면 그 앞의 달은 위 05:00 줄이 계속
+#      갱신하므로, 등록만 해 두고 패스를 미뤄도 그 카테고리가 얼어붙지 않는다 -- 등록의 앞을 막던 것이
+#      6h44m 짜리 전량 패스였다.
+#   2) 그 뒤 아무 때나 cosmai analyze polarity --impl ollama:gemma4:latest [--scope <그 카테고리>] 로
+#      since 이후 달을 채운다. --scope 는 이제 좁히기만 한다 -- 빼면 주인이 자기 (scope, 기간) 전부를
+#      돈다. 그 사이 since 이후 달의 그 카테고리에는 행이 아예 없다(규칙이 임시로 채우면 두 구현이 고른
+#      need_key 가 갈릴 때 한 문장이 두 번 세어진다 -- contracts/entrypoints.md §분석).
+# 뒤집으면(패스가 등록보다 먼저면) 패스는 성공한 채 끝나고 위 05:00 줄이 그날 밤 그 라벨을 규칙으로 도로
+# 덮는다 -- 주인 없는 scope 는 이 줄의 몫이기 때문이다. 순서를 틀릴 수 없게 CLI 가 1) 없는 --scope 를
+# 거절한다 (cosmai/cli.py -> analysis/polarity/ownership.py 의 unready).

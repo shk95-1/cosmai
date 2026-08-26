@@ -25,7 +25,7 @@ from analysis.locks import ANALYZE, analyze_lock
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
-from analysis.polarity.ownership import OWNERS
+from analysis.polarity.ownership import OWNERS, Owner
 from analysis.polarity.pipeline import MARKER
 from analysis.types import Polarity
 
@@ -295,7 +295,7 @@ def run_all(
     youtube_schema: str,
     captured_at: date | None,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
     stale: Sequence[str] = (),
 ) -> StageOutcome:
     counts: dict[str, int] = {}
@@ -354,7 +354,7 @@ def run_stage(
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
 ) -> StageOutcome:
     """한 실행 = 한 락. 못 잡으면 아무것도 열지 않고 양보한다 (analysis/locks.py)."""
     with analyze_lock(conn) as held:
@@ -379,7 +379,7 @@ def _one(
     youtube_schema: str,
     captured_at: date | None,
     polarity: Polarity | None,
-    owners: Mapping[str, str],
+    owners: Mapping[str, Owner],
     stale: Sequence[str],
 ) -> StageOutcome:
     run_id: int | None = None
