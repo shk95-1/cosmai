@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from db.seed import labeled, lexicon, mentions, metrics, products
+from db.seed import labeled, lexicon, mentions, metrics, pipeline, products
 from db.seed._common import DEFAULT_SLICES, EVAL_DIR, connect
 
 # Order matters: product_ref before the mentions that reference it, analysis_run before the metrics.
-GROUP_NAMES = ("lexicon", "labeled", "products", "mentions", "metrics")
+# pipeline 은 아무것도 참조하지 않는 운영 선언이라 어디에 놓아도 되지만, 분석 픽스처와 섞이지
+# 않게 끝에 둔다 -- --only pipeline 하나만 돌리는 것이 흔한 쓰임이다(#138).
+GROUP_NAMES = ("lexicon", "labeled", "products", "mentions", "metrics", "pipeline")
 
 
 def run_all(
@@ -22,6 +24,7 @@ def run_all(
         "products": (products.load, slices_dir),
         "mentions": (mentions.load, slices_dir),
         "metrics": (metrics.load, slices_dir),
+        "pipeline": (pipeline.load, slices_dir),
     }
     out: dict[str, int] = {}
     with connect(url) as conn, conn.cursor() as cur:

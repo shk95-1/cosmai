@@ -107,6 +107,43 @@ status/versions 와 그 run 의 `metrics_need`·`metrics_wish` 행 수. `need_me
 run_id 를 갖지 않으므로(versioning.md A19) 각 단계가 만든 행 수는 `analysis_run.note` 가 이름=값으로
 나른다. `db/migrate.sh` 가 배포마다 다시 적용한다 (CREATE OR REPLACE).
 
+### 단계의 지금 상태 — `needs.pipeline_health`
+
+위 둘은 **run 하나당 한 줄인 로그**라 "지금 무엇이 막혔나" 에 답하지 못한다. 그 답을 지는 것이
+`db/views/pipeline_health.sql` 의 `needs.pipeline_health` 이고, 기대 주기는 `needs.pipeline_stage`
+(DDL 007)가 선언한다 — 크론탭(`stack/crontab.d/`)은 DB 에 없고 포털은 PostgREST 로 DB 만 읽는다.
+크론탭을 파싱해 넣지 않는 이유는 `enabled` 다: `youtube watch` 는 크론 줄이 **있는데** compose
+profile 뒤라 안 돈다. 선언과 크론탭의 어긋남은 `tests/test_pipeline_stage.py` 가 막는다.
+
+행은 선언된 단계마다 정확히 하나이고, 컬럼은 `stage_key` · `arm` · `dataset` · `enabled` ·
+`expected_interval` · `last_success_at` · `last_run_at` · `last_run_status` · `overdue_by` ·
+`freshness` · `requests` · `ok` · `blocked` · `failed` · `p90_ms` 다.
+
+**두 사실을 하나로 접지 않는다.** `freshness` 는 "안 돌았다" 만, `last_run_status` 는 "돌았는데
+어떻게 끝났나" 만 말한다. 셋째 사실을 넣지 않는 이유는 3일 전에 실패하고 그 뒤로 안 돈 단계가 한
+값으로는 둘 중 하나로만 보이기 때문이다.
+
+`freshness` 는 마지막 **성공** run 의 `finished_at` 을 기준으로 다섯 값 중 하나다:
+
+| 값 | 뜻 |
+|---|---|
+| `disabled` | `pipeline_stage.enabled = false` — 선언상 안 도는 것. 최신 성공이 있어도 이것이 이긴다 |
+| `never` | 성공한 run 이 한 번도 없다. `overdue_by` 는 NULL 이다 — 늦었냐는 질문이 성립하지 않는다 |
+| `ok` | 마지막 성공이 `expected_interval` 안 |
+| `late` | 그것을 넘었지만 `2 × expected_interval` 안 |
+| `stalled` | `2 × expected_interval` 을 넘었다 |
+
+눈금이 절대값이 아니라 주기의 배수인 것은 주기가 5분(`youtube work`)부터 한 달(`naver datalab`)까지
+벌어져 있어서다 — 상수 여유를 두면 어느 한쪽에서 반드시 틀린다.
+
+분석 두 줄은 `analysis_run.note` 의 `missing=` 으로 갈린다. `stage` 는 구현 판본을 달고 있어 그대로
+쓸 수 없고, 크론 줄로도 갈리지 않는다. `eval:*`·`trend-quarter:*` 는 크론 단계가 아니라 이 뷰에
+오지 않는다. 분석 팔에는 외부 fetch 가 없어 `requests`·`ok`·`blocked`·`failed`·`p90_ms` 가 NULL 이다.
+
+읽는 롤은 둘이다: `needs_runtime`(뷰 파일의 GRANT)과 `postgrest_anon`
+(`db/grants/postgrest_anon_needs.sql`) — 포털은 anon 으로 묻기 때문에 앞의 것만으로는 화면이 아무것도
+받지 못한다. 상류 두 뷰는 anon 에 열지 않는다: 화면이 읽는 것은 판정이 끝난 이 뷰 하나다.
+
 ## 분석
 ```
 cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]

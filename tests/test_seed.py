@@ -39,6 +39,9 @@ EXPECTED = {
     "analysis_run": 3,  # 슬라이스마다 run 하나: seed:slice-{suncare,p1,p9}
     "metrics_need": 346,  # suncare 15 + 30 (suncare run) + p1 301 (p1 run)
     "metrics_wish": 601,  # slice-p9-wish-mining/wish_aggregates.csv
+    # 슬라이스가 아니라 운영 선언이다 -- 크론 14줄과 1:1 이고 그 대조는
+    # tests/test_pipeline_stage.py 가 한다 (#138).
+    "pipeline_stage": 14,
 }
 
 
