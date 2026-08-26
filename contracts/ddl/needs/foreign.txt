@@ -19,3 +19,6 @@ panel_roster           # 포크 cosmai-import-ydc 의 022_panel_and_quarter — 
 panel_channel          # 같은 022 — 43채널 명부와 panel_role
 metrics_topic_quarter  # 같은 022 — 분기 그레인 집계
 metrics_topic_quarter_violation  # 포크 db/views/ 의 뷰 (분기 표의 조밀 격자·분모 닫힘 검사). -T 는 뷰에도 걸린다
+corpus_snapshot        # 포크 cosmai-import-ydc 의 023_corpus_snapshot — 코퍼스 스냅샷 판본 (2026-08-26 01:20 운영 적용)
+corpus_document        # 같은 023 — 스냅샷의 문서. doc_id 는 source:source_item_id 의 GENERATED STORED
+corpus_mention         # 같은 023 — 문서 × 주제 언급
