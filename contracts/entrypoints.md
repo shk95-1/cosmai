@@ -157,6 +157,9 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   바꾸는 길은 `cosmai lexicon load/diff/activate` 하나다 — 적재 원본은 `analysis/retrieval/dict/topics_v1.csv`.
   aspect 버전 하나 = **모든 룰셋을 합친 aspect 사전 전체**라(`activate` 는 kind 단위로 켠다) 주제를 새
   버전으로 올릴 때는 극성 쪽 CSV(`eval/lexicon/aspect_lexicon_v1.csv`)도 같은 버전으로 함께 적재한다.
+  **v3 적재는 아직 안 했다**(2026-08-27, 운영은 v2 가 활성) — 그전까지 검색이 보는 사전은 v2 이고, 레포의
+  적재 원본은 이미 v3 내용이라 그 둘이 갈려 있다. 켜는 순간 `선크림` 주제가 12,197 → 12,418 문서를 보게
+  되고 색인 캐시가 사전 지문으로 무효화된다(`pipeline.index_signature`).
 - **색인·추출 축에는 불용어 목록도 조사 목록도 두지 않는다**(포크 #37, ydc `lexicon.json` 처분). 그 축은
   색인 토큰화(`bm25.tokenize`)와 `terms` 다 — 일반어는 lift 축이 걷어내고(`analysis/retrieval/terms.py`),
   조사는 Kiwi 의 태그가 가른다: `KIWI_TAGS` 밖(조사 `J*`·어미 `E*`)을 버리고 한 글자 명사도 버려서, ydc
@@ -166,8 +169,13 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   이슈가 아래 두 항목에서 진다. 축이 어느 쪽이든 살아남는 것은 파일이 아니라 **버전을 받는 행**이다
   (포크 #8) — 주제 표기는 위 사전(`ruleset='retrieval-topic'`), 브랜드 표기는 `needs.entity_lexicon`
   (`formats.md` §사전 CSV).
-  `lexicon.json` 의 별칭은 아직 그 자리로 다 가지 않았다: 9개 중 셋만 자리가 있고 **5종이 미이전**이라
-  옮기는 일은 포크 #56 이 진다.
+  `lexicon.json` 의 별칭 **9개가 다 판정됐다**(포크 #56): 셋(`썬크림`·`자외선차단제`·`코스알엑스`)은
+  이미 있었고, `선크림추천` 은 확장이 잡아 행이 필요 없으며, **셋**(`썬쿠션`·`썬스틱`·`sunscreen`)이 주제
+  사전 v3 의 행이 됐고, `올영`(df 5,583)과 `sunstick`(df 3)은 미등재다 — 앞은 정본이 `tier='stop'` 이라
+  행을 더해도 소비자가 없고, 뒤는 바닥(`terms.MIN_DOCS` 5) 아래이며 그 3편을 이미 `선크림` 이 본다.
+  같은 v3 가 #37 의 후보 7종도 판정해 `선에센스`·`선스프레이`·`속건조`·`파데프리` 넷을 더 올렸다. 판정
+  원장과 등재 기준 넷은 `formats.md` §주제 사전 v3 이고, 그 수를 다시 재 원장과 맞대는 길은
+  `tool/measure-lexicon-candidates` 다.
 - **질의 토큰화는 색인 토큰화와 갈린다**(포크 #46). 색인은 `bm25.tokenize`, 질의는 `bm25.tokenize_query`
   — 같은 토큰화에 **질의 불용어 제거**만 얹은 것이고, `Index.search` 만 그쪽을 탄다. 색인에서 빼지 않는
   이유는 그러면 `소비자` 를 직접 찾는 질의를 못 하게 되기 때문이다. 뺄 근거가 lift 도 idf 도 아닌 이유는
