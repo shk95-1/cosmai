@@ -6,6 +6,11 @@ set -e
 . tool/checks/prerequisite
 require_command uv docker pg_isready
 
+# Before the postgres container: a broken portal/public/*.js fails here for free, without
+# paying the ~2min container-and-migrate cost that the python suite below needs.
+printf '→ js\n'
+tool/checks/js
+
 uv sync --extra dev --frozen
 
 # git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
@@ -55,4 +60,5 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
 fi
 
+printf '→ pytest\n'
 uv run pytest

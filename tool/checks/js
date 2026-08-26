@@ -1,0 +1,8 @@
+#!/bin/sh
+# portal/public/{query,screens,render}.js are pure functions (no DOM/fetch) precisely so
+# portal/test/*.test.mjs can check them with node's built-in runner and no browser.
+set -e
+. tool/checks/prerequisite
+require_command node
+
+node --test portal/test/*.test.mjs
