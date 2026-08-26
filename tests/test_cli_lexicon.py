@@ -187,3 +187,52 @@ def test_the_topic_dictionary_is_not_read_as_a_polarity_aspect(seeded: str):
         conn.commit()
         assert len(load_aspects(conn, "suncare-v2.2").patterns) == before
         assert topics.load(conn).version == 1
+
+
+# ---------- 적재 원본 CSV 를 DB 버전과 맞댄다 (포크 #62) ----------
+
+
+def test_diff_compares_a_csv_against_a_db_version(seeded: str, tmp_path: Path, capsys):
+    """이 명령은 DB 버전끼리만 비교했다 -- "레포의 CSV 가 지금 켜져 있는 사전인가"를 물을 길이
+    레포 안에 없었고, `interfaces.md` §검색 실측 의 판본 되짚기가 그 물음이었다."""
+    csv = _csv(tmp_path, "brand_v2.csv", BRAND_V2)
+    main(["lexicon", "load", "--kind", "brand", "--version", "2", csv, "--url", seeded])
+    capsys.readouterr()
+    # 같은 CSV 를 그 CSV 로 적재한 버전과 맞대면 아무 차이가 없어야 한다.
+    assert main(["lexicon", "diff", "--kind", "brand", "--csv", csv, "--against", "2", "--url", seeded]) == 0
+    assert "+0 -0 ~0" in capsys.readouterr().out
+    # 한 줄만 고쳐도 그 줄이 보인다 -- 공회전이 아니라는 것이 여기서 관측된다.
+    moved = _csv(tmp_path, "brand_moved.csv", BRAND_V2.replace("cooc_required", "normal"))
+    assert (
+        main(["lexicon", "diff", "--kind", "brand", "--csv", moved, "--against", "2", "--url", seeded]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "+0 -0 ~1" in out and "~ 헤라" in out
+
+
+def test_the_csv_diff_narrows_an_aspect_version_to_the_rulesets_the_csv_carries(seeded: str, capsys):
+    """한 aspect 버전에는 룰셋이 여럿 산다(formats.md B4). 안 좁히면 극성 사전 70행이 통째로
+    "지워짐"으로 나와서 주제 사전이 같다는 사실이 그 목록에 묻힌다."""
+    from analysis.retrieval import topics
+    from db.lexicon import insert_aspects
+    from tests.retrieval.conftest import csv_rows
+
+    with connect(seeded) as conn, conn.cursor() as cur:
+        insert_aspects(cur, csv_rows(), 2, active=False)
+        conn.commit()
+    capsys.readouterr()
+    argv = ["lexicon", "diff", "--kind", "aspect", "--csv", str(topics.DICTIONARY_CSV)]
+    assert main([*argv, "--against", "2", "--url", seeded]) == 0
+    out = capsys.readouterr().out
+    assert "+0 -0 ~0" in out
+    assert "retrieval-topic" in out  # 어느 룰셋으로 좁혀 본 결과인지 출력이 말한다
+
+
+def test_the_csv_diff_refuses_to_take_two_left_hands(seeded: str, tmp_path: Path, capsys):
+    # --version 과 --csv 가 둘 다 오면 어느 쪽이 그 판본인지 답이 둘이다.
+    csv = _csv(tmp_path, "brand_v2.csv", BRAND_V2)
+    argv = ["lexicon", "diff", "--kind", "brand", "--csv", csv, "--version", "2", "--url", seeded]
+    assert main(argv) == 2
+    assert "--version" in capsys.readouterr().out
+    # 둘 다 없어도 맞댈 상대가 없다.
+    assert main(["lexicon", "diff", "--kind", "brand", "--url", seeded]) == 2

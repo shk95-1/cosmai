@@ -195,3 +195,54 @@ def test_the_polarity_ruleset_is_not_read_as_a_topic(conn):
         insert_aspects(cur, [("효과없음", "generic", "", "효과|도움", True, "p1-v2.2", 1, {})], 1)
     conn.commit()
     assert [e["topic"] for e in topics.load(conn).entries] == [e["topic"] for e in frozen_topics.TOPICS]
+
+
+# ---------- 판본 문자열 (포크 #62) ----------
+
+
+def test_the_stamp_names_the_ruleset_the_version_and_the_content():
+    """번호표만으로는 판본이 아니다 -- 켜져 있는 버전에 행을 더할 수 있어 번호가 그대로 남는다
+    (`index_signature` 가 지문을 함께 무는 것과 같은 이유)."""
+    stamped = csv_topics(3).stamp
+    assert stamped == (
+        "ruleset=retrieval-topic · version=3 · topics=15 · aliases=80"
+        f" · fingerprint={csv_topics(3).fingerprint}"
+    )
+    # 별칭 수는 매칭·질의가 보는 두 계열만 센다. mfds_inci 를 함께 세면 한 낱말이 두 축을 말한다.
+    assert csv_topics(3).aliases == 80
+    # 적재 원본 한 벌에는 번호표가 없다 -- 번호는 적재가 준다. 0 이나 1 로 메우면 그 자리가 거짓이 된다.
+    assert "version=미적재" in csv_topics(None).stamp
+
+
+def test_the_frozen_v1_copy_is_the_dictionary_the_six_baseline_lines_stand_on():
+    """`contracts/interfaces.md` §검색 실측 이 인용하는 판본 문자열의 거처. 이 사본이 움직이면 그
+    여섯 줄이 어느 사전 위의 값인지 말하는 근거가 함께 움직인다 (포크 #62)."""
+    frozen = topics.Topics(
+        entries=tuple(frozen_topics.TOPICS),
+        version=1,
+        fingerprint=topics._fingerprint(frozen_topics.TOPICS),
+    )
+    assert frozen.stamp == (
+        "ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 · fingerprint=4afd3b25522a4d26"
+    )
+
+
+def test_the_difference_between_two_dictionaries_names_the_axis_it_is_on():
+    """지문은 갈렸다는 것만 말한다. 무엇이 갈렸는지를 못 말하면 "지문이 다르다"가 "점수가 다르다"로
+    읽힌다 -- 실제로 얼어붙은 사본과 적재 원본은 매칭이 안 보는 칸의 **순서**로 갈린다 (포크 #62)."""
+    frozen = topics.Topics(
+        entries=tuple(frozen_topics.TOPICS),
+        version=1,
+        fingerprint=topics._fingerprint(frozen_topics.TOPICS),
+    )
+    lines = topics.differences(csv_topics(3), frozen)
+    assert "≈ 유기자차.mfds_inci: 순서만 다르다" in lines
+    # #56 이 더한 일곱이 넷(주제 셋 × 계열)으로 나온다. 그 밖의 축은 갈리지 않는다.
+    assert sorted(line.split(":")[0] for line in lines) == [
+        "~ 선크림.ko",
+        "~ 선크림.latin",
+        "~ 촉촉함_건조함.ko",
+        "~ 톤업_메이크업베이스.ko",
+        "≈ 유기자차.mfds_inci",
+    ]
+    assert topics.differences(csv_topics(3), csv_topics(9)) == []  # 번호표는 사전 내용이 아니다

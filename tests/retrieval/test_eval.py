@@ -340,3 +340,51 @@ def test_every_vector_row_carries_the_store_version_even_when_nothing_is_off(loa
     assert fused and all(row.store == stamped for row in fused)
     # bm25 는 저장소를 열지 않는다 -- 없는 판본을 지어내지 않는다.
     assert all(not row.store for row in retrieval_eval.run(loaded, "literal", cache_dir=None))
+
+
+def test_every_row_carries_the_dictionary_it_was_scored_on(loaded, monkeypatch, tmp_path):
+    """저장소 판본만으로는 반쪽이다 -- 정답도 질의도 주제 사전이 만들므로, 사전이 갈리면 같은
+    저장소 위에서도 다른 표가 나온다. bm25 행에는 저장소가 없지만 사전은 있다 (#62)."""
+    from analysis.retrieval import embed, topics, vectors
+
+    stamped = topics.load(loaded).stamp
+    assert "ruleset=retrieval-topic" in stamped and "fingerprint=" in stamped
+    assert "dictionary" in retrieval_eval.FIELDS  # CSV 로 떨어져 나가도 같이 간다
+
+    lexical = retrieval_eval.run(loaded, "literal", cache_dir=None)
+    assert lexical, "질의가 하나도 채점되지 않았다"
+    # 저장소를 안 여는 엔진이다 -- `store` 는 비고 `dictionary` 는 찬다. 두 열의 축이 다르다는 뜻이다.
+    assert all(not row.store for row in lexical)
+    assert all(row.dictionary == stamped for row in lexical)
+    assert stamped in retrieval_eval.summary(lexical)
+
+    out = _covering_store(loaded, tmp_path / "e5base")
+
+    class FakeEncoder:
+        def encode(self, texts, **_kw):
+            return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_kw: FakeEncoder())
+    for engine in ("vector", "hybrid"):
+        scored = retrieval_eval.run(loaded, "literal", engine=engine, store=out, cache_dir=None)
+        assert scored and all(row.dictionary == stamped for row in scored), engine
+
+
+def test_the_dictionary_stamp_follows_the_dictionary_the_run_actually_read(loaded):
+    """번호표만 실으면 켜져 있는 버전에 행을 더한 실행이 같은 판본을 주장한다 -- 지문이 그것을 막는다.
+    사전을 넓히고 다시 돌렸을 때 행의 판본이 안 움직이면 이 열은 아무것도 안 말한다."""
+    from analysis.retrieval import topics
+    from db.lexicon import activate, insert_aspects
+    from tests.retrieval.conftest import csv_rows
+
+    before = {row.dictionary for row in retrieval_eval.run(loaded, "literal", cache_dir=None)}
+    assert len(before) == 1
+    with loaded.cursor() as cur:
+        more = ("백탁", "generic", "", "허옇", False, topics.RULESET, 1, {"term_kind": "ko"})
+        insert_aspects(cur, [*csv_rows(), more], 2, active=False)
+        activate(cur, "aspect", 2)
+    loaded.commit()
+    after = {row.dictionary for row in retrieval_eval.run(loaded, "literal", cache_dir=None)}
+    assert len(after) == 1
+    assert after != before
+    assert "version=2" in after.pop()
