@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""전량 대조를 다시 돌린다: ydc 세 스크립트의 산출본 대 `cosmai trend sensitivity` (포크 #41).
+
+표본 골든(`tests/test_sensitivity_golden.py`)은 `tests/fixtures/trend_sample/` 위에서 CI 가 매번 지킨다.
+**전량은 CI 가 지킬 수 없다** -- 261,317문서 174MB 는 `archive/` 에 있고 그 자리는 읽기 전용이며 레포에
+넣을 것도 아니다(`contracts/formats.md` §코퍼스 스냅샷). 그래서 전량 대조는 사람이 한 번 돌리는 일이고,
+"어떻게 돌렸나" 가 커밋 메시지에만 남아 아무도 다시 맞대 볼 수 없게 되는 것을 막는 것이 이 파일이다.
+
+돌리는 법 (인자는 전부 그 자리에서 준다 -- 레포에 남의 머신 배치를 적지 않는다):
+
+    # 1. 일회용 postgres 에 전량을 세운다 (운영 DB 에 쓰지 않는다)
+    python -m db.corpus load ~/github_prj/Main/archive/yt-handoff --url "$URL"
+    cosmai trend quarter --url "$URL"      # COPY 직후 첫 실행은 autovacuum 경합으로 한 번 죽는다
+    cosmai trend judge   --url "$URL"
+
+    # 2. ydc 세 스크립트를 손대지 않고 돌려 산출본 셋을 만든 뒤 행 단위로 맞댄다
+    tool/compare-ydc-sensitivity --url "$URL" \
+        --ydc ~/github_prj/Main/import/youtube-data-collector \
+        --runs data/panel/run_20260819T053057Z data/panel/run_20260819T054559Z
+
+`--runs` 는 `--ydc` 안에서의 상대 경로다 (ydc 스크립트가 자기 디렉터리에서 도는 것을 전제한다).
+`panel_sensitivity.py` 는 판정 대상 셀이 0개면 요약을 찍다 죽지만 CSV 는 그 전에 쓰므로, 종료 코드가
+아니라 파일이 생겼는지로 본다.
+
+산출본 셋 중 `panel_sensitivity.csv` 와 `backtest.csv` 는 ydc 레포에 이미 커밋돼 있고
+(`reports/panel_sensitivity.csv` · `data/backtest.csv`), `spam_ad_sensitivity.csv` 는 없다 -- 그것이 이
+스크립트가 세 개를 **다 다시 만들어** 맞대는 이유다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from analysis.sensitivity.pipeline import build  # noqa: E402
+from db.seed._common import connect  # noqa: E402
+
+# ydc 는 소스를 파일마다 다르게 적는다(`panel_sensitivity.csv` 는 `video`, `backtest.csv` 는
+# `youtube_video`). 이 레포의 어휘는 022 의 CHECK 하나다 -- 그 하나로 옮겨 맞댄다.
+SOURCE = {"video": "youtube_video", "comment": "youtube_comment"}
+VARIANT = {
+    "광고·협찬 영상 제외": "ad_video",
+    "운영자 댓글 제외": "creator_comment",
+    "홍보 댓글 제외": "promo_comment",
+    "전부 제외": "all_flagged",
+}
+SCRIPTS = (
+    ("panel_sensitivity.py", "panel_sensitivity.csv"),
+    ("backtest.py", "backtest.csv"),
+    ("spam_ad_flags.py", "spam_ad_sensitivity.csv"),
+)
+PANEL_COLUMNS = (
+    "quarters_ok_product", "quarters_ok_all", "delta_product_pp", "delta_all_pp",
+    "difference_pp", "sample_ok",
+)  # fmt: skip
+BACKTEST_COLUMNS = (
+    "trend_type", "before_pp", "before_excl_pp", "after_pp", "at_cutoff_pp",
+    "expected", "actual", "hit", "hit_level",
+)  # fmt: skip
+AD_COLUMNS = (
+    "composition_base_pp", "composition_kept_pp", "diff_pp", "judged_cells", "flipped_cells",
+)  # fmt: skip
+
+
+def _same(want: str, got: object) -> bool:
+    if isinstance(got, bool):
+        return want == ("true" if got else "false")
+    if isinstance(got, float):
+        return abs(float(want) - got) < 1e-9
+    if isinstance(got, int):
+        return int(want) == got
+    return want == got
+
+
+def _read(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _produce(ydc: Path, runs: list[str], out: Path) -> dict[str, Path]:
+    made: dict[str, Path] = {}
+    for script, name in SCRIPTS:
+        target = out / name
+        subprocess.run(  # noqa: S603
+            [sys.executable, script, *runs, "--out", str(target)],
+            cwd=ydc,
+            check=False,
+            capture_output=True,
+        )
+        if not target.exists():
+            raise SystemExit(f"{script} produced no {name}; run it by hand to see why")
+        made[name] = target
+    return made
+
+
+def _compare(name: str, golden: dict, ours: dict, columns: tuple[str, ...]) -> int:
+    if set(golden) != set(ours):
+        print(f"{name}: KEY MISMATCH {sorted(set(golden) ^ set(ours))[:10]}")
+        return len(set(golden) ^ set(ours))
+    differ = 0
+    for key, want in golden.items():
+        for column in columns:
+            got = getattr(ours[key], column)
+            if not _same(want[column], got):
+                print(f"  DIFF {name} {key} {column}: ydc {want[column]!r} != {got!r}")
+                differ += 1
+    print(f"{name}: {len(golden)} rows compared, {differ} differ")
+    return differ
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--url", required=True, help="SQLAlchemy URL of the database holding the run.")
+    parser.add_argument("--ydc", required=True, type=Path, help="The ydc checkout to run unchanged.")
+    parser.add_argument("--runs", required=True, nargs="+", help="Run dirs, relative to --ydc.")
+    parser.add_argument("--keep", type=Path, default=None, help="Keep the ydc CSVs in this directory.")
+    args = parser.parse_args()
+
+    with tempfile.TemporaryDirectory() as scratch:
+        out = args.keep or Path(scratch)
+        out.mkdir(parents=True, exist_ok=True)
+        made = _produce(args.ydc.expanduser(), args.runs, out)
+        with connect(args.url) as conn:
+            built = build(conn)
+        differ = _compare(
+            "panel_sensitivity",
+            {(SOURCE[r["source"]], r["topic_id"]): r for r in _read(made["panel_sensitivity.csv"])},
+            {(row.source, row.topic_key): row for row in built.panel},
+            PANEL_COLUMNS,
+        )
+        differ += _compare(
+            "backtest",
+            {(r["cutoff"], r["source"], r["topic_id"]): r for r in _read(made["backtest.csv"])},
+            {(row.cutoff, row.source, row.topic_key): row for row in built.back.rows},
+            BACKTEST_COLUMNS,
+        )
+        differ += _compare(
+            "spam_ad",
+            {
+                (VARIANT[r["variant"]], r["source"], r["topic_id"]): r
+                for r in _read(made["spam_ad_sensitivity.csv"])
+            },
+            {(row.variant, row.source, row.topic_key): row for row in built.ad.rows},
+            AD_COLUMNS,
+        )
+    ad = built.ad
+    print(
+        f"read: videos={ad.videos} ad={ad.ad_videos}(declared {ad.declared} · matched {ad.matched}) "
+        f"comments={ad.comments} creator={ad.creator_comments} promo={ad.promo_comments}"
+    )
+    print(f"violations: {built.violations}")
+    print(f"TOTAL DIFFERENCES: {differ}")
+    return 0 if differ == 0 else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

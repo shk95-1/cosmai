@@ -1,22 +1,23 @@
 {
   "produced_by": "to_common_schema.py",
   "source_runs": [
+    "run_20260819T053057Z",
     "run_20260819T054559Z"
   ],
   "table_counts": {
-    "document.csv": 442,
-    "mention.csv": 614,
-    "channel.csv": 4
+    "document.csv": 974,
+    "mention.csv": 1171,
+    "channel.csv": 11
   },
   "documents_by_content_type": {
-    "video_long": 22,
+    "video_long": 62,
     "video_unknown": 1,
     "video_short": 1,
-    "comment": 418
+    "comment": 910
   },
   "input_counts": {
-    "video_rows": 24,
-    "comment_rows": 418,
+    "video_rows": 64,
+    "comment_rows": 910,
     "duplicate_docs": 0,
     "orphan_comments": 0,
     "duplicate_comment_text": 0
@@ -40,9 +41,49 @@
     "그_영상_댓글_전체": 418,
     "그_영상_댓글_중복제외": 418,
     "재현_방법": "document 에서 content_type=video_long 이고 channel.panel_role=product 이며 mention 에 topic_id=선크림 이 있는 문서 → 21. 그 영상들을 parent_item_id 로 갖는 댓글 → 418. 그중 quality_flags 가 빈 것 → 418.",
-    "표본": "2026-08-19 코퍼스에서 채널 4개(UCat2CSzaple02nnhbUSJ2zg · UCcM_RMZxkIiSmnjx_hOKkDQ · UCN820P3PLVl7v0nPdnXTtLQ · UCED7YKsAzQ2qi2e-cJ7yTEg)만 남기고 잘라낸 대표 표본이다. 그 채널들의 선크림 장문 전부와 그 영상들의 댓글 전부를 담았고, 제외 경로를 보이려고 쇼츠 1편 · video_unknown 1편 · 선크림 없는 장문 1편을 함께 남겼다 — 모집단이 채널 단위로 닫혀 있어 ydc trend.py 를 같은 잘린 run 에 돌린 값과 1:1 로 맞댈 수 있다."
+    "표본": "2026-08-19 코퍼스에서 채널 11개만 남기고 잘라낸 대표 표본이다. product 4개(UCat2CSzaple02nnhbUSJ2zg · UCcM_RMZxkIiSmnjx_hOKkDQ · UCN820P3PLVl7v0nPdnXTtLQ · UCED7YKsAzQ2qi2e-cJ7yTEg) 와 expert 7개(UCehSxRApNbh93SbHSR9PNmg · UC120Dx91wwLlbOjxCMBpZiQ · UCXFd79l1HUumoM6spU4D1Cw · UCK7v-eIsfif6b-Df8jJ343Q · UCJT4XXjfaxSPxTe2Ui95zTQ · UCAXfBEN6G-T1EEhfnOAXOwg · UCeW13kHjeb_sviMo30GGBEw) 다. 각 채널의 선크림 장문 전부와 그 영상들의 댓글 전부를 담았고, 제외 경로를 보이려고 쇼츠 1편 · video_unknown 1편 · 선크림 없는 장문 1편을 함께 남겼다 — 모집단이 채널 단위로 닫혀 있어 ydc trend.py 를 같은 잘린 run 에 돌린 값과 1:1 로 맞댈 수 있다. expert 7개는 포크 #41 이 더했다: 판정·보고 모집단은 product 뿐이라(규칙 5) 이 채널들은 metrics_topic_quarter 의 어느 행에도 들지 않고, 패널 민감도가 product 와 43채널 전부를 갈라 볼 수 있는 자리만 만든다."
   },
   "source_run_manifests": [
+    {
+      "run_id": "run_20260819T053057Z",
+      "collected_at": "2026-08-19T05:30:57Z",
+      "method": "channel_uploads_panel",
+      "config": {
+        "seed_videos_file": "",
+        "seed_video_count": 0,
+        "channels_csv": "seeds/channels_v1.csv",
+        "published_after": "2023-07-01T00:00:00Z",
+        "max_units": 8000,
+        "comments_per_video": 100,
+        "comment_order": "relevance",
+        "include_replies": false
+      },
+      "counts": {
+        "seed_channels": 20,
+        "channels_resolved": 20,
+        "unique_videos": 7205,
+        "topic_matched_videos": 2851,
+        "comment_rows": 142745,
+        "videos_without_comments": 1
+      },
+      "api_calls": {
+        "channels": 1,
+        "playlistItems": 153,
+        "videos": 145,
+        "commentThreads": 2852
+      },
+      "quota_units_spent": 3151,
+      "limitations": [
+        "모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).",
+        "패널 밖 신규 채널·신규 브랜드의 등장은 관측되지 않는다.",
+        "조회수·좋아요는 collected_at 시점 스냅샷이다.",
+        "업로드 플레이리스트 최신순 가정에 기반해 cutoff에서 조기 종료한다.",
+        "댓글은 주제 사전에 걸린 영상만 받는다. 전체 영상의 댓글 분모는 존재하지 않는다.",
+        "댓글 published_at은 댓글 자체 시각이다. 분기 귀속은 video_id로 부모 영상에 붙인다.",
+        "댓글은 계속 쌓이므로 최근 분기는 구조적으로 과소 집계된다.",
+        "order=relevance는 유튜브 비공개 알고리즘이며 좋아요 순이 아니다."
+      ]
+    },
     {
       "run_id": "run_20260819T054559Z",
       "collected_at": "2026-08-19T05:45:59Z",
