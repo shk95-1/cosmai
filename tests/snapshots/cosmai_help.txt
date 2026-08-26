@@ -129,15 +129,17 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai trend --help
-usage: cosmai trend [-h] {quarter,judge} ...
+usage: cosmai trend [-h] {quarter,judge,evidence,cards} ...
 
 positional arguments:
-  {quarter,judge}
-    quarter        Load needs.metrics_topic_quarter from the active corpus snapshot.
-    judge          Load needs.topic_quarter_judgement from that run's quarterly rows.
+  {quarter,judge,evidence,cards}
+    quarter             Load needs.metrics_topic_quarter from the active corpus snapshot.
+    judge               Load needs.topic_quarter_judgement from that run's quarterly rows.
+    evidence            Load needs.topic_quarter_evidence for that run's judged cells.
+    cards               Render the quarter's opportunity cards to stdout.
 
 options:
-  -h, --help       show this help message and exit
+  -h, --help            show this help message and exit
 
 $ cosmai trend quarter --help
 usage: cosmai trend quarter [-h] [--url URL]
@@ -152,6 +154,21 @@ usage: cosmai trend judge [-h] [--url URL]
 options:
   -h, --help  show this help message and exit
   --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend evidence --help
+usage: cosmai trend evidence [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend cards --help
+usage: cosmai trend cards [-h] --quarter QUARTER [--url URL]
+
+options:
+  -h, --help         show this help message and exit
+  --quarter QUARTER  예: 2026Q2. 카드는 분기 단위의 물음이다.
+  --url URL          SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]

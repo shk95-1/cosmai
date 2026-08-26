@@ -120,6 +120,17 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     )
     judged.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 근거는 판정 셀에 붙는 포인터다 -- 본문을 베끼지 않으므로 인자도 스냅샷도 없다.
+    evidence = actions.add_parser(
+        "evidence", help="Load needs.topic_quarter_evidence for that run's judged cells."
+    )
+    evidence.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+    # 카드는 아무것도 쓰지 않는다. 저장된 세 표를 읽어 마크다운을 stdout 으로 낸다.
+    cards = actions.add_parser("cards", help="Render the quarter's opportunity cards to stdout.")
+    cards.add_argument("--quarter", required=True, help="예: 2026Q2. 카드는 분기 단위의 물음이다.")
+    cards.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
@@ -330,6 +341,10 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
+    from analysis.cards.pipeline import collect as cards_collect
+    from analysis.cards.pipeline import report as cards_report
+    from analysis.evidence.pipeline import NoEvidence
+    from analysis.evidence.pipeline import run as evidence_run
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
@@ -341,20 +356,27 @@ def _run_trend(args: argparse.Namespace) -> int:
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
-    act = quarter_run if args.action == "quarter" else judge_run
+    acts = {"quarter": quarter_run, "judge": judge_run, "evidence": evidence_run}
     try:
         with conn:
-            outcome = act(conn)
-    # 명부도 스냅샷도 주제 사전도 지표 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
+            if args.action == "cards":
+                outcome = cards_collect(conn, args.quarter)
+                # 카드는 산출물 자체가 stdout 이다 -- 파일로 떨구지 않고, 남기려면 리다이렉트한다.
+                print(cards_report(outcome), end="")
+                print(outcome.note)
+                # 카드 0건은 위반이 아니라 결과 없음이다 (`retrieval search` 와 같은 자리).
+                return 0 if outcome.status == "ok" else 1
+            written = acts[args.action](conn)
+    # 명부도 스냅샷도 주제 사전도 지표·판정 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
     # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    except (NoPopulation, NoJudgement, TopicAxisDrift, NoDictionary) as blocked:
+    except (NoPopulation, NoJudgement, NoEvidence, TopicAxisDrift, NoDictionary) as blocked:
         print(blocked)
         return 2
-    print(outcome.note)
-    for violation in outcome.violations:
+    print(written.note)
+    for violation in written.violations:
         print(f"  {violation}")
     # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
-    return 0 if outcome.status == "ok" else 1
+    return 0 if written.status == "ok" else 1
 
 
 def _run_eval(args: argparse.Namespace) -> int:

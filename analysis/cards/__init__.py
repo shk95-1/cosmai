@@ -49,7 +49,7 @@ GENERIC_ALIAS: Mapping[str, frozenset[str]] = {
     "지속력_워터프루프": frozenset({"지속"}),
 }
 UNDERCOUNTED = "최근 분기는 댓글이 계속 쌓이므로 구조적으로 과소 집계된다"
-SINGLE_SOURCE = "단일 소스 판정 -- 플랫폼 간 교차 확인 없음"
+SINGLE_SOURCE = "단일 소스 판정 — 플랫폼 간 교차 확인 없음"
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,7 @@ def classify(facts: CellFacts) -> tuple[str, str] | None:
     if gap >= GAP_PRODUCT_GAP and comment_type not in UNJUDGED and comment_type:
         return (
             PRODUCT_GAP,
-            f"갭 +{gap:.2f}%p -- 댓글이 영상 설명보다 훨씬 많이 말한다 (댓글 판정 {comment_type})",
+            f"갭 +{gap:.2f}%p — 댓글이 영상 설명보다 훨씬 많이 말한다 (댓글 판정 {comment_type})",
         )
     if comment_type in RISING or video_type in RISING:
         if abs(gap) < GAP_PRODUCT_GAP:
@@ -130,7 +130,7 @@ def classify(facts: CellFacts) -> tuple[str, str] | None:
                 VERIFIED_GROWTH,
                 f"댓글 {comment_type or '—'} / 영상 {video_type or '—'}, 갭 {gap:+.2f}%p 로 작다",
             )
-        return (FAD_RISK, f"단기 피크 관측 (댓글 {comment_type or '—'} / 영상 {video_type or '—'})")
+        return (FAD_RISK, f"단기 피크 관측 (댓글 {comment_type} / 영상 {video_type})")
     if comment_type in STEADY and video_type in STEADY and composition >= SATURATED_COMPOSITION:
         return (SATURATED, f"구성비 {composition:.2f}% 로 상위인데 양쪽 다 {comment_type}·{video_type}")
     return None
@@ -154,7 +154,7 @@ def limits(facts: CellFacts, quotes: Sequence[Quote]) -> list[str]:
         if row is None:
             continue
         if row.hold_reason:
-            made.append(f"{label}: 판정 보류 -- {row.hold_reason}")
+            made.append(f"{label}: 판정 보류 — {row.hold_reason}")
         if row.single_source:
             made.append(f"{label}: {SINGLE_SOURCE}")
     used = {q.matched_term for q in quotes if q.matched_term}
