@@ -231,6 +231,26 @@ cosmai trend judge [--url <url>]
   지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
 - `analysis_run.versions.judgement` 가 그 행들의 정의 판본을 든다 (`versioning.md`).
 
+## 민감도·후향 검증 (포크 #41, ydc `panel_sensitivity.py`·`backtest.py`·`spam_ad_flags.py` 승격)
+```
+cosmai trend sensitivity [--url <url>]
+```
+- `cosmai trend quarter` 가 낸 **그 run 의** 결론이 세 선택에 흔들리는지 묻는다: 패널 구성(product 만 대 43채널
+  전부) · 컷오프(과거 분기까지만 알던 것처럼 다시 셈) · 광고·협찬 표시(빼고 다시 셈). run 은 `quarter`·`judge`
+  와 **같은 길**로 찾는다(활성 스냅샷·활성 명부에서 만든 note) — 인자가 없는 이유도 같다.
+- **아무것도 쓰지 않는다.** 세 측정이 만드는 행은 반사실 모집단의 것이고 022 의 `panel_role` 어휘에도
+  `analysis_run` 에도 자리가 없다(`interfaces.md` §민감도). 답은 표가 아니라 stdout 이고, 읽기 전용이라 운영 DB 에
+  그대로 돌린다. 저장된 표가 그대로인 것은 `tests/test_sensitivity_pipeline.py` 가 지문으로 붙든다.
+- 기저는 다시 세고, 그 기저가 저장된 `metrics_topic_quarter` 행과 다르면 그 사실(`baseline_drift`)이 먼저 나온다 —
+  그때 이 명령의 모든 차이는 뜻이 없다.
+- 종료 코드: 0 ok(세 선택 어디서도 결론이 움직이지 않았고 후향 사례가 둘 이상) · 1 partial(**결론이 흔들린다** —
+  패널 뒤집힘이 있거나, 광고·협찬을 빼면 유형이 바뀌는 셀이 있거나, 후향 검증 사례가 둘 미만이거나,
+  `baseline_drift` 다. 기획안 §4 의 "필터 민감 신호로 표시한다"가 이 코드다 — 2026-08-19 전량에서 **1 이 정답**이다)
+  · 2 blocked(연결 거절, 활성 명부·스냅샷·주제 사전 없음, **그 run 에 지표 행이 없음** — `cosmai trend quarter` 를
+  아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다. 판정이 반사실 격자 위에서 멈춘 것(`SparseGrid`·`MissingValue`)도
+  같은 자리다).
+- 크론에 걸지 않는다. 한 번 물어 답을 이슈에 남기는 명령이고, 답이 바뀌는 것은 코퍼스나 명부가 바뀔 때다.
+
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
