@@ -60,6 +60,29 @@ export const OPS_QUERY = {
   order: 'stage_key',
 };
 
+// 구조 지도(#142)가 읽는 둘. 엣지가 노드까지 진다(#141 -- 노드 표를 두지 않는 것이 설계다).
+// 단계 표를 따로 받는 것은 arm 과 enabled 때문이다: 그림이 팔로 색을 나누고, 꺼진 단계를
+// 회색으로 두려면 그 둘이 필요하다. 엣지만으로는 알 수 없다.
+//
+// 정렬을 서버에 맡긴다 -- 여기서는 페이지 경계를 안정시키는 것이 목적이고, 그림의 순서는
+// map.js 의 순수 함수가 계층으로 정한다.
+export const MAP_QUERIES = {
+  edge: {
+    select: ['from_key', 'from_kind', 'to_key', 'to_kind', 'note'],
+    order: 'from_key,to_key',
+  },
+  stage: {
+    select: ['stage_key', 'arm', 'dataset', 'enabled'],
+    order: 'stage_key',
+  },
+  // 상태를 그림에 얹는다(#143). 판정은 뷰가 이미 끝냈으므로 두 컬럼만 받으면 된다 --
+  // 색을 고르는 severity.js 가 보는 것이 그 둘뿐이다.
+  health: {
+    select: ['stage_key', 'freshness', 'last_run_status'],
+    order: 'stage_key',
+  },
+};
+
 export const NEED_QUERIES = {
   // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
   // 가 그것을 고르는 유일한 필터다(#109, #130).

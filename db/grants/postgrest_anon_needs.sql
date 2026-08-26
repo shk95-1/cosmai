@@ -9,6 +9,11 @@ GRANT USAGE ON SCHEMA needs TO postgrest_anon;
 GRANT SELECT ON needs.metrics_need, needs.metrics_wish, needs.entity_lexicon, needs.aspect_lexicon,
     needs.product_ref, needs.analysis_run TO postgrest_anon;
 
+-- 구조 지도(#142)가 읽는 둘. 표이므로 여기가 맞는 자리다 -- 뷰와 달리 배포가 다시 만들지 않아
+-- 이 GRANT 가 살아남는다(뷰는 #158 이 그 반대를 배운 자리다: 뷰의 권한은 뷰 파일이 진다).
+-- 단계 이름과 그들 사이의 관계이지 수집 원문이 아니므로 화이트리스트에 든다.
+GRANT SELECT ON needs.pipeline_stage, needs.pipeline_edge TO postgrest_anon;
+
 -- 뷰는 여기 적지 않는다. 이 파일은 migrate 단계 (d) 이고 db/views/*.sql 을 DROP + CREATE 하는
 -- 것은 (f) 다 -- 여기서 준 GRANT 는 새로 만들어진 뷰에 따라오지 않아 어느 배포에서도 살아남지
 -- 못한다(#158: 운영 관제 화면이 그래서 401 이었다). 뷰의 권한은 뷰 파일이 진다, needs_runtime

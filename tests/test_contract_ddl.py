@@ -33,10 +33,11 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_thirtyfive_contract_tables():
+def test_the_ddl_declares_the_thirtysix_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: 파이프라인 단계의 기대 주기 선언)
+    # + 1 from 008_pipeline_edge.sql (upstream issue #141: 무엇이 무엇을 먹이는가)
     # + 1 from 020_retrieval_chunk.sql (issue #28; the 020 block is this branch's, see that file)
     # + 3 from 022_panel_and_quarter.sql (fork issue #3: panel_roster, panel_channel,
     # metrics_topic_quarter -- the roster is the parent panel_version points at)
@@ -48,7 +49,7 @@ def test_the_ddl_declares_the_thirtyfive_contract_tables():
     # derivation but a pointer: the judgement cell's key plus a rank, pointing back at the
     # corpus_document rows that made it).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 35
+    assert len(declared_tables()) == 36
 
 
 def test_every_declared_table_exists_in_the_database():

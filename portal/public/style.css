@@ -144,3 +144,31 @@ th.num, td.num { text-align: right; }
 
 /* 이 페이지의 표는 정렬 가능한 표가 아니다 — 순서는 심각도가 정한다(ops.js sortByWorst). */
 #ops-problems th, #ops-arms th, #ops-disabled th { cursor: default; }
+
+/* ---- 구조 지도(map.html, #142) ---------------------------------------------
+   새 색 토큰을 만들지 않는다: 팔 넷을 있는 순차·발산 색으로 나누면 다크 모드가 저절로 따라온다. */
+.map-node { stroke: var(--border); stroke-width: 1; }
+.node-store { fill: var(--surface-1); }
+.node-commerce { fill: var(--seq-1); fill-opacity: 0.22; stroke: var(--seq-1); }
+.node-youtube { fill: var(--diverging-neg); fill-opacity: 0.18; stroke: var(--diverging-neg); }
+.node-naver { fill: var(--seq-2); fill-opacity: 0.20; stroke: var(--seq-2); }
+.node-analyze { fill: var(--diverging-pos); fill-opacity: 0.20; stroke: var(--diverging-pos); }
+/* 선언상 꺼진 단계. 안 도는 것이 사실이므로 보이되 물러나 있어야 한다. */
+.node-off { fill: var(--surface-1); stroke: var(--text-muted); stroke-dasharray: 3 3; }
+.map-label { font-size: 12px; fill: var(--text-primary); }
+
+.edge { fill: none; stroke-width: 1.5; }
+.edge-write { stroke: var(--text-secondary); }
+/* 읽기는 흐리게: 쓰기가 흐름이고 읽기는 그 흐름을 먹는 관계다. 같은 굵기면 그림이 실뭉치가 된다. */
+.edge-read { stroke: var(--text-muted); stroke-opacity: 0.65; }
+/* 되먹임은 사실이지 결함이 아니다 — 점선으로 갈라 두되 눈에 띄게 둔다. */
+.edge-feedback { stroke: var(--seq-2); stroke-dasharray: 5 4; }
+
+/* 지도의 상태 띠(#143). 관제 표의 왼쪽 테두리와 같은 장치·같은 색이라 두 화면이 같은 말을 한다.
+   sev-* 클래스는 severity.js 가 고르고, 색은 위 관제 절의 정의를 그대로 쓴다. */
+.map-stripe { stroke: none; }
+.map-stripe.sev-critical { fill: var(--diverging-neg); }
+.map-stripe.sev-warn { fill: var(--seq-2); }
+.map-stripe.sev-idle { fill: var(--text-muted); }
+.map-stripe.sev-ok { fill: var(--diverging-pos); }
+.map-stripe.sev-muted { fill: var(--text-muted); fill-opacity: 0.4; }
