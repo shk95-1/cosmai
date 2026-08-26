@@ -14,11 +14,23 @@ tests/test_analyze_polarity.py 의 소유 표 검사가 그 순간을 잡는다.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
 
 from analysis.polarity import VERSION as RULE_VERSION
 
-__all__ = ["NO_OWNERS", "OWNERS", "foreign_scopes", "unready"]
+__all__ = ["ALWAYS", "NO_OWNERS", "OWNERS", "Owner", "foreign_scopes", "unready"]
+
+
+@dataclass(frozen=True)
+class Owner:
+    """한 scope 의 주인: 판본과, 그 판본이 책임지는 첫 달."""
+
+    version: str
+    since: str
+
+
+ALWAYS = "0000-00"  # 어떤 YYYY-MM 보다도 작다 — 전량 패스가 끝난 scope 는 모든 달이 주인 몫이다.
 
 # 2026-08-24 홀드아웃에서 gemma4 가 규칙을 넘었다 (interfaces.md §LLM 실측). #31 이 정의한 나머지
 # 26개 카테고리는 패스에 6~7시간이 들어 지금은 돌리지 않기로 했다 — 등록만 해 두고 패스를 안 돌리면
@@ -26,17 +38,17 @@ __all__ = ["NO_OWNERS", "OWNERS", "foreign_scopes", "unready"]
 # 선블록 하나로 되돌려 그동안 규칙이 나머지를 계속 갱신하게 한다. 나중에 카테고리를 꺼낼 때는 등록과
 # 패스를 같은 순간에 한다(등록만 하고 미루지 않는다).
 _GEMMA4_2026_08_24 = "llm-ollama-gemma4:latest-fs2-20260824"
-OWNERS: Mapping[str, str] = MappingProxyType({"선블록": _GEMMA4_2026_08_24})
+OWNERS: Mapping[str, Owner] = MappingProxyType({"선블록": Owner(_GEMMA4_2026_08_24, ALWAYS)})
 # 소유가 없던 시절의 동작 그대로 — 이 표를 비우면 규칙 실행이 다시 전량을 쓰고 지운다.
-NO_OWNERS: Mapping[str, str] = MappingProxyType({})
+NO_OWNERS: Mapping[str, Owner] = MappingProxyType({})
 
 
-def foreign_scopes(owners: Mapping[str, str], polarity_version: str) -> tuple[str, ...]:
+def foreign_scopes(owners: Mapping[str, Owner], polarity_version: str) -> tuple[str, ...]:
     """이 판정자가 손대면 안 되는 scope — 다른 구현이 주인인 자리다."""
-    return tuple(sorted(scope for scope, owner in owners.items() if owner != polarity_version))
+    return tuple(sorted(scope for scope, owner in owners.items() if owner.version != polarity_version))
 
 
-def unready(owners: Mapping[str, str], version: str, scope: str | None) -> str | None:
+def unready(owners: Mapping[str, Owner], version: str, scope: str | None) -> str | None:
     """규칙이 아닌 구현을 손으로 풀어도 되는 자리인가 — 아니면 그 이유 한 줄 (cosmai/cli.py 가 부른다).
 
     두 가지를 묻는다. 스코프를 이름 붙였는가: 안 붙인 한 줄은 규칙 모집단 전량을 다시 라벨한다(시간과

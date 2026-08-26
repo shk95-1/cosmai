@@ -25,7 +25,7 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
-from analysis.polarity.ownership import OWNERS, foreign_scopes
+from analysis.polarity.ownership import OWNERS, Owner, foreign_scopes
 from analysis.types import (
     AspectLexicon,
     Candidate,
@@ -284,7 +284,7 @@ class PolarityStage:
         conn: psycopg.Connection[Any],
         batch: int = BATCH,
         polarity: Polarity | None = None,
-        owners: Mapping[str, str] = OWNERS,
+        owners: Mapping[str, Owner] = OWNERS,
     ) -> None:
         self.conn = conn
         self.batch = batch
@@ -436,7 +436,7 @@ def run(
     youtube_schema: str = YOUTUBE_SCHEMA,
     batch: int = BATCH,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
     on_run_open: Callable[[int], None] | None = None,
 ) -> StageResult:
     """`on_run_open` 은 run 행이 열린 그 순간 호출자에게 run_id 를 넘긴다 — 이 단계 안에서 죽어도
@@ -447,7 +447,7 @@ def run(
     if scope is not None and scope in stage.foreign:
         # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
         raise ValueError(
-            f"{scope} is owned by {owners[scope]}, not {version} (analysis/polarity/ownership.py)"
+            f"{scope} is owned by {owners[scope].version}, not {version} (analysis/polarity/ownership.py)"
         )
     with conn.cursor() as cur:
         cur.execute(

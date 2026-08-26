@@ -19,7 +19,7 @@ from analysis import predictors, registry
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
-from analysis.polarity.ownership import NO_OWNERS, OWNERS, unready
+from analysis.polarity.ownership import ALWAYS, NO_OWNERS, OWNERS, Owner, unready
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -538,7 +538,7 @@ def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _
 
 
 # 구현 소유권 (#31): 선블록은 gemma4 가, 나머지는 규칙이 갱신한다 — 표는 ownership.py 한 곳이다.
-GEMMA4 = OWNERS["선블록"]
+GEMMA4 = OWNERS["선블록"].version
 # 규칙 실행이 다시 뽑지 않는 자리에 남은 주인의 행 — 삭제문이 이것을 지우는지 본다.
 OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 # 규칙 실행이 같은 자연키로 다시 쓰는 자리 — 005 의 자연키에 polarity_version 이 없어 제자리 upsert 가
@@ -625,7 +625,7 @@ def _by_scope(url: str) -> list[tuple[Any, ...]]:
 def test_the_owner_keeps_the_scope_a_later_unscoped_run_walks_over(loaded: str, _schema_name: str):
     """두 구현이 같은 문장을 두고 다툰다: 주인이 먼저 선블록을 라벨하고, 그 뒤 스코프 없는 실행이 전량을
     돈다. 주인의 scope 는 그대로, 나머지(샴푸)는 나중 실행의 것이다."""
-    owners = {"선블록": OwnerPolarity.version}
+    owners = {"선블록": Owner(OwnerPolarity.version, ALWAYS)}
     _run(loaded, _schema_name, scope="선블록", polarity=OwnerPolarity(), owners=owners)
     _run(loaded, _schema_name, polarity=RivalPolarity(), owners=owners)
     assert _by_scope(loaded) == [
@@ -669,14 +669,14 @@ def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quiet
 def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
-    assert OWNERS["선블록"] == OllamaPolarity().version
+    assert OWNERS["선블록"].version == OllamaPolarity().version
 
 
 def test_every_registered_scope_names_the_same_owner_version():
     """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 등록된 1개가
     가리키는 값이 하나인지를 표 자체로 확인한다."""
     assert len(OWNERS) == 1
-    assert set(OWNERS.values()) == {OllamaPolarity().version}
+    assert {o.version for o in OWNERS.values()} == {OllamaPolarity().version}
 
 
 # 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
@@ -708,7 +708,12 @@ def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scop
     ref, sentence = MOVED
     _label(loaded, ref, "백탁", sentence, GEMMA4)
     with connect(loaded) as conn:
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners={"선블록": GEMMA4})
+        run(
+            conn,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            owners={"선블록": Owner(GEMMA4, ALWAYS)},
+        )
     assert _labels(loaded, ref) == [("백탁", "만족", GEMMA4), (RULE_KEY, "불만", "rule-v2.2")]
 
 
