@@ -5,8 +5,11 @@ import {
   buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
   PAGE_SIZE, nextPageOffset,
 } from './query.js';
-import { latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption } from './screens.js';
-import { renderDivergingBars, renderMagnitudeBars, renderTopBars } from './render.js';
+import {
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption,
+  needCharacterRows, hasYoutubeMentions, rowsWithValue,
+} from './screens.js';
+import { renderDivergingBars, renderMagnitudeBars, renderTopBars, renderScatter } from './render.js';
 
 // PostgREST 는 이 페이지를 서빙한 호스트의 3000 번 — 머신이 바뀌어도 고쳐 쓸 것이 없다.
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:3000`;
@@ -36,11 +39,11 @@ async function apiPage(path) {
 
 // PGRST_DB_MAX_ROWS(#81)에 잘린 응답을 offset 을 옮겨 이어 받는다 — query.js 가
 // 이미 내놓은 PAGE_SIZE/nextPageOffset 을 그대로 쓴다(새 페이징 방식을 만들지 않는다).
-async function apiAll(basePath, { select, order }) {
+async function apiAll(basePath, { select, order, filters }) {
   const rows = [];
   let offset = 0;
   for (;;) {
-    const q = buildQuery({ select, order, limit: PAGE_SIZE, offset });
+    const q = buildQuery({ select, filters, order, limit: PAGE_SIZE, offset });
     const page = await apiPage(`${basePath}?${q}`);
     rows.push(...page.rows);
     const next = nextPageOffset(offset, page.range);
@@ -50,7 +53,9 @@ async function apiAll(basePath, { select, order }) {
   return rows;
 }
 
-const state = { need: [], wish: [], needRunId: null, wishRunId: null };
+// need 는 두 벌이다 — 화면 1·4 가 쓰는 카테고리 합 행과 화면 3 이 쓰는 제품 축 행.
+// #41 이 제품 행을 더한 뒤로 한 벌로 받으면 합 행 화면이 제 몫의 13배를 끌어온다.
+const state = { need: [], needProducts: [], wish: [], needRunId: null, wishRunId: null };
 
 // ---- 탭 --------------------------------------------------------------
 
@@ -111,7 +116,7 @@ function renderWishScreen(scope) {
 // ---- 화면 3: 제품별 미해결 ----------------------------------------------
 
 function renderProductScreen() {
-  const rows = productRows(state.need, state.needRunId, 20);
+  const rows = productRows(state.needProducts, state.needRunId, 20);
   $('product-chart').innerHTML = renderMagnitudeBars(rows, { key: 'unresolved', labelKey: 'product_ref', hue: 'blue', fmt: (v) => v.toFixed(2) });
 
   const cols = ['product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'];
@@ -124,6 +129,28 @@ function renderProductScreen() {
     for (const c of cols) tr.insertCell().textContent = r[c];
   }
   $('product-table').replaceChildren(table);
+}
+
+// ---- 화면 4: 니즈의 성격 ------------------------------------------------
+
+function renderCharacterScreen(scope) {
+  const rows = sortRows(needCharacterRows(state.need, state.needRunId, scope), 'unresolved', 'desc');
+  $('character-chart-scatter').innerHTML = renderScatter(rows, {
+    xKey: 'persist_month_ratio', yKey: 'persist_product_ratio', sizeKey: 'unresolved',
+    xLabel: '지속(월 비율)', yLabel: '확산(제품 비율)',
+  });
+
+  // 유튜브를 안 모은 scope 는 0 막대만 늘어선 차트가 되어 "만족도 불만도 없다"로 읽힌다.
+  $('character-chart-source').innerHTML = hasYoutubeMentions(rows)
+    ? '<div class="legend"><span><span class="swatch neg"></span>유튜브 불만(yt_neg)</span><span><span class="swatch pos"></span>유튜브 만족(yt_pos)</span></div>'
+      + renderDivergingBars(rows, { negKey: 'yt_neg', posKey: 'yt_pos' })
+    : '<p class="empty-note">유튜브 언급 없음</p>';
+
+  const pct = (v) => `${(v * 100).toFixed(1)}%`;
+  $('character-chart-new').innerHTML =
+    renderMagnitudeBars(rowsWithValue(rows, 'new_ratio'), { key: 'new_ratio', hue: 'blue', fmt: pct });
+  $('character-chart-low').innerHTML =
+    renderMagnitudeBars(rowsWithValue(rows, 'low_share'), { key: 'low_share', hue: 'amber', fmt: pct });
 }
 
 // ---- 내려받기 -----------------------------------------------------------
@@ -140,7 +167,19 @@ function saveFile(text, name) {
 async function boot() {
   showError('');
   try {
-    const needSelect = ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved', 'population_share_pct'];
+    // 화면 1·4 가 쓰는 카테고리 합 행. product_ref 가 실제로 빈 문자열이라
+    // 'product_ref=eq.'(allowEmpty)가 그것을 고르는 유일한 필터다.
+    const needSelect = [
+      'run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved',
+      'population_share_pct',
+      'yt_neg', 'yt_pos', 'persist_months', 'persist_months_total',
+      'persist_products', 'persist_products_total', 'unresolved_new', 'low_share',
+      'denom_low', 'denom_site',
+    ];
+    const needFilters = [{ column: 'product_ref', op: 'eq', value: '', allowEmpty: true }];
+    // 화면 3 은 제품 축 행만 — 합 행을 같이 받으면 상위 20 이 카테고리로 채워진다.
+    const productSelect = ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved'];
+    const productFilters = [{ column: 'product_ref', op: 'neq', value: '', allowEmpty: true }];
     // order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해
     // offset 페이징 중 행이 빠지거나 겹칠 수 있다(query.js 상단 주석과 같은 이유).
     const needOrder = 'run_id.desc,scope,need_key,month,product_ref';
@@ -150,12 +189,14 @@ async function boot() {
     const runSelect = ['run_id', 'finished_at', 'status', 'versions', 'note'];
     const runOrder = 'run_id.desc';
 
-    const [runs, need, wish] = await Promise.all([
+    const [runs, need, needProducts, wish] = await Promise.all([
       apiAll('/analysis_run', { select: runSelect, order: runOrder }),
-      apiAll('/metrics_need', { select: needSelect, order: needOrder }),
+      apiAll('/metrics_need', { select: needSelect, filters: needFilters, order: needOrder }),
+      apiAll('/metrics_need', { select: productSelect, filters: productFilters, order: needOrder }),
       apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
     ]);
     state.need = need;
+    state.needProducts = needProducts;
     state.wish = wish;
     const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
     state.needRunId = needRunId;
@@ -168,11 +209,15 @@ async function boot() {
     const wishScopes = scopesForRun(wish, wishRunId);
     $('need-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     $('wish-scope').replaceChildren(...wishScopes.map((s) => new Option(s, s)));
+    // 화면 4 는 화면 1 과 같은 표(카테고리 합)를 보므로 scope 목록도 같다.
+    $('character-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     $('need-scope').onchange = () => renderNeedScreen($('need-scope').value);
     $('wish-scope').onchange = () => renderWishScreen($('wish-scope').value);
+    $('character-scope').onchange = () => renderCharacterScreen($('character-scope').value);
 
     if (needScopes.length > 0) renderNeedScreen(needScopes[0]);
     if (wishScopes.length > 0) renderWishScreen(wishScopes[0]);
+    if (needScopes.length > 0) renderCharacterScreen(needScopes[0]);
     renderProductScreen();
   } catch (e) {
     $('run-caption').textContent = '';

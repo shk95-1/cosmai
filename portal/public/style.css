@@ -74,6 +74,8 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--text-secondary); }
 .controls select { font-size: 14px; padding: 4px 6px; }
 
 .chart { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+/* 산점도는 넓어질수록 점만 커질 뿐 더 읽히지 않는다 — 판의 폭을 묶는다. */
+.chart-scatter { max-width: 780px; }
 .chart-pair, .chart-triple { display: grid; gap: 16px; margin: 8px 0 16px; }
 .chart-pair { grid-template-columns: 1fr 1fr; }
 .chart-triple { grid-template-columns: 1fr 1fr 1fr; }
@@ -85,11 +87,19 @@ svg.viz-root { width: 100%; height: auto; }
 .bar-pos { fill: var(--diverging-pos); }
 .bar-magnitude-1 { fill: var(--seq-1); }
 .bar-magnitude-2 { fill: var(--seq-2); }
+.viz-dot { fill: var(--seq-1); fill-opacity: 0.65; stroke: var(--seq-1); }
+.viz-axis { stroke: var(--border); stroke-width: 1; }
+.viz-quadrant { stroke: var(--gridline); stroke-width: 1; stroke-dasharray: 4 4; }
+.viz-tick { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.viz-axis-label { fill: var(--text-secondary); font-size: 11px; }
+.viz-point-label { fill: var(--text-primary); font-size: 11px; dominant-baseline: middle; }
 
 .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 4px 0 8px; }
 .legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
 .legend .swatch.neg { background: var(--diverging-neg); }
 .legend .swatch.pos { background: var(--diverging-pos); }
+
+.empty-note { color: var(--text-muted); margin: 0; padding: 12px 4px; }
 
 .table-controls { margin: 12px 0 8px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }

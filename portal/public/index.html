@@ -17,6 +17,7 @@
   <button type="button" data-screen="need" class="on">1. 카테고리 니즈</button>
   <button type="button" data-screen="wish" class="on-off">2. 위시</button>
   <button type="button" data-screen="product" class="on-off">3. 제품별 미해결</button>
+  <button type="button" data-screen="character" class="on-off">4. 니즈의 성격</button>
 </nav>
 
 <section id="screen-need" class="screen">
@@ -60,6 +61,34 @@
   <h2>제품별 미해결(unresolved)</h2>
   <div id="product-chart" class="chart"></div>
   <div id="product-table"></div>
+</section>
+
+<section id="screen-character" class="screen hidden">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="character-scope"></select>
+    </label>
+  </div>
+  <h2>지속성 × 확산</h2>
+  <p class="caption">오른쪽 위일수록 오래 가고 여러 제품에 걸친 니즈다. 점 크기는 미해결비(unresolved).</p>
+  <div id="character-chart-scatter" class="chart chart-scatter"></div>
+  <div class="chart-triple">
+    <div>
+      <h3>출처 대조 (유튜브 불만/만족)</h3>
+      <p class="caption">리뷰 전체(neg/pos)가 아니라 유튜브 댓글 몫만 본다.</p>
+      <div id="character-chart-source" class="chart"></div>
+    </div>
+    <div>
+      <h3>신규 제품 대비 (unresolved_new / unresolved)</h3>
+      <p class="caption">100% = 신제품도 전체와 같은 미해결 수준. 낮을수록 신제품이 해결했다는 뜻.</p>
+      <div id="character-chart-new" class="chart"></div>
+    </div>
+    <div>
+      <h3>저평점 구조 (low_share)</h3>
+      <p class="caption">저평점 표본 안에서 이 니즈가 차지하는 비율.</p>
+      <div id="character-chart-low" class="chart"></div>
+    </div>
+  </div>
 </section>
 
 <script type="module" src="app.js"></script>
