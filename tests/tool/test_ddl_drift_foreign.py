@@ -126,11 +126,38 @@ def test_the_survivors_are_exactly_what_this_checkout_does_not_declare(tmp_path:
     assert survivors(declared, tmp=tmp_path) == [e for e in entries() if e not in declared]
 
 
+def upstream_shaped() -> set[str]:
+    """upstream 체크아웃의 선언 집합 모양 — 001~008 은 선언하고 이 아홉은 하나도 선언하지 않는다.
+    `aspect_lexicon` 은 남고 `aspect_lexicon.extra` 만 빠지는 것까지 그쪽과 같다(021 이 포크 것이다)."""
+    listed = set(entries())
+    return {o for o in declared_objects() if o not in listed and o.split(".")[0] not in listed}
+
+
 def test_an_upstream_checkout_declares_none_of_them_so_the_rule_is_off(tmp_path: Path):
-    """upstream 체크아웃에는 020~025 도 포크 뷰도 없다. 선언 목록이 비면 아홉이 전부 살아남고
-    ddl-drift 가 만드는 제외 목록은 이 규칙이 생기기 전과 항목도 순서도 같다."""
-    assert survivors([], tmp=tmp_path) == entries()
-    assert kinds([], tmp=tmp_path)[:2] == ["table retrieval_chunk", "column aspect_lexicon.extra"]
+    """규칙이 켜지는 조건은 '목록이 비었다' 가 아니라 '이 체크아웃이 그것을 선언한다' 이다.
+    upstream 모양의 선언 집합(비어 있지 않다)을 주면 아홉이 전부 살아남고, ddl-drift 가 만드는
+    제외 목록은 이 규칙이 생기기 전과 항목도 순서도 같다."""
+    declared = upstream_shaped()
+    assert declared, "빈 목록으로 upstream 을 흉내 내면 아래 단언이 다른 이유로 통과한다"
+    assert "aspect_lexicon" in declared and "aspect_lexicon.extra" not in declared
+    assert survivors(declared, tmp=tmp_path) == entries()
+    assert kinds(declared, tmp=tmp_path)[:2] == [
+        "table retrieval_chunk",
+        "column aspect_lexicon.extra",
+    ]
+
+
+def test_an_empty_declaration_list_stops_the_check_instead_of_quietly_widening_it(tmp_path: Path):
+    """이 규칙이 조용히 실패하는 방향은 하나다: 선언 목록이 비면 아홉이 전부 제외되고 ddl-drift 는
+    작아진 검사 위에서 그대로 'matches the contract' 를 찍는다. 그래서 빈 목록은 답이 아니라 오류다."""
+    listing = tmp_path / "declared.txt"
+    listing.write_text("", encoding="utf-8")
+    done = subprocess.run([str(FILTER), str(FOREIGN), str(listing)], capture_output=True, text=True)
+    assert done.returncode == 1
+    assert "empty declared-object list" in done.stderr
+    assert done.stdout == ""
+    # ddl-drift 는 그 질의를 자기 자리에서도 한 번 더 막는다 -- 실패 메시지가 질의를 가리키게.
+    assert '[ -s "$work/declared" ]' in DRIFT.read_text(encoding="utf-8")
 
 
 def test_the_rule_is_on_for_everything_the_checkout_declares(tmp_path: Path):
@@ -146,7 +173,7 @@ def test_a_bad_entry_is_rejected_rather_than_interpolated_into_sql(tmp_path: Pat
     """이름은 pg_dump 플래그와 ALTER TABLE 에 그대로 박힌다 — 평범한 식별자가 아니면 멈춘다."""
     bad = tmp_path / "foreign.txt"
     listing = tmp_path / "declared.txt"
-    listing.write_text("", encoding="utf-8")
+    listing.write_text("some_table\n", encoding="utf-8")
     for entry in ("needs.a.b", "a..b", ".a", "a.", "a-b", "Retrieval_Chunk", 'x";DROP'):
         bad.write_text(f"{entry}\n", encoding="utf-8")
         done = subprocess.run([str(FILTER), str(bad), str(listing)], capture_output=True, text=True)
@@ -170,4 +197,8 @@ def test_ddl_drift_reads_the_file_through_the_rule():
     assert "contracts/ddl/needs/foreign.txt" in body
     assert "tool/ddl-foreign-entries" in body
     # 선언 목록은 텍스트를 두 번 파싱해서가 아니라, migrate.sh 가 막 세워 둔 스키마에서 나온다.
-    assert "information_schema.columns" in body
+    # pg_catalog 인 것이 중요하다 -- information_schema 는 롤이 볼 수 있는 것만 보여서, 권한이
+    # 좁아지면 선언이 줄고 그만큼이 무시가 아니라 제외로 넘어간다(검사가 조용히 작아진다).
+    # 주석은 information_schema 를 이름으로 부른다(왜 안 쓰는지를 적느라). 질의가 그것을 읽지
+    # 않는다는 쪽을 본다.
+    assert "pg_attribute" in body and "FROM information_schema" not in body

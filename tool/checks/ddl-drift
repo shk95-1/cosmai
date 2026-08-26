@@ -112,12 +112,28 @@ COSMAI_SECRET_FILE="$work/needs.env" db/migrate.sh --container "$name" --db drif
 # itself (cosmai#108). The needs schema migrate.sh just built IS this checkout's declaration, so
 # the question goes to pg_catalog rather than to a second parser of the same .sql files -- views
 # and ADD COLUMNs fall out of it for free. tool/ddl-foreign-entries applies the rule and rejects a
-# malformed entry, which is why that check now happens here rather than before the container.
+# malformed entry; that entry check moved here from before the container so that the whole rule
+# lives in one file, and the cost is that a typo is caught a migrate.sh later than it used to be.
+#
+# pg_class/pg_attribute, not information_schema: the information_schema views filter by what the
+# current role may see, so a role with fewer grants would report fewer declared objects, and every
+# object that fell out would be *excluded* from the comparison instead of ignored -- the failure
+# direction that makes the check quietly smaller. pg_catalog does no such filtering. The emptiness
+# guard below catches the all-or-nothing version of the same accident.
 docker exec "$name" psql -U drift -d drift -X -Atq \
-    -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'needs'
+    -c "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = 'needs' AND c.relkind IN ('r', 'p', 'v', 'm')
         UNION ALL
-        SELECT table_name || '.' || column_name FROM information_schema.columns
-         WHERE table_schema = 'needs'" > "$work/declared"
+        SELECT c.relname || '.' || a.attname FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_attribute a ON a.attrelid = c.oid
+         WHERE n.nspname = 'needs' AND c.relkind IN ('r', 'p', 'v', 'm')
+           AND a.attnum > 0 AND NOT a.attisdropped" > "$work/declared"
+# A query that succeeds and returns nothing would ignore nothing, exclude all nine, and still let
+# report() print "matches the contract" -- the check disappearing without a word. migrate.sh ran a
+# few lines up, so an empty needs schema here is a fault, never a state. The same guard sits in
+# tool/ddl-foreign-entries (where the suite can re-ask it); this one names the query that failed.
+[ -s "$work/declared" ] || { echo "ddl-drift: the declared-object query came back empty" >&2; exit 1; }
 tool/ddl-foreign-entries "$foreign" "$work/declared" > "$work/foreign"
 
 exclude=
