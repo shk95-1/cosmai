@@ -170,15 +170,20 @@ def test_the_view_notices_a_quote_that_belongs_to_another_cell(judged: str):
 
 
 def test_one_where_on_the_view_reaches_the_quote_from_a_judged_cell(judged: str):
-    """이 이슈의 완료 기준 그대로 -- 셀 하나에서 근거 원문까지 사람이 조인을 쓰지 않는다."""
+    """이 이슈의 완료 기준 그대로 -- 셀 하나에서 근거 원문까지 사람이 조인을 쓰지 않는다.
+
+    그 한 줄에 `run_id` 가 드는 것도 계약이다(§근거): 뷰는 run 을 가리지 않으므로 한 스냅샷·명부에
+    run 이 둘이면 같은 셀이 겹쳐 나오고 `rank` 가 1..n 이 아니게 된다.
+    """
     with connect(judged) as conn:
         judge_run(conn)
-        run(conn)
+        outcome = run(conn)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT trend_type, rank, like_count, matched_term, left(text, 20), parent_video_url "
-                "FROM topic_quarter_evidence_quote WHERE topic_key = %s AND quarter = %s ORDER BY rank",
-                ("자극_눈시림", "2026Q2"),
+                "FROM topic_quarter_evidence_quote "
+                "WHERE run_id = %s AND topic_key = %s AND quarter = %s ORDER BY rank",
+                (outcome.run_id, "자극_눈시림", "2026Q2"),
             )
             rows = cur.fetchall()
         conn.commit()

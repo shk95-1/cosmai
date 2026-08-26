@@ -266,6 +266,7 @@ cosmai trend sensitivity [--url <url>]
 - 크론에 걸어도 안전하다(읽기 전용 · 0 이 평상 상태). 다만 답이 바뀌는 것은 코퍼스나 명부가 바뀔 때라, 지금은
   사람이 한 번 물어 이슈에 남긴다.
 - **아래 §근거·카드 의 `cards` 도 같은 자리다** — "규칙에 걸린 셀이 없다"는 발견이지 실패가 아니다.
+
 ## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
 ```
 cosmai trend evidence [--url <url>]
