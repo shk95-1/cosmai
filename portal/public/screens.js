@@ -62,3 +62,41 @@ export function runCaption(needRun, wishRun) {
   if (need === null && wish === null) return '데이터 없음';
   return `need run ${need ?? '없음'} · wish run ${wish ?? '없음'}`;
 }
+
+// 0 나누기 방어: 분모가 없거나 0 이면 비율은 null 이다 — 0 으로 눕히면 "분모가 없는
+// 니즈"와 "정말 0 인 니즈"가 같은 그림이 되어 산점도가 거짓말을 한다.
+export function safeRatio(numerator, denominator) {
+  const n = Number(numerator);
+  const d = Number(denominator);
+  if (numerator === null || numerator === undefined || !Number.isFinite(n)) return null;
+  if (denominator === null || denominator === undefined || !Number.isFinite(d) || d === 0) return null;
+  return n / d;
+}
+
+// 화면 4가 쓰는 행: 카테고리 합 행에 세 비율을 얹는다. 지속(월)·확산(제품)은 산점도의
+// x·y 다. new_ratio 는 unresolved_new(신제품만의 미해결비, 002_audit_additive A4)를
+// 전체 미해결비로 나눈 값이라 1(=100%)이 "신제품도 같은 수준"이고 1 을 넘을 수 있다 —
+// 0~1 이 아니므로 산점도 축으로는 쓰지 않는다. 원본 컬럼은 그대로 둔다.
+export function needCharacterRows(need, runId, scope) {
+  return needRowsForScope(need, runId, scope).map((r) => ({
+    ...r,
+    persist_month_ratio: safeRatio(r.persist_months, r.persist_months_total),
+    persist_product_ratio: safeRatio(r.persist_products, r.persist_products_total),
+    new_ratio: safeRatio(r.unresolved_new, r.unresolved),
+  }));
+}
+
+// yt_neg/yt_pos 가 전부 0 인 scope 는 유튜브 수집분이 없다는 뜻 — 빈 차트 대신
+// 문구를 보여야 "언급 0 건"과 "그 출처를 안 모았다"가 구분된다.
+export function hasYoutubeMentions(rows) {
+  return (rows || []).some((r) => (Number(r.yt_neg) || 0) > 0 || (Number(r.yt_pos) || 0) > 0);
+}
+
+// 값이 null 인 행(분모 0)은 막대 차트에서 뺀다 — Number(null)||0 이 0% 막대로 둔갑해
+// "신규가 하나도 없다"는 없는 사실을 그린다.
+export function rowsWithValue(rows, key) {
+  return (rows || []).filter((r) => {
+    const v = r[key];
+    return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  });
+}

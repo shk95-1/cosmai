@@ -26,6 +26,25 @@ test('buildQuery skips empty filter values', () => {
   assert.equal(new URLSearchParams(q).has('scope'), false);
 });
 
+// #109: 카테고리 합 행은 product_ref 가 빈 문자열이다 — 'product_ref=eq.' 로만 걸러진다.
+// 빈 값을 무조건 버리는 기본 규칙(셀렉트가 안 골라진 상태)과 구분하려고 allowEmpty 를 쓴다.
+test('buildQuery keeps an empty filter value when allowEmpty is set (#109)', () => {
+  const q = buildQuery({
+    select: ['run_id', 'need_key'],
+    filters: [{ column: 'product_ref', op: 'eq', value: '', allowEmpty: true }],
+    order: 'run_id.desc',
+  });
+  assert.equal(q.includes('product_ref=eq.&'), true);
+  const params = new URLSearchParams(q);
+  assert.equal(params.get('product_ref'), 'eq.');
+});
+
+// 화면 3(제품 축)은 그 반대편 — 빈 product_ref 를 뺀다.
+test('buildQuery builds the product-axis filter product_ref=neq. (#109)', () => {
+  const q = buildQuery({ filters: [{ column: 'product_ref', op: 'neq', value: '', allowEmpty: true }] });
+  assert.equal(new URLSearchParams(q).get('product_ref'), 'neq.');
+});
+
 test('parseContentRange reads the total after the slash', () => {
   assert.equal(parseContentRange('0-999/65646'), 65646);
   assert.equal(parseContentRange('0-999/*'), null);

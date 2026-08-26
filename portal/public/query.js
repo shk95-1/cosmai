@@ -9,11 +9,17 @@ export const PAGE_SIZE = 1000;
 // PostgREST 문법의 쿼리스트링을 만든다. 앞의 '?' 는 붙이지 않는다.
 // order 를 항상 붙이는 것이 핵심: 정렬 없이 offset 을 옮기면 페이지 사이에
 // 행이 중복되거나 빠진다 (DB 가 순서를 보장하지 않는다).
+//
+// 빈 값의 필터는 기본적으로 버린다 — 아무것도 안 고른 셀렉트가 필터로 둔갑하지
+// 않게 하려는 것이다. 다만 metrics_need 의 카테고리 합 행은 product_ref 가 실제로
+// 빈 문자열이라 'product_ref=eq.' 가 유일한 필터다(#109) — 그 자리는 allowEmpty 로
+// "빈 값을 값으로 쓰겠다"고 밝힌다.
 export function buildQuery({ select, filters, order, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (select && select.length > 0) params.append('select', select.join(','));
   for (const f of filters || []) {
-    if (!f || !f.column || f.value === undefined || f.value === null || f.value === '') continue;
+    if (!f || !f.column || f.value === undefined || f.value === null) continue;
+    if (f.value === '' && !f.allowEmpty) continue;
     params.append(f.column, `${f.op}.${f.value}`);
   }
   if (order) params.append('order', order);

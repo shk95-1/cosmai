@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { latestRunId, sortRows, topByDimension } from '../public/query.js';
-import { renderDivergingBars, renderMagnitudeBars, renderTopBars } from '../public/render.js';
+import { renderDivergingBars, renderMagnitudeBars, renderTopBars, renderScatter } from '../public/render.js';
+import { needCharacterRows } from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const needFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_need.sample.json'), 'utf8'));
@@ -69,4 +70,59 @@ test('renderTopBars on an empty list renders an empty chart, not a crash', () =>
   const svg = renderTopBars([]);
   assert.match(svg, /<svg/);
   assert.deepEqual(svg.match(/<rect/g), null);
+});
+
+// ---- 화면 4: 산점도 ------------------------------------------------------
+
+const SCATTER = { xKey: 'persist_month_ratio', yKey: 'persist_product_ratio', sizeKey: 'unresolved', xLabel: '지속 월 비율', yLabel: '확산 제품 비율' };
+
+test('renderScatter: 비율이 있는 need_key 만큼 점을 찍는다', () => {
+  const rows = needCharacterRows(needFixture, 2, '선블록');
+  const svg = renderScatter(rows, SCATTER);
+  assert.equal((svg.match(/class="viz-dot"/g) || []).length, 2);
+  assert.match(svg, /밀림/);
+  assert.match(svg, /끈적유분/);
+  assert.match(svg, /지속 월 비율/);
+  assert.match(svg, /확산 제품 비율/);
+});
+
+// 분모(persist_months_total)가 0 이면 비율이 없다 — 0 으로 눕혀 왼쪽 아래에 찍으면
+// "지속되지 않는 니즈"라는 거짓 신호가 된다. 그 점은 아예 그리지 않는다.
+test('renderScatter: 분모 0 인 행은 점이 되지 않는다', () => {
+  const rows = needCharacterRows(needFixture, 2, '쿠션');
+  const svg = renderScatter(rows, SCATTER);
+  assert.equal(rows.length, 1);
+  assert.equal(svg.match(/class="viz-dot"/g), null);
+  assert.match(svg, /<svg/);
+});
+
+test('renderScatter: 0.5 사분면 구분선을 그린다', () => {
+  const svg = renderScatter(needCharacterRows(needFixture, 2, '선블록'), SCATTER);
+  assert.equal((svg.match(/class="viz-quadrant"/g) || []).length, 2);
+});
+
+test('renderScatter escapes need_key text', () => {
+  const rows = [{ need_key: '<script>', persist_month_ratio: 0.5, persist_product_ratio: 0.5, unresolved: 1 }];
+  const svg = renderScatter(rows, SCATTER);
+  assert.doesNotMatch(svg, /<script>/);
+  assert.match(svg, /&lt;script&gt;/);
+});
+
+// 점이 많으면 라벨이 서로 덮는다 — 큰 점 상위 N 개만 글자로 적고, 나머지는 <title>
+// (호버)로만 이름을 준다. 순수 함수라 DOM 이벤트를 못 달기 때문이다.
+test('renderScatter: 점이 많으면 라벨은 상위 N 개, 이름은 title 로 전부 남는다', () => {
+  const rows = Array.from({ length: 20 }, (_, i) => ({
+    need_key: `n${i}`, persist_month_ratio: 0.5, persist_product_ratio: 0.5, unresolved: i / 20,
+  }));
+  const svg = renderScatter(rows, SCATTER);
+  assert.equal((svg.match(/class="viz-dot"/g) || []).length, 20);
+  assert.equal((svg.match(/<title>/g) || []).length, 20);
+  assert.equal((svg.match(/class="viz-point-label"/g) || []).length, 12);
+  assert.match(svg, /class="viz-point-label"[^>]*>n19</);
+});
+
+test('renderScatter: 행이 없어도 축은 그린다', () => {
+  const svg = renderScatter([], SCATTER);
+  assert.match(svg, /<svg/);
+  assert.match(svg, /class="viz-axis"/);
 });

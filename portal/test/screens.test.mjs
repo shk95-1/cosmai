@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption } from '../public/screens.js';
+import {
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption,
+  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue,
+} from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const needFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_need.sample.json'), 'utf8'));
@@ -108,4 +111,49 @@ test('productRows: 롤업이 없는 run 은 카테고리 scope 의 제품 행을
     { run_id: 6, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
   ];
   assert.deepEqual(productRows(need, 6).map((r) => r.product_ref), ['oy:A1']);
+});
+
+// ---- 화면 4: 니즈의 성격 --------------------------------------------------
+
+test('safeRatio: 분모가 0·없음이면 null 이다 (0 이 아니다)', () => {
+  assert.equal(safeRatio(3, 4), 0.75);
+  assert.equal(safeRatio(0, 4), 0);
+  assert.equal(safeRatio(3, 0), null);
+  assert.equal(safeRatio(3, null), null);
+  assert.equal(safeRatio(null, 4), null);
+  assert.equal(safeRatio(undefined, undefined), null);
+});
+
+test('needCharacterRows: 카테고리 합 행에 세 비율을 얹는다', () => {
+  const rows = needCharacterRows(needFixture, 2, '선블록');
+  assert.deepEqual(rows.map((r) => r.need_key), ['밀림', '끈적유분']);
+  const 밀림 = rows[0];
+  assert.equal(밀림.persist_month_ratio, 5 / 6);
+  assert.equal(밀림.persist_product_ratio, 8 / 10);
+  assert.equal(밀림.new_ratio, 0.3 / 0.71);
+  assert.equal(밀림.low_share, 0.44);
+});
+
+// unresolved 가 0 인 니즈(불만이 다 해소됨)에서 신규 비율은 계산될 수 없다.
+test('needCharacterRows: unresolved 가 0 이면 신규 비율은 null 이다', () => {
+  const need = [{ run_id: 9, scope: 'a', need_key: 'x', month: '', product_ref: '', unresolved: 0, unresolved_new: 0, persist_months: 1, persist_months_total: 2, persist_products: 1, persist_products_total: 2 }];
+  const rows = needCharacterRows(need, 9, 'a');
+  assert.equal(rows[0].new_ratio, null);
+  assert.equal(rows[0].persist_month_ratio, 0.5);
+});
+
+test('needCharacterRows: 제품 축 행은 섞이지 않는다 (#41)', () => {
+  const rows = needCharacterRows(needFixture, 2, '선블록');
+  assert.equal(rows.some((r) => r.product_ref !== ''), false);
+});
+
+test('hasYoutubeMentions: yt_neg·yt_pos 가 전부 0 인 scope 는 false', () => {
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, 2, '선블록')), true);
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, 2, '쿠션')), false);
+  assert.equal(hasYoutubeMentions([]), false);
+});
+
+test('rowsWithValue: 비율이 null 인 행은 막대에서 빠진다', () => {
+  const rows = [{ need_key: 'a', new_ratio: 0.5 }, { need_key: 'b', new_ratio: null }, { need_key: 'c', new_ratio: 0 }];
+  assert.deepEqual(rowsWithValue(rows, 'new_ratio').map((r) => r.need_key), ['a', 'c']);
 });
