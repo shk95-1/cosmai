@@ -122,3 +122,25 @@ th { color: var(--text-secondary); cursor: pointer; user-select: none; }
 td { font-variant-numeric: tabular-nums; }
 /* 숫자는 우측 정렬이라야 자리수가 세로로 맞아 크기가 눈에 들어온다. */
 th.num, td.num { text-align: right; }
+
+/* ---- 운영 관제 페이지(ops.html, #139) --------------------------------------
+   새 색 토큰을 만들지 않는다: 이미 있는 발산·순차 색을 쓰면 다크 모드가 저절로 따라오고,
+   지표 화면과 같은 빨강·주황을 써야 두 화면이 같은 말을 한다. */
+.banner { font-size: 20px; font-weight: 600; padding: 14px 16px; border-radius: 8px; margin: 0 0 8px; }
+.banner-ok { color: var(--diverging-pos); border: 1px solid var(--border); background: var(--surface-1); }
+.banner-bad { color: var(--diverging-neg); border: 1px solid var(--diverging-neg); background: var(--surface-1); }
+
+/* 배지는 값을 그대로 보인다 — freshness 와 last_run_status 를 하나로 접지 않기 때문에 둘이 나란히 선다. */
+.badge { font-size: 12px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-secondary); }
+
+/* 색은 두 값 중 나쁜 쪽에서 온다(ops.js severityOf). 왼쪽 띠만 칠하는 것은 행 전체를 물들이면
+   표의 숫자가 읽히지 않아서다. */
+#ops-problems tr, #ops-arms tr, #ops-disabled tr { border-left: 3px solid transparent; }
+.sev-critical { border-left-color: var(--diverging-neg) !important; }
+.sev-warn { border-left-color: var(--seq-2) !important; }
+.sev-idle { border-left-color: var(--text-muted) !important; }
+.sev-ok { border-left-color: var(--diverging-pos) !important; }
+.sev-muted { color: var(--text-muted); }
+
+/* 이 페이지의 표는 정렬 가능한 표가 아니다 — 순서는 심각도가 정한다(ops.js sortByWorst). */
+#ops-problems th, #ops-arms th, #ops-disabled th { cursor: default; }

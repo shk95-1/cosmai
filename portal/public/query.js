@@ -42,6 +42,24 @@ export function buildQuery({ select, filters, order, limit, offset } = {}) {
 // 페이징 중 행이 빠지거나 겹칠 수 있다(이 파일 머리말과 같은 이유).
 const NEED_ORDER = 'run_id.desc,scope,need_key,month,product_ref';
 
+// 운영 관제(#139)가 읽는 단 하나의 표 -- needs.pipeline_health. 판정(freshness·last_run_status)은
+// 뷰가 이미 끝냈으므로 화면은 받아서 놓기만 한다.
+//
+// select 가 소비 함수가 거르는 컬럼을 빠짐없이 담아야 한다는 규칙은 여기서도 같다: PostgREST 는
+// select 에 적은 컬럼만 JSON 에 담으므로, ops.js 의 isProblem 이 보는 freshness·last_run_status 나
+// byArm 이 보는 arm 이 빠지면 그 비교가 언제나 거짓이 되고 화면이 통째로 빈다(#130 이 데인 자리).
+//
+// 필터도 정렬도 서버에 맡기지 않는다 -- 행이 선언된 단계 수(지금 14)뿐이라 한 페이지에 들어오고,
+// 순서는 ops.js 의 순수 함수가 심각도로 정한다. 서버 정렬을 섞으면 그 판단이 두 자리로 갈린다.
+export const OPS_QUERY = {
+  select: [
+    'stage_key', 'arm', 'dataset', 'enabled', 'expected_interval',
+    'last_success_at', 'last_run_at', 'last_run_status', 'overdue_by', 'freshness',
+    'requests', 'ok', 'blocked', 'failed', 'p90_ms',
+  ],
+  order: 'stage_key',
+};
+
 export const NEED_QUERIES = {
   // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
   // 가 그것을 고르는 유일한 필터다(#109, #130).
