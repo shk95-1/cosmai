@@ -79,11 +79,16 @@ def test_the_two_windows_are_the_eight_quarters_before_the_one_still_running():
 
 def test_a_quarter_missing_from_the_observation_still_takes_its_seat_in_the_window():
     """관측 목록의 인덱스로 세면 빠진 분기가 창을 한 칸씩 뒤로 민다 -- 그러면 같은 코퍼스가 두 개의
-    "최근 4분기"를 갖는다."""
-    dense = sensitivity.calendar_windows(["2024Q1", "2025Q1", "2026Q3"])
-    sparse = sensitivity.calendar_windows([q for q in QUARTERS if q != "2025Q1"][:11] + ["2026Q3"])
-    assert dense == sparse
-    assert "2025Q1" in dense[0]
+    "최근 4분기"를 갖는다. 이 코퍼스에서 빠지는 분기는 2025Q1 이고, 달력으로 세면 그 칸이 남는다."""
+    sparse = [q for q in QUARTERS[2:15] if q != "2025Q1"]
+    assert "2025Q1" not in sparse
+    prior, recent = sensitivity.calendar_windows(sparse)
+    # 값을 리터럴로 못 박는다 -- 두 호출을 맞대면 `calendar_windows` 가 마지막 분기만 읽으므로
+    # 어떤 입력으로도 안 깨지는 항등식이 된다.
+    assert prior == ("2024Q3", "2024Q4", "2025Q1", "2025Q2")
+    assert recent == ("2025Q3", "2025Q4", "2026Q1", "2026Q2")
+    # 관측 인덱스로 셌다면 창이 한 칸 밀려 2024Q2 가 직전 구간에 들어왔을 자리다.
+    assert "2024Q2" not in prior
 
 
 def test_a_population_without_a_quarter_is_refused_instead_of_answered():

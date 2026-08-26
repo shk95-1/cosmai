@@ -14,8 +14,14 @@
 않는다.**
 
 **표본이 못 보는 자리**: 이 표본은 `quarters_ok_product` 가 최대 3이라 `sample_ok` 가 한 셀도 서지 않고,
-그래서 뒤집힘 판정(`flipped`)이 여기서는 돌지 않는다. 그 갈래는 `tests/test_sensitivity_rules.py` 가 홀로
-진다. 전량(13분기·338행) 대조는 워커가 일회용 컨테이너에서 한 번 돌려 보고했다(2026-08-26).
+그래서 뒤집힘 판정(`flipped`)이 여기서는 돌지 않는다. 홍보 댓글도 0건이다(전량 17). 두 갈래는
+`tests/test_sensitivity_rules.py` 가 홀로 지고, 표본이 그것들을 밟게 만드는 일은 **#57 이 진다** --
+product 모집단을 건드리는 순간 골든을 **다섯 벌**(#5 분기 지표 · #40 판정 · #41 민감도 셋) 다시 만들어야
+하고, 그 비용 때문에 이 PR 은 product 에 한 문서도 대지 않고 expert 만 더했다.
+
+**전량 대조는 CI 가 못 한다** -- 261,317문서는 `archive/` 에 있고 그 자리는 읽기 전용이다. 사람이 한 번
+돌리는 절차와 대조 코드는 `tool/compare-ydc-sensitivity` 한 자리에 있다(2026-08-26 실행: 패널 26행 ·
+후향 11행 · 표시 104행, 차이 0).
 """
 
 from __future__ import annotations
@@ -176,15 +182,15 @@ def test_the_three_flags_are_not_all_empty_in_this_sample(built):
     """표시가 0건이면 "빼도 결론이 같다"가 아무것도 뺀 적 없다는 말이 된다."""
     assert built.ad.ad_videos > 0
     assert built.ad.creator_comments > 0
-    # 홍보 댓글은 이 표본에 없다(전량 17건). 그 사실을 침묵으로 두지 않는다 -- 0 이 아니게 되는 날
-    # promo 변형의 행들이 처음으로 움직인다.
+    # 홍보 댓글은 이 표본에 없다(전량 17건, #57 의 구멍 5). 그 사실을 침묵으로 두지 않는다 -- 0 이
+    # 아니게 되는 날 promo 변형의 행들이 처음으로 움직이고, 이 줄이 먼저 깨져서 그것을 알린다.
     assert built.ad.promo_comments == 0
     assert all(row.diff_pp == 0 for row in built.ad.rows if row.variant == sensitivity.PROMO_COMMENT)
 
 
 def test_the_sample_reaches_no_flip_and_says_so_instead_of_pretending(built):
-    """`sample_ok` 가 한 셀도 서지 않는다 -- 그러니 `flipped` 는 여기서 0회 돈다. 표본이 바뀌어 서기
-    시작하면 이 줄이 먼저 깨져서, 뒤집힘 대조가 조용히 공회전하고 있었다는 사실이 드러난다."""
+    """`sample_ok` 가 한 셀도 서지 않는다 -- 그러니 `flipped` 는 여기서 0회 돈다(#57 의 구멍 4). 표본이
+    바뀌어 서기 시작하면 이 줄이 먼저 깨져서, 뒤집힘 대조가 조용히 공회전하고 있었다는 사실이 드러난다."""
     assert not any(row.sample_ok for row in built.panel)
     assert built.flipped == []
 
