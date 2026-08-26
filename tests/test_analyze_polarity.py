@@ -6,7 +6,7 @@ import re
 import time
 import urllib.error
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -556,14 +556,16 @@ def _label(
     version: str,
     polarity: str = "만족",
     lexicon_category: str = "선블록",
+    observed_at: str = "2026-03-04",
+    month: str = "2026-03",
 ) -> None:
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
             " observed_at, observed_at_resolution, month, sentence, extractor_version,"
-            " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, '2026-03-04',"
-            " 'day', '2026-03', %s, 'rule-v2.3', %s)",
-            (ref, lexicon_category, need_key, polarity, sentence, version),
+            " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, %s,"
+            " 'day', %s, %s, 'rule-v2.3', %s)",
+            (ref, lexicon_category, need_key, polarity, observed_at, month, sentence, version),
         )
         conn.commit()
 
@@ -599,9 +601,16 @@ def test_an_unscoped_rule_run_does_not_overwrite_the_owners_label(loaded: str, _
 
 
 class OwnerPolarity:
-    """선블록의 주인 자리에 꽂는 스텁 — 규칙과도 경쟁자와도 다른 버전을 내는 것이 요점이다."""
+    """선블록의 주인 자리에 꽂는 스텁 — 규칙과도 경쟁자와도 다른 버전을 내는 것이 요점이다.
+
+    판정한 문장을 적어 둔다: 증분 실행이 무엇을 다시 판정하지 *않는지*는 행만 봐서는 안 보인다 —
+    gemma4 는 비결정이라 두 번째 판정이 같은 라벨을 낼 보장이 없고, 값은 GPU 시간이다 (#98).
+    """
 
     version = "stub-owner-v9"
+
+    def __init__(self) -> None:
+        self.judged: list[str] = []
 
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
@@ -609,6 +618,7 @@ class OwnerPolarity:
         return PolarityResult(aspect="백탁", polarity="만족", reason="owner", version=self.version)
 
     def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        self.judged.extend(x.sentence for x in items)
         return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
 
 
@@ -826,3 +836,105 @@ def test_a_run_without_a_scope_must_own_one():
     assert unready(OWNERS, GEMMA4, "선블록") is None
     # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
     assert unready(OWNERS, "stub-v9", "선블록") is None
+
+
+# --- 증분 실행 (#98): 주인은 "내 판본 행이 없는 원천 행"만 판정한다 ------------------------------------
+# 늦게 도착한 리뷰. written_at 은 옛 달이라 롤링 창(`--since 어제`)이 못 잡고, 고정 컷은 컷 이후 전량을
+# 매일 다시 판정한다 — 축이 written_at 이라 날짜로는 "안 한 것"을 고를 수 없다 (contracts/formats.md §시간).
+LATE_REVIEW = ("oliveyoung", "R6", "P1", 1.0, "백탁이 진짜 심해서 못 쓰겠어요", WRITTEN)
+# `--since D` 가 든 달에 앉았지만 D 보다 앞선 행 — 삭제를 같이 좁히지 않으면 매 실행이 이것을 판다.
+BEFORE_SINCE = ("P7/R7", "끈적유분", "since 앞에 앉은 옛 행")
+AFTER_SINCE = ("P7/R8", "끈적유분", "since 뒤에 앉은 옛 행")
+SINCE_MONTH = "2026-08"  # loaded 의 written_at NULL 리뷰가 captured_at 으로 앉는 달
+SINCE_DAY = date(2026, 8, 10)
+
+
+def _mentions(url: str) -> list[tuple[Any, ...]]:
+    """mention_id 를 함께 읽는다 — 지우고 다시 넣으면 값이 커지므로 '행 변화 0' 이 그대로 보인다."""
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT mention_id, ref, need_key, polarity, polarity_version FROM need_mention"
+            " ORDER BY mention_id"
+        )
+        return cur.fetchall()
+
+
+def _owner_only() -> dict[str, Owner]:
+    return {"선블록": Owner(OwnerPolarity.version, ALWAYS)}
+
+
+def test_a_repeated_missing_run_judges_nothing_and_leaves_every_row_untouched(loaded: str, _schema_name: str):
+    """크론이 매일 돌릴 명령이다: 원천이 그대로면 두 번째 실행은 판정을 한 번도 부르지 않는다.
+    행 비교는 mention_id 까지 본다 — 지우고 같은 값으로 다시 넣는 것도 재판정이다."""
+    owners = _owner_only()
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners, missing=True)
+    before = _mentions(loaded)
+    assert before, "첫 실행이 아무 행도 안 썼으면 이 단언은 진공이다"
+    again = OwnerPolarity()
+    _run(loaded, _schema_name, polarity=again, owners=owners, missing=True)
+    assert again.judged == []
+    assert _mentions(loaded) == before
+
+
+def test_a_missing_run_judges_only_the_source_row_that_has_no_row_of_its_version(
+    loaded: str, needs_schema: str, _schema_name: str
+):
+    """수집은 늦게 온다 — 새 리뷰의 written_at 은 옛 달이다. 고른 기준이 날짜가 아니라 '내 판본 행이
+    없는 원천 행'이라야 그 하나만 판정한다."""
+    owners = _owner_only()
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners, missing=True)
+    before = _mentions(loaded)
+    with connect(needs_schema) as conn, conn.cursor() as cur:
+        source, key, product, rating, body, written = LATE_REVIEW
+        cur.execute(
+            "INSERT INTO review (source, review_key, captured_at, product_key, rating, body, written_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (source, key, CAPTURED, product, rating, body, written),
+        )
+        conn.commit()
+    again = OwnerPolarity()
+    _run(loaded, _schema_name, polarity=again, owners=owners, missing=True)
+    after = _mentions(loaded)
+    assert len(again.judged) == 1, again.judged
+    assert [row[1] for row in after if row not in before] == ["P1/R6"]
+    assert [row for row in before if row not in after] == []
+
+
+def test_a_missing_run_adds_what_is_absent_and_replaces_nothing(loaded: str, _schema_name: str):
+    """증분은 없는 것을 더하기만 한다 — 갈아끼우기(역사 보정·판본 상승)는 --scope 전량 경로의 몫이다.
+    그래서 옛 판본이 남긴 행은 이 모드가 지우지 않는다."""
+    ref, need_key, sentence = OWNED_ONLY
+    _label(loaded, ref, need_key, sentence, "rule-v0.9")
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=_owner_only(), missing=True)
+    assert _labels(loaded, ref) == [(need_key, "만족", "rule-v0.9")]
+
+
+def test_missing_is_refused_for_a_run_that_owns_no_scope(loaded: str, _schema_name: str):
+    """규칙은 매일 전량이 맞다 — 소유가 없으면 '내 판본 행'이 곧 그 모집단 전량이라 증분이 뜻을 잃는다."""
+    with pytest.raises(ValueError, match="--missing"):
+        _run(loaded, _schema_name, missing=True)
+
+
+def test_an_owner_run_does_not_walk_the_months_before_its_earliest_since(loaded: str, _schema_name: str):
+    """주인은 자기 since 앞의 달에 한 행도 쓸 수 없다(소유 술어). 그 달을 훑는 것은 삭제 한 번과 읽기
+    한 번의 순수한 비용이다 — 26개 카테고리를 꺼내면 매일 그만큼 곱해진다."""
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    found = _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)
+    assert found.months == 1  # loaded 의 두 달 중 2026-08 만
+
+
+def test_since_does_not_delete_the_rows_that_sit_before_it(loaded: str, _schema_name: str):
+    """`--since D` 는 읽기만 자르고 삭제는 안 잘랐다 — D 가 든 달의 D 이전 행을 전부 지우고 D 이후만
+    다시 썼다. 그대로 크론에 넣으면 매일 구멍을 판다."""
+    ref, need_key, sentence = BEFORE_SINCE
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", observed_at="2026-08-01", month=SINCE_MONTH)
+    _run(loaded, _schema_name, since=SINCE_DAY)
+    assert _stale(loaded, ref) == [(need_key, "선블록")]
+
+
+def test_since_still_deletes_the_stale_rows_it_will_rewrite(loaded: str, _schema_name: str):
+    """반대 방향도 같은 실행이 지킨다: D 이후는 이 실행이 다시 쓰는 자리라 옛 판본 행이 남으면 안 된다."""
+    ref, need_key, sentence = AFTER_SINCE
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", observed_at="2026-08-20", month=SINCE_MONTH)
+    _run(loaded, _schema_name, since=SINCE_DAY)
+    assert _stale(loaded, ref) == []

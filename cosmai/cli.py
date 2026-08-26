@@ -53,6 +53,11 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--scope", default=None, help="Restrict to one lexicon or source category.")
     p.add_argument("--impl", default=None, help="Registered polarity factory, e.g. ollama:gemma4:latest.")
     p.add_argument(
+        "--missing",
+        action="store_true",
+        help="Owner runs only: judge the source rows that have no row of this version yet.",
+    )
+    p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
 
@@ -158,7 +163,9 @@ def _run_analyze(args: argparse.Namespace) -> int:
         except (ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
-        outcome = run_stage(conn, args.stage, since=since, scope=args.scope, polarity=polarity)
+        outcome = run_stage(
+            conn, args.stage, since=since, scope=args.scope, missing=args.missing, polarity=polarity
+        )
     print(outcome.note)
     return 0 if outcome.status == "ok" else 1
 

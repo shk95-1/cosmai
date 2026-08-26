@@ -291,6 +291,7 @@ def run_all(
     conn: psycopg.Connection[Any],
     since: date | None,
     scope: str | None,
+    missing: bool,
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
@@ -318,6 +319,7 @@ def run_all(
             conn,
             since=since,
             scope=scope,
+            missing=missing,
             commerce_schema=commerce_schema,
             youtube_schema=youtube_schema,
             polarity=polarity,
@@ -350,6 +352,7 @@ def run_stage(
     *,
     since: date | None = None,
     scope: str | None = None,
+    missing: bool = False,
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
@@ -363,10 +366,29 @@ def run_stage(
         stale = _abandoned(conn)
         if stage == "all":
             return run_all(
-                conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+                conn,
+                since,
+                scope,
+                missing,
+                commerce_schema,
+                youtube_schema,
+                captured_at,
+                polarity,
+                owners,
+                stale,
             )
         return _one(
-            conn, stage, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+            conn,
+            stage,
+            since,
+            scope,
+            missing,
+            commerce_schema,
+            youtube_schema,
+            captured_at,
+            polarity,
+            owners,
+            stale,
         )
 
 
@@ -375,6 +397,7 @@ def _one(
     stage: str,
     since: date | None,
     scope: str | None,
+    missing: bool,
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
@@ -401,6 +424,7 @@ def _one(
                 conn,
                 since=since,
                 scope=scope,
+                missing=missing,
                 commerce_schema=commerce_schema,
                 youtube_schema=youtube_schema,
                 polarity=polarity,
