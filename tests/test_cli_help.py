@@ -27,6 +27,7 @@ COMMANDS = (
     ("trend", "sensitivity"),
     ("trend", "evidence"),
     ("trend", "cards"),
+    ("trend", "crosscheck"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

@@ -1,0 +1,24 @@
+topic_group,topic_name,polarity
+발림성,보통이에요,neutral
+발림성,다소 아쉬워요,negative
+발림성,아주 만족해요,positive
+발색력,보통이에요,neutral
+발색력,다소 아쉬워요,negative
+발색력,아주 만족해요,positive
+보습력,촉촉해요,positive
+보습력,보통이에요,neutral
+보습력,약간 건조해요,negative
+수분감,매트해요,negative
+수분감,보통이에요,neutral
+수분감,아주 촉촉해요,positive
+자극도,순해요,positive
+자극도,보통이에요,neutral
+자극도,자극없이 순해요,positive
+자극도,자극이 있어요,negative
+자극도,자극이 느껴져요,negative
+지속력,보통이에요,neutral
+지속력,예상보다 짧아요,negative
+지속력,지속이 오래돼요,positive
+커버력,보통이에요,neutral
+커버력,예상보다 길어요,positive
+커버력,예상보다 짧아요,negative

@@ -71,6 +71,8 @@ extend-include = [
     "tool/compare-ydc-sensitivity",
     "tool/measure-query-routing",
     "tool/show-vector-stamp",
+    "tool/compare-ydc-crosscheck",
+    "tool/measure-crosscheck-keys",
 ]
 
 [tool.ruff.lint]
