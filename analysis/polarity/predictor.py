@@ -103,6 +103,16 @@ class _Blocking:
         self.inner = inner
         self.version = inner.version
 
+    def preflight(self) -> None:
+        # 단계가 이 이름으로 찾는다 — 감싼 판정자에 프로브가 있어도 여기서 안 내보내면 못 본다.
+        probe = getattr(self.inner, "preflight", None)
+        if probe is None:
+            return
+        try:
+            probe()
+        except UNREACHABLE as unreachable:
+            raise LookupError(f"{type(unreachable).__name__}: {unreachable}") from unreachable
+
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
     ) -> PolarityResult:

@@ -545,6 +545,10 @@ def run(
     # 남의 scope 거절과 같은 자리·같은 모양이다: run 이 열리기 전에 멈춰야 운영자가 표를 본다.
     if missing and not stage.owned:
         raise ValueError(NO_MISSING.format(version=version))
+    # 배선이 끊긴 밤이 첫 배치까지 가서 죽으면 `--missing` 은 rewriting 표식을 안 달아 그 죽음을 되짚을
+    # 자리가 없다 — 규칙에는 없는 선택 훅이라 이름으로 찾는다 (analysis/polarity/ollama.py 의 preflight).
+    if (probe := getattr(stage.polarity, "preflight", None)) is not None:
+        probe()
     floor = stage.floor(scope)
     with conn.cursor() as cur:
         cur.execute(

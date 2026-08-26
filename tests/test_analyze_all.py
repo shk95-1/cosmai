@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -657,6 +658,29 @@ def test_the_crontab_schedules_analyze_all_at_the_time_the_contract_names():
     # decision (stack/docker-compose.yml), and it must not decide whether this check sees the line.
     scheduled = "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
     assert _time(scheduled) == contract
+
+
+ANALYZE_LINE = re.compile(r"^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(cosmai analyze .+)$")
+
+
+def test_the_contract_and_the_crontab_agree_on_every_analyze_line():
+    """`analyze all` 하나만 대조하던 검사를 넓힌다 (#32): gemma4 줄이 크론에만 있고 계약에 없으면
+    §스케줄 은 "매일 밤 무엇이 도는가"에 거짓을 답한다 — 간격 규칙이 서는 표가 바로 그 표다."""
+
+    def _times(text: str) -> dict[str, str]:
+        found = {}
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if match := ANALYZE_LINE.match(line):
+                found[" ".join(match.group(2).split())] = " ".join(match.group(1).split())
+        return found
+
+    contract = _times(ENTRYPOINTS_MD.read_text(encoding="utf-8"))
+    scheduled = _times(
+        "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
+    )
+    assert scheduled, "stack/crontab.d 에 analyze 줄이 하나도 없다"
+    assert scheduled == contract, f"크론 {scheduled} vs 계약 {contract}"
 
 
 def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime():
