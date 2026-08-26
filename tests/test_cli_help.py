@@ -21,6 +21,8 @@ COMMANDS = (
     ("retrieval", "eval"),
     ("retrieval", "embed"),
     ("retrieval", "terms"),
+    ("trend",),
+    ("trend", "quarter"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

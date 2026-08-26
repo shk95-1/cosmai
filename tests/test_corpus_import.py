@@ -35,7 +35,7 @@ README = ROOT / "contracts" / "README.md"
 # 금지이며, 레포에 그 원문을 복사하는 것도 반입 대상이 아니다. 대신 재현 정의가 걸러 내야 하는 다섯
 # 가지를 한 벌에 담았다 -- expert 채널 · 쇼츠 · video_unknown · 선크림이 없는 장문 · 그 각각의 댓글.
 FIXTURE_REPRODUCES = {"선크림_장문_product": 2, "그_영상_댓글_전체": 3, "그_영상_댓글_중복제외": 2}
-FIXTURE_COUNTS = {"corpus_snapshot": 1, "corpus_document": 12, "corpus_mention": 8}
+FIXTURE_COUNTS = {"corpus_snapshot": 1, "corpus_document": 12, "corpus_mention": 9}
 
 SNAPSHOT = (
     "SELECT snapshot_id, label, produced_by, source_runs, collected_at, note, imported_at"

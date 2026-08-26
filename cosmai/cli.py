@@ -104,6 +104,17 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     emb.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
+def _add_trend(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("trend", help="Build the panel's quarterly topic series.")
+    actions = p.add_subparsers(dest="action", required=True)
+
+    quarter = actions.add_parser(
+        "quarter", help="Load needs.metrics_topic_quarter from the active corpus snapshot."
+    )
+    # 스냅샷도 명부도 인자가 아니다 -- 활성 판본이 답이고, 그것을 고르는 길이 둘이면 분모도 둘이 된다.
+    quarter.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
     p.add_argument("task", choices=TASKS)
@@ -142,6 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_login(subparsers)
     _add_analyze(subparsers)
     _add_retrieval(subparsers)
+    _add_trend(subparsers)
     _add_eval(subparsers)
     _add_lexicon(subparsers)
     return parser
@@ -309,6 +321,32 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
     return connect(url or runtime_url())
 
 
+def _run_trend(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from analysis.retrieval.topics import NoDictionary
+    from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, run
+
+    try:
+        conn = _connect(args.url)
+    except (ValueError, LookupError, psycopg.Error) as refused:
+        print(refused)
+        return 2
+    try:
+        with conn:
+            outcome = run(conn)
+    # 명부도 스냅샷도 주제 사전도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운 것이고,
+    # 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
+    except (NoPopulation, TopicAxisDrift, NoDictionary) as blocked:
+        print(blocked)
+        return 2
+    print(outcome.note)
+    for violation in outcome.violations:
+        print(f"  {violation}")
+    # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
+    return 0 if outcome.status == "ok" else 1
+
+
 def _run_eval(args: argparse.Namespace) -> int:
     from analysis import predictors, registry
     from analysis.baselines import adoption_misses
@@ -449,6 +487,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_analyze(args)
     if args.command == "retrieval":
         return _run_retrieval(args)
+    if args.command == "trend":
+        return _run_trend(args)
     if args.command == "eval":
         return _run_eval(args)
     if args.command == "lexicon":

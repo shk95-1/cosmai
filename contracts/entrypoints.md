@@ -194,6 +194,26 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   `uv sync --extra embed` 로 깔아 두면 다음 `tool/checks/test` 가 지운다(그게 맞는 동작이다).
 - `analyze all` 과 같은 이유로 크론 간격 규칙에서 제외된다 — 외부 fetch 가 없는 DB·파일 전용 작업이다.
 
+## 분기 시계열 (포크 #5, ydc `trend.py` 승격)
+```
+cosmai trend quarter [--url <url>]
+```
+- 활성 코퍼스 스냅샷(`corpus_snapshot.active`)과 활성 패널 명부(`panel_channel` 의 활성 판본)를 읽어
+  `needs.metrics_topic_quarter` 를 쓴다. **스냅샷도 명부도 인자가 아니다** — 고르는 길이 둘이면 분모도
+  둘이 되고, 활성 판본을 고르는 자리는 `db/corpus.active_snapshot` 과 `db/seed/panel.active_version`
+  하나씩이다(후자는 활성 판본이 둘이면 답 대신 멈춘다).
+- 모집단은 매니페스트 규칙 그대로다: `content_type='video_long'` · `panel_role='product'` ·
+  `topic_id='선크림'` 언급이 있는 영상, 그리고 그 영상들에 달린 댓글. 산출 행의 `scope` 는
+  `metrics_need.scope` 와 같은 어휘(`선블록`)이고 `content_type` 은 `long_form` 이다.
+- **한 실행이 그 (run, scope, 명부) 의 행을 통째로 다시 쓴다.** 부분 갱신이 아닌 것이 격자를 조밀하게
+  지키는 방법이다 — 재실행은 같은 `run_id`(note 로 찾는다)에 같은 행을 낸다.
+- 쓰고 나서 `needs.metrics_topic_quarter_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면
+  종료 코드 **1**(partial)이고 stdout 이 그 줄을 싣는다 — 표는 섰지만 그 표의 뜻이 계약과 다르다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, **활성 명부 없음**·**활성 스냅샷
+  없음**, 모집단이 비어 산출할 행이 없음 — 셋 다 `db/seed --only panel`·`db/corpus load` 를 아직 안
+  돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `analysis_run.versions.metric` 이 그 행들의 정의 판본을 든다 (`versioning.md`).
+
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
