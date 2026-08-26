@@ -91,18 +91,26 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
 - 산출 행은 반드시 `*_version` 을 가진다 (`versioning.md`).
-- `analyze --impl <spec>` 는 `eval` 과 같은 레지스트리·같은 스펙 문법이다(`ollama:gemma4:latest`·`llm:claude-sonnet-5`). 없으면 규칙이 돌고, 있으면 그 구현의 버전이 `analysis_run.versions.polarity` 와 산출 행에 남는다. **규칙이 아닌 구현은 `--scope` 없이는 거절한다** — 무료여도 그렇다(analyze 의 기본은 전량이라 스코프 없는 한 줄이 곧 전량 재라벨이고, 값은 돈이거나 GPU 시간이다). 그 `--scope` 가 아직 소유 표에 주인이 없는 `lexicon_category` 여도 거절한다: 등록이 패스보다 먼저여야 그 결과가 다음 05:00 에 지워지지 않는다. 유료(`registry.is_paid`) 구현은 그보다 앞서 돈을 이유로 한 번 더 걸린다 — `eval` 의 `--split` 강제와 같은 자리다. 두 거절 모두 run 이 열리기 전이라 blocked(종료 코드 2)이고, 판정은 `analysis/polarity/ownership.py` 가 한다.
+- `analyze --impl <spec>` 는 `eval` 과 같은 레지스트리·같은 스펙 문법이다(`ollama:gemma4:latest`·`llm:claude-sonnet-5`). 없으면 규칙이 돌고, 있으면 그 구현의 버전이 `analysis_run.versions.polarity` 와 산출 행에 남는다. **소유 표에 자기 자리가 없는 구현은 `--scope` 없이는 거절한다** — 무료여도 그렇다(analyze 의 기본은 전량이라 그런 구현의 스코프 없는 한 줄은 곧 전량 재라벨이고, 값은 돈이거나 GPU 시간이다). 표에 자리가 있는 구현(=주인)은 `--scope` 없이 돌 수 있다: 그 한 줄이 도는 것은 자기 `(scope, 기간)` 뿐이고 `--scope` 는 그것을 더 좁히기만 한다. 그 `--scope` 가 아직 소유 표에 주인이 없는 `lexicon_category` 여도 거절한다: 등록이 패스보다 먼저여야 그 결과가 다음 05:00 에 지워지지 않는다. 유료(`registry.is_paid`) 구현은 그보다 앞서 돈을 이유로 한 번 더 걸린다 — `eval` 의 `--split` 강제와 같은 자리다. 두 거절 모두 run 이 열리기 전이라 blocked(종료 코드 2)이고, 판정은 `analysis/polarity/ownership.py` 가 한다.
 - `analyze all` 은 `needs.analysis_run` 행 하나를 만들고(polarity 가 열고 aggregate 가 그 `run_id` 로
   metrics 를 쓴다) `versions` 에 linker·extractor·polarity·aggregate 와 `lexicon`(활성 버전 + ruleset)을
   기록한다. 한 단계라도 실패하면 그 run 은 `status='failed'` + note 로 닫히고 종료 코드는 1 이다.
 - `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
-- 그 모집단 안에서 **극성 구현은 scope 마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가 한
-  `lexicon_category` 를 한 `polarity_version` 에 배정하고, 주인이 아닌 실행은 그 scope 의 `need_mention`
-  행을 쓰지도 지우지도 않는다(삭제문과 `DO UPDATE` 에 같이 선 소유 술어가 그것을 세운다) — 005 의
-  자연키가 `polarity_version` 을 담지 않아 소유는 행이 아니라 scope 단위로만 성립하기 때문이다. 주인
-  없는 `lexicon_category` 와 `lexicon_category IS NULL` 인 행(유튜브 댓글·카테고리를 못 붙인 리뷰)은
+- 그 모집단 안에서 **극성 구현은 (scope, 기간)마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가
+  한 `lexicon_category` 를 한 `polarity_version` 과 그 판본이 책임지는 첫 달(`since`, `need_mention.month`
+  와 같은 YYYY-MM)에 배정하고, 그 scope 의 `month >= since` 인 `need_mention` 행은 **주인만** 쓰고
+  지운다. 반대 방향도 같다: **주인은 자기 `since` 앞의 달을 쓰지도 지우지도 않는다.** 양쪽 다 읽기
+  건너뛰기·삭제문·`DO UPDATE` 에 같은 모양으로 선 소유 술어 하나가 세운다. 소유가 행이 아니라
+  `(scope, 기간)` 단위인 것은 005 의 자연키가 `polarity_version` 을 담지 않기 때문이고, 기간이 붙는
+  것은 등록과 패스를 떼어놓기 위해서다 — `since` 를 다음 달로 적어 등록하면 그 앞의 달은 규칙이 계속
+  갱신하므로, 전량 패스가 끝나기를 기다렸다가 등록할 이유가 없다. 주인 없는 `lexicon_category`,
+  주인의 `since` 앞의 달, `lexicon_category IS NULL` 인 행(유튜브 댓글·카테고리를 못 붙인 리뷰)은
   지금처럼 규칙이 갱신한다.
+- 그래서 **주인 기간인데 주인이 아직 안 닿은 달에는 행이 없다**(등록 직후, 그리고 주인의 패스 사이).
+  규칙이 임시로 채우지 않는 것은 두 구현이 같은 문장에서 다른 `need_key` 를 고르면 그 임시 행이 주인의
+  행 옆에 그대로 남아 집계가 한 문장을 두 번 세기 때문이다 — 아래 '카테고리가 움직인 문장' 문단이 같은
+  자리를 말한다. 이 구멍의 수명은 주인 패스의 주기다.
 - 그래서 한 문장의 라벨은 그 문장의 `lexicon_category` 를 소유한 구현의 것 하나다 — 그 카테고리가
   움직이지 않는 동안은. `rank_snapshot` 의 최신 행과 `category_map` 이 매일 다시 계산하므로 제품은
   카테고리를 옮겨 다니고, 옮겨간 뒤 옛 scope 에 남은 주인의 행은 아무도 지우지 못한다(주인 아닌 실행은
@@ -111,9 +119,11 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   센다** — 같은 `need_key` 면 자연키가 겹치고 소유 술어가 갱신을 막아 주인의 행 하나로 남는다. 옛 행은
   주인의 `polarity_version` 이 오르는 첫 실행이 치운다.
 - 반대로 제품이 남의 scope에서 **주인의 scope 안으로** 옮겨오면 회수 주체가 다르다. 옮겨오기 전에
-  규칙이 써 둔 행은 저장된 `lexicon_category` 가 옛 카테고리 그대로이고, 규칙 실행은 그 유닛을
-  건너뛴다(`analysis/polarity/pipeline.py` 가 `lexicon_category` 를 `stage.foreign` 이나 지금 `--scope`
-  와 견줘 판정 자체를 하지 않는다). 주인이 도는 `--scope` 삭제문(`NEED_DELETE_SCOPED`)은
+  규칙이 써 둔 행은 저장된 `lexicon_category` 가 옛 카테고리 그대로이고, 규칙 실행은 **그 달이 주인
+  기간이면** 그 유닛을 건너뛴다(`analysis/polarity/pipeline.py` 가 `lexicon_category` 와 그 유닛의 달을
+  소유 술어에, 그리고 지금 `--scope` 에 견줘 판정 자체를 하지 않는다). 주인의 `since` 앞의 달이면
+  규칙이 그 유닛을 그대로 돌아 **새** 카테고리로 다시 뽑으므로, 아래의 이중 계수가 그 달에서는 규칙
+  실행 하나로 생긴다. 주인이 도는 `--scope` 삭제문(`NEED_DELETE_SCOPED`)은
   `lexicon_category = <그 scope>` 로 좁혀져 있어 옛 카테고리를 단 그 행을 맞히지 못한다 — 그래서 이
   방향의 옛 행을 치우는 것은 주인 패스가 아니라 **규칙 자신의 버전이 오르는 실행**이다:
   `NEED_DELETE` 의 `NOT (extractor_version = ... AND polarity_version = ...)` 술어가 규칙의

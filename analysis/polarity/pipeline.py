@@ -7,8 +7,8 @@ idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징�
 쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
 자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
 (삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
-같은 계열 안에서 두 극성 구현이 공존하는 자리는 scope 로 갈린다 — 소유 표(ownership.py)가 배정한
-lexicon_category 는 그 주인만 쓰고 지운다.
+같은 계열 안에서 두 극성 구현이 공존하는 자리는 (scope, 기간)으로 갈린다 — 소유 표(ownership.py)가
+배정한 lexicon_category 의 since 이후 달은 그 주인만 쓰고 지우고, 그 앞의 달은 규칙이 계속 갱신한다.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
-from analysis.polarity.ownership import OWNERS, Owner, foreign_scopes
+from analysis.polarity.ownership import OWNERS, Owner, Scopes, may_write, scopes_of
 from analysis.types import (
     AspectLexicon,
     Candidate,
@@ -61,12 +61,24 @@ RUN_NOTE: LiteralString = "UPDATE analysis_run SET note = %s WHERE run_id = %s"
 # 그 안에서 죽으면 원천은 그대로여도 그 달의 need_mention 은 반쪽이고, 주인 있는 scope 는 규칙이
 # 배제하므로(#31) 사람이 다시 돌릴 때까지 아무도 메우지 않는다. 창 안에 있다는 사실을 DB 가 말한다.
 MARKER = "rewriting="
-NEED_DELETE: LiteralString = """
+# ownership.py 의 may_write 를 SQL 로 옮긴 술어 하나 — 삭제문과 DO UPDATE 가 같은 것을 쓴다. 앞 줄이
+# 남의 (scope, 기간) 행을 밖에 두고(lexicon_category 가 NULL 이면 맞는 쌍이 없어 통과한다), 뒷 줄이
+# 표에 오른 구현을 자기 (scope, 기간) 안에 가둔다. 두 배열이 다 비면 소유 이전의 동작 그대로다.
+OWNED: LiteralString = """(
+  NOT EXISTS (SELECT 1 FROM unnest(%s::text[], %s::text[]) AS theirs(scope, since)
+              WHERE theirs.scope = need_mention.lexicon_category AND need_mention.month >= theirs.since)
+  AND (cardinality(%s::text[]) = 0
+       OR EXISTS (SELECT 1 FROM unnest(%s::text[], %s::text[]) AS mine(scope, since)
+                  WHERE mine.scope = need_mention.lexicon_category AND need_mention.month >= mine.since))
+)"""
+NEED_DELETE: LiteralString = (
+    """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
-AND (lexicon_category IS NULL OR lexicon_category <> ALL(%s::text[]))
-"""
-# 마지막 줄이 남의 scope(ownership.py)를 삭제 밖에 둔다 — 빈 배열이면 <> ALL 이 전부 참이라 옛 동작이다.
+AND """
+    + OWNED
+    + "\n"
+)
 # --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
 # 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
 NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
@@ -76,7 +88,8 @@ AND extractor_version <> %s
 """
 # 005 로 extractor_version 이 자연키에 들어간 뒤로 시드 행(slice-*)은 이 INSERT 와 애초에 충돌하지
 # 않는다 — 충돌하는 행은 반드시 이 실행과 같은 버전이므로 DO UPDATE 에 버전 필터가 필요 없다.
-NEED_UPSERT: LiteralString = """
+NEED_UPSERT: LiteralString = (
+    """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, aspect_scope,
    polarity, strength, rating, observed_at, observed_at_resolution, month, sentence, kind, marker,
@@ -91,9 +104,11 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
-WHERE need_mention.lexicon_category IS NULL OR need_mention.lexicon_category <> ALL(%s::text[])
-"""
-# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category 가 남의 scope 면 갱신도 하지 않는다.
+WHERE """
+    + OWNED
+    + "\n"
+)
+# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category·month 가 남의 자리면 갱신도 하지 않는다.
 # 저장된 scope 와 지금 매핑이 갈리면(rank_snapshot 최신 행·category_map 이 매일 다시 계산한다) 이 실행은
 # 그 문장을 자기 것으로 보고 다시 뽑는다: 두 구현이 같은 need_key 를 고르면 자연키가 통째로 겹쳐, 삭제를
 # 피한 주인의 행을 제자리 upsert 가 갈아 끼운다. WISH_UPSERT 가 쓰는 그 자리(DO UPDATE ... WHERE)다.
@@ -292,8 +307,11 @@ class PolarityStage:
         # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
         self.rule = RulePolarity()
         self.polarity: Polarity = polarity or self.rule
-        # 다른 구현이 주인인 scope — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
-        self.foreign = foreign_scopes(owners, self.polarity.version)
+        self.owners = owners
+        # 남이 주인인 (scope, 기간) — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
+        self.foreign: Scopes = scopes_of(owners, self.polarity.version, mine=False)
+        # 이 실행이 주인인 (scope, 기간) — 비어 있지 않으면 이 실행은 그 안에서만 쓰고 지운다.
+        self.owned: Scopes = scopes_of(owners, self.polarity.version, mine=True)
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
@@ -307,6 +325,16 @@ class PolarityStage:
             "polarity": self.polarity.version,
             "lexicon": {"entity": self.lexicon.version, "aspect": self.aspects[GENERIC_RULESET].version},
         }
+
+    def _owner_args(self) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+        """OWNED 술어가 받는 다섯 인자 — 남의 쌍 둘, 내 쌍 셋(cardinality 검사가 첫 배열을 한 번 더 본다)."""
+        theirs = [list(part) for part in zip(*self.foreign, strict=True)] or [[], []]
+        mine = [list(part) for part in zip(*self.owned, strict=True)] or [[], []]
+        return (theirs[0], theirs[1], mine[0], mine[0], mine[1])
+
+    def owns(self, lexicon_category: str | None, month: str) -> bool:
+        """읽기 건너뛰기가 묻는 것 — 삭제문·갱신문의 OWNED 와 같은 술어다 (ownership.py 의 may_write)."""
+        return may_write(self.owners, self.polarity.version, lexicon_category, month)
 
     def _scope_of(self, aspects: AspectLexicon, category: str | None, aspect: str) -> str:
         for pattern in self.rule.patterns_for(aspects, category):
@@ -401,7 +429,7 @@ class PolarityStage:
 
     def replace_stale(self, src: str, month: str, scope: str | None = None) -> int:
         """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다."""
-        versions = (RuleExtractor.version, self.polarity.version, list(self.foreign))
+        versions = (RuleExtractor.version, self.polarity.version, *self._owner_args())
         with self.conn.cursor() as cur:
             if scope is None:
                 cur.execute(NEED_DELETE, (src, month, *versions))
@@ -409,7 +437,8 @@ class PolarityStage:
                 cur.execute(NEED_DELETE_SCOPED, (src, month, *versions, scope))
             replaced = cur.rowcount
             # wish_mention 에는 lexicon_category 가 없고 스코프 실행은 wish 행을 하나도 만들지 않는다.
-            if scope is None:
+            # 주인 있는 구현도 마찬가지다 — 소유가 성립하지 않는 표라 그 행은 규칙의 것이다.
+            if scope is None and not self.owned:
                 cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
                 replaced += cur.rowcount
         self.conn.commit()
@@ -423,7 +452,7 @@ class PolarityStage:
             self.conn.commit()
 
     def flush(self, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]) -> None:
-        self._write(NEED_UPSERT, needs, (list(self.foreign),))
+        self._write(NEED_UPSERT, needs, self._owner_args())
         self._write(WISH_UPSERT, wishes)
 
 
@@ -444,10 +473,13 @@ def run(
     구별할 단서가 표에 없다 (analysis/pipeline.py)."""
     stage = PolarityStage(conn, batch, polarity, owners)
     version = stage.polarity.version
-    if scope is not None and scope in stage.foreign:
+    # since 와 무관하게 남의 scope 면 거절한다: 주인의 기간 앞 달은 스코프 없는 05:00 줄이 도는 자리라,
+    # 그 이름을 --scope 로 부르는 한 줄은 어느 달을 노렸든 손실행이다.
+    if scope is not None and any(taken == scope for taken, _ in stage.foreign):
         # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
         raise ValueError(
-            f"{scope} is owned by {owners[scope].version}, not {version} (analysis/polarity/ownership.py)"
+            f"{scope} is owned by {owners[scope].version} since {owners[scope].since}, not {version} "
+            "(analysis/polarity/ownership.py)"
         )
     with conn.cursor() as cur:
         cur.execute(
@@ -498,9 +530,11 @@ def run(
                     lexicon_category = stage.categories.lexicon_category(
                         source, unit.category, names.get((source, product_key))
                     )
-                    # 주인이 따로 있는 scope 는 판정 자체를 하지 않는다: 자연키에 polarity_version 이
+                    # 주인이 따로 있는 (scope, 달)은 판정 자체를 하지 않는다: 자연키에 polarity_version 이
                     # 없어 여기서 한 줄만 흘러도 upsert 가 주인의 라벨을 제자리에서 덮는다.
-                    if lexicon_category in stage.foreign or (scope and lexicon_category != scope):
+                    if not stage.owns(lexicon_category, month_of(unit.observed_at)) or (
+                        scope and lexicon_category != scope
+                    ):
                         continue
                     units += 1
                     pending.extend(stage.candidates(unit, lexicon_category))
@@ -510,8 +544,9 @@ def run(
             _note(conn, run_id, base_note)
 
     # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
-    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다).
-    if scope is None and _exists(conn, youtube_schema, "comments"):
+    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다). 주인 있는
+    # 구현도 같다: lexicon_category 가 없는 행에는 소유가 성립하지 않아 판정이 한 줄도 통과하지 못한다.
+    if scope is None and not stage.owned and _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
