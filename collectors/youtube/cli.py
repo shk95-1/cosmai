@@ -130,6 +130,7 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
                 conn,
                 kind=directive.kind,
                 target=directive.target,
+                dataset=Dataset.WATCH.value,
                 follow_up_kind=follow_up,
                 refresh=index == 0,
                 now=now,
@@ -170,7 +171,14 @@ def _claim(conn: Connection, *, limit: int, now: datetime) -> Sequence[Any]:
         sa.update(jobs)
         .where(jobs.c.identifier.in_(sa.select(candidates.c.identifier)))
         .values(state=JobState.RUNNING.value, started_at=now)
-        .returning(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind, jobs.c.started_at)
+        .returning(
+            jobs.c.identifier,
+            jobs.c.kind,
+            jobs.c.target,
+            jobs.c.dataset,
+            jobs.c.follow_up_kind,
+            jobs.c.started_at,
+        )
     )
     return conn.execute(stmt).all()
 
@@ -294,7 +302,11 @@ def _collect_one(
 
     if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
         video_ids = [v["video_id"] for v in payload["videos"]]
-        queue.fan_out_follow_up(conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, now=now)
+        # #102: the fanned-out job inherits the listing job's own dataset -- it exists only because
+        # that job's follow_up_kind named it, not because of anything `work` itself decided.
+        queue.fan_out_follow_up(
+            conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, dataset=job.dataset, now=now
+        )
 
     conn.execute(
         sa.update(jobs)
