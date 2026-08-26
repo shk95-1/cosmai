@@ -12,11 +12,19 @@ const FRESHNESS_SEVERITY = { stalled: 0, late: 1, never: 2, ok: 3, disabled: 4 }
 // yielded 는 소스 락에 밀려 물러난 run 이라 고장이 아니다(#78). blocked 는 403·429 -- 주의다.
 const STATUS_SEVERITY = { failed: 0, partial: 1, blocked: 1, yielded: 3, ok: 3 };
 
-// 배너와 '문제만 모은 덩어리'가 세는 집합. never 와 disabled 는 들어가지 않는다 -- never 는
-// 아직 안 돈 단계(naver datalab·blog)의 정직한 표시이지 고장이 아니고, 항상 빨간 대시보드는
-// 아무도 안 보게 된다(#138 사용자 결정).
+// 배너와 '문제만 모은 덩어리'가 세는 집합. 배너가 답하는 질문은 "지금 무엇이 막혔나" 이므로
+// 여기 드는 것은 둘뿐이다: 안 돌고 있다 · 마지막 run 이 통째로 실패했다.
+//
+// never 와 disabled 는 안 든다 -- never 는 아직 안 돈 단계(naver datalab·blog)의 정직한
+// 표시이지 고장이 아니고, 항상 빨간 대시보드는 아무도 안 보게 된다(#138).
+//
+// partial 도 안 든다(#156). commerce:product 는 4일 중 3일이 partial 이면서 89 중 84~86 을
+// 걷는다 -- 그것을 막힌 단계로 세면 배너가 매일 빨갛고, #154 가 뷰에서 없앤 함정이 화면에서
+// 한 칸 위로 옮겨질 뿐이다. 사라지지는 않는다: severityOf 가 '주의' 로 두어 행이 눈에 띄고
+// failed 건수는 요청 통계에 남는다. 실패 *비율* 이 크면 배너에 서야 한다는 것은 맞지만, 그
+// 문턱을 정할 실측이 아직 없다 -- 별건.
 const BAD_FRESHNESS = new Set(['stalled', 'late']);
-const BAD_STATUS = new Set(['failed', 'partial']);
+const BAD_STATUS = new Set(['failed']);
 
 export function isProblem(row) {
   return BAD_FRESHNESS.has(row.freshness) || BAD_STATUS.has(row.last_run_status);

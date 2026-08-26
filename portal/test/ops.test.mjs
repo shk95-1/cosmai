@@ -22,10 +22,19 @@ test('never 와 disabled 는 문제로 세지 않는다 — 항상 빨간 배너
   assert.equal(isProblem(row({ freshness: 'stalled' })), true);
 });
 
-test('freshness 가 ok 여도 마지막 run 이 실패했으면 문제다', () => {
+test('freshness 가 ok 여도 마지막 run 이 통째로 실패했으면 문제다', () => {
   assert.equal(isProblem(row({ freshness: 'ok', last_run_status: 'failed' })), true);
-  assert.equal(isProblem(row({ freshness: 'ok', last_run_status: 'partial' })), true);
   assert.equal(isProblem(row({ freshness: 'ok', last_run_status: 'ok' })), false);
+});
+
+test('partial 은 배너를 빨갛게 만들지 않는다 — 돌았고 대부분을 걷었다 (#156)', () => {
+  // commerce:product 는 4일 중 3일이 partial 이다(89 중 84~86 을 걷는다). 그것을 막힌 단계로
+  // 세면 배너가 매일 빨갛고, #154 가 뷰에서 없앤 함정이 화면에서 한 칸 위로 옮겨질 뿐이다.
+  const partial = row({ freshness: 'ok', last_run_status: 'partial' });
+  assert.equal(isProblem(partial), false);
+  assert.equal(problemCount([partial]), 0);
+  // 사라지지는 않는다: 여전히 '주의' 색이라 전체 목록에서 눈에 띄고, failed 건수는 통계에 남는다.
+  assert.equal(severityOf(partial), 1);
 });
 
 test('배너의 수와 문제 덩어리의 행 수는 같은 술어에서 나온다', () => {
