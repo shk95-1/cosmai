@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, LiteralString
 
@@ -225,7 +226,7 @@ def _scan(
             commerce = source == crosscheck.COMMERCE_REVIEW
             sunny = any(word in text for word in crosscheck.SUN_WORDS)
             for key, terms in crosscheck.INGREDIENT_KEYS.items():
-                if not crosscheck.matches(text, (key, *terms)):
+                if not crosscheck.mentions_term(text, (key, *terms)):
                     continue
                 talk[key]["commerce" if commerce else "youtube"].add(doc_id)
                 # 선크림 문맥은 **같은 청크 안**에서 본다. 문서 단위로 보면 자막 한 편이 통째로
@@ -403,23 +404,35 @@ def build(
 
 
 HEAD = ("댓글", "자막", "제목", "리뷰")
+# 성분명 하나가 700자인 성분표가 있다(쉼표 없이 공백으로만 나열한 것). 감사 줄이 그대로 서면 읽을 수
+# 없으므로 표시에서만 자른다 -- 세는 값은 원문 그대로다.
+NAME_WIDTH = 34
+
+
+def _pad(text: str, width: int, *, right: bool = False) -> str:
+    """한글은 터미널에서 두 칸을 먹는다. 파이썬의 자릿수 맞춤은 그것을 모르므로 여기서 센다."""
+    shown = sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
+    space = " " * max(0, width - shown)
+    return (space + text) if right else (text + space)
+
+
+def _short(name: str) -> str:
+    return name if len(name) <= NAME_WIDTH else name[: NAME_WIDTH - 1] + "…"
 
 
 def render(built: Built) -> list[str]:
     """사람이 읽는 답. ydc 세 스크립트의 요약과 같은 문장을 낸다."""
     lines = [
-        "구성  같은 사전·같은 단위(문서)·소스마다 자기 분모. 합산하지 않는다",
-        "      "
-        + "".join(f"{name:>10}" for name in HEAD)
-        + "   "
+        "구성  같은 사전·같은 단위(문서)·소스마다 자기 분모. 합산하지 않는다 · "
         + " · ".join(
             f"{name} {built.documents.get(source, 0):,}문서"
             for name, source in zip(HEAD, crosscheck.SOURCES, strict=True)
         ),
+        "  " + _pad("", 18) + "".join(_pad(name, 10, right=True) for name in HEAD),
     ]
     for row in built.composition:
         cells = "".join(f"{row.shares[source]:>9.2f}%" for source in crosscheck.SOURCES)
-        lines.append(f"  {row.topic_key:<16}{cells}   {row.reading}")
+        lines.append(f"  {_pad(row.topic_key, 18)}{cells}   {row.reading}")
     lines.append(
         f"평가  커머스 플랫폼 속성 평가 {len(built.ratings)}주제 "
         f"(제품 {crosscheck.MIN_PRODUCTS}개 미만이라 해석을 쓰지 않는 주제 {built.thin}) · "
@@ -428,7 +441,7 @@ def render(built: Built) -> list[str]:
     for row in built.ratings:
         gap = "-" if row.youtube_gap_pp is None else f"{row.youtube_gap_pp:+.2f}"
         lines.append(
-            f"  {row.topic_key:<16}{row.products_rated:>4}제품 긍정 {row.positive_rate_mean:>5.1f}% "
+            f"  {_pad(row.topic_key, 18)}{row.products_rated:>4}제품 긍정 {row.positive_rate_mean:>5.1f}% "
             f"(중앙 {row.positive_rate_median:>5.1f}%) · 댓글 {row.youtube_rank_comment}위 "
             f"gap {gap}%p {row.youtube_trend_type} · {'|'.join(row.commerce_groups)}  {row.reading}"
         )
@@ -439,13 +452,14 @@ def render(built: Built) -> list[str]:
     )
     for row in built.ingredients.rows:
         lines.append(
-            f"  {row.ingredient:<16}유튜브 {row.talk_youtube:>6,} (선크림 문맥 {row.talk_youtube_sun:>5,} · "
-            f"{row.sun_share:>5.1f}%) · 리뷰 {row.talk_commerce:>5,}  {row.reading}"
+            f"  {_pad(row.ingredient, 18)}유튜브 {row.talk_youtube:>6,} "
+            f"(선크림 문맥 {row.talk_youtube_sun:>5,} · {row.sun_share:>5.1f}%) · "
+            f"리뷰 {row.talk_commerce:>5,}  {row.reading}"
         )
     lines.append("감사  키가 실제로 무엇을 잡는가 -- 수치만 봐서는 못 잡는다")
     for audit in built.ingredients.audits:
-        names = " · ".join(f"{name}({count})" for name, count in audit.names) or "-"
-        lines.append(f"  {audit.key:<16}{audit.rows:>5}행 {audit.products:>4}제품  {names}")
+        names = " · ".join(f"{_short(name)}({count})" for name, count in audit.names) or "-"
+        lines.append(f"  {_pad(audit.key, 18)}{audit.rows:>5}행 {audit.products:>4}제품  {names}")
     return lines
 
 

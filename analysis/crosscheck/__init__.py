@@ -369,8 +369,16 @@ def run_on(name: str) -> bool:
 
 
 def matches(name: str, terms: Iterable[str]) -> bool:
+    """**성분명** 전용. 공백과 대소문자를 접는다 -- 성분표는 `나이아신아마이드 (20,000 ppm)` 처럼
+    같은 성분을 띄어쓰기만 달리 적는다."""
     folded = name.replace(" ", "").lower()
     return any(term.replace(" ", "").lower() in folded for term in terms)
+
+
+def mentions_term(text: str, terms: Iterable[str]) -> bool:
+    """**담론** 전용. 원문 그대로 본다 (ydc `count_terms`). 자유 문장에서 공백을 접으면 낱말 경계를
+    넘어 붙어(`... 콜라` + `겐 ...`) 없는 언급이 생긴다."""
+    return any(term in text for term in terms)
 
 
 def audit(
@@ -440,6 +448,7 @@ __all__ = [
     "composition",
     "ingredient_reading",
     "matches",
+    "mentions_term",
     "parse_ingredients",
     "polarity",
     "positive_rate",

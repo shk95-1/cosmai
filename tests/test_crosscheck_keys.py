@@ -154,3 +154,11 @@ def test_both_axes_that_divide_by_another_population_stay_locked():
     row = crosscheck.IngredientRow("PDRN", 960, 150, 56)
     assert row.formula_products is None and row.formula_pct is None
     assert row.median_order is None and row.high_dose_pct is None
+
+
+def test_talk_is_matched_on_the_raw_text_not_on_folded_words():
+    """성분명은 띄어쓰기가 흔들려 공백을 접지만, 담론은 접으면 안 된다 -- 자유 문장에서 공백을 접으면
+    낱말 경계를 넘어 붙어 없는 언급이 생긴다 (ydc `count_terms` 와 같은 자리)."""
+    assert crosscheck.matches("나이아신아마이드 (20,000 ppm)", ("나이아신아마이드",))
+    assert not crosscheck.mentions_term("선크림 콜라 겐 없이", ("콜라겐",))
+    assert crosscheck.mentions_term("콜라겐 좋아요", ("콜라겐",))
