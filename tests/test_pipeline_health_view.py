@@ -31,9 +31,12 @@ def ago(**kw: float) -> datetime:
 STAGES = (
     # (stage_key, arm, dataset, interval, enabled)
     ("commerce:ranking", "commerce", "ranking", "1 hour", True),  # ok
-    ("commerce:review", "commerce", "review", "1 hour", True),  # late
     ("commerce:product", "commerce", "product", "1 hour", True),  # stalled + 마지막 run 은 failed
     ("commerce:new_product", "commerce", "new_product", "1 hour", True),  # ok + 마지막 run 은 failed
+    # 매일 정시에 돌지만 늘 partial 인 단계. "돌았나" 와 "깨끗하게 돌았나" 를 가르는 자리다(#154).
+    ("commerce:review", "commerce", "review", "1 hour", True),
+    # 소스 락에 전부 밀려 물러난 run 만 있는 단계 -- 아무것도 안 걷었으므로 돈 것이 아니다.
+    ("commerce:review_stats", "commerce", "review_stats", "1 hour", True),
     ("naver:datalab", "naver", "datalab", "1 hour", True),  # never
     ("youtube:watch", "youtube", "watch", "1 hour", False),  # disabled — 최신 성공이 있어도
     ("analyze:all", "analyze", "all", "1 hour", True),
@@ -43,7 +46,10 @@ STAGES = (
 # (collector, dataset, started, finished, status, requests, ok, blocked, failed, queued, p90)
 COLLECTOR_ROWS = (
     ("commerce", "ranking", ago(minutes=35), ago(minutes=30), "ok", 30, 30, 0, 0, None, 2300),
-    ("commerce", "review", ago(minutes=95), ago(minutes=90), "ok", 10, 10, 0, 0, None, 500),
+    # 20분 전에 돌았고 89 중 84 를 걷었다. 늦지 않았다 -- partial 은 "못 돌았다" 가 아니다.
+    ("commerce", "review", ago(minutes=25), ago(minutes=20), "partial", 89, 84, 0, 5, None, 500),
+    # 물러난 run 만 있다: 돈 적이 없는 것과 같다.
+    ("commerce", "review_stats", ago(minutes=20), ago(minutes=19), "yielded", 0, 0, 0, 0, None, None),
     ("commerce", "product", ago(hours=5), ago(hours=5), "ok", 5, 5, 0, 0, None, 100),
     # 5시간 전에 성공한 뒤로 실패만 -- freshness 는 stalled, 마지막 run 은 failed 여야 한다.
     ("commerce", "product", ago(minutes=15), ago(minutes=10), "failed", 5, 0, 0, 5, None, 100),
@@ -132,7 +138,8 @@ def test_every_declared_stage_gets_exactly_one_row(health: dict[str, Any]):
     ("stage_key", "expected"),
     [
         ("commerce:ranking", "ok"),
-        ("commerce:review", "late"),
+        ("commerce:review", "ok"),
+        ("commerce:review_stats", "never"),
         ("commerce:product", "stalled"),
         ("naver:datalab", "never"),
         ("youtube:watch", "disabled"),
