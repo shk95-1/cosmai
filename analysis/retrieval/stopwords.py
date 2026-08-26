@@ -7,9 +7,11 @@
 
 판단이므로 **버전을 받는 행으로 산다**(포크 #8 이 파일 사전을 막은 자리, #37 이 별칭에 낸 답과 같다):
 `needs.entity_lexicon` 의 `kind='stopword'` · `canonical='query'` 활성 버전이 정본이고 레포의
-`dict/query_stopwords_v1.csv` 는 그 적재 원본이다. 그 kind 는 aspect 사전과 **버전 축이 따로** 돈다 --
+`dict/query_stopwords_v1.csv` 는 그 적재 원본이다. 그 kind 는 aspect 사전과 **활성 버전이 따로** 돈다 --
 `entity_lexicon` 의 activate 는 `WHERE kind = %s` 라(`db/lexicon.py`) 주제 사전 개정(#56 의 v3)과 이
-목록의 개정이 같은 번호를 다투지 않는다.
+목록의 개정이 서로를 끄지 않는다. 다만 버전 **번호표**는 그 표 전역이라 이 목록을 v2 로 올리면 brand 가
+그대로여도 run 의 `versions.lexicon` 이 2 가 된다 -- 물려받은 성질이고 포크 #58 이 진다
+(`contracts/formats.md` §entity 사전의 `kind='stopword'`).
 
 **활성 목록이 없는 것은 막힘이 아니다.** 주제 사전은 없으면 정답이 0건이라 점수가 거짓이 되지만
 (`topics.NoDictionary`), 질의 불용어가 없는 검색은 이 목록 이전의 검색 그대로다.
@@ -27,7 +29,8 @@ KIND = "stopword"
 # 새로 생기고, tier 로 가르면 brand 전용 어휘와 한 칸을 나눠 쓰게 된다 (formats.md §사전 CSV).
 AXIS = "query"
 DICTIONARY_CSV = Path(__file__).resolve().parent / "dict" / "query_stopwords_v1.csv"
-FIX = f"`cosmai lexicon load --kind {KIND} --version <n> {DICTIONARY_CSV.name}` 뒤 `activate`"
+# `topics.FIX` 같은 "고치는 길" 문자열이 여기 없는 것은 낼 자리가 없어서다 -- 활성 목록이 없는 것은
+# 오류가 아니라 정상 상태라(아래 `active`) 사람에게 명령을 알려줄 메시지 자체가 생기지 않는다.
 
 ACTIVE_SQL: LiteralString = """
 SELECT surface, version FROM entity_lexicon
@@ -123,5 +126,6 @@ def query_note(query: str) -> str | None:
     dropped = words.dropped(tokens)
     if not dropped or words.keep(tokens) == tokens:
         return None
-    at = f"v{words.version}" if words.version is not None else "없음"
-    return f"질의 불용어({at})로 뺀 토큰: {dropped} -- 색인은 그대로다"
+    # 여기 왔다는 것은 목록이 비어 있지 않다는 뜻이고, 비어 있지 않은 목록은 언제나 버전 있는 행에서
+    # 온다(`from_rows`) -- 그래서 "버전 없음"을 말하는 가지가 없다.
+    return f"질의 불용어(v{words.version})로 뺀 토큰: {dropped} -- 색인은 그대로다"
