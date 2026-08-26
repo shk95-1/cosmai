@@ -953,6 +953,9 @@ def test_since_still_deletes_the_stale_rows_it_will_rewrite(loaded: str, _schema
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CRONTAB_ANALYZE = REPO_ROOT / "stack" / "crontab.d" / "analyze"
 CATEGORY_MAP_CSV = REPO_ROOT / "eval" / "lexicon" / "category_map_v1.csv"
+# 운영 행에서 뽑은 평가셋이라 `category` 열이 곧 그 행들의 lexicon_category 다 — 매핑표에 없는
+# (=항등으로 통과하는) 이름을 이 레포 안에서 대조할 수 있는 유일한 자리다.
+CROSSCAT_CSVS = ("crosscat_60.csv", "crosscat_blind40.csv")
 SUNBLOCK = "선블록"
 REGISTERED = 27  # 선블록 + #33 의 대상 26개
 
@@ -979,13 +982,17 @@ def test_the_owner_table_carries_the_twenty_six_categories_the_cron_line_walks()
     assert MONTH.match(next(iter(later.values())))
 
 
-def test_every_lexicon_category_the_map_can_name_has_an_owner():
+def test_every_lexicon_category_this_repo_can_name_has_an_owner():
     """이름 하나가 표와 갈리면 그 카테고리는 조용히 무주공산으로 남고 크론 줄이 그것을 안 돈다 —
-    `category_map` 이 산출하는 이름과 이 표의 키는 같은 문자열이어야 한다."""
+    표의 키는 `category_map` 이 산출하는 이름, 그리고 운영 행에서 뜬 평가셋의 카테고리와 같은
+    문자열이어야 한다. 그 둘이 이 레포가 그 이름을 아는 전부다(나머지는 운영 DB 에만 있다)."""
     with CATEGORY_MAP_CSV.open(encoding="utf-8") as handle:
-        mapped = {row["lexicon_category"] for row in csv.DictReader(handle)}
-    assert mapped, "category_map_v1.csv 가 비었으면 이 단언은 진공이다"
-    assert not mapped - set(OWNERS), f"주인이 없는 매핑 대상: {sorted(mapped - set(OWNERS))}"
+        named = {row["lexicon_category"] for row in csv.DictReader(handle)}
+    for name in CROSSCAT_CSVS:
+        with (REPO_ROOT / "eval" / "polarity" / name).open(encoding="utf-8") as handle:
+            named |= {row["category"] for row in csv.DictReader(handle)}
+    assert len(named) > len(OWNERS) // 2, "이름을 못 모았으면 이 단언은 진공이다"
+    assert not named - set(OWNERS), f"주인이 없는 카테고리: {sorted(named - set(OWNERS))}"
 
 
 def test_the_cron_line_runs_the_incremental_command_of_the_version_the_table_names():
