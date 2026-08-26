@@ -24,6 +24,7 @@ COMMANDS = (
     ("trend",),
     ("trend", "quarter"),
     ("trend", "judge"),
+    ("trend", "sensitivity"),
     ("trend", "evidence"),
     ("trend", "cards"),
     ("eval",),

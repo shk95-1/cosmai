@@ -129,12 +129,14 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai trend --help
-usage: cosmai trend [-h] {quarter,judge,evidence,cards} ...
+usage: cosmai trend [-h] {quarter,judge,sensitivity,evidence,cards} ...
 
 positional arguments:
-  {quarter,judge,evidence,cards}
+  {quarter,judge,sensitivity,evidence,cards}
     quarter             Load needs.metrics_topic_quarter from the active corpus snapshot.
     judge               Load needs.topic_quarter_judgement from that run's quarterly rows.
+    sensitivity         Ask whether the panel, the cutoff or the ad flags move that run's
+                        verdicts.
     evidence            Load needs.topic_quarter_evidence for that run's judged cells.
     cards               Render the quarter's opportunity cards to stdout.
 
@@ -150,6 +152,13 @@ options:
 
 $ cosmai trend judge --help
 usage: cosmai trend judge [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend sensitivity --help
+usage: cosmai trend sensitivity [-h] [--url URL]
 
 options:
   -h, --help  show this help message and exit

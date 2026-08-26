@@ -388,6 +388,47 @@ class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀�
     matched_term: str | None = None  # corpus_mention 이 이미 단 표현. 여기서 다시 매칭하지 않는다
 
 
+# ---------- 민감도 (반사실 산출. 어느 표에도 저장되지 않는다 — §민감도) ----------
+@dataclass(frozen=True)
+class PanelSensitivityRow:  # 패널 구성이 결론을 바꾸는가 (ydc panel_sensitivity.py)
+    source: str
+    topic_key: str
+    quarters_ok_product: int  # 언급이 표본 게이트를 넘는 분기 수 — product 만인 산출
+    quarters_ok_all: int  # 같은 것을 43채널 전부(product+expert)로 잰 값
+    delta_product_pp: float  # 최근 4분기 구성비 − 직전 4분기 구성비 (%p)
+    delta_all_pp: float
+    difference_pp: float  # 두 델타의 차. 반올림 전 값끼리 뺀다
+    sample_ok: bool  # 충족 분기가 관측 분기의 절반을 넘는가. 아니면 애초에 판정 대상이 아니다
+
+
+@dataclass(frozen=True)
+class BacktestRow:  # 그때 알 수 있었는가 (ydc backtest.py)
+    cutoff: str  # 판정 대상 분기 T. 지표는 T 다음 분기까지만 알던 것처럼 다시 셌다
+    source: str
+    topic_key: str
+    trend_type: str  # 방향이 있는 넷뿐이다 — 급상승·신규 등장·사라짐·단기 피크
+    before_pp: float  # 직전 4분기 평균 구성비 (기준 A)
+    before_excl_pp: float  # T 를 뺀 직전 4분기 평균 (기준 B — "올라간 수준이 유지됐는가")
+    after_pp: float  # C 이후 4분기 평균
+    at_cutoff_pp: float  # T 분기의 구성비. `단기 피크` 의 비교 상대다
+    expected: str  # 상승 유지 | 하락 유지 | 피크 소멸
+    actual: str  # 상승 | 하락 (기준 A 의 비교 결과)
+    hit: bool  # 기준 A
+    hit_level: bool  # 기준 B
+
+
+@dataclass(frozen=True)
+class AdSensitivityRow:  # 광고·협찬을 빼도 결론이 같은가 (ydc spam_ad_flags.py)
+    variant: str  # ad_video | creator_comment | promo_comment | all_flagged
+    source: str
+    topic_key: str
+    composition_base_pp: float  # 최근 4분기 구성비 (기저)
+    composition_kept_pp: float  # 같은 것을 그 변형에서 잰 값
+    diff_pp: float
+    judged_cells: int  # 그 (source, 주제) 에서 기저가 판정한 셀 수
+    flipped_cells: int  # 그중 유형이 바뀐 셀 수. 표본 미달로 사라진 셀은 여기 들지 않는다
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str

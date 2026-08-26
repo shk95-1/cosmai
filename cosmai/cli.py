@@ -120,6 +120,12 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     )
     judged.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 민감도는 아무것도 쓰지 않는다 -- 반사실 모집단에는 022 의 어휘에도 run 에도 자리가 없다.
+    wobble = actions.add_parser(
+        "sensitivity", help="Ask whether the panel, the cutoff or the ad flags move that run's verdicts."
+    )
+    wobble.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
     # 근거는 판정 셀에 붙는 포인터다 -- 본문을 베끼지 않으므로 인자도 스냅샷도 없다.
     evidence = actions.add_parser(
         "evidence", help="Load needs.topic_quarter_evidence for that run's judged cells."
@@ -348,6 +354,9 @@ def _run_trend(args: argparse.Namespace) -> int:
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
+    from analysis.sensitivity import ShortHistory
+    from analysis.sensitivity.pipeline import NoBaseline, Outcome
+    from analysis.sensitivity.pipeline import run as sensitivity_run
     from analysis.trend.pipeline import NoPopulation, TopicAxisDrift
     from analysis.trend.pipeline import run as quarter_run
 
@@ -356,27 +365,44 @@ def _run_trend(args: argparse.Namespace) -> int:
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
-    acts = {"quarter": quarter_run, "judge": judge_run, "evidence": evidence_run}
+    acts = {
+        "quarter": quarter_run,
+        "judge": judge_run,
+        "evidence": evidence_run,
+        "sensitivity": sensitivity_run,
+    }
     try:
         with conn:
             if args.action == "cards":
-                outcome = cards_collect(conn, args.quarter)
-                # 카드는 산출물 자체가 stdout 이다 -- 파일로 떨구지 않고, 남기려면 리다이렉트한다.
-                print(cards_report(outcome), end="")
-                print(outcome.note)
+                # 카드만 갈래가 다르다 -- 산출이 표가 아니라 stdout 의 마크다운이고 위반 줄이 없다.
+                made = cards_collect(conn, args.quarter)
+                print(cards_report(made), end="")
+                print(made.note)
                 # 카드 0건은 위반이 아니라 결과 없음이다 (`retrieval search` 와 같은 자리).
-                return 0 if outcome.status == "ok" else 1
-            written = acts[args.action](conn)
+                return 0 if made.status == "ok" else 1
+            outcome = acts[args.action](conn)
     # 명부도 스냅샷도 주제 사전도 지표·판정 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
     # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    except (NoPopulation, NoJudgement, NoEvidence, TopicAxisDrift, NoDictionary) as blocked:
+    # 코퍼스가 비었는데 지표 행이 남아 있는 것(ShortHistory)도 같은 자리다: 창이 설 분기가 없다.
+    # `analysis/judge` 의 SparseGrid·MissingValue 는 여기 없다 -- #41 이 민감도의 반사실 격자에서도
+    # 도달 가능한지 확인했고 여전히 아니다(`analysis.trend.rows` 가 주제 × 분기 직사각형을 통째로
+    # 내고, 문서가 0인 계열은 행을 만들지 않는다). 그 둘을 잡을 조건은 #40 이 적어 둔 그대로 **다른
+    # 생산자가 metrics_topic_quarter 에 쓰는 날**이다.
+    except (
+        NoPopulation, NoJudgement, NoEvidence, NoBaseline, TopicAxisDrift, NoDictionary, ShortHistory,
+    ) as blocked:  # fmt: skip
         print(blocked)
         return 2
-    print(written.note)
-    for violation in written.violations:
+    print(outcome.note)
+    # 답이 표가 아니라 문장인 것은 `sensitivity` 뿐이다 -- 나머지 셋은 note 와 위반 줄이 전부다.
+    # getattr 이 아니라 isinstance 인 것은 타입 체커가 그 갈래를 지게 하려는 것이다.
+    if isinstance(outcome, Outcome):
+        for line in outcome.lines:
+            print(line)
+    for violation in outcome.violations:
         print(f"  {violation}")
     # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
-    return 0 if written.status == "ok" else 1
+    return 0 if outcome.status == "ok" else 1
 
 
 def _run_eval(args: argparse.Namespace) -> int:

@@ -241,6 +241,30 @@ cosmai trend judge [--url <url>]
   지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
 - `analysis_run.versions.judgement` 가 그 행들의 정의 판본을 든다 (`versioning.md`).
 
+## 민감도·후향 검증 (포크 #41, ydc `panel_sensitivity.py`·`backtest.py`·`spam_ad_flags.py` 승격)
+```
+cosmai trend sensitivity [--url <url>]
+```
+- `cosmai trend quarter` 가 낸 **그 run 의** 결론이 세 선택에 흔들리는지 묻는다: 패널 구성(product 만 대 43채널
+  전부) · 컷오프(과거 분기까지만 알던 것처럼 다시 셈) · 광고·협찬 표시(빼고 다시 셈). run 은 `quarter`·`judge`
+  와 **같은 길**로 찾는다(활성 스냅샷·활성 명부에서 만든 note) — 인자가 없는 이유도 같다.
+- **아무것도 쓰지 않는다.** 세 측정이 만드는 행은 반사실 모집단의 것이고 022 의 `panel_role` 어휘에도
+  `analysis_run` 에도 자리가 없다(`interfaces.md` §민감도). 답은 표가 아니라 stdout 이고, 읽기 전용이라 운영 DB 에
+  그대로 돌린다. 저장된 표가 그대로인 것은 `tests/test_sensitivity_pipeline.py` 가 지문으로 붙든다.
+- 기저는 다시 세고, 그 기저가 저장된 `metrics_topic_quarter` 행과 다르면 그 사실(`baseline_drift`)이 먼저 나온다 —
+  그때 이 명령의 모든 차이는 뜻이 없다.
+- 종료 코드: **0 ok — 답이 계산됐다** · 1 partial(**이 산출을 믿지 마라** — `baseline_drift`, 또는 방향성 판정
+  사례가 둘 미만이라 후향 검증이라 부를 것이 없다(`thin_backtest`)) · 2 blocked(연결 거절, 활성 명부·스냅샷·주제
+  사전 없음, **그 run 에 지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
+  막힘이다. 코퍼스가 비었는데 지표 행만 남아 창이 설 분기가 없는 것(`ShortHistory`)도 같은 자리다).
+- **"결론이 흔들린다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이지 실행의 실패가 아니고,
+  이 파일 맨 위의 공통 규약(`0 ok · 1 partial(일부 실패·절단) · 2 blocked`)에서 1 은 "산출이 온전하지 않다"는
+  뜻이다. 흔들림은 종료 코드가 아니라 `note` 의 `panel_flips=`·`ad_flips=` 와 세 표가 싣는다 — 전량에서 흔들림은
+  평상 상태라(광고·협찬을 빼면 19셀에서 유형이 바뀐다) 1 로 내면 `set -e` 셸·make·CI 한 줄이 정상 실행을 실패로
+  읽는다. 출처인 ydc 도 같은 자리다: `panel_sensitivity.py`·`spam_ad_flags.py` 는 언제나 0 이고 `backtest.py` 만
+  사례 2건 미만에 1 을 쓴다.
+- 크론에 걸어도 안전하다(읽기 전용 · 0 이 평상 상태). 다만 답이 바뀌는 것은 코퍼스나 명부가 바뀔 때라, 지금은
+  사람이 한 번 물어 이슈에 남긴다.
 ## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
 ```
 cosmai trend evidence [--url <url>]

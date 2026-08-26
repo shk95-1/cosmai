@@ -81,8 +81,12 @@ def _golden() -> list[dict[str, str]]:
         return list(csv.DictReader(handle))
 
 
+# ydc 가 `above_half_peak` 에 쓰는 문장의 앞머리. 뒤에는 그 주제의 최고 분기 구성비가 붙는다.
+PEAK_SENTENCE = "하락하지만 최고 분기("
+
+
 def _reason(sentence: str) -> str:
-    return ABOVE_HALF_PEAK if sentence.startswith("하락하지만 최고 분기(") else REASONS[sentence]
+    return ABOVE_HALF_PEAK if sentence.startswith(PEAK_SENTENCE) else REASONS[sentence]
 
 
 def _install_registry(url: str) -> None:
@@ -159,13 +163,17 @@ def test_the_peak_ydc_writes_into_the_hold_reason_is_the_peak_of_our_metric_rows
         peaks[key] = max(peaks.get(key, 0.0), float(row.composition or 0.0))
     checked = 0
     for want in _golden():
-        if not want["hold_reason"].startswith("하락하지만 최고 분기("):
+        if not want["hold_reason"].startswith(PEAK_SENTENCE):
             continue
         peak = peaks[(want["topic_id"], want["source"])]
         assert f"최고 분기({peak * 100:.1f}%)" in want["hold_reason"]
         checked += 1
-    # 이 표본에는 그 사유가 없다. 전량에서는 3셀이고, 그 자리는 tests/test_judge_rules.py 가 진다.
-    assert checked == 0
+    # 이 표본에는 그 사유가 없다 -- 전량에서는 **7셀**이다(2026-08-26 포크 #41 재현. 그 전 주석의 3셀은
+    # 틀린 수였다). 표본을 다시 자를 때 이 줄을 `checked > 0` 으로 바꾸라는 표식으로 남긴다.
+    assert checked == 0, "표본이 바뀌었다 -- 위 대조가 돌기 시작했으니 이 줄을 checked > 0 으로 바꿔라"
+    # 위 대조가 0회 도는 동안 사유 파서의 이 갈래도 함께 잠들어 있었다. 표본이 못 밟는 그 한 줄만은
+    # 여기서 깨워 둔다 -- 파서가 조용히 KeyError 로 바뀌면 표본이 바뀌는 날 골든이 아니라 이 파일이 깨진다.
+    assert _reason(f"{PEAK_SENTENCE}{max(peaks.values()) * 100:.1f}%)의 절반 이상") == ABOVE_HALF_PEAK
 
 
 def test_the_judgement_version_lands_on_the_run_the_metrics_already_carry(sampled: str):
