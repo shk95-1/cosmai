@@ -4,13 +4,18 @@
 없다. 답은 **같은 스냅샷에서 두 구현이 같은 수를 내는가**이고, 이 파일이 그 대조다.
 
 고정 입력은 `tests/fixtures/trend_sample/` 한 벌이다. 2026-08-19 코퍼스 전량(261,317행 · 174M)은
-`archive/` 에 있고 그 자리는 수정 금지이므로 레포에는 **대표 표본**만 둔다 -- 채널 4개로 잘라 모집단이
-닫힌 표본이고, 두 파일은 같은 잘린 run 에서 각각 이렇게 나왔다:
+`archive/` 에 있고 그 자리는 수정 금지이므로 레포에는 **대표 표본**만 둔다 -- product 채널 4개로 잘라
+모집단이 닫힌 표본이고, 두 파일은 같은 잘린 run 에서 각각 이렇게 나왔다:
 
     python to_common_schema.py <잘린 run> --out corpus              # → corpus/*
     python trend.py <잘린 run> --panel eval/panel/channels_v1.csv   # → ydc_trend_v0.2.csv
 
 전량 대조는 워커가 한 번 돌려 보고했다(2026-08-26): 338행 × 13열 전부 일치, 차이 0.
+
+표본의 코퍼스에는 expert 채널 7개가 함께 들어 있다(포크 #41 이 더했다). 판정·보고 모집단은
+`panel_role='product'` 뿐이라(코퍼스 규칙 5) 그 문서들은 이 골든의 어느 행에도 들지 않는다 --
+패널 민감도(`tests/test_sensitivity_golden.py`)가 product 만인 산출과 43채널 전부인 산출을 갈라
+보려면 표본에 두 역할이 다 있어야 해서 있는 것이다.
 """
 
 from __future__ import annotations
