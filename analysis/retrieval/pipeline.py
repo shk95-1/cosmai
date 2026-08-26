@@ -470,15 +470,20 @@ def search(
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
 ) -> list[tuple[str, float, str]]:
-    """(chunk_id, 점수, 본문). 근거 없는 질의는 순위를 매기기 전에 막는다.
+    """(chunk_id, 점수, 본문). `vector`·`hybrid` 는 근거 없는 질의를 순위를 매기기 전에 막는다.
 
-    **색인은 엔진과 무관하게 연다.** 게이트가 보는 df 가 거기 있어서인데, `--engine vector` 는 지금까지
-    색인을 안 열었으므로 이 자리가 비용이다 -- 캐시가 있으면 피클 한 벌이고, 없으면 38만 청크를 형태소
-    분석하는 십수 분이다(`load_index`). 그 비용을 내는 이유는 코사인 하한선이 못 쓰는 것으로 판정났기
-    때문이고(계약 §벡터 하한선), 코퍼스에 없는 이름을 물었을 때 상위 k 가 근거로 인쇄되는 것보다는 낫다.
+    **`bm25` 에는 걸지 않는다.** 어휘 검색은 df 0 인 낱말을 idf 0 으로 무시하고 **남은 낱말로 답하므로**,
+    막으면 "진짜 주제 + 코퍼스에 아직 없는 신제품 이름" 질의에서 예전에 나오던 부분 답이 0건이 된다.
+    그 손해는 아무도 재지 않았고(질의 로그가 없다), 재지 않은 손해를 감수할 이유가 없다.
+
+    **색인은 엔진과 무관하게 연다.** bm25·hybrid 는 순위를 매기는 데 쓰고, vector 는 게이트가 보는 df
+    때문이다 -- vector 는 지금까지 색인을 안 열었으므로 그 자리가 이 이슈가 만든 비용이다. 캐시가 있으면
+    피클 한 벌, 없으면 38만 청크를 형태소 분석하는 십수 분이고, **캐시는 `--source` 조합마다 따로다**
+    (`index_signature` 가 `sources` 를 문다). 벡터 파일이 없는 호스트는 그 비용을 치른 **뒤에야**
+    `StoreMissing`(2)을 본다 -- 게이트가 저장소보다 앞이라서다.
     """
     index, _ = load_index(conn, sources, cache_dir=cache_dir)
-    if not (grounded := grounding.check(query, index)).ok:
+    if engine in ("vector", "hybrid") and not (grounded := grounding.check(query, index)).ok:
         # 결과 0건은 이미 계약이 아는 답이다(종료 코드 1) -- 새 코드를 늘리지 않고 이유만 말한다.
         print(grounded.note, file=sys.stderr)
         return []
