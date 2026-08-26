@@ -254,7 +254,15 @@ flat as $all
        else
          (if (channel_labels | length) != 1 then {key: .key, short: .short, number: .number, reason: "ch:* 라벨이 정확히 하나가 아니다"} else empty end),
          (if .parent == null then {key: .key, short: .short, number: .number, reason: "부모 에픽이 없다"} else empty end),
-         (if section("완료 기준") then empty else {key: .key, short: .short, number: .number, reason: "본문에 ## 완료 기준 이 없다"} end)
+         # when-touched 의 완료 시점은 이 이슈가 아니라 그 파일을 다음에 만지는 작업에 얹혀 있다
+         # (라벨 정의: "그 파일을 다음에 만질 때 고친다"). 완료 기준을 요구하면 라벨의 뜻과 어긋나고,
+         # 실제로 그 어긋남이 lint 를 계속 빨갛게 두었다(포크 #43·#44, 본문은 옳고 규칙이 틀렸다).
+         # 면제가 무규칙은 아니다 -- 언제 고치는지는 여전히 적혀 있어야 한다. 코드의 TODO(#n) 표식
+         # 대조는 audit 이 양방향으로 따로 한다.
+         (if ($i | tagged("when-touched"))
+          then (if section("언제 고치나") then empty else {key: .key, short: .short, number: .number, reason: "when-touched 본문에 ## 언제 고치나 가 없다"} end)
+          else (if section("완료 기준") then empty else {key: .key, short: .short, number: .number, reason: "본문에 ## 완료 기준 이 없다"} end)
+          end)
        end),
       (if ($i | tagged("memo")) then
          (if (channel_labels | length) > 0 then {key: .key, short: .short, number: .number, reason: "memo 에 ch:* 라벨이 있다"} else empty end),
