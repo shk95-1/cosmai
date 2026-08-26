@@ -286,6 +286,45 @@ cosmai trend sensitivity [--url <url>]
   사례 2건 미만에 1 을 쓴다.
 - 크론에 걸어도 안전하다(읽기 전용 · 0 이 평상 상태). 다만 답이 바뀌는 것은 코퍼스나 명부가 바뀔 때라, 지금은
   사람이 한 번 물어 이슈에 남긴다.
+- **아래 §근거·카드 의 `cards` 도 같은 자리다** — "규칙에 걸린 셀이 없다"는 발견이지 실패가 아니다.
+
+## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
+```
+cosmai trend evidence [--url <url>]
+cosmai trend cards --quarter <q> [--url <url>]
+```
+- `evidence` 는 `cosmai trend judge` 가 판정한 **그 run 의** 셀에 붙는 근거 댓글을
+  `needs.topic_quarter_evidence` 에 쓴다. run 을 찾는 길은 `quarter`·`judge` 와 같은 note 하나이고,
+  그래서 인자도 `--url` 하나다.
+- **모집단은 지표를 세운 그 술어다** — `analysis/trend/pipeline.py` 의 `POPULATION` CTE 를 그대로 든다.
+  근거만 다른 모집단에서 고르면 카드의 발화와 카드의 숫자가 다른 분모 위에 선다.
+- **후보를 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다.** 근거는 판정과 달리 코퍼스를 훑는 단계라
+  `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에 그대로 걸린다 — 커서를 연 채 접으면
+  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이고,
+  전량에서 후보 15,602행 · 0.52s · 73MB 로 실제로 재 봤다 (`interfaces.md` §근거 "전량 실측").
+- 한 실행이 그 (run, scope, 명부) 의 근거 행을 통째로 다시 쓴다 — 부분 갱신이면 자리(rank)의 사다리가
+  조용히 구멍 난다.
+- 쓰고 나서 `needs.topic_quarter_evidence_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
+  코드 **1**(partial)이고 stdout 이 그 줄을 싣는다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
+  판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `cards` 는 **아무것도 쓰지 않는다.** 위 세 표를 읽어 마크다운 카드 묶음을 stdout 으로 낸다. 파일로
+  떨구지 않는 것은 `retrieval terms` 와 같은 이유다(자라는 코퍼스의 스냅숏이라 레포에 두면 낡는다) —
+  남기려면 리다이렉트한다. `--quarter` 는 필수다: 카드는 "이번 분기에 이 주제를 더 볼지"를 담당자가
+  정하는 단위라 분기가 없으면 물음이 서지 않는다.
+- `cards` 의 종료 코드: **0 ok — 카드가 계산됐다(0장이어도 그렇다)** · 1 partial(**규칙에 걸렸는데 근거
+  원문이 없어 카드로 서지 못한 셀이 있다** — 그것만이 잘린 산출이다) · 2 blocked(연결 거절, 그 run 에 판정
+  행이 없음, 그 분기가 이 run 의 격자에 없음 — 뒤의 둘은 메시지가 갈라 말한다).
+- **"규칙에 걸린 셀이 없다"는 1 이 아니다.** 그것은 규칙이 다 돌고 나온 정상적으로 계산된 답이고, 이 파일
+  맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 바로 위 §민감도 의 "흔들린다는 1 이 아니다"와
+  **같은 자리, 같은 문장**이다. 실측으로도 그렇다: 표본 골든 11분기 중 **8분기가 0장**이라 1 로 내면 평상
+  상태의 73%가 실패로 읽히고, `cards` 는 사람이 한 번 치는 탐색 명령이 아니라 `quarter → judge → evidence
+  → cards` 의 마지막 칸이라 `set -e` 셸·make·크론이 그 줄에서 멈춘다(upstream #55 의 착수 조건이 "S6 자동
+  소비자"다). 몇 장인지는 종료 코드가 아니라 stderr 의 `note` 가 싣는다.
+- **stdout 은 마크다운 산출물뿐이다.** `note` 와 잘린 셀 줄은 stderr 로 나간다 — 리다이렉트한 `.md` 안에
+  `trend cards run=…` 이 남지 않아야 그 파일이 그대로 문서다.
+- `analysis_run.versions.evidence` 가 근거 행들의 정의 판본을 든다 (`versioning.md`). 카드는 행을 만들지
+  않으므로 판본을 남기지 않는다 — 그 카드가 어느 정의의 근거를 실었는지는 읽은 run 의 이 키가 답한다.
 
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는

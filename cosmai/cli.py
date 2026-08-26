@@ -126,6 +126,17 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     )
     wobble.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 근거는 판정 셀에 붙는 포인터다 -- 본문을 베끼지 않으므로 인자도 스냅샷도 없다.
+    evidence = actions.add_parser(
+        "evidence", help="Load needs.topic_quarter_evidence for that run's judged cells."
+    )
+    evidence.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+    # 카드는 아무것도 쓰지 않는다. 저장된 세 표를 읽어 마크다운을 stdout 으로 낸다.
+    cards = actions.add_parser("cards", help="Render the quarter's opportunity cards to stdout.")
+    cards.add_argument("--quarter", required=True, help="예: 2026Q2. 카드는 분기 단위의 물음이다.")
+    cards.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
@@ -336,6 +347,10 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
+    from analysis.cards.pipeline import collect as cards_collect
+    from analysis.cards.pipeline import report as cards_report
+    from analysis.evidence.pipeline import NoEvidence
+    from analysis.evidence.pipeline import run as evidence_run
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
@@ -350,11 +365,28 @@ def _run_trend(args: argparse.Namespace) -> int:
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
-    act = {"quarter": quarter_run, "judge": judge_run, "sensitivity": sensitivity_run}[args.action]
+    acts = {
+        "quarter": quarter_run,
+        "judge": judge_run,
+        "evidence": evidence_run,
+        "sensitivity": sensitivity_run,
+    }
     try:
         with conn:
-            outcome = act(conn)
-    # 명부도 스냅샷도 주제 사전도 지표 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
+            if args.action == "cards":
+                # 카드만 갈래가 다르다 -- 산출이 표가 아니라 stdout 의 마크다운이고 위반 줄이 없다.
+                made = cards_collect(conn, args.quarter)
+                print(cards_report(made), end="")
+                # note 는 stderr 다 -- stdout 이 곧 마크다운 산출물이라, 리다이렉트하면 `.md` 안에
+                # `trend cards run=…` 한 줄이 남는다.
+                print(made.note, file=sys.stderr)
+                for violation in made.violations:
+                    print(f"  {violation}", file=sys.stderr)
+                # **카드 0건은 1 이 아니다** -- 규칙이 다 돌고 나온 답이다. 1 은 규칙에 걸렸는데 근거
+                # 원문이 없어 카드로 서지 못한 셀이 있을 때뿐이다 (#41 이 §민감도 에서 못 박은 자리).
+                return 0 if made.status == "ok" else 1
+            outcome = acts[args.action](conn)
+    # 명부도 스냅샷도 주제 사전도 지표·판정 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
     # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
     # 코퍼스가 비었는데 지표 행이 남아 있는 것(ShortHistory)도 같은 자리다: 창이 설 분기가 없다.
     # `analysis/judge` 의 SparseGrid·MissingValue 는 여기 없다 -- #41 이 민감도의 반사실 격자에서도
@@ -362,12 +394,12 @@ def _run_trend(args: argparse.Namespace) -> int:
     # 내고, 문서가 0인 계열은 행을 만들지 않는다). 그 둘을 잡을 조건은 #40 이 적어 둔 그대로 **다른
     # 생산자가 metrics_topic_quarter 에 쓰는 날**이다.
     except (
-        NoPopulation, NoJudgement, NoBaseline, TopicAxisDrift, NoDictionary, ShortHistory,
+        NoPopulation, NoJudgement, NoEvidence, NoBaseline, TopicAxisDrift, NoDictionary, ShortHistory,
     ) as blocked:  # fmt: skip
         print(blocked)
         return 2
     print(outcome.note)
-    # 답이 표가 아니라 문장인 것은 `sensitivity` 뿐이다 -- 나머지 둘은 note 와 위반 줄이 전부다.
+    # 답이 표가 아니라 문장인 것은 `sensitivity` 뿐이다 -- 나머지 셋은 note 와 위반 줄이 전부다.
     # getattr 이 아니라 isinstance 인 것은 타입 체커가 그 갈래를 지게 하려는 것이다.
     if isinstance(outcome, Outcome):
         for line in outcome.lines:
