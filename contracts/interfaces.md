@@ -344,6 +344,27 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
     sample_ok: bool = False
 
 
+@dataclass(frozen=True)
+class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
+    # 앞 여덟 칸은 metrics_topic_quarter 의 기본키 그대로다. 판정은 그 표의 한 행을 받아 한 행을 내므로
+    # 이 여덟이 곧 FK 이고, 그래서 판정 행은 자기 근거가 되는 지표 행 없이 존재할 수 없다.
+    run_id: int
+    scope: str
+    topic_key: str
+    quarter: str
+    source: str
+    content_type: str
+    panel_version: int
+    panel_role: str
+    trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
+    judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
+    evidence_strength: float  # 0~100 (§판정)
+    single_source: bool  # 이 판정이 소스 하나만 보고 내려졌는가. v1(YouTube 단독)은 언제나 true
+    opportunity_score: float | None = None  # 제품군 내 0~100 정규화. 점수 대상이 아닌 셀은 NULL
+    gap_pp: float | None = None  # 댓글 구성비 - 영상 구성비 (%p). (주제, 분기) 사실이라 두 행이 같은 값
+    hold_reason: str = ""  # `판정 보류` 의 사유 코드. 보류가 아니면 '' (§판정 의 닫힌 어휘)
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str
@@ -473,6 +494,107 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
   자리수: `composition` 5 · `velocity_yoy` 4 · `persistence` 3 · `unique_ratio` 4 · `channel_diffusion` 3.
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — RATING_ASC 표본 안에 3★ 이 섞였거나 ≤2★ 가 150 미만이면 ≤2★ 는 전수다. 150 은 수집 표본 상한(`REVIEW_PAGES 3 x 50`)이고 `collectors/commerce/scope.json`(#7)과 `formats.md` 가 같은 값을 갖는다.
+
+## 판정 (트렌드 유형 7종과 두 점수 — `topic_quarter_judgement`, 포크 #40)
+
+판정은 **집계가 아니라 파생**이다. 입력이 문서가 아니라 한 run 의 `metrics_topic_quarter` 행 전부이고,
+산출은 그 행과 **1:1**(같은 여덟 칸이 키이자 FK)이다. 그래서 이 표는 `formats.md` §시간 의 "집계 그레인의
+정본" 에 줄을 갖지 않는다 — 그 표가 닫는 질문은 "이 그레인의 **언급 수·채널 수·지속성**을 어디에 묻는가"
+이고, 판정 표는 그 셋을 하나도 들지 않는다. 세는 칸이 없으므로 정본을 다툴 상대가 없다. 이름이
+`metrics_` 로 시작하지 않는 것도 같은 문장이다.
+
+판정은 §분기 표의 행 집합 의 **조밀한 격자를 전제한다**: `신규 등장` 은 직전 3분기를, `사라짐` 은 전 기간
+최고 분기를, `채널 확산` 은 전년 동분기를 그 주제의 이력에서 꺼낸다. 언급 0 칸이 행으로 남아 있지 않으면
+그 조회가 빈칸을 만나고, 빈칸은 0 이 아니라 "모른다"라서 판정이 조용히 달라진다.
+
+- **evidence_strength** = `W_EVIDENCE.documents * min(1, 근거 수 백분위)` + `W_EVIDENCE.channels *
+  min(1, channel_count / denom_channels)` + `W_EVIDENCE.unique * min(1, unique_ratio)`, 0~100.
+  - `근거 수 백분위` 는 **그 source 안에서** `mentions` 가 놓인 위치(0~1)다. 같은 값이 여럿이면 그 구간의
+    중간을 준다. 절대 기준을 하나 쓰지 않는 것은 소스별 스케일이 다르기 때문이고(이 코퍼스 실측: 영상
+    중앙 16 · 댓글 중앙 62), 그래서 이 항은 **행 하나가 아니라 그 source 의 행 집합 전체**에 의존한다 —
+    판정이 run 단위 파생인 두 번째 이유다.
+  - **채널 항은 `channel_count / denom_channels` 다.** 이것은 `channel_diffusion` 이 쓰는 두 채널 비율과
+    **또 다른 세 번째** 비율이다. 셋이 섞이면 오류 없이 다른 수가 나오므로 여기서 갈라 적는다:
+    | 어디 | 분자 | 분모 | source 의존 |
+    |---|---|---|---|
+    | `evidence_strength` 채널 항 | `channel_count` (그 행의 source 에서 그 주제를 낸 채널 수) | `denom_channels` | **있다** (댓글 행과 영상 행이 다른 값) |
+    | `channel_diffusion` 첫 항(넓이) | 그 주제를 낸 **영상** 채널 수 | `denom_channels` | 없다 (두 행이 같은 값) |
+    | `channel_diffusion` 둘째 항(고름) | 채널별 **영상** 언급 분포의 섀넌 엔트로피 | `ln(그 분포에 든 채널 수)` | 없다 (두 행이 같은 값) |
+    `youtube_video` 행에서는 첫 두 비율이 우연히 같은 수이고, 그래서 **영상만 보고 있으면 이 차이가
+    보이지 않는다.** 갈리는 것은 댓글 행이다.
+  - `unique_ratio` 항은 이 코퍼스에서 사실상 상수다(중앙 1.0, 최저 0.9939) — 25점이 모든 셀에 같이
+    들어간다. 항을 빼지 않는 것은 재게시가 많은 소스(NAVER·커머스)가 붙으면 변별력이 생기기 때문이고,
+    지금은 **정보가 없다는 사실**이 산출물에 남는다.
+  - 저장 전 소수 **1자리**로 반올림한다. `EVIDENCE_FLOOR` 비교도 `opportunity_score` 의 항도 그 반올림된
+    값을 쓴다 — 자리수가 곧 그 게이트의 해상도다(§수식 "저장 자리수" 와 같은 문장).
+- **판정 순서** — 위에서 먼저 걸리면 종료한다. 순서 자체가 정의다.
+  1. 그 source 의 **마지막 분기**면 `미확정(진행 중)`. 진행 중이라 문서 수가 덜 찼다.
+  2. `evidence_strength < EVIDENCE_FLOOR` 또는 `mentions < MIN_DOCUMENTS` 면 `근거 부족`.
+  3. 직전 3분기가 **존재하고** 그 셋의 `composition` 이 모두 `NEW_TOPIC_MAX_SHARE` 미만이고
+     `mentions >= MIN_DOCUMENTS` 이고 `channel_count >= 2` 면 `신규 등장`.
+  4. `velocity_yoy` 가 NULL 이면 `판정 보류`(비교 상대가 없다). **3 보다 뒤인 것이 뜻이다** — 새로 나타난
+     주제는 전년 동분기 표본이 없는 것이 정상이라, 그 셀을 보류로 흘리면 `신규 등장` 이 서지 않는다.
+  5. `velocity_yoy > TAU` 면 `persist_quarters == 1` 일 때 `단기 피크`, 아니면 `급상승`.
+  6. 전년 동분기 행이 있고 `channel_diffusion - 전년 동분기 channel_diffusion > DIFFUSION_TAU` 이고
+     `velocity_yoy <= TAU` 면 `채널 확산`.
+  7. `abs(velocity_yoy) <= TAU` 이고 `persist_quarters >= 3` 이면 `지속 인기`.
+  8. `velocity_yoy < -TAU` 이고 `composition < (그 주제의 전 기간 최고 composition) / 2` 면 `사라짐`.
+  9. 어디에도 안 걸리면 `판정 보류`.
+- **유형 어휘는 아홉이고 그중 일곱이 "유형"이다.** 나머지 둘(`판정 보류` · `미확정(진행 중)`)은
+  유형이 아니라 판정하지 않았다는 말이다. `judged` = 일곱에서 `근거 부족` 을 뺀 여섯에 들었는가.
+  유형 일곱: `급상승` `사라짐` `지속 인기` `단기 피크` `신규 등장` `채널 확산` `근거 부족`
+- **hold_reason** — `판정 보류` 가 나온 이유. 빈칸으로 두면 규칙의 구멍이 안 보인다. 닫힌 어휘 넷이다:
+  `no_prior_year`(전년 동분기 표본 부족, 순서 4) · `above_half_peak`(`velocity < -TAU` 인데 구성비가
+  최고 분기의 절반 이상이라 `사라짐` 에 못 든다) · `within_tau_short_persistence`(변화가 TAU 이내인데
+  `persist_quarters < 3`) · `no_rule`(규칙 미해당). 보류가 아닌 행은 `''` 다. ydc 는 이 사유를 사람이 읽는
+  한 문장으로 적고 `above_half_peak` 에는 최고 분기 구성비를 끼워 넣는데, 그 수는 같은 run 의
+  `metrics_topic_quarter` 에서 다시 나오는 파생이라 여기 저장하지 않는다.
+  - 이 컬럼이 실제로 규칙의 구멍 하나를 드러냈다: 이 코퍼스에서 가장 큰 하락(`톤업_메이크업베이스` 댓글,
+    `velocity_yoy = -0.56`)이 `above_half_peak` 으로 떨어진다. `사라짐` 이 두 조건을 **함께** 요구하기
+    때문이다. 유형을 늘리는 것은 팀 합의 사항이라 규칙은 그대로 두고 사유만 남긴다.
+- **opportunity_score** = 네 항을 0~1 로 맞춰 가중합한 뒤 **그 source 안에서** 0~100 으로 min-max 정규화.
+  소수 1자리. 점수를 매기는 집합(`scored`)은 그 source 의 셀 중 `velocity_yoy` 가 NULL 이 아니고, 마지막
+  분기가 아니고, `trend_type` 이 `근거 부족`·`판정 보류` 가 아닌 것이다. 그 밖의 셀은 NULL —
+  **0 이 아니다.** 0 은 "가장 낮은 기회"이고 NULL 은 "점수를 매기지 않았다"다.
+  `raw = W_SCORE.velocity * (velocity_yoy - min) / (max - min) + W_SCORE.persistence * persistence
+  + W_SCORE.channel_diffusion * channel_diffusion + W_SCORE.evidence_strength * evidence_strength / 100`
+  이고, `min`·`max` 는 `scored` 안의 `velocity_yoy` 범위다(폭이 0이면 1.0 으로 둔다). 그 `raw` 를 다시
+  `scored` 안에서 min-max 정규화한 것이 저장값이다. **그래서 이 점수는 그 산출 안에서만 비교된다** —
+  `persistence` 와 같은 뜻으로 run 상대이고, 다른 run 의 점수와 크기를 비교하면 틀린다.
+  `judged` 인데 점수가 NULL 인 셀이 있을 수 있다(전량 실측 2셀): `신규 등장` 은 순서 4보다 앞이라
+  `velocity_yoy` 가 NULL 인 채로 판정된다.
+- **gap_pp** = `100 * (youtube_comment 의 composition - youtube_video 의 composition)`, 소수 2자리.
+  (주제, 분기) 단위 사실이라 **두 source 행이 같은 값을 든다.** 한쪽 source 에 그 (주제, 분기) 행이 없으면
+  NULL 이다. 0.6:0.4 같은 가중합으로 두 계열을 섞지 않는 이유가 이 칸이다 — 갭 자체가 신호다(`백탁` 은
+  영상 0/13분기 대 댓글 12/13분기이고, 섞으면 그 공백이 사라진다).
+- **single_source** — 이 판정이 소스 하나만 보고 내려졌는가. v1 은 **언제나 true** 다. TEAM_DECISIONS_v0.2
+  §3.2 의 `근거 부족` 조건 셋 중 `source_count < 2` 를 **적용하지 않기** 때문이고, YouTube 안에서 영상과
+  댓글은 상호 검증 소스가 아니라 성격이 다른 두 계열(설명은 스펙·포뮬러, 댓글은 사용감·불만)이라서다.
+  값이 언제나 같은 칸을 두는 것은 그 게이트가 **꺼져 있다는 사실**이 행에서 읽혀야 하기 때문이다 —
+  NAVER·커머스가 붙어 이 칸이 false 가 되는 날 그 조건이 켜진다.
+
+### 판정 상수 (`analysis/judge` 한 곳에 모여 있고 `tests/test_judge_constants.py` 가 이 표와 대조한다)
+#3 등급 A 리뷰가 "저장된 값 위에서 맞춰진 산물" 이라고 넘긴 다섯이다. 아래는 **그 값이 무엇 위에서
+나왔는가**와 **그대로 채택하는가 다시 맞추는가**의 답이고, 재현은 2026-08-26 포크 #40 이 원 산출
+(`reports/trend_sunscreen_v0.2.csv` 338행 = 이 표의 338행, #5 가 셀 차이 0 으로 대조)에서 했다.
+
+| 상수 | 값 | 무엇 위에서 나왔나 (재현 결과) | 판단 |
+|---|---|---|---|
+| `TAU` | `0.35` | 관측 `abs(velocity_yoy)` 분포의 75분위. **소스별로 따로 뽑아 거의 같은 값이 나온 것이 근거다** — 재현: 영상 76셀 중앙 0.207 · 75분위 **0.366** · 90분위 0.594 · 최대 0.887, 댓글 108셀 중앙 0.216 · 75분위 **0.357** · 90분위 0.526 · 최대 1.290 (TEAM_DECISIONS_v0.2 §3.1.1 표와 같은 수) | **그대로 채택.** 다시 맞춰도 0.357~0.366 으로 돌아오고, 둘을 하나로 내려 고정한 것이 팀 결정이다. **한 번만 뽑아 고정하는 것**이 이 값의 요점이다 — 매 산출마다 다시 뽑으면 조용한 분기에도 언제나 상위 25%가 `급상승` 이 된다 |
+| `DIFFUSION_TAU` | `0.089` | 전년 동분기 행이 존재하는 **234셀**(13주제 × 9분기 × 2소스)의 `abs(Δchannel_diffusion)` 75분위. 재현: n=**234** · 중앙 **0.042** · 75분위 **0.089** · 90분위 **0.496** — `judge.py` 주석의 세 수와 자리까지 일치. 분위는 `sorted(v)[int(q*n)]` 로 뽑는다 | **그대로 채택.** 0 으로 두면(= "오르기만 하면 확산") 판정된 89셀 중 **52셀(58%)** 이 `채널 확산` 한 곳으로 몰려 분류의 정보량이 사라진다. 이 컷에서 52 → **14셀**(재현 일치). 소스가 늘면 그 소스의 분포에서 다시 뽑아야 한다 |
+| `EVIDENCE_FLOOR` | `50.0` | **적합된 값이 아니다.** v1 에서 온 0~100 척도의 중간이고 TEAM_DECISIONS 는 값만 적는다. 이 코퍼스에서의 실측 결과: `evidence_strength` 중앙 60.0, 338셀 중 111셀(33%)이 `근거 부족` 이고 그중 **51셀은 이 컷 하나로만** 걸린다(`mentions < 5` 로만 걸리는 셀은 **0**). 감도: 40 → 73셀 · 50 → 111셀 · 60 → 156셀 | **재적합하지 않고 채택한다 — 맞출 정답이 없기 때문이다.** `backtest.csv` 11행은 이미 **판정된** 셀의 적중만 보고(`trend_type` 은 급상승·신규 등장·사라짐·단기 피크뿐) `근거 부족` 판정에 대해서는 아무 말도 하지 않는다. 근거가 "팀 합의" 하나뿐이라는 사실을 여기 적는 것이 이 줄의 일이다 |
+| `MIN_DOCUMENTS` | `5` | `metrics_topic_quarter.sample_ok` 의 게이트와 **같은 수**(022 의 `CHECK (sample_ok = (mentions >= 5))`, §수식 의 `velocity_yoy` 조건) | 채택하되 **따로 정의하지 않는다** — `analysis.trend.MIN_MENTIONS` 를 그대로 든다. 실측상 이 게이트가 단독으로 거르는 셀은 0이라 `EVIDENCE_FLOOR` 에 완전히 가려져 있다 |
+| `NEW_TOPIC_MAX_SHARE` | `0.01` | TEAM_DECISIONS §3.2 의 "직전 3분기 구성비 < 1%". 적합값이 아니라 읽기 좋은 팀 합의 수다. 감도: 0.005 → 1셀 · 0.01 → 5셀 · 0.02 → 10셀 | 채택. 근거가 합의뿐이라는 것을 적는다 |
+| `W_EVIDENCE` | `documents 43.75` · `channels 31.25` · `unique 25.0` | v1 의 4요소(근거 수 35 · 채널 25 · 비중복 20 · 제품·주제 매칭 신뢰도 20)에서 **`entity_link` 가 없어 계산할 수 없는 넷째를 빼고 남은 셋을 0.8 로 나눈 재정규화**다(35/.8 · 25/.8 · 20/.8). 산술이 곧 근거이고 테스트가 그 나눗셈을 검사한다 | 채택. 넷째 항을 0으로 깔면 모든 주제가 조용히 20점 깎여 `EVIDENCE_FLOOR` 가 오작동한다. `entity_link` 가 생기면 4요소 원안으로 되돌아간다 |
+| `W_SCORE` | `velocity .35` · `persistence .25` · `channel_diffusion .20` · `evidence_strength .20` | **이 코퍼스에서 적합된 값이 아니다.** TEAM_DECISIONS_v0.2 §1 "v1에서 그대로 채택하는 것" 목록에 있는 v1 합의값이다 | 채택. 근거가 "v1 합의" 하나뿐임을 적는다 — 넷의 합이 1.0 이라는 것 말고는 이 값을 지지하는 실측이 없다 |
+
+- 위 표를 **값만** 옮기는 것은 이 계약의 실패다. 각 줄의 3열이 없으면 "왜 0.35 인가"에 답할 자리가 없다.
+- 판정 상수가 바뀌면 그것은 정의가 바뀐 것이므로 `analysis_run.versions.judgement` 를 올린다
+  (`versioning.md`). ydc 는 같은 사실을 행마다 `tau`·`diffusion_tau` 컬럼으로 적는데, 이 레포는 A19 에
+  따라 집계·파생 표에 `*_version` 컬럼을 두지 않으므로 그 자리가 run 이다.
+- **저장 자리수** (`topic_quarter_judgement`) — 024 가 `numeric(p,s)` 로 그 자리수를 들고 있어, 저장이
+  자리수를 지키는 것은 DDL 이 강제한다.
+  판정 자리수: `evidence_strength` 1 · `opportunity_score` 1 · `gap_pp` 2
 
 ## 모집단의 한계 (숫자를 읽는 법 — `manifest.limitations`, 포크 #4)
 2026-08-19 코퍼스(`needs.corpus_*`, `formats.md` §코퍼스 스냅샷)를 걷은 두 런이 스스로 적어 둔 여덟
