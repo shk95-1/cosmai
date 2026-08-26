@@ -36,6 +36,7 @@ import argparse
 import csv
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -123,10 +124,10 @@ LEDGER = (
         "모공막힘",
         "ko",
         "자극_눈시림",
-        REFUSED,
+        HELD,
         5,
         5,
-        f"df 5 = MIN_DOCS {MIN_DOCS} 바닥. 다음 재측정의 후보다",
+        f"기준 넷을 다 넘는다. 표본이 바닥({MIN_DOCS})과 같아 트러블 축인지를 못 가른다",
     ),
     Row("케미컬", "ko", "유기자차", REFUSED, 3, 3, f"df 3 < MIN_DOCS {MIN_DOCS}"),
     Row("olive영", "ko", BRAND, REFUSED, 0, 0, "코퍼스에 없다"),
@@ -149,6 +150,13 @@ def baseline(path: Path | None = None) -> topics.Topics:
     return topics.from_rows(rows, 0)
 
 
+def _texts(corpus: Path):
+    """문서 본문만. 코퍼스를 여는 자리를 하나로 둔다 -- 둘이면 인코딩이나 열 이름이 갈릴 수 있다."""
+    with corpus.open(encoding="utf-8-sig", newline="") as handle:
+        for record in csv.DictReader(handle):
+            yield record["text"] or ""
+
+
 def matcher(row: Row):
     if row.kind == "latin":
         pattern = topics.latin_pattern([row.term])
@@ -166,39 +174,84 @@ def measure(corpus: Path, known: topics.Topics) -> dict:
     new = dict(df)
     unseen = dict(df)
     documents = 0
-    with corpus.open(encoding="utf-8-sig", newline="") as handle:
-        for record in csv.DictReader(handle):
-            documents += 1
-            text = record["text"] or ""
-            lowered = text.lower()
-            hits = None
-            for row, hit in tests:
-                if not hit(text, lowered):
-                    continue
-                df[row.term] += 1
-                if hits is None:
-                    hits = set(topics.match_topics(text, include_excluded=True, dictionary=known))
-                if not hits:
-                    unseen[row.term] += 1
-                # 브랜드 자리의 표기는 주제 사전이 볼 일이 아니다 -- new 를 세면 축이 다른 수가 된다.
-                if row.place != BRAND and row.place not in hits:
-                    new[row.term] += 1
+    for text in _texts(corpus):
+        documents += 1
+        lowered = text.lower()
+        hits = None
+        for row, hit in tests:
+            if not hit(text, lowered):
+                continue
+            df[row.term] += 1
+            if hits is None:
+                hits = set(topics.match_topics(text, include_excluded=True, dictionary=known))
+            if not hits:
+                unseen[row.term] += 1
+            # 브랜드 자리의 표기는 주제 사전이 볼 일이 아니다 -- new 를 세면 축이 다른 수가 된다.
+            if row.place != BRAND and row.place not in hits:
+                new[row.term] += 1
     return {"documents": documents, "df": df, "new": new, "unseen": unseen}
 
 
+def topic_documents(corpus: Path, before: topics.Topics, after: topics.Topics) -> dict:
+    """주제마다 (기준 사전, 그 사전 + 표기 하나) 의 등장 문서 수. 계약이 인용하는 12,197 -> 12,418 과
+    959 -> 2,021 이 나오는 자리다 -- 특히 뒤엣것은 등재 기준 3 이 딛고 선 유일한 수인데, 재는 길이
+    없으면 코퍼스가 자라는 순간 그 기준이 근거 없는 문턱이 된다."""
+    counts: dict[str, list[int]] = {e["topic"]: [0, 0] for e in after.entries}
+    for text in _texts(corpus):
+        for topic in topics.match_topics(text, include_excluded=True, dictionary=before):
+            counts[topic][0] += 1
+        for topic in topics.match_topics(text, include_excluded=True, dictionary=after):
+            counts[topic][1] += 1
+    return {topic: {"before": b, "after": a} for topic, (b, a) in counts.items() if b != a}
+
+
+def with_terms(known: topics.Topics, rows: Sequence[Row]) -> topics.Topics:
+    """기준 사전에 원장의 표기 몇을 도로 얹는다."""
+    wider = [
+        (
+            entry["topic"],
+            alias,
+            {
+                "term_kind": kind,
+                "topic_type": entry["topic_type"],
+                "trend_use": "true" if entry["trend_use"] else "false",
+            },
+        )
+        for entry in known.entries
+        for kind in ("ko", "latin", "mfds_inci")
+        for alias in entry[kind]
+    ]
+    wider += [(row.place, row.term, {"term_kind": row.kind}) for row in rows if row.place != BRAND]
+    return topics.from_rows(wider, 0)
+
+
 def misses(measured: dict) -> list[str]:
-    """원장이 코퍼스와 갈린 자리. 비어 있으면 원장을 그대로 믿어도 된다."""
+    """원장이 코퍼스와 갈린 자리. 비어 있으면 원장을 그대로 믿어도 된다 (종료 코드 1 = 이 산출을 믿지 마라).
+
+    `count` 가 먼저 온다 -- 이 도구의 존재 이유가 원장의 수를 **다시 재 맞대는 것**이라, 대조 없이 사람이
+    읽는 표만 내면 원장은 아무 수나 적어도 초록이다(레포의 다른 measure-* 도 전부 정확 일치다). 그래서
+    **어느 행이든 수가 움직이면 걸린다** -- 판정이 무엇이든, 근거가 수든 아니든.
+
+    나머지 셋은 대조를 통과한 수 위에서 **그 행의 근거가 아직 서는지**를 묻는다. 근거가 수인 행에만
+    걸린다: `보류`(모공막힘·화잘먹·비비크림)의 근거는 축과 표본이고 `올영` 의 근거는 tier='stop' 이라
+    수로는 무너지지 않는다 -- 그쪽이 무너지는 것은 `count` 와 `tests/retrieval/test_lexicon_v3.py` 의
+    기계적 근거 테스트가 본다. 여기서 수로 되물을 수 있는 것만 여기서 묻는다.
+    """
     out = []
     for row in LEDGER:
         df, new = measured["df"][row.term], measured["new"][row.term]
+        if (df, new) != (row.df, row.new):
+            out.append(f"count   {row.term}: df {df}·new {new}, 원장은 {row.df}·{row.new}")
         if row.verdict == LISTED and df < MIN_DOCS:
-            out.append(f"floor   {row.term}: df {df} < {MIN_DOCS} — 등재 근거가 무너졌다")
-        if row.verdict == LISTED and (new == 0) != (row.new == 0):
-            out.append(
-                f"idle    {row.term}: new {new}, 원장은 {row.new} — 이 행이 무엇을 관측하는지가 달라졌다"
-            )
-        if row.verdict != LISTED and df >= MIN_DOCS and new > 0 and row.new == 0:
-            out.append(f"revived {row.term}: df {df} · new {new} — 미등재 근거가 사라졌다")
+            out.append(f"floor   {row.term}: df {df} < {MIN_DOCS} — 등재 기준 1 이 무너졌다")
+        if row.verdict == LISTED and new == 0 and row.new != 0:
+            out.append(f"idle    {row.term}: new 0 — 이 행이 매칭 축에서 관측하던 것이 없어졌다")
+        # 미등재 근거가 수인 두 모양. 옛 판은 `row.new == 0` 인 행에만 걸어서 df 로 기각한 행
+        # (케미컬 3·3 · olive영 0·0)이 구조적으로 안 걸렸다 -- 근거마다 그 근거를 문다.
+        if row.verdict == REFUSED and row.df < MIN_DOCS <= df:
+            out.append(f"revived {row.term}: df {df} ≥ {MIN_DOCS} — 바닥으로 기각한 근거가 사라졌다")
+        if row.verdict == REFUSED and row.new == 0 < new and row.place != BRAND:
+            out.append(f"revived {row.term}: new {new} — 새로 보는 것이 없다던 근거가 사라졌다")
     return out
 
 
@@ -208,9 +261,38 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--corpus", type=Path, default=CORPUS, help="document.csv (default: %(default)s)")
     parser.add_argument("--json", action="store_true", help="기계가 읽는 형식")
+    parser.add_argument(
+        "--topics",
+        action="store_true",
+        help="표기가 아니라 주제 단위로 센다 — 계약이 인용하는 12,197->12,418 과 959->2,021 이 이 출력이다",
+    )
     args = parser.parse_args(argv)
 
-    measured = measure(args.corpus, baseline())
+    base = baseline()
+    if args.topics:
+        # 등재분만 얹은 사전 = 지금의 적재 원본. 보류·미등재까지 얹으면 "안 올린 것"의 값도 함께 낸다.
+        moved = {
+            "listed": topic_documents(
+                args.corpus, base, with_terms(base, [r for r in LEDGER if r.verdict == LISTED])
+            ),
+            "held_or_refused": topic_documents(
+                args.corpus, base, with_terms(base, [r for r in LEDGER if r.verdict != LISTED])
+            ),
+        }
+        if args.json:
+            print(json.dumps(moved, ensure_ascii=False, indent=2))
+            return 0
+        for label, rows in moved.items():
+            print(f"[{label}]")
+            for topic, count in rows.items():
+                delta = count["after"] - count["before"]
+                print(
+                    f"  {topic:20s} {count['before']:7,d} -> {count['after']:7,d}  (+{delta:,d}"
+                    f" · {100 * delta / max(count['before'], 1):.1f}%)"
+                )
+        return 0
+
+    measured = measure(args.corpus, base)
     failures = misses(measured)
     if args.json:
         print(json.dumps({**measured, "misses": failures, "floor": MIN_DOCS}, ensure_ascii=False, indent=2))

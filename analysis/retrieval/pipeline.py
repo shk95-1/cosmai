@@ -427,7 +427,7 @@ def ranked_chunks(
 ) -> list[tuple[str, float]]:
     """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
 
-    `index` · `vector_store` · `encoder` 를 넘기면 그것을 쓴다. eval 은 질의 61개를 연달아 돌리는데
+    `index` · `vector_store` · `encoder` 를 넘기면 그것을 쓴다. eval 은 질의 63개를 연달아 돌리는데
     매번 다시 읽으면 96MB 피클과 1.2GB 행렬과 모델을 61번씩 여는 셈이다.
 
     점수의 뜻은 엔진마다 다르다(BM25 는 클수록, 벡터는 코사인 거리라 작을수록 가깝다). 그래서
@@ -443,7 +443,7 @@ def ranked_chunks(
     loaded = vector_store
     if loaded is None:
         loaded = vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
-        # 저장소를 연 쪽이 커버리지를 묻는다 -- eval 은 한 저장소로 질의 61개를 도므로 자기가 한 번
+        # 저장소를 연 쪽이 커버리지를 묻는다 -- eval 은 한 저장소로 질의 63개를 도므로 자기가 한 번
         # 묻고 그 답을 채점표에 싣는다(여기서 물으면 61번 세고 같은 줄을 61번 찍는다).
         if note := coverage_note(conn, loaded):
             print(note, file=sys.stderr)

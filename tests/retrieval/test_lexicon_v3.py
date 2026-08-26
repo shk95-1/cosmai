@@ -141,6 +141,18 @@ def test_a_compound_that_adds_no_document_can_still_earn_its_row_on_the_token_ax
     assert "속건조" in tokens and "건조" in tokens
 
 
+def test_the_criterion_that_separates_속건조_from_톤업크림_is_the_token_it_would_lose(repo_dictionary):
+    """등재 기준 2 는 "관측되는 것이 늘되 있던 것을 잃지 않는다"이다. 둘 다 `new` 0 이고 둘 다 토큰이
+    달라지므로, 판정을 가른 것은 **손실**이다 -- 별칭이 Kiwi 사용자 단어가 되어 복합어를 묶으면 조각
+    토큰이 사라진다. `속건조` 는 확장이 `건조` 를 지키고, `톤업크림` 은 `크림` 을, `비비크림` 은
+    `비비`·`크림` 둘 다 잃는다."""
+    tool = _tool()
+    wider = tool.with_terms(csv_topics(), [r for r in LEDGER if r.term in ("톤업크림", "비비크림")])
+    topics.use(wider)
+    assert bm25.tokenize("톤업크림 발라요") == ["톤업크림", "톤업", "바르"]  # `크림` 이 없다
+    assert bm25.tokenize("비비크림 추천") == ["비비크림", "추천"]  # `비비`·`크림` 둘 다 없다
+
+
 def test_a_stop_tier_canonical_keeps_every_surface_of_its_out_of_the_linker():
     """`올영` 미등재의 근거. 자리(kind=brand)는 있지만 `올리브영` 은 유통 채널이라 `tier='stop'` 이고,
     `compile_lexicon` 이 그 정본의 표면을 `surface_re` 에서 통째로 뺀다 -- 행을 더해도 링커가 그것을
@@ -205,20 +217,78 @@ def test_the_tool_refuses_when_a_listed_term_falls_through_the_floor(tmp_path):
     assert [m for m in tool.misses(measured) if m.startswith("floor   파데프리")]
 
 
-def test_the_tool_is_green_on_a_corpus_that_matches_the_ledger(tmp_path, capsys):
-    """빨간 자리만 있고 초록이 도달 불가하면 위 테스트는 항등식이다 -- 원장대로인 코퍼스를 지어
-    종료 코드 0 이 실제로 나오는 것을 본다."""
-    tool = _tool()
+def _ledger_corpus(tmp_path: Path, tool: Any, repeats: dict[str, int] | None = None) -> Path:
+    """원장의 `df`·`new` 를 **정확히** 재현하는 코퍼스. 표기마다 `new` 편은 그 표기만 담고(그 주제가
+    못 보는 문서), `df - new` 편은 그 주제의 첫 별칭을 덧붙인다(이미 보는 문서). 빨간 자리만 있고
+    초록이 도달 불가하면 위 테스트들은 항등식이다."""
+    known = tool.baseline()
+    filler = {entry["topic"]: entry["ko"][0] for entry in known.entries}
     lines = []
     for index, row in enumerate(tool.LEDGER):
-        needed = max(row.df, MIN_DOCS if row.verdict == "등재" else 0)
+        seen = "" if row.place == tool.BRAND else " " + filler[row.place]
+        extra = (repeats or {}).get(row.term, 0)
+        texts = [row.term] * (row.new + extra) + [row.term + seen] * (row.df - row.new)
         lines += [
-            f"x{index}_{n},youtube_comment,x{index}_{n},comment,,,,,{row.term},,{{}}" for n in range(needed)
+            f"d{index}_{n},youtube_comment,d{index}_{n},comment,,,,,{t},,{{}}" for n, t in enumerate(texts)
         ]
     path = tmp_path / "document.csv"
     path.write_text(CORPUS_HEADER + "\n".join(lines) + "\n", encoding="utf-8")
-    assert tool.main(["--corpus", str(path), "--json"]) == 0
+    return path
+
+
+def test_the_tool_is_green_on_a_corpus_that_matches_the_ledger(tmp_path, capsys):
+    tool = _tool()
+    assert tool.main(["--corpus", str(_ledger_corpus(tmp_path, tool)), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["misses"] == []
+
+
+def test_the_tool_compares_the_ledgers_own_numbers_and_not_only_the_verdicts(tmp_path, monkeypatch):
+    """이 도구의 존재 이유가 원장의 수를 다시 재 **맞대는** 것이다. 대조가 없으면 원장에 아무 수나
+    적어도 초록이라 계약이 인용하는 df 가 조용히 거짓이 된다(레포의 다른 measure-* 는 전부 정확 일치).
+
+    변이: `썬쿠션 116` 을 `9116` 으로 바꾸면 그 한 줄이 `count` 로 나온다.
+    """
+    tool = _tool()
+    corpus = _ledger_corpus(tmp_path, tool)
+    assert tool.misses(tool.measure(corpus, tool.baseline())) == []
+    row = next(r for r in tool.LEDGER if r.term == "썬쿠션")
+    monkeypatch.setattr(row, "df", 9116)
+    reported = tool.misses(tool.measure(corpus, tool.baseline()))
+    assert [m for m in reported if m.startswith("count   썬쿠션") and "9116" in m], reported
+
+
+def test_the_revived_guard_reaches_a_row_that_was_refused_on_the_floor(tmp_path):
+    """근거가 수인 미등재는 그 근거로 되물어야 한다. 옛 판은 `row.new == 0` 인 행에만 걸어서 df 로
+    기각한 `케미컬`(3·3)·`olive영`(0·0)이 구조적으로 안 걸렸다 -- 바닥을 넘으면 다시 판정할 때다."""
+    tool = _tool()
+    corpus = _ledger_corpus(tmp_path, tool, repeats={"케미컬": 6})
+    reported = tool.misses(tool.measure(corpus, tool.baseline()))
+    assert [m for m in reported if m.startswith("revived 케미컬")], reported
+    assert [m for m in reported if m.startswith("count   케미컬")], reported
+
+
+def test_a_held_rows_ground_is_not_numeric_so_only_the_count_guard_speaks_for_it(tmp_path):
+    """`모공막힘`·`화잘먹`·`비비크림` 의 근거는 축과 표본이라 수로는 안 무너진다 -- 그 행들이 원장대로인
+    코퍼스에서 빨개지면 도구가 운영 코퍼스에서 영영 종료 1 이 된다. 대신 **수가 움직이면** `count` 가
+    잡는다: 그것이 사람이 축을 다시 읽어야 한다는 신호다."""
+    tool = _tool()
+    plain = tool.misses(tool.measure(_ledger_corpus(tmp_path, tool), tool.baseline()))
+    assert plain == []
+    moved = tool.misses(
+        tool.measure(_ledger_corpus(tmp_path, tool, repeats={"모공막힘": 7}), tool.baseline())
+    )
+    assert [m for m in moved if m.startswith("count   모공막힘")], moved
+
+
+def test_the_tool_counts_the_topic_totals_the_contract_quotes(tmp_path, capsys):
+    """계약이 인용하는 `선크림` 12,197 -> 12,418 과 `밀림_들뜸` 959 -> 2,021 이 나오는 자리. 뒤엣것은
+    등재 기준 3 이 딛고 선 유일한 수라, 재는 길이 없으면 그 문턱이 근거 없는 수가 된다."""
+    tool = _tool()
+    assert tool.main(["--corpus", str(_ledger_corpus(tmp_path, tool)), "--topics", "--json"]) == 0
+    moved = json.loads(capsys.readouterr().out)
+    assert moved["listed"]["선크림"]["after"] > moved["listed"]["선크림"]["before"]
+    held = moved["held_or_refused"]["밀림_들뜸"]
+    assert held["after"] - held["before"] == next(r for r in tool.LEDGER if r.term == "화잘먹").new
 
 
 def test_the_tool_reads_the_repo_csv_as_its_baseline_dictionary():

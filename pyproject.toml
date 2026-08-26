@@ -74,6 +74,7 @@ extend-include = [
     "tool/show-vector-stamp",
     "tool/compare-ydc-crosscheck",
     "tool/measure-crosscheck-keys",
+    "tool/measure-lexicon-candidates",
 ]
 
 [tool.ruff.lint]
