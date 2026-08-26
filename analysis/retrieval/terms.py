@@ -14,6 +14,13 @@
 불용어 목록은 두지 않는다 -- lift 가 일반어를 걷어내는 축이고, 손으로 관리하는 불용어 파일은
 버전을 못 받는 두 번째 사전이 되어 이 이슈가 없앤 문제를 다시 만든다.
 
+그 판단이 슬라이스의 사전 자산 넷을 처분한다(포크 #37). `lexicon.json` 의 `stopwords` 86 은 이 lift
+축이 **대체**하고, `protected` 32 는 불용어 목록을 막으려고만 있던 것이라 막을 것이 없어 **폐기**다
+(22개는 이미 `dict/topics_v1.csv`·`dict/user_dictionary.tsv` 의 표기다). 평면 사본 셋
+(`seeds/stopwords_ko.txt` 30 · `seeds/protected_terms.txt` 36 · `seeds/term_aliases.csv` 8)도 같이
+폐기한다 -- 셋은 `lexicon.json` 의 사본조차 아니고(겹침 7 · 17 · 2) 더 낡은 세대다. 별칭만 살아남되
+목록이 아니라 버전을 받는 행으로 산다(`needs.aspect_lexicon` · `needs.entity_lexicon`).
+
 **자동으로 사전에 넣지 않는다.** 표는 사람이 읽고 `dict/topics_v1.csv` 를 고치는 재료이며, 그
 CSV 가 DB 로 가는 길은 `cosmai lexicon load/diff/activate` 하나다.
 """

@@ -157,6 +157,13 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   바꾸는 길은 `cosmai lexicon load/diff/activate` 하나다 — 적재 원본은 `analysis/retrieval/dict/topics_v1.csv`.
   aspect 버전 하나 = **모든 룰셋을 합친 aspect 사전 전체**라(`activate` 는 kind 단위로 켠다) 주제를 새
   버전으로 올릴 때는 극성 쪽 CSV(`eval/lexicon/aspect_lexicon_v1.csv`)도 같은 버전으로 함께 적재한다.
+- **불용어 목록도 조사 목록도 두지 않는다**(포크 #37, ydc `lexicon.json` 처분). 일반어는 `terms` 의 lift
+  축이 걷어내고(`analysis/retrieval/terms.py`), 조사는 Kiwi 의 태그가 가른다 — `bm25.tokenize` 는
+  `KIWI_TAGS` 밖(조사 `J*`·어미 `E*`)을 버리고 한 글자 명사도 버려서, ydc 가 코퍼스 실측으로 검증한
+  조사 30개를 어간에 붙여도 토큰이 하나도 달라지지 않는다(실측 2026-08-26, 30/30 ·
+  `tests/retrieval/test_particles.py`). 손으로 관리하는 목록을 되살리면 버전을 못 받는 두 번째 사전이
+  된다(포크 #8). 별칭은 반대다 — 목록이 아니라 버전을 받는 행으로 산다: 주제 표기는 위 사전
+  (`ruleset='retrieval-topic'`), 브랜드 표기는 `needs.entity_lexicon`(`formats.md` §사전 CSV).
 - `terms` 는 그 사전이 **못 잡는** 고빈도 명사와 사전 표기의 등장 문서 수를 stdout 표 두 개로 낸다 —
   사람이 읽고 위 CSV 를 고치는 재료다. 파일로 떨구지 않는다: 매일 자라는 코퍼스의 스냅숏이라 레포에
   두면 낡고, 무엇보다 두 번째 사전으로 오해된다. 남기려면 리다이렉트한다.
