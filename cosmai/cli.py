@@ -120,6 +120,12 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     )
     judged.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 민감도는 아무것도 쓰지 않는다 -- 반사실 모집단에는 022 의 어휘에도 run 에도 자리가 없다.
+    wobble = actions.add_parser(
+        "sensitivity", help="Ask whether the panel, the cutoff or the ad flags move that run's verdicts."
+    )
+    wobble.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
@@ -330,9 +336,13 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
+    from analysis.judge import MissingValue, SparseGrid
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
+    from analysis.sensitivity import ShortHistory
+    from analysis.sensitivity.pipeline import NoBaseline
+    from analysis.sensitivity.pipeline import run as sensitivity_run
     from analysis.trend.pipeline import NoPopulation, TopicAxisDrift
     from analysis.trend.pipeline import run as quarter_run
 
@@ -341,16 +351,25 @@ def _run_trend(args: argparse.Namespace) -> int:
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
-    act = quarter_run if args.action == "quarter" else judge_run
+    act = {"quarter": quarter_run, "judge": judge_run, "sensitivity": sensitivity_run}[args.action]
     try:
         with conn:
             outcome = act(conn)
     # 명부도 스냅샷도 주제 사전도 지표 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
     # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    except (NoPopulation, NoJudgement, TopicAxisDrift, NoDictionary) as blocked:
+    # SparseGrid·MissingValue 가 여기 든 것은 #41 부터다: 판정이 저장된 표 말고 민감도의 반사실 행
+    # 위에서도 도는데, 그 행들은 불변식 뷰가 지키는 표에서 오지 않아 "격자가 아직 안 섰다"가 도달
+    # 가능한 자리가 됐다. 셋 다 같은 뜻이라 blocked(2) 다.
+    except (
+        NoPopulation, NoJudgement, NoBaseline, TopicAxisDrift, NoDictionary,
+        SparseGrid, MissingValue, ShortHistory,
+    ) as blocked:  # fmt: skip
         print(blocked)
         return 2
     print(outcome.note)
+    # 답이 표가 아니라 문장인 것은 `sensitivity` 뿐이다 -- 나머지 둘은 note 와 위반 줄이 전부다.
+    for line in getattr(outcome, "lines", ()):
+        print(line)
     for violation in outcome.violations:
         print(f"  {violation}")
     # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
