@@ -18,7 +18,7 @@ from pathlib import Path
 
 import psycopg
 
-from analysis.retrieval import corpus, stopwords, topics
+from analysis.retrieval import corpus, grounding, stopwords, topics
 from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
 from analysis.retrieval.chunks import (
     MAX_CHARS,
@@ -470,9 +470,27 @@ def search(
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
 ) -> list[tuple[str, float, str]]:
-    """(chunk_id, 점수, 본문)."""
+    """(chunk_id, 점수, 본문). 근거 없는 질의는 순위를 매기기 전에 막는다.
+
+    **색인은 엔진과 무관하게 연다.** 게이트가 보는 df 가 거기 있어서인데, `--engine vector` 는 지금까지
+    색인을 안 열었으므로 이 자리가 비용이다 -- 캐시가 있으면 피클 한 벌이고, 없으면 38만 청크를 형태소
+    분석하는 십수 분이다(`load_index`). 그 비용을 내는 이유는 코사인 하한선이 못 쓰는 것으로 판정났기
+    때문이고(계약 §벡터 하한선), 코퍼스에 없는 이름을 물었을 때 상위 k 가 근거로 인쇄되는 것보다는 낫다.
+    """
+    index, _ = load_index(conn, sources, cache_dir=cache_dir)
+    if not (grounded := grounding.check(query, index)).ok:
+        # 결과 0건은 이미 계약이 아는 답이다(종료 코드 1) -- 새 코드를 늘리지 않고 이유만 말한다.
+        print(grounded.note, file=sys.stderr)
+        return []
     hits = ranked_chunks(
-        conn, query, engine=engine, top=top, sources=sources, store=store, cache_dir=cache_dir
+        conn,
+        query,
+        engine=engine,
+        top=top,
+        sources=sources,
+        store=store,
+        cache_dir=cache_dir,
+        index=index,  # 게이트가 이미 연 것을 넘긴다 -- bm25·hybrid 가 같은 색인을 두 번 열지 않는다
     )
     # 벡터는 질의를 토큰화하지 않고 원문을 인코딩하므로 이 목록을 안 탄다 -- 그쪽에 이 줄을 찍으면
     # 안 일어난 일을 말하게 된다.

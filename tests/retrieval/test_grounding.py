@@ -73,14 +73,16 @@ def test_a_query_with_no_tokens_is_not_judged_by_df(index: bm25.Index):
 
 def test_the_gate_reads_df_on_the_index_axis_not_the_query_stopword_axis(index: bm25.Index):
     """df 는 색인이 세운 사실이라 색인의 토큰화로 물어야 한다 -- `eval.docs_with_tokens` 와 같은 자리.
-    질의 불용어를 태우면 그 목록이 바뀌는 날 이 게이트의 판정이 함께 흔들린다."""
+    질의 축으로 물으면 불용어 목록이 바뀌는 날 이 게이트의 판정이 함께 흔들린다: 아래 질의는 색인
+    축에서 막히고 질의 축에서는 통과한다(`화이트닝` 이 빠지면 남는 토큰의 df 가 0 이 아니다)."""
     from analysis.retrieval import stopwords
 
-    installed = stopwords.use(stopwords.QueryStopwords(frozenset({"제품", "함유"}), 1))
+    stopwords.use(stopwords.QueryStopwords(frozenset({"화이트닝"}), 1))
     try:
-        assert installed.dropped(bm25.tokenize("함유 제품")) == ["함유", "제품"]
-        found = grounding.check("퀀텀펩타이드사이드 함유 제품 있어", index)
-        assert not found.ok and found.missing == ("퀀텀펩타이드사이드",)
+        assert bm25.tokenize("화이트닝 백탁") == ["화이트닝", "백탁"]
+        assert bm25.tokenize_query("화이트닝 백탁") == ["백탁"]
+        found = grounding.check("화이트닝 백탁", index)
+        assert not found.ok and found.missing == ("화이트닝",)
     finally:
         stopwords.forget()
 
@@ -132,6 +134,41 @@ def test_the_search_path_still_answers_a_grounded_query(monkeypatch: pytest.Monk
     assert pipeline.search(cast(Any, Conn()), "백탁 없는 선크림", engine="vector") == [
         ("d:0#0", 1.5, CORPUS[0])
     ]
+
+
+def test_a_blocked_query_is_partial_at_the_command_line(monkeypatch: pytest.MonkeyPatch, capsys):
+    """막힌 질의의 답은 결과 0건이고, 그 자리의 종료 코드는 이미 계약에 있다(1) -- 게이트가 새 코드를
+    늘리지 않는다는 것을 명령줄 끝에서 확인한다."""
+    from analysis.retrieval import pipeline
+    from cosmai import cli
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+    built = bm25.Index([f"d:{i}#0" for i in range(len(CORPUS))], list(CORPUS))
+    monkeypatch.setattr(cli, "_connect", lambda _url: FakeConn())
+    monkeypatch.setattr(pipeline, "load_index", lambda *a, **k: (built, {}))
+    argv = ["retrieval", "search", "--engine", "vector", "--query", "퀀텀펩타이드사이드 함유 제품 있어"]
+    assert cli.main(argv) == 1
+    printed = capsys.readouterr()
+    assert "결과 없음" in printed.out
+    assert "퀀텀펩타이드사이드" in printed.err, "왜 0건인지 말하지 않으면 색인이 빈 것과 구분되지 않는다"
+
+
+def test_the_search_section_carries_the_gate_and_what_it_costs():
+    """`--engine vector` 가 색인을 열게 된 것은 사람이 겪는 변화다 -- 계약에 없으면 캐시 없는 호스트에서
+    십수 분을 만나고 나서야 알게 된다."""
+    body = (ROOT / "contracts" / "entrypoints.md").read_text(encoding="utf-8")
+    start = body.index("## 검색 (")
+    search = body[start : body.index("\n## ", start)]
+    assert "근거 없는 질의를 df 로 막는다" in search
+    assert "새 코드가 늘지 않는다" in search
+    assert "`--engine vector` 도 BM25 색인을 연다" in search
+    assert "`retrieval eval` 은 이 게이트를 타지 않는다" in search
 
 
 def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():

@@ -21,8 +21,12 @@
 재는 값은 질의마다 **최고 코사인**(top-1)이다. 저장소가 L2 정규화돼 있어 `vectors.search` 가 주는
 거리에서 `1 - 거리` 로 되돌린다.
 
-    uv run --extra retrieval --extra embed tool/measure-vector-floor
+두 부분의 무거운 의존이 **서로 다르다.** `cosine` 은 벡터 저장소와 인코더(`embed` extra)를 열고,
+`df` 는 BM25 색인을 연다(캐시가 없으면 십수 분). 그래서 따로 부를 수 있다.
+
+    uv run --extra retrieval --extra embed tool/measure-vector-floor            # 둘 다
     uv run --extra retrieval --extra embed tool/measure-vector-floor --json
+    uv run --extra retrieval tool/measure-vector-floor --part df                # 인코더도 GPU 도 안 쓴다
 
 질의 73개를 CPU 로 재는 데 11초라 기본 장치는 `cpu` 다 -- 공유 GPU 를 잡을 이유가 없다.
 
@@ -43,7 +47,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from analysis.retrieval import eval as retrieval_eval  # noqa: E402
-from analysis.retrieval import topics, vectors  # noqa: E402
+from analysis.retrieval import grounding, topics, vectors  # noqa: E402
 
 # 코퍼스에 없는 성분명처럼 생긴 말. ydc `vector_threshold.py` v0.3.0 의 목록 **그대로**다 -- 우리가 다시
 # 지으면 그 짓는 규칙이 또 하나의 손잡이가 된다. 실제 성분명처럼 보이도록 접미사(`-사이드`·`-오일`·
@@ -65,6 +69,10 @@ FAKE = (
 KEEP = 0.90  # 문턱이 남겨야 하는 정탐 비율
 CUT = 0.50  # 그 문턱이 잘라야 하는 오탐 비율
 YDC_TRIAL = 0.865  # ydc 가 표본 6개로 임시로 넣었던 값. 근거가 약하다는 것이 이 측정의 출발점이다
+ROUTING_TOOL = ROOT / "tool" / "measure-query-routing"
+# 게이트가 쓰는 규칙 말고, 고르며 버린 갈래들. 값은 "df 0 을 근거로 볼 최소 토큰 길이"이고 None 은
+# ydc 초판의 "토큰의 df 가 전부 0" 이다.
+DISCARDED = {"all_zero": None, "any_len3": 3}
 SEPARATED = "분리가 된다"
 USABLE = "쓸 수 있다"
 UNUSABLE = "못 쓴다"
@@ -138,7 +146,7 @@ def at(threshold: float, real: list[float], fake: list[float]) -> dict:
     }
 
 
-def measure(conn, store, device: str | None) -> dict:
+def measure_cosine(conn, store, device: str | None) -> dict:
     from analysis.retrieval import embed
 
     dictionary = topics.use_active(conn)
@@ -167,7 +175,66 @@ def measure(conn, store, device: str | None) -> dict:
     }
 
 
-def report(found: dict) -> None:
+def frames() -> tuple[str, ...]:
+    """문형 열 개. **정본은 #47 의 도구다** -- 두 벌이 되면 갈리고, 그러면 이 표본이 "문형은 성분 신호를
+    내지 않는다"는 그쪽의 확인을 물려받지 못한다."""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+
+    spec = spec_from_loader(
+        "measure_query_routing", SourceFileLoader("measure_query_routing", str(ROUTING_TOOL))
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - 파일이 없으면 아래에서 막힌다
+        raise FileNotFoundError(ROUTING_TOOL)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.FRAMES)
+
+
+def zero_df(query: str, index, minimum: int | None) -> bool:
+    """버린 갈래가 이 질의를 막는가. `minimum` 이 None 이면 ydc 초판의 "전부 0" 이다."""
+    from analysis.retrieval import bm25
+
+    frequency = {term: len(index.postings.get(term, ())) for term in set(bm25.tokenize(query))}
+    if not frequency:
+        return False  # 토큰이 없으면 어느 갈래도 df 로 판정하지 않는다
+    if minimum is None:
+        return max(frequency.values()) == 0
+    return any(not df and len(term) >= minimum for term, df in frequency.items())
+
+
+def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
+    """규칙마다, 표본마다 **막힌 질의 수**. 쓰는 규칙의 줄은 `grounding.check` 자신이 낸다 -- 여기서
+    다시 적으면 계약의 표가 구현이 아니라 그 사본을 재게 된다."""
+    from analysis.retrieval import pipeline
+
+    dictionary = topics.use_active(conn)
+    index, _origin = pipeline.load_index(conn, sources)
+    real = [query for _topic, query in retrieval_eval.queries("literal", dictionary)]
+    shapes = frames()
+    samples = {
+        "real_alias": real,
+        "real_sentence": [frame.format(alias=alias) for alias in real for frame in shapes],
+        "fake_name": list(FAKE),
+        "fake_sentence": [frame.format(alias=name) for name in FAKE for frame in shapes],
+    }
+    rules: dict[str, dict[str, int]] = {name: {} for name in ("all_zero", "any_len3", "in_use")}
+    for sample, queries in samples.items():
+        for name, minimum in DISCARDED.items():
+            rules[name][sample] = sum(1 for query in queries if zero_df(query, index, minimum))
+        rules["in_use"][sample] = sum(1 for query in queries if not grounding.check(query, index).ok)
+    return {
+        "dictionary": dictionary.version,
+        "minimum_length": grounding.ZERO_DF_MINLEN,
+        "frames": len(shapes),
+        "sizes": {sample: len(queries) for sample, queries in samples.items()},
+        "rules": rules,
+        # 못 막는 가짜를 이름으로 낸다. 수만 내면 "몇 개는 새지" 로 읽히고 어느 성질이 새는지가 지워진다.
+        "unblocked_fakes": [name for name in FAKE if grounding.check(name, index).ok],
+    }
+
+
+def report_cosine(found: dict) -> None:
     print(f"저장소 {found['store']} · 활성 주제 사전 v{found['dictionary']}")
     if found["present"]:
         print(f"[가짜가 아니다] 코퍼스에 실제로 있는 후보 {found['present']}")
@@ -195,12 +262,33 @@ def report(found: dict) -> None:
         )
 
 
+def report_df(found: dict) -> None:
+    labels = {
+        "all_zero": "전부 0 (ydc 초판)",
+        "any_len3": "하나라도 0 · 길이 >= 3",
+        "in_use": f"하나라도 0 · 길이 >= {found['minimum_length']} (쓰는 규칙)",
+    }
+    print(f"\n막힌 질의 수 · 활성 주제 사전 v{found['dictionary']} · 문형 {found['frames']}개")
+    for name, label in labels.items():
+        counts = " · ".join(
+            f"{sample} {found['rules'][name][sample]}/{size}" for sample, size in found["sizes"].items()
+        )
+        print(f"  {label}\n      {counts}")
+    print(f"  못 막는 가짜: {found['unblocked_fakes']}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--vectors", default=None, help="벡터 저장소 경로. 기본값은 vectors.DEFAULT_STORE")
     parser.add_argument("--device", default="cpu", help="인코더 장치. 기본값 cpu -- 질의 73개다")
+    parser.add_argument(
+        "--part",
+        choices=("all", "cosine", "df"),
+        default="all",
+        help="cosine 은 저장소와 인코더를, df 는 BM25 색인을 연다. 무거운 의존이 서로 다르다",
+    )
     parser.add_argument("--json", action="store_true", help="테스트·보고가 읽는 형식")
     args = parser.parse_args()
 
@@ -211,19 +299,28 @@ def main() -> int:
     except (ValueError, LookupError) as refused:
         print(refused, file=sys.stderr)
         return 2
+    found: dict = {}
     try:
         with conn:
-            store = vectors.load(Path(args.vectors) if args.vectors else vectors.DEFAULT_STORE)
-            found = measure(conn, store, args.device)
+            if args.part in ("all", "cosine"):
+                store = vectors.load(Path(args.vectors) if args.vectors else vectors.DEFAULT_STORE)
+                found["cosine"] = measure_cosine(conn, store, args.device)
+            if args.part in ("all", "df"):
+                found["df"] = measure_df(conn)
+    # 인코더가 없는 것(embed extra 미설치)은 실패가 아니라 막힘이다 -- load_encoder 가 무엇을 어떻게
+    # 깔아야 하는지 RuntimeError 로 말한다.
     except (vectors.StoreMissing, topics.NoDictionary, RuntimeError) as blocked:
         print(blocked, file=sys.stderr)
         return 2
     if args.json:
         print(json.dumps(found, ensure_ascii=False, indent=2))
     else:
-        report(found)
+        if "cosine" in found:
+            report_cosine(found["cosine"])
+        if "df" in found:
+            report_df(found["df"])
     # 가짜가 아닌 것이 표본에 있었으면 뺀 뒤에도 이 수는 계약이 적은 표본 위의 수가 아니다.
-    return 1 if found["present"] else 0
+    return 1 if found.get("cosine", {}).get("present") else 0
 
 
 if __name__ == "__main__":
