@@ -75,6 +75,12 @@ export const MAP_QUERIES = {
     select: ['stage_key', 'arm', 'dataset', 'enabled'],
     order: 'stage_key',
   },
+  // 상태를 그림에 얹는다(#143). 판정은 뷰가 이미 끝냈으므로 두 컬럼만 받으면 된다 --
+  // 색을 고르는 severity.js 가 보는 것이 그 둘뿐이다.
+  health: {
+    select: ['stage_key', 'freshness', 'last_run_status'],
+    order: 'stage_key',
+  },
 };
 
 export const NEED_QUERIES = {

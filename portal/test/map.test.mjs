@@ -5,6 +5,8 @@ import {
   NODE_W, NODE_H, COL_GAP, ROW_GAP, PAD,
 } from '../public/map.js';
 import { MAP_QUERIES } from '../public/query.js';
+import { severityClass } from '../public/severity.js';
+import { severityOf as opsSeverityOf } from '../public/ops.js';
 
 const w = (stage, store) => ({ from_key: stage, from_kind: 'stage', to_key: store, to_kind: 'store' });
 const r = (store, stage) => ({ from_key: store, from_kind: 'store', to_key: stage, to_kind: 'stage' });
@@ -135,5 +137,25 @@ test('select 가 소비 함수들이 거르는 컬럼을 빠짐없이 담는다 
   }
   for (const key of ['stage_key', 'arm', 'enabled']) {
     assert.ok(MAP_QUERIES.stage.select.includes(key), `stage select 에 ${key} 가 없다`);
+  }
+});
+
+test('지도와 관제 표가 같은 행에 같은 색을 낸다 (#143)', () => {
+  // 두 화면이 같은 단계를 다른 색으로 보이면 둘 다 못 믿게 된다. 같은 모듈을 부르는 것이
+  // 그 보장이고, 여기서 그것을 잰다.
+  for (const row of [
+    { freshness: 'stalled', last_run_status: 'failed' },
+    { freshness: 'ok', last_run_status: 'partial' },
+    { freshness: 'never', last_run_status: null },
+    { freshness: 'disabled', last_run_status: null },
+    { freshness: 'ok', last_run_status: 'ok' },
+  ]) {
+    assert.equal(severityClass(row), ['sev-critical', 'sev-warn', 'sev-idle', 'sev-ok', 'sev-muted'][opsSeverityOf(row)]);
+  }
+});
+
+test('상태 질의가 색을 고르는 데 필요한 컬럼을 담는다', () => {
+  for (const key of ['stage_key', 'freshness', 'last_run_status']) {
+    assert.ok(MAP_QUERIES.health.select.includes(key), `health select 에 ${key} 가 없다`);
   }
 });
