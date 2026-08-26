@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_thirtythree_contract_tables():
+def test_the_ddl_declares_the_thirtyfour_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 020_retrieval_chunk.sql (issue #28; the 020 block is this branch's, see that file)
@@ -42,9 +42,12 @@ def test_the_ddl_declares_the_thirtythree_contract_tables():
     # + 3 from 023_corpus_snapshot.sql (fork issue #4: corpus_snapshot, corpus_document,
     # corpus_mention -- the snapshot is the parent snapshot_id points at)
     # + 1 from 024_topic_quarter_judgement.sql (fork issue #40: topic_quarter_judgement -- a
-    # derivation of metrics_topic_quarter, keyed and FK'd on that table's whole primary key).
+    # derivation of metrics_topic_quarter, keyed and FK'd on that table's whole primary key)
+    # + 1 from 025_topic_quarter_evidence.sql (fork issue #6: topic_quarter_evidence -- not a
+    # derivation but a pointer: the judgement cell's key plus a rank, pointing back at the
+    # corpus_document rows that made it).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 33
+    assert len(declared_tables()) == 34
 
 
 def test_every_declared_table_exists_in_the_database():

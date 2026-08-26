@@ -241,6 +241,34 @@ cosmai trend judge [--url <url>]
   지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
 - `analysis_run.versions.judgement` 가 그 행들의 정의 판본을 든다 (`versioning.md`).
 
+## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
+```
+cosmai trend evidence [--url <url>]
+cosmai trend cards --quarter <q> [--url <url>]
+```
+- `evidence` 는 `cosmai trend judge` 가 판정한 **그 run 의** 셀에 붙는 근거 댓글을
+  `needs.topic_quarter_evidence` 에 쓴다. run 을 찾는 길은 `quarter`·`judge` 와 같은 note 하나이고,
+  그래서 인자도 `--url` 하나다.
+- **모집단은 지표를 세운 그 술어다** — `analysis/trend/pipeline.py` 의 `POPULATION` CTE 를 그대로 든다.
+  근거만 다른 모집단에서 고르면 카드의 발화와 카드의 숫자가 다른 분모 위에 선다.
+- **후보를 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다.** 근거는 판정과 달리 코퍼스를 훑는 단계라
+  `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에 그대로 걸린다 — 커서를 연 채 접으면
+  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이다.
+- 한 실행이 그 (run, scope, 명부) 의 근거 행을 통째로 다시 쓴다 — 부분 갱신이면 자리(rank)의 사다리가
+  조용히 구멍 난다.
+- 쓰고 나서 `needs.topic_quarter_evidence_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
+  코드 **1**(partial)이고 stdout 이 그 줄을 싣는다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
+  판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `cards` 는 **아무것도 쓰지 않는다.** 위 세 표를 읽어 마크다운 카드 묶음을 stdout 으로 낸다. 파일로
+  떨구지 않는 것은 `retrieval terms` 와 같은 이유다(자라는 코퍼스의 스냅숏이라 레포에 두면 낡는다) —
+  남기려면 리다이렉트한다. `--quarter` 는 필수다: 카드는 "이번 분기에 이 주제를 더 볼지"를 담당자가
+  정하는 단위라 분기가 없으면 물음이 서지 않는다.
+- `cards` 의 종료 코드: 0 ok · 1 partial(**카드 0건** — 규칙에 걸린 셀이 없거나 걸린 셀에 근거가 없다,
+  `retrieval search` 의 결과 없음과 같은 자리) · 2 blocked(연결 거절, 그 run 에 판정 행이 없음).
+- `analysis_run.versions.evidence` 가 근거 행들의 정의 판본을 든다 (`versioning.md`). 카드는 행을 만들지
+  않으므로 판본을 남기지 않는다 — 그 카드가 어느 정의의 근거를 실었는지는 읽은 run 의 이 키가 답한다.
+
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가

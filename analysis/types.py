@@ -369,6 +369,25 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
     hold_reason: str = ""  # `판정 보류` 의 사유 코드. 보류가 아니면 '' (§판정 의 닫힌 어휘)
 
 
+@dataclass(frozen=True)
+class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀을 받치는 소비자 발화 — §근거)
+    # 앞 여덟 칸은 topic_quarter_judgement 의 기본키 그대로다. 근거가 가리키는 것이 지표 행이 아니라
+    # 판정 셀인 것이 뜻이다 — 근거를 묻는 사람은 유형을 읽은 사람이다.
+    run_id: int
+    scope: str
+    topic_key: str
+    quarter: str
+    source: str
+    content_type: str
+    panel_version: int
+    panel_role: str
+    rank: int  # 그 셀 안 좋아요 내림차순 자리. 1 부터 빈칸 없이 (§근거)
+    snapshot_id: int  # 근거 문서가 사는 관측 판본. doc_id 하나로는 재수집분과 갈리지 않는다
+    doc_id: str  # 본문은 여기 없다 — 코퍼스가 정본이고 뷰 topic_quarter_evidence_quote 가 잇는다
+    like_count: int  # 고른 이유. collected_at 시점의 스냅샷이라 나중에 세면 다른 수다
+    matched_term: str | None = None  # corpus_mention 이 이미 단 표현. 여기서 다시 매칭하지 않는다
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str
