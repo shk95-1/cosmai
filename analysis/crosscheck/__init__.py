@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import re
+import statistics
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
@@ -117,10 +119,22 @@ INGREDIENT_KEYS: dict[str, tuple[str, ...]] = {
 }
 # 쓰지 않기로 한 별칭과 그 근거. 상수로 남기는 것은, 되돌리면 무엇이 잡히는지를 적어 두는 것 말고는
 # "시카가 왜 없지" 하고 되살리는 것을 막을 길이 없기 때문이다. 값은 우리 표 실측(2026-08-27)이다.
+# (`센텔라` 는 버린 것이 아니라 키에 남아 있다 -- 0행일 뿐이고, 그래서 `병풀` 이 필요했다.)
 REJECTED_TERMS: dict[str, str] = {
     "시카": "216행 전부 트라이에톡시카프릴릴실레인(209)·트리에톡시카프릴릴실란(7) -- 실리콘 분산제다",
-    "센텔라": "0행. 우리 성분표는 병풀·마데카소사이드·아시아티코사이드로 적는다",
     "레티놀": "7행. `레티날` 은 0행이고 레티놀과 레티날은 다른 물질이다",
+}
+# 어느 키도 잡아서는 안 되는 성분명과 그 이유. **감사의 기계 게이트는 이것 하나다.**
+#
+# ydc 의 `[의심]` 규칙(잡힌 이름에 키가 하나도 안 들어 있는가)은 여기 옮기지 않았다 -- 매처는 대소문자·
+# 공백을 접고 그 규칙은 원문 그대로 보므로, 실제로 잡을 수 있는 것이 폴딩 아티팩트(`pdrn` 대 `PDRN`)뿐
+# 이다. 정작 `시카` 는 그 규칙을 **만족한다**(`시카` 가 트라이에톡시카프릴릴실레인 안에 진짜로 들어 있다).
+# 그것을 잡은 것은 규칙이 아니라 찍힌 이름을 읽은 사람이다. 그래서 우리는 사람이 한 번 읽어 확인한 것을
+# 목록으로 남긴다 -- 되살아나면 종료 코드 1 이다 (계약 §성분).
+DENIED_NAMES: dict[str, str] = {
+    "트라이에톡시카프릴릴실레인": "실리콘 분산제. `시카` 별칭이 우리 표에서 209행을 이것으로 잡았다",
+    "트리에톡시카프릴릴실란": "같은 물질의 다른 표기. 7행",
+    "레티놀": "레티날과 다른 물질이다. `레티날` 키가 이것을 잡으면 후한 것이 아니라 틀린 것이다",
 }
 # 담론 수를 "선크림 담론" 으로 읽으면 안 된다. 색인 전체에서 센 값이라 같은 채널이 소개한 앰플·
 # 스킨부스터가 다 들어 있다. 그래서 이 말이 **같은 청크 안에** 있는 것을 따로 센다 (계약 §성분).
@@ -147,20 +161,19 @@ RUN_ON_SPACES = 5
 
 @dataclass(frozen=True)
 class KeyAudit:
-    """키 하나가 실제로 무엇을 잡는가. **부분문자열 오매칭 전용 검사다** -- 눈으로는 못 잡는다."""
+    """키 하나가 실제로 무엇을 잡는가. **부분문자열 오매칭 전용 검사다** -- 수치만 봐서는 못 잡는다."""
 
     key: str
     terms: tuple[str, ...]
     rows: int
     products: int
     names: tuple[tuple[str, int], ...] = ()
+    denied: tuple[str, ...] = ()
 
     @property
     def suspect(self) -> bool:
-        """잡힌 성분명에 키가 하나도 안 들어 있는가. 0행은 오매칭이 아니라 부재라 통과다."""
-        return bool(self.rows) and not any(
-            any(term in name for term in self.terms) for name, _count in self.names
-        )
+        """사람이 한 번 확인해 금지한 성분명을 잡았는가. 0행은 오매칭이 아니라 부재라 통과다."""
+        return bool(self.denied)
 
 
 @dataclass(frozen=True)
@@ -197,33 +210,85 @@ class Ingredients:
 
 def ranks(values: Mapping[str, float]) -> dict[str, int]:
     """큰 값이 1위. 비교는 크기가 아니라 순위로 한다 (ydc `cross_source.ranks`)."""
-    raise NotImplementedError
+    order = sorted(values, key=lambda key: -values[key])
+    return {key: place + 1 for place, key in enumerate(order)}
 
 
 def composition(
     mentions: Mapping[str, Mapping[str, int]], topic_keys: Sequence[str]
 ) -> tuple[SourceShare, ...]:
-    """소스별 (주제 -> 언급 문서 수) -> 주제마다 한 줄. 분모는 그 소스의 주제 언급 문서 수 합이다."""
-    raise NotImplementedError
+    """소스별 (주제 -> 언급 문서 수) -> 주제마다 한 줄. 분모는 그 소스의 주제 언급 문서 수 합이다.
+
+    분모를 `topic_keys` 로 좁히는 것이 뜻이다 -- 축 밖 주제(`trend_use` 가 거짓인 `선크림`·`추천_재구매`)
+    가 분모에 들면 모든 소스의 구성비가 조용히 작아진다.
+    """
+    total = {source: sum(counts.get(topic, 0) for topic in topic_keys) for source, counts in mentions.items()}
+    shares = {
+        source: {
+            topic: (100 * mentions[source].get(topic, 0) / total[source] if total[source] else 0.0)
+            for topic in topic_keys
+        }
+        for source in mentions
+    }
+    place = {source: ranks(shares[source]) for source in mentions}
+    return tuple(
+        SourceShare(
+            topic_key=topic,
+            documents={source: mentions[source].get(topic, 0) for source in mentions},
+            shares={source: shares[source][topic] for source in mentions},
+            ranks={source: place[source][topic] for source in mentions},
+            reading=share_reading({source: shares[source][topic] for source in mentions}),
+        )
+        for topic in topic_keys
+    )
 
 
 def share_reading(shares: Mapping[str, float]) -> str:
     """어느 쪽이 그 주제를 담는 그릇인가 (ydc `source_composition.reading` + `cross_source` 한 줄)."""
-    raise NotImplementedError
+    creator, consumer = shares.get(CREATOR, 0.0), shares.get(CONSUMER, 0.0)
+    comment = shares.get(COMMENT, 0.0)
+    if consumer >= LEAD_PP and creator < THIN_PP:
+        return READ_CONSUMER_ONLY
+    if consumer - creator >= LEAD_PP:
+        return READ_CONSUMER_LEAD
+    if creator - consumer >= LEAD_PP:
+        return READ_CREATOR_LEAD
+    # ydc `cross_source.topic_table` 의 한 줄. 실사용 쪽이 0 이면 붙지 않는다 -- 아무도 말하지 않는
+    # 주제는 제작자의 사각이 아니다.
+    if consumer > 0 and creator < SPARSE_PP and comment > creator * TALK_RATIO:
+        return READ_COMMENT_ONLY
+    return ""
 
 
 def polarity(topic_name: str) -> str:
-    raise NotImplementedError
+    """중립이 먼저다 -- `보통이에요` 는 부정 힌트를 하나도 갖지 않지만 긍정도 아니다."""
+    name = (topic_name or "").strip()
+    if any(hint in name for hint in NEUTRAL_HINTS):
+        return "neutral"
+    if any(hint in name for hint in NEGATIVE_HINTS):
+        return "negative"
+    return "positive"
 
 
 def positive_rate(choices: Sequence[tuple[str, float]]) -> float | None:
     """한 제품·한 topic_group 안에서 긍정 선택지가 차지하는 비중."""
-    raise NotImplementedError
+    total = sum(share for _name, share in choices)
+    if not total:
+        return None
+    positive = sum(share for name, share in choices if polarity(name) == "positive")
+    return 100 * positive / total
 
 
 def rating_reading(positive_rate_mean: float, gap_pp: float | None) -> str:
-    """언급이 많은데 만족도가 낮으면 개선 여지, 둘 다 높으면 이미 해결된 강점."""
-    raise NotImplementedError
+    """언급이 많은데 만족도가 낮으면 개선 여지, 둘 다 높으면 이미 해결된 강점.
+
+    갭을 모르는 셀(판정 행이 없다)은 갭이 큰 쪽으로 읽지 않는다 -- 모른다와 작다는 다르지만, 모르는
+    것을 크다고 읽으면 없는 근거로 공백을 주장하게 된다.
+    """
+    wide = gap_pp is not None and gap_pp > GAP_PP_MATERIAL
+    if wide:
+        return READ_GAP_UNHAPPY if positive_rate_mean < POSITIVE_RATE_HIGH else READ_GAP_HAPPY
+    return READ_QUIET_UNHAPPY if positive_rate_mean < POSITIVE_RATE_HIGH else READ_SATURATED
 
 
 def ratings(
@@ -231,16 +296,81 @@ def ratings(
     judged: Mapping[str, tuple[int | None, float | None, float | None, str]],
 ) -> tuple[RatingRow, ...]:
     """(소스, 제품, topic_group) -> 선택지들, 그리고 그 run 의 판정 -> 주제마다 한 줄."""
-    raise NotImplementedError
+    per_topic: dict[str, list[float]] = {}
+    groups: dict[str, set[str]] = {}
+    for (_source, _product, group), choices in rated.items():
+        topic = GROUP_MAP.get(group)
+        # 대응이 없는 그룹은 넣지 않는다. 전량에서 `피부타입` 이 그 자리다.
+        if topic is None:
+            continue
+        rate = positive_rate(choices)
+        if rate is None:
+            continue
+        per_topic.setdefault(topic, []).append(rate)
+        groups.setdefault(topic, set()).add(group)
+    made: list[RatingRow] = []
+    for topic, rates in per_topic.items():
+        mean = statistics.mean(rates)
+        rank, composition_pct, gap, trend_type = judged.get(topic, (None, None, None, ""))
+        row = RatingRow(
+            topic_key=topic,
+            commerce_groups=tuple(sorted(groups[topic])),
+            products_rated=len(rates),
+            positive_rate_mean=round(mean, 1),
+            positive_rate_median=round(statistics.median(rates), 1),
+            youtube_rank_comment=rank,
+            youtube_composition_pct=composition_pct,
+            youtube_gap_pp=gap,
+            youtube_trend_type=trend_type,
+        )
+        # 표본이 얇은 주제는 수치를 그대로 싣되 해석을 쓰지 않는다 (계약 §평가).
+        made.append(row if row.thin else replace_reading(row, rating_reading(mean, gap)))
+    made.sort(key=lambda row: (-row.products_rated, row.topic_key))
+    return tuple(made)
+
+
+def replace_reading(row: RatingRow, reading: str) -> RatingRow:
+    return RatingRow(
+        topic_key=row.topic_key,
+        commerce_groups=row.commerce_groups,
+        products_rated=row.products_rated,
+        positive_rate_mean=row.positive_rate_mean,
+        positive_rate_median=row.positive_rate_median,
+        youtube_rank_comment=row.youtube_rank_comment,
+        youtube_composition_pct=row.youtube_composition_pct,
+        youtube_gap_pp=row.youtube_gap_pp,
+        youtube_trend_type=row.youtube_trend_type,
+        reading=reading,
+    )
 
 
 def parse_ingredients(text: str) -> list[str]:
     """성분표 한 장을 성분명으로. 대괄호 구간 표시는 버리고 괄호 안의 쉼표는 자르지 않는다."""
-    raise NotImplementedError
+    body = BRACKET_RE.sub(" ", STAR_NOTE_RE.sub(" ", text or ""))
+    out: list[str] = []
+    depth, current = 0, []
+    for char in body:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        if char in ",\n" and depth == 0:
+            out.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    out.append("".join(current))
+    return [name.strip() for name in out if name.strip()]
+
+
+def run_on(name: str) -> bool:
+    """쉼표 없이 공백으로만 나열한 성분표 한 덩어리인가. 조용히 쪼개지 않고 세기만 한다."""
+    return name.count(" ") >= RUN_ON_SPACES
 
 
 def matches(name: str, terms: Iterable[str]) -> bool:
-    raise NotImplementedError
+    folded = name.replace(" ", "").lower()
+    return any(term.replace(" ", "").lower() in folded for term in terms)
 
 
 def audit(
@@ -249,16 +379,38 @@ def audit(
     keys: Mapping[str, tuple[str, ...]] | None = None,
     top: int = 5,
 ) -> tuple[KeyAudit, ...]:
-    """(제품 키, 성분명) 행들 -> 키마다 실제로 잡히는 고유 성분명."""
-    raise NotImplementedError
+    """(제품 키, 성분명) 행들 -> 키마다 실제로 잡히는 고유 성분명.
+
+    채택률만 보면 `시카` 의 41.1% 는 그럴듯했다. 이름을 찍으면 즉시 보인다.
+    """
+    table = keys if keys is not None else INGREDIENT_KEYS
+    made: list[KeyAudit] = []
+    for key, terms in table.items():
+        hit = [(product, name) for product, name in rows if matches(name, terms)]
+        names = Counter(name for _product, name in hit)
+        made.append(
+            KeyAudit(
+                key=key,
+                terms=terms,
+                rows=len(hit),
+                products=len({product for product, _name in hit}),
+                names=tuple(names.most_common(top)),
+                denied=tuple(sorted({denied for denied in DENIED_NAMES if denied in names})),
+            )
+        )
+    return tuple(made)
 
 
 def ingredient_reading(row: IngredientRow) -> str:
-    raise NotImplementedError
+    """담론 수를 "선크림 담론" 으로 읽지 말라고 말하는 한 줄 (계약 §성분)."""
+    if row.talk_youtube and row.sun_share < SUN_SHARE_LOW:
+        return f"{READ_NOT_SUNCARE} (선크림 문맥 {row.sun_share:.1f}%)"
+    return ""
 
 
 __all__ = [
     "COMMENT",
+    "DENIED_NAMES",
     "COMMERCE_REVIEW",
     "CONSUMER",
     "CREATOR",
@@ -292,6 +444,8 @@ __all__ = [
     "polarity",
     "positive_rate",
     "ranks",
+    "replace_reading",
+    "run_on",
     "rating_reading",
     "ratings",
     "share_reading",

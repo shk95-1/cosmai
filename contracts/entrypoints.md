@@ -342,8 +342,8 @@ cosmai trend crosscheck [--url <url>]
 - 청크 색인을 한 번 훑는다 — 전량 381,950청크 48MB **11.3초**로 실제로 재 봤다(2026-08-27, 키셋 2만 행
   페이지에 페이지마다 커밋). 한 흐름으로 훑으면 `needs_runtime` 의 `transaction_timeout`(60초)에 걸리므로
   `analysis/retrieval/eval.py` 의 `gold_from_chunks` 와 같은 방식을 쓴다.
-- 종료 코드: **0 ok — 대조표가 계산됐다** · 1 partial(**이 산출을 믿지 마라** — 성분 키가 잡은 행들의
-  성분명에 그 키가 하나도 안 들어 있거나(`key_mismatch`, §대조 의 `시카` 사고가 이 자리다), 커머스
+- 종료 코드: **0 ok — 대조표가 계산됐다** · 1 partial(**이 산출을 믿지 마라** — 성분 키가 사람이 한 번
+  읽어 금지한 성분명을 잡았거나(`key_mismatch`, §대조 의 `시카` 사고가 이 자리다), 커머스
   `topic_group` 이 가리키는 우리 주제가 활성 사전에 없다(`group_map_drift`)) · 2 blocked(연결 거절, 활성
   명부·스냅샷·주제 사전 없음, **그 run 에 판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는
   뜻이라 실패가 아니라 막힘이다. 청크가 비었거나(`cosmai retrieval chunk`) 랭킹에 선케어 제품이 없는 것

@@ -53,23 +53,42 @@ def test_retinol_is_not_retinal():
 
 
 def test_every_rejected_alias_stays_out_of_the_key_table():
-    """되살리면 무엇이 잡히는지가 REJECTED_TERMS 에 적혀 있고, 그 셋은 어느 키에도 없어야 한다."""
+    """되살리면 무엇이 잡히는지가 REJECTED_TERMS 에 적혀 있고, 그 둘은 어느 키에도 없어야 한다."""
     terms = {term for group in crosscheck.INGREDIENT_KEYS.values() for term in group}
-    assert set(crosscheck.REJECTED_TERMS) == {"시카", "센텔라", "레티놀"}
+    assert set(crosscheck.REJECTED_TERMS) == {"시카", "레티놀"}
     assert terms.isdisjoint(crosscheck.REJECTED_TERMS)
     assert all(crosscheck.REJECTED_TERMS.values()), "버린 이유가 없는 별칭은 다시 살아난다"
+    # `센텔라` 는 버린 것이 아니라 키에 남아 0행일 뿐이다 -- 그래서 `병풀` 이 필요했다.
+    assert "센텔라" in crosscheck.INGREDIENT_KEYS["시카센텔라"]
 
 
-def test_the_audit_flags_a_key_whose_hits_never_contain_it():
-    """`시카` 를 되살렸다고 치고 감사가 잡는지 본다. 눈으로는 못 잡는 자리다."""
+def test_ydcs_own_suspect_rule_would_not_have_caught_this():
+    """`시카` 는 트라이에톡시카프릴릴실레인 **안에 진짜로 들어 있다.** 그래서 "잡힌 이름에 키가 하나도
+    안 들어 있는가" 라는 규칙은 만족되고 아무 말도 하지 않는다 -- 사고를 잡은 것은 규칙이 아니라
+    찍힌 이름을 읽은 사람이다. 우리 게이트가 DENIED_NAMES 인 이유가 이 한 줄이다."""
+    assert "시카" in "트라이에톡시카프릴릴실레인"
+
+
+def test_the_audit_flags_a_key_that_catches_a_denied_substance():
+    """`시카` 를 되살렸다고 치고 감사가 잡는지 본다."""
     (bad,) = crosscheck.audit(_rows(), keys={"시카": ("시카",)})
-    assert bad.suspect and bad.rows == 2
+    assert bad.rows == 2 and bad.suspect
+    assert bad.denied == ("트라이에톡시카프릴릴실레인", "트리에톡시카프릴릴실란")
     assert bad.names[0] == ("트라이에톡시카프릴릴실레인", 1)
 
 
 def test_a_key_that_catches_nothing_is_absence_not_a_mismatch():
     (none,) = crosscheck.audit(_rows(), keys={"PDRN": ("피디알엔", "pdrn")})
     assert none.rows == 0 and not none.suspect
+
+
+def test_every_denied_name_carries_the_reason_it_was_denied():
+    assert set(crosscheck.DENIED_NAMES) == {
+        "트라이에톡시카프릴릴실레인",
+        "트리에톡시카프릴릴실란",
+        "레티놀",
+    }
+    assert all(crosscheck.DENIED_NAMES.values())
 
 
 def test_the_corrected_keys_pass_the_audit_on_our_own_ingredient_names():
@@ -79,6 +98,24 @@ def test_the_corrected_keys_pass_the_audit_on_our_own_ingredient_names():
     caught = {row.key: row.rows for row in audits}
     assert caught["시카센텔라"] == 5, "병풀 2 · 마데카 1 · 아시아티코 1 · 아시아틱 1"
     assert caught["레티날"] == 0
+
+
+def test_what_each_key_catches_is_locked_here_not_left_to_the_exit_code():
+    """기계 규칙으로 `시카` 를 잡을 수 없다는 것이 위 두 테스트다. 그래서 **키가 무엇을 잡는지를
+    여기서 건다** -- 코퍼스가 자라 새 물질이 어떤 키에 들어오면 이 줄이 먼저 깨지고 사람이 다시 읽는다.
+    """
+    caught = {row.key: {name for name, _count in row.names} for row in crosscheck.audit(_rows())}
+    assert caught["시카센텔라"] == {
+        "병풀추출물",
+        "병풀잎추출물",
+        "마데카소사이드",
+        "아시아티코사이드",
+        "아시아틱애씨드",
+    }
+    assert caught["히알루론산"] == {"소듐하이알루로네이트"}
+    assert caught["펩타이드"] == {"카퍼트라이펩타이드-1"}
+    assert caught["콜라겐"] == {"하이드롤라이즈드콜라겐"}
+    assert caught["레티날"] == set()
 
 
 def test_a_bracketed_section_label_is_not_an_ingredient():
