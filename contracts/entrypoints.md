@@ -345,9 +345,11 @@ cosmai trend crosscheck [--url <url>]
 - 종료 코드: **0 ok — 대조표가 계산됐다** · 1 partial(**이 산출을 믿지 마라** — 성분 키가 사람이 한 번
   읽어 금지한 성분명을 잡았거나(`key_mismatch`, §대조 의 `시카` 사고가 이 자리다), 커머스
   `topic_group` 이 가리키는 우리 주제가 활성 사전에 없다(`group_map_drift`)) · 2 blocked(연결 거절, 활성
-  명부·스냅샷·주제 사전 없음, **그 run 에 판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는
-  뜻이라 실패가 아니라 막힘이다. 청크가 비었거나(`cosmai retrieval chunk`) 랭킹에 선케어 제품이 없는 것
-  (`cosmai collect commerce`)도 같은 자리다 — 대조할 소스가 아직 없다).
+  명부·스냅샷·주제 사전 없음, **그 스냅샷·명부에 지표 run 이 없음**(`cosmai trend quarter` 를 아직 안
+  돌렸다), **그 run 에 판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
+  막힘이다. 청크가 비었거나(`cosmai retrieval chunk`) 랭킹에 선케어 제품이 없는 것
+  (`cosmai collect commerce`)도 같은 자리다 — 대조할 소스가 아직 없다). **여덟 갈래 전부** 코드의
+  `NoPopulation`·`NoCrosscheck`·`NoDictionary` 셋 중 하나이고, 메시지가 어느 것인지 갈라 말한다.
 - **"소스가 어긋난다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이지 실행의 실패가
   아니고, 이 파일 맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 위 §민감도 의 "흔들린다는
   1 이 아니다", §근거·카드 의 "규칙에 걸린 셀이 없다는 1 이 아니다"와 **같은 자리, 같은 문장**이다. 실측

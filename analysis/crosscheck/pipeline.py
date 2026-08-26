@@ -203,6 +203,10 @@ def _scan(
 
     커머스 모집단만 문서 id 집합을 든다. 유튜브 쪽 문서 수는 SQL 이 세는 값이라 여기서 들 필요가 없고,
     28만 개를 파이썬 집합으로 들면 그 자체가 답보다 큰 비용이다.
+
+    **페이지마다 커밋한다.** 주제 매칭이 트랜잭션 밖에서 돌아야 하기 때문이다 -- 한 흐름으로 훑으면 그
+    트랜잭션이 매칭이 끝날 때까지(전량 11.3초) 열려 있는데 `needs_runtime` 의 `transaction_timeout`(60초)은
+    트랜잭션 **총 수명**의 상한이라 코퍼스가 자라면 도중에 끊는다.
     """
     mentions: dict[str, dict[str, set[str]]] = {source: {} for source in crosscheck.SOURCES}
     talk: dict[str, dict[str, set[str]]] = {
@@ -250,11 +254,17 @@ def load(
     conn: psycopg.Connection[Any],
     *,
     scope: str = SCOPE,
-    commerce_schema: str = COMMERCE_SCHEMA,
+    commerce_schema: str | None = None,
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Read:
-    """읽는다. run 을 찾는 길은 `quarter`·`judge`·`sensitivity` 와 같은 하나다."""
+    """읽는다. run 을 찾는 길은 `quarter`·`judge`·`sensitivity` 와 같은 하나다.
+
+    `commerce_schema` 는 호출 시점에 푼다 -- `None` 은 "배포 기본값(`trend_radar`)", `""` 는 "search_path
+    가 아는 것" 이다. 인자 기본값으로 박아 두면 그 둘을 부르는 자리가 갈리지 않는다 (`--url` 이 `None`
+    이면 `runtime_url()` 인 것과 같은 규약).
+    """
+    commerce_schema = COMMERCE_SCHEMA if commerce_schema is None else commerce_schema
     dictionary = topic_registry.use_active(conn)
     topic_keys = tuple(entry["topic"] for entry in dictionary.entries if entry["trend_use"])
     where = {"board": SUN_BOARD, "category": list(SUN_CATEGORY)}
@@ -351,7 +361,7 @@ def build(
     conn: psycopg.Connection[Any],
     *,
     scope: str = SCOPE,
-    commerce_schema: str = COMMERCE_SCHEMA,
+    commerce_schema: str | None = None,
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Built:
@@ -417,20 +427,33 @@ def build(
 
 
 HEAD = ("댓글", "자막", "제목", "리뷰")
-# 성분명 하나가 700자인 성분표가 있다(쉼표 없이 공백으로만 나열한 것). 감사 줄이 그대로 서면 읽을 수
-# 없으므로 표시에서만 자른다 -- 세는 값은 원문 그대로다.
+# 성분명 하나가 384자인 성분표가 있다(쉼표 없이 공백으로만 나열한 것, 2026-08-27 실측). 감사 줄이 그대로
+# 서면 읽을 수 없으므로 표시에서만 자른다 -- 세는 값은 원문 그대로다. 폭은 글자 수가 아니라 **화면 칸**
+# 으로 센다: 한글이 두 칸이라 `len()` 으로 자르면 34자가 화면 60칸이 되어 그 줄만 표 밖으로 나간다.
 NAME_WIDTH = 34
 
 
 def _pad(text: str, width: int, *, right: bool = False) -> str:
     """한글은 터미널에서 두 칸을 먹는다. 파이썬의 자릿수 맞춤은 그것을 모르므로 여기서 센다."""
-    shown = sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
-    space = " " * max(0, width - shown)
+    space = " " * max(0, width - _width(text))
     return (space + text) if right else (text + space)
 
 
+def _width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
+
+
 def _short(name: str) -> str:
-    return name if len(name) <= NAME_WIDTH else name[: NAME_WIDTH - 1] + "…"
+    if _width(name) <= NAME_WIDTH:
+        return name
+    kept: list[str] = []
+    room = NAME_WIDTH - 1
+    for char in name:
+        room -= _width(char)
+        if room < 0:
+            break
+        kept.append(char)
+    return "".join(kept) + "…"
 
 
 def render(built: Built) -> list[str]:
@@ -480,7 +503,7 @@ def run(
     conn: psycopg.Connection[Any],
     *,
     scope: str = SCOPE,
-    commerce_schema: str = COMMERCE_SCHEMA,
+    commerce_schema: str | None = None,
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Outcome:

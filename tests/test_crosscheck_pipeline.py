@@ -16,7 +16,8 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from analysis import crosscheck
-from analysis.crosscheck.pipeline import NoCrosscheck, build, run
+from analysis.crosscheck import pipeline
+from analysis.crosscheck.pipeline import NoCrosscheck, _quarter_of, build, run
 from analysis.judge.pipeline import run as judge_run
 from analysis.retrieval import topics as topic_registry
 from analysis.trend.pipeline import run as quarter_run
@@ -35,18 +36,28 @@ VIEWS = (
 AT = datetime(2026, 8, 20, tzinfo=UTC)
 # 선케어 보드에 오른 제품 하나, 오르지 않은 제품 하나. 랭킹이 모집단을 정하는 것이 계약이라, 밖의
 # 제품이 새어 들어오면 이 픽스처가 먼저 말한다.
+# 선케어 모집단의 두 다리를 **갈라 둔다** -- `sun` 은 보드로만, `sun2` 는 카테고리 이름으로만 걸린다.
+# 한 제품이 둘 다 만족하면 어느 다리를 지워도 표가 그대로라 술어가 검사되지 않는다.
 RANKED = [
-    ("oliveyoung", "suncare", "c1", "sun", AT, "01 > 선케어 > 선블록", 1, "톤업 선크림", 12000),
+    ("oliveyoung", "suncare", "c1", "sun", AT, "01 > 스킨케어 > 기타", 1, "톤업 선크림", 12000),
+    ("glowpick", "category", "c9", "sun2", AT, "선크림", 1, "선크림 2호", 15000),
     ("oliveyoung", "skincare", "c2", "amp", AT, "01 > 스킨케어 > 앰플", 1, "PDRN 앰플", 30000),
+    ("hwahae", "suncare", "c8", "sun", AT, "01 > 스킨케어 > 기타", 1, "톤업 선크림", 12000),
 ]
 REVIEWS = [
     ("oliveyoung", "r1", AT, "sun", "백탁 없이 촉촉해요 선크림 좋아요"),
     ("oliveyoung", "r2", AT, "sun", "눈시림이 심해요"),
+    ("glowpick", "r9", AT, "sun2", "발림성이 좋아요"),
     ("oliveyoung", "r3", AT, "amp", "끈적임 없이 좋아요"),
 ]
+# `t1` 은 시점이 둘이다 -- 옛 시점의 값이 다르므로 중복 제거를 끄면 제품 수도 긍정률도 달라진다.
+OLD = datetime(2026, 8, 18, tzinfo=UTC)
 RATED = [
+    ("oliveyoung", "sun", "t1", OLD, "자극없이 순해요", 20, "자극도"),
     ("oliveyoung", "sun", "t1", AT, "자극없이 순해요", 70, "자극도"),
     ("oliveyoung", "sun", "t2", AT, "자극이 느껴져요", 30, "자극도"),
+    # 가중치만 싣는 소스(`share_pct` NULL). 운영에서 hwahae 10,842행이 이 자리다.
+    ("hwahae", "sun", "t3", AT, "자극없이 순해요", None, "자극도"),
     ("oliveyoung", "amp", "t1", AT, "자극없이 순해요", 99, "자극도"),
 ]
 
@@ -88,7 +99,8 @@ def _seed_commerce(url: str) -> None:
         cur.execute(
             "INSERT INTO product (source, product_key, captured_at, name, first_seen_at, "
             "last_seen_at, ingredients) VALUES ('oliveyoung','amp',%s,'PDRN 앰플',%s,%s,%s)",
-            (AT, AT, AT, "정제수, 병풀추출물, 나이아신아마이드(20,000 ppm)"),
+            # 트라이에톡시카프릴릴실레인은 `시카` 를 되살렸을 때만 잡히는 금지 물질이다.
+            (AT, AT, AT, "정제수, 트라이에톡시카프릴릴실레인 (1%), 병풀추출물, 나이아신아마이드(20,000 ppm)"),
         )
         cur.execute("GRANT SELECT ON rank_snapshot, review, review_topic, product TO needs_runtime")
         source.commit()
@@ -135,17 +147,37 @@ def test_the_answer_lands_on_the_run_the_judgement_already_has(crossable: str):
         built = build(conn, commerce_schema="")
         assert built.violations == ()
         assert built.status == "ok"
-        assert built.quarter in built.quarters
         assert f"run={built.run_id}" in built.note
 
 
+def test_the_compared_quarter_is_the_last_confirmed_one(crossable: str):
+    """마지막 분기는 판정이 `미확정(진행 중)` 으로 두는 진행 중 분기라 과소 집계된다 (계약 §평가).
+    `built.quarter in built.quarters` 는 항등식이라 아무 말도 하지 않는다 -- 자리를 짚어야 한다."""
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    assert len(built.quarters) > 1, "이 픽스처가 그 갈래를 밟지 못하면 아래 단언이 항등식이 된다"
+    assert built.quarter == built.quarters[-2]
+
+
+def test_the_quarter_rule_falls_back_only_when_there_is_nothing_to_fall_back_from():
+    assert _quarter_of(["2025Q1", "2025Q2", "2025Q3"]) == "2025Q2"
+    assert _quarter_of(["2025Q1"]) == "2025Q1"
+
+
 def test_the_ranking_decides_which_commerce_documents_count(crossable: str):
-    """선케어 보드에 오른 제품의 리뷰만 든다 -- 이름 부분문자열로 고르지 않는다 (계약 §대조)."""
+    """선케어 보드에 오른 제품의 리뷰만 든다 -- 이름 부분문자열로 고르지 않는다 (계약 §대조).
+
+    모집단의 두 다리를 갈라 세었다: `sun` 은 `board='suncare'` 로만, `sun2` 는 `category_name` 으로만
+    걸린다. 3 이 나온다는 것은 두 다리가 **각각** 살아 있다는 뜻이고, 어느 하나를 지우면 2 가 된다.
+    """
     with connect(crossable) as conn:
         built = build(conn, commerce_schema="")
     seen = {row.documents[crosscheck.COMMERCE_REVIEW] for row in built.composition}
-    assert built.documents[crosscheck.COMMERCE_REVIEW] == 2, "amp 리뷰는 선케어 보드 밖이다"
+    assert built.documents[crosscheck.COMMERCE_REVIEW] == 3, "amp 리뷰와 랭킹 밖 리뷰는 들지 않는다"
     assert seen != {0}
+    # 카테고리 다리로만 들어온 문서가 실제로 표에 값을 얹는다.
+    shares = {row.topic_key: row.documents[crosscheck.COMMERCE_REVIEW] for row in built.composition}
+    assert shares["발림성"] == 1, "glowpick 의 `선크림` 카테고리 다리가 없으면 0 이다"
 
 
 def test_a_product_outside_the_suncare_boards_is_not_rated_either(crossable: str):
@@ -155,6 +187,26 @@ def test_a_product_outside_the_suncare_boards_is_not_rated_either(crossable: str
     assert rating.topic_key == "자극_눈시림"
     assert rating.products_rated == 1, "amp 의 설문은 들지 않는다"
     assert rating.positive_rate_mean == pytest.approx(70.0)
+
+
+def test_only_the_latest_snapshot_of_a_choice_is_counted(crossable: str):
+    """시점별 스냅샷이라 (제품, 선택지)별 최신 한 행만 쓴다. 전부 세면 제품 수가 시점 수만큼 부풀려지고,
+    옛 시점의 값이 평균에 섞인다 -- 픽스처의 `t1` 은 08.18 에 20, 08.20 에 70 이다 (계약 §평가)."""
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    (rating,) = built.ratings
+    assert rating.positive_rate_mean == pytest.approx(70.0), "옛 시점 20 이 섞이면 45 가 된다"
+    assert rating.products_rated == 1, "두 시점을 다 세면 제품이 둘로 보인다"
+
+
+def test_a_source_that_publishes_a_weight_instead_of_a_share_is_not_averaged_in(crossable: str):
+    """`share_pct` 가 NULL 인 소스는 비중이 아니라 가중치(`score`)를 싣는다. 섞어 평균 내면 아무것도
+    보여 주지 않고 틀린다 -- 운영에서 그 소스가 10,842행이다 (계약 §평가)."""
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    (rating,) = built.ratings
+    # hwahae 의 `sun` 도 선케어 랭킹에 있지만 share_pct 가 NULL 이라 제품 수에 들지 않는다.
+    assert rating.products_rated == 1
 
 
 def test_every_source_carries_its_own_denominator_end_to_end(crossable: str):
@@ -254,3 +306,48 @@ def test_the_cli_calls_blocked_blocked(crossable: str, capsys: pytest.CaptureFix
     그래야 한다. 그 갈래는 위 테스트가 파이프라인에서 진다."""
     assert main(["trend", "crosscheck", "--url", crossable]) == 2
     assert "collect commerce" in capsys.readouterr().out
+
+
+def test_a_key_that_catches_a_denied_substance_makes_the_answer_partial(
+    crossable: str, monkeypatch: pytest.MonkeyPatch
+):
+    """**종료 코드 1 은 이 자리 하나를 위해 있다.** `시카` 를 되살리고 그 물질이 든 성분표를 놓으면
+    `key_mismatch` 가 서야 한다 -- 서지 않으면 이 PR 이 막으려 존재하는 사고가 조용히 통과한다."""
+    monkeypatch.setitem(crosscheck.INGREDIENT_KEYS, "시카", ("시카",))
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    assert built.status == "partial"
+    assert [line for line in built.violations if line.startswith("key_mismatch 시카")]
+
+
+def test_a_commerce_group_pointing_off_the_dictionary_axis_makes_the_answer_partial(
+    crossable: str, monkeypatch: pytest.MonkeyPatch
+):
+    """`GROUP_MAP` 이 가리키는 주제가 사전에서 사라지면 그 행의 대조는 뜻이 없다."""
+    monkeypatch.setitem(crosscheck.GROUP_MAP, "향", "없는주제")
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    assert built.status == "partial"
+    assert [line for line in built.violations if line.startswith("group_map_drift 향")]
+
+
+def test_the_cli_turns_a_violation_into_exit_one(
+    crossable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """계약 §종료 코드 의 1 이 실제로 CLI 에서 나오는가. 검사용 스키마 하나가 needs 와 trend_radar 를
+    함께 담으므로(tests/conftest.py) 배포 기본값 대신 search_path 를 보게 한다 -- 운영
+    `needs_runtime` 의 search_path 는 `needs` 뿐이라 기본값이 `trend_radar` 여야 한다."""
+    monkeypatch.setattr(pipeline, "COMMERCE_SCHEMA", "")
+    monkeypatch.setitem(crosscheck.GROUP_MAP, "향", "없는주제")
+    assert main(["trend", "crosscheck", "--url", crossable]) == 1
+    printed = capsys.readouterr().out
+    assert "trend crosscheck run=" in printed and "group_map_drift" in printed
+
+
+def test_the_cli_gives_zero_when_the_sources_merely_disagree(
+    crossable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    """**어긋남은 발견이지 실패가 아니다** -- #41 이 §민감도 에서 못 박은 자리와 같다."""
+    monkeypatch.setattr(pipeline, "COMMERCE_SCHEMA", "")
+    assert main(["trend", "crosscheck", "--url", crossable]) == 0
+    assert "구성  같은 사전" in capsys.readouterr().out

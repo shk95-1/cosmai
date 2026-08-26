@@ -16,6 +16,7 @@ import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from pathlib import Path
 
 # ---------------------------------------------------------------- 구성 (ydc source_composition.py)
@@ -67,8 +68,16 @@ GROUP_MAP = {
     "발색력": "톤업_메이크업베이스",
 }
 # 커머스는 선택지 문구로 극성을 나타낸다. 중립이 먼저다 -- `보통이에요` 는 부정 힌트를 안 갖는다.
+#
+# **힌트 목록도 벤더 문자열 위의 부분문자열이라 성분 키와 같은 병이 있다.** 운영 `review_topic` 의
+# `GROUP_MAP` 그룹 어휘 23개에 먹여 보니 다섯이 뒤집혀 나왔다(2026-08-27 실측): `자극도/자극이 있어요` ·
+# `보습력/약간 건조해요` · `지속력/예상보다 짧아요` · `커버력/예상보다 짧아요` 가 긍정으로,
+# `가루날림/날림이 없어요` 는 `없어요` 힌트에 걸려 부정으로. 오늘 선케어 집합에는 바르게 분류되는 세
+# 선택지만 오지만, `GROUP_MAP` 이 존재하는 이유가 나머지 그룹이 오는 날이다. 그래서 힌트는 **마지막
+# 수단**이고 정본은 사람이 확인한 표다 (계약 §평가).
 NEGATIVE_HINTS = ("느껴져요", "아쉬", "부족", "무거", "끈적", "밀려", "answer_no", "없어요")
 NEUTRAL_HINTS = ("보통",)
+POLARITY_CSV = Path(__file__).resolve().parent / "audit" / "polarity_v1.csv"
 
 # 우리 판정에 document_count >= 5 를 요구하면서 이 대조에만 예외를 두면 이중 기준이다 (계약 §평가).
 MIN_PRODUCTS = 5
@@ -280,9 +289,22 @@ def share_reading(shares: Mapping[str, float]) -> str:
     return ""
 
 
-def polarity(topic_name: str) -> str:
-    """중립이 먼저다 -- `보통이에요` 는 부정 힌트를 하나도 갖지 않지만 긍정도 아니다."""
+@lru_cache(maxsize=1)
+def confirmed_polarity() -> dict[tuple[str, str], str]:
+    """(topic_group, topic_name) -> 사람이 확인한 극성. 힌트보다 **먼저** 답한다."""
+    with POLARITY_CSV.open(encoding="utf-8-sig", newline="") as handle:
+        return {(row["topic_group"], row["topic_name"]): row["polarity"] for row in csv.DictReader(handle)}
+
+
+def polarity(topic_name: str, *, topic_group: str | None = None) -> str:
+    """확인된 표가 먼저, 없으면 힌트. 힌트 안에서는 중립이 먼저다 -- `보통이에요` 는 부정 힌트를 하나도
+    갖지 않지만 긍정도 아니다. 그룹을 안 주면 힌트만 도는데, 그것이 ydc `commerce_crosscheck.polarity`
+    와 같은 답이라 대조가 선다 (`tool/compare-ydc-crosscheck`)."""
     name = (topic_name or "").strip()
+    if topic_group is not None:
+        known = confirmed_polarity().get((topic_group, name))
+        if known is not None:
+            return known
     if any(hint in name for hint in NEUTRAL_HINTS):
         return "neutral"
     if any(hint in name for hint in NEGATIVE_HINTS):
@@ -290,12 +312,12 @@ def polarity(topic_name: str) -> str:
     return "positive"
 
 
-def positive_rate(choices: Sequence[tuple[str, float]]) -> float | None:
+def positive_rate(choices: Sequence[tuple[str, float]], *, topic_group: str | None = None) -> float | None:
     """한 제품·한 topic_group 안에서 긍정 선택지가 차지하는 비중."""
     total = sum(share for _name, share in choices)
     if not total:
         return None
-    positive = sum(share for name, share in choices if polarity(name) == "positive")
+    positive = sum(share for name, share in choices if polarity(name, topic_group=topic_group) == "positive")
     return 100 * positive / total
 
 
@@ -323,7 +345,7 @@ def ratings(
         # 대응이 없는 그룹은 넣지 않는다. 전량에서 `피부타입` 이 그 자리다.
         if topic is None:
             continue
-        rate = positive_rate(choices)
+        rate = positive_rate(choices, topic_group=group)
         if rate is None:
             continue
         per_topic.setdefault(topic, []).append(rate)
@@ -454,6 +476,7 @@ __all__ = [
     "LEAD_PP",
     "MIN_PRODUCTS",
     "PAPER_HOLD",
+    "POLARITY_CSV",
     "POSITIVE_RATE_HIGH",
     "REJECTED_TERMS",
     "SOURCES",
@@ -472,6 +495,7 @@ __all__ = [
     "SourceShare",
     "audit",
     "composition",
+    "confirmed_polarity",
     "denial_reason",
     "denied_in",
     "ingredient_reading",

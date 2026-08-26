@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""성분 키가 **지금 표에서** 무엇을 잡는지 다시 재고 확인된 목록과 맞댄다 (포크 #7).
+"""부분문자열 목록이 **지금 표에서** 무엇을 잡는지 다시 재고 확인된 목록과 맞댄다 (포크 #7).
+
+성분 키와 극성 힌트 둘 다 벤더 문자열 위의 부분문자열이라 같은 병을 앓는다 -- 그래서 한 도구가
+둘을 함께 잰다.
 
 계약 §성분 이 지는 문장이 이것이다: *키가 무엇을 잡는지는 사람이 한 번 읽어 확인했고, 코퍼스가 자라
 새 물질이 어떤 키에 들어오면 그 사실이 드러나야 한다.* **CI 는 그 일을 할 수 없다** -- 운영 표에 닿지
@@ -55,6 +58,31 @@ def measure(url: str, schema: str) -> dict[str, dict[str, int]]:
     return {key: {name: len(products) for name, products in names.items()} for key, names in found.items()}
 
 
+VOCABULARY = """
+SELECT topic_group, topic_name, count(*) FROM {topic}
+ WHERE topic_group = ANY(%(groups)s) AND share_pct IS NOT NULL
+ GROUP BY 1, 2 ORDER BY 1, 2
+"""
+
+
+def polarity_drift(url: str, schema: str) -> list[tuple[str, str, int, str, str]]:
+    """`GROUP_MAP` 그룹의 선택지 어휘를 전부 읽어 **확인된 표에 없는 것**을 낸다.
+
+    없는 것은 힌트가 답하는데, 힌트가 뒤집는 문구가 실측으로 다섯이다 (`자극이 있어요` · `약간
+    건조해요` · `예상보다 짧아요` 둘 · `날림이 없어요`). 그래서 표에 없는 문구는 전부 사람이 읽어야 한다.
+    """
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(_commerce(schema, VOCABULARY), {"groups": list(crosscheck.GROUP_MAP)})
+        rows = cur.fetchall()
+        conn.commit()
+    known = crosscheck.confirmed_polarity()
+    return [
+        (group, name, count, crosscheck.polarity(name), known.get((group, name), ""))
+        for group, name, count in rows
+        if (group, name) not in known
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -83,9 +111,15 @@ def main() -> int:
             print(f"  [새것] {name} ({names[name]}제품) -- 읽고 판단해서 목록에 더해라")
         for name in gone:
             print(f"   (사라짐) {name}")
+    drift = polarity_drift(args.url or runtime_url(), args.schema)
+    report["_polarity"] = {"unconfirmed": [f"{group}/{name}" for group, name, *_rest in drift]}
+    bad += len(drift)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if bad == 0 else 1
+    print(f"\n극성  GROUP_MAP 그룹의 선택지 어휘 -- 확인된 표에 없는 것 {len(drift)}건")
+    for group, name, count, guess, _known in drift:
+        print(f"  [새것] {group}/{name} ({count}행) -- 힌트는 {guess} 라고 답한다. 읽고 목록에 더해라")
     if bad:
         print(f"\n[실패] 사람이 읽어야 할 것 {bad}건. 읽고 나면 {crosscheck.KNOWN_NAMES_CSV} 를 갱신한다")
         return 1

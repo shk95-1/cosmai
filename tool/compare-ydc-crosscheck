@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib.util
+import inspect
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,14 @@ def _constants(cross: Any, composition: Any, commerce: Any) -> int:
     # (3.0, 8.5) 여야 두 번째 갈래가 홀로 선다 -- video < 2 면 첫 갈래가 먼저 먹는다.
     differ += _same("reading(3.0, 8.5)", composition.reading(3.0, 8.5), crosscheck.READ_CONSUMER_LEAD)
     differ += _same("reading(8.9, 0.2)", composition.reading(8.9, 0.2), crosscheck.READ_CREATOR_LEAD)
+    # ydc 는 `cross_source.topic_table` 안에 리터럴로 들고 있어 함수를 못 부른다. 문턱 둘과 문구 하나를
+    # 그 파일의 소스에서 직접 읽어 맞댄다 -- 안 그러면 "차이 0" 이 이 셋을 안 덮는데 그렇게 안 읽힌다.
+    body = inspect.getsource(cross.topic_table)
+    differ += _same("SPARSE_PP (topic_table 리터럴)", "video < 0.5" in body, crosscheck.SPARSE_PP == 0.5)
+    differ += _same(
+        "TALK_RATIO (topic_table 리터럴)", "comment > video * 3" in body, crosscheck.TALK_RATIO == 3
+    )
+    differ += _same("READ_COMMENT_ONLY 문구", crosscheck.READ_COMMENT_ONLY in body, True)
     return differ
 
 
@@ -93,6 +102,19 @@ def _rules(cross: Any, commerce: Any) -> int:
     for rate, gap in ((70.0, 2.0), (90.0, 2.0), (70.0, 0.5), (90.0, 0.5)):
         differ += _same(
             f"reading({rate}, {gap})", commerce.reading(rate, gap), crosscheck.rating_reading(rate, gap)
+        )
+    # `7c0f69d` 가 담론 매칭을 성분명 매칭에서 갈라 놓았다. 그 갈래가 ydc `count_terms` 와 같은 답인지는
+    # 여기서만 검사된다 -- 상수 비교로는 안 보인다.
+    for text, terms in (
+        ("선크림 콜라 겐 없이", ("콜라겐",)),
+        ("콜라겐 좋아요", ("콜라겐",)),
+        ("백탁 백탁 백탁", ("백탁",)),
+        ("하얗게 뜬다", ("백탁", "하얗게")),
+    ):
+        differ += _same(
+            f"count_terms({text!r})",
+            cross.count_terms([text], terms) == 1,
+            crosscheck.mentions_term(text, terms),
         )
     return differ
 

@@ -157,3 +157,44 @@ def test_every_mapped_topic_exists_on_the_dictionary_axis():
     with DICTIONARY_CSV.open(encoding="utf-8-sig", newline="") as handle:
         axis = {row["aspect"] for row in csv.DictReader(handle) if row["trend_use"] == "true"}
     assert set(crosscheck.GROUP_MAP.values()) <= axis, sorted(set(crosscheck.GROUP_MAP.values()) - axis)
+
+
+def test_the_confirmed_table_answers_before_the_hints():
+    """힌트 목록도 벤더 문자열 위의 부분문자열이라 성분 키와 같은 병이 있다. 운영 어휘 23개에 먹여
+    보니 다섯이 뒤집혔고(2026-08-27), 그래서 정본은 사람이 확인한 표다 (계약 §평가)."""
+    flipped = {
+        ("자극도", "자극이 있어요"),
+        ("보습력", "약간 건조해요"),
+        ("지속력", "예상보다 짧아요"),
+        ("커버력", "예상보다 짧아요"),
+        ("수분감", "매트해요"),
+    }
+    for group, name in flipped:
+        assert crosscheck.polarity(name) == "positive", f"{name}: 힌트가 뒤집는 것이 이 테스트의 전제다"
+        assert crosscheck.polarity(name, topic_group=group) == "negative", f"{group}/{name}"
+    # `없어요` 힌트가 부정으로 끌어당기는 자리도 같은 병이다.
+    assert crosscheck.polarity("날림이 없어요") == "negative"
+
+
+def test_a_group_the_table_does_not_know_still_falls_back_to_the_hints():
+    """확인된 표는 오늘 아는 어휘뿐이다. 모르는 문구에 답을 안 하면 그 제품이 통째로 사라진다 --
+    답은 하되, 그 문구가 왔다는 사실을 `tool/measure-crosscheck-keys` 가 말한다."""
+    assert crosscheck.polarity("처음 보는 문구", topic_group="자극도") == "positive"
+    assert crosscheck.polarity("자극이 느껴져요", topic_group="없는그룹") == "negative"
+
+
+def test_the_confirmed_table_covers_every_mapped_group():
+    known = crosscheck.confirmed_polarity()
+    assert {group for group, _name in known} == set(crosscheck.GROUP_MAP)
+    assert set(known.values()) <= {"positive", "negative", "neutral"}
+    # 그룹마다 세 극성이 다 있어야 긍정률이 0~100 을 실제로 가로지른다.
+    for group in crosscheck.GROUP_MAP:
+        polarities = {value for (grp, _name), value in known.items() if grp == group}
+        assert polarities == {"positive", "negative", "neutral"}, group
+
+
+def test_the_rate_uses_the_group_so_a_flipped_label_cannot_inflate_it():
+    """`보습력` 이 오는 날 힌트만 보면 긍정률이 100% 로 선다 -- 실제로는 40% 다."""
+    choices = [("촉촉해요", 40.0), ("보통이에요", 20.0), ("약간 건조해요", 40.0)]
+    assert crosscheck.positive_rate(choices) == pytest.approx(80.0), "힌트만 보면 이렇게 부푼다"
+    assert crosscheck.positive_rate(choices, topic_group="보습력") == pytest.approx(40.0)
