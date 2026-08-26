@@ -133,6 +133,41 @@ def test_one_topic_rising_alone_moves_both_axes():
     assert rows["백탁"].holdout_rate > rows["백탁"].seen_rate
 
 
+def test_the_share_axis_is_the_rate_axis_divided_by_that_arms_scale():
+    """**두 축의 재현 수를 나란히 놓으면 안 되는 이유가 이 한 줄이다** (계약 §홀드아웃).
+
+    `share == rate / scale` 이라, 두 팔의 리뷰당 언급 수가 다르면 같은 `MATERIAL_PP` 가 구성비 축에서
+    체계적으로 헐겁다. 전량 실측(2026-08-27)의 계수 1.4218 · 1.3405 를 그대로 세우고, `발림성` 이 실제로
+    움직인 만큼(Δ언급률 −2.20%p) 움직이게 하면 **같은 움직임이 한 축에서는 문턱을 넘고 다른 축에서는
+    못 넘는다.** 그 차이는 안정성이 아니라 눈금이다.
+    """
+    seen = [
+        *(_review("발림성", "백탁") for _ in range(100)),
+        *(_review("백탁", "자극_눈시림") for _ in range(600)),
+        *(_review("자극_눈시림") for _ in range(22)),
+        *(_review() for _ in range(278)),
+    ]
+    hold = [
+        *(_review("발림성", "백탁") for _ in range(78)),
+        *(_review("백탁", "자극_눈시림") for _ in range(590)),
+        *(_review("자극_눈시림") for _ in range(4)),
+        *(_review() for _ in range(328)),
+    ]
+    seen_arm, hold_arm = _arm("a", seen), _arm("b", hold)
+    assert seen_arm.scale == pytest.approx(1.422, abs=1e-3)
+    assert hold_arm.scale == pytest.approx(1.340, abs=1e-3)
+    (row,) = [r for r in holdout.topics(seen_arm, hold_arm, AXIS) if r.topic_key == "발림성"]
+    assert row.rate_diff_pp == pytest.approx(-2.20, abs=0.01), "실측 `발림성` 이 움직인 만큼이다"
+    assert abs(row.rate_diff_pp) > holdout.MATERIAL_PP, "언급률 축에서는 사람이 본다"
+    assert abs(row.share_diff_pp) < holdout.MATERIAL_PP, "구성비 축에서는 같은 움직임이 문턱을 못 넘는다"
+    # 그리고 판정은 언급률 축의 것이다 -- 헐거운 축이 판정을 무르게 만들지 않는다.
+    assert holdout.verdict(holdout.topics(seen_arm, hold_arm, AXIS)) != holdout.VERDICT_REPRODUCED
+
+
+def test_an_arm_with_no_review_has_no_scale_instead_of_dividing():
+    assert _arm("a", []).scale == 0.0
+
+
 # ---------------------------------------------------------------- 플랫폼 구성과 표준화
 
 

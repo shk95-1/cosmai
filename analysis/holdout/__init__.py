@@ -63,6 +63,12 @@ class Arm:
     first_captured: datetime | None = None
     last_captured: datetime | None = None
 
+    @property
+    def scale(self) -> float:
+        """리뷰 한 건당 주제 언급 수. **두 축을 잇는 계수다** -- `share == rate / scale` 이라, 두 팔의
+        계수가 다르면 같은 `MATERIAL_PP` 가 구성비 축에서 더 헐겁다 (계약 §홀드아웃)."""
+        return self.mentions / self.reviews if self.reviews else 0.0
+
 
 @dataclass(frozen=True)
 class TopicRow:
@@ -91,10 +97,6 @@ class TopicRow:
     @property
     def reproduced(self) -> bool:
         return abs(self.rate_diff_pp) <= MATERIAL_PP
-
-    @property
-    def share_reproduced(self) -> bool:
-        return abs(self.share_diff_pp) <= MATERIAL_PP
 
 
 @dataclass(frozen=True)
@@ -163,13 +165,13 @@ class Comparison:
 
     @property
     def reproduced(self) -> int:
-        """언급률 축에서 재현된 주제 수. 분모는 `ranked` 다."""
-        return sum(1 for row in self.ranked if row.reproduced)
+        """**판정 축(언급률)에서** 재현된 주제 수. 분모는 `ranked` 다.
 
-    @property
-    def share_reproduced(self) -> int:
-        """구성비 축에서 재현된 주제 수. **같은 분모(`ranked`) 위의 다른 축**이라 위 수와 섞지 않는다."""
-        return sum(1 for row in self.ranked if row.share_reproduced)
+        구성비 축의 같은 셈은 두지 않는다 -- 두 수를 나란히 놓으면 둘째가 첫째의 독립 근거로 읽히는데,
+        `share == rate / scale` 이라 두 팔의 계수가 다르면 그 차이는 안정성이 아니라 **눈금**이다
+        (계약 §홀드아웃, 2026-08-27 실측 세 줄). 축의 차이는 행마다 `share_diff_pp` 가 싣는다.
+        """
+        return sum(1 for row in self.ranked if row.reproduced)
 
 
 def rate(documents: int, reviews: int) -> float:

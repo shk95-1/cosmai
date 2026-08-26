@@ -27,7 +27,7 @@ from psycopg import IsolationLevel
 
 from analysis import holdout
 from analysis.crosscheck import COMMERCE_REVIEW
-from analysis.crosscheck.pipeline import COMMERCE_SCHEMA, SUN_JOIN, commerce_sql, sun_params
+from analysis.crosscheck.pipeline import COMMERCE_SCHEMA, SUN_JOIN, SUN_PRODUCTS, commerce_sql, sun_params
 from analysis.holdout import Comparison
 from analysis.retrieval import corpus
 from analysis.retrieval import topics as topic_registry
@@ -45,10 +45,6 @@ POPULATION = (
     + " WHERE coalesce(r.body, '') <> ''"
 )
 EMPTY = "SELECT count(*) FROM {review} r" + SUN_JOIN + " WHERE coalesce(r.body, '') = ''"
-SUN_PRODUCTS = (
-    "SELECT count(*) FROM (SELECT DISTINCT source, product_key FROM {rank} "
-    "WHERE board = %(board)s OR category_name ILIKE ANY(%(category)s)) sun"
-)
 
 
 class NoHoldout(LookupError):
@@ -88,7 +84,10 @@ class Built:
         return (
             f"trend holdout seen={made.seen.reviews:,} holdout={made.holdout.reviews:,} "
             f"empty={self.dropped_empty:,} topics={len(made.topics)} ranked={ranked} "
-            f"reproduced={made.reproduced}/{ranked} share_reproduced={made.share_reproduced}/{ranked} "
+            f"reproduced={made.reproduced}/{ranked} "
+            # 구성비 축의 재현 수는 싣지 않는다 -- 인용될 때 판정 축의 독립 근거로 읽히는데, 그 차이는
+            # 안정성이 아니라 눈금이다. 대신 그 눈금 자체(두 팔의 계수)를 싣는다 (계약 §홀드아웃).
+            f"scale={made.seen.scale:.2f}→{made.holdout.scale:.2f} "
             f"verdict={made.verdict} window={made.window} "
             f"basket_shared={made.basket.shared if made.basket else 0}{tail}"
         )
@@ -244,10 +243,16 @@ def render(built: Built) -> list[str]:
         f"본문 빈 리뷰 {built.dropped_empty:,}건은 두 팔 모두에서 뺐다",
         f"지표  언급률 분모 = 그 팔의 리뷰 수 · 구성비 분모 = 그 팔의 주제 언급 합 "
         f"({seen.mentions:,} · {hold.mentions:,}) · 판정 {made.verdict}",
+        # 계수가 1보다 크면 구성비 축의 문턱이 헐거워지고 작으면 빡빡해진다 -- 어느 쪽인지 단언하지
+        # 않고 계수를 찍는 것은 그것이 모집단마다 다르기 때문이다 (계약 §홀드아웃).
+        f"      **판정과 재현 표시는 언급률 축에서만 한다** — 구성비는 언급률을 그 팔의 리뷰당 언급 수"
+        f"(기존 {seen.scale:.4f} · 홀드 {hold.scale:.4f})로 나눈 값이라,",
+        "      같은 %p 가 두 축에서 같은 것을 뜻하지 않는다. 두 축의 Δ 를 빼거나 재현 수를 비교하지 않는다",
         "  "
         + _pad("", 18)
         + "".join(
-            _pad(name, 9, right=True) for name in ("기존률", "홀드률", "Δ%p", "기존비", "홀드비", "순위")
+            _pad(name, 9, right=True)
+            for name in ("기존률", "홀드률", "Δ률%p", "기존비", "홀드비", "Δ비%p", "순위")
         ),
     ]
     for row in made.topics:
@@ -256,7 +261,7 @@ def render(built: Built) -> list[str]:
         lines.append(
             f"  {_pad(row.topic_key, 18)}{row.seen_rate:>8.2f}%{row.holdout_rate:>8.2f}%"
             f"{row.rate_diff_pp:>+9.2f}{row.seen_share:>8.2f}%{row.holdout_share:>8.2f}%"
-            f"{_pad(place, 9, right=True)}  {mark}"
+            f"{row.share_diff_pp:>+9.2f}{_pad(place, 9, right=True)}  {mark}"
         )
     lines.append("구성  플랫폼이 바뀌면 수준이 통째로 움직인다. 갈라 세고 기존 구성비로 재가중한다")
     for row in made.platforms:
@@ -304,7 +309,6 @@ __all__ = [
     "CHUNKED",
     "EMPTY",
     "POPULATION",
-    "SUN_PRODUCTS",
     "Built",
     "NoHoldout",
     "Outcome",
