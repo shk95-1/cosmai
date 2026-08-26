@@ -111,10 +111,23 @@ docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP
 # analysis_health, #138) makes the per-file DROP fail on the *second* deploy -- "cannot drop view
 # analysis_health because other objects depend on it". Ordering the files around that would encode
 # the dependency graph in filenames, silently, and the next such view would break the deploy again.
-# Dropping every view in the schema up front makes the files order-independent: the loop below
-# recreates all of them, so a partial state cannot outlive this step.
-{ printf "SET ROLE needs_owner;\nDO \$\$DECLARE v text; BEGIN FOR v IN SELECT viewname FROM pg_views WHERE schemaname = 'needs' LOOP EXECUTE format('DROP VIEW IF EXISTS needs.%%I CASCADE', v); END LOOP; END\$\$;\n"; } \
-    | migrator_psql || { echo "needs: could not clear the operational views" >&2; exit 1; }
+# Dropping them up front makes the file order irrelevant: the loop below recreates all of them, so
+# a partial state cannot outlive this step.
+#
+# The list comes from the *files*, never from pg_views (#150). The needs schema also holds views this
+# checkout does not own -- the fork's metrics_topic_quarter_violation and topic_quarter_judgement_
+# violation (fork DDL 022/024) -- and a schema-wide sweep deletes them for good, because the loop
+# below only recreates what is in db/views/. Owning the drop means owning the recreate.
+#
+# CASCADE stays: our own three depend on each other. A *foreign* view that depends on one of ours
+# would still be dropped silently by it -- there is no ledger that would let this script know, which
+# is what #107 is open about.
+{ printf 'SET ROLE needs_owner;\n'
+  for file in db/views/*.sql; do
+      [ -e "$file" ] || continue
+      printf 'DROP VIEW IF EXISTS needs.%s CASCADE;\n' "$(basename "$file" .sql)"
+  done
+} | migrator_psql || { echo "needs: could not clear the operational views" >&2; exit 1; }
 for file in db/views/*.sql; do
     [ -e "$file" ] || continue
     { printf 'BEGIN;\nSET ROLE needs_owner;\n'; cat "$file"; printf '\nCOMMIT;\n'; } | migrator_psql \
