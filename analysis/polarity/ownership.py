@@ -27,6 +27,7 @@ from analysis.polarity import VERSION as RULE_VERSION
 
 __all__ = [
     "ALWAYS",
+    "CRON_SINCE",
     "NO_OWNERS",
     "OWNERS",
     "Owner",
@@ -51,11 +52,50 @@ Scopes = tuple[tuple[str, str], ...]  # (scope, since) 쌍 — SQL 로 넘어갈
 ALWAYS = "0000-00"  # 어떤 YYYY-MM 보다도 작다 — 전량 패스가 끝난 scope 는 모든 달이 주인 몫이다.
 
 # 2026-08-24 홀드아웃에서 gemma4 가 규칙을 넘었다 (interfaces.md §LLM 실측). 선블록은 전량 패스(run 16,
-# 6h44m)가 끝나 ALWAYS 다. #31 이 정의한 나머지 26개를 꺼낼 때는 등록과 패스가 같은 순간일 필요가
-# 없다 — `since` 를 다음 달로 적어 등록하면 그 앞의 달은 규칙이 계속 갱신하고, 주인의 패스는 나중에
-# 자기 기간만 채운다. 패스 소요가 등록의 앞을 막지 않으므로 등록을 미룰 이유는 이제 없다.
+# 6h44m)가 끝나 ALWAYS 다. 나머지 26개는 그 뒤로 오는 달만 주인의 몫이다 — 등록과 패스가 같은 순간일
+# 필요가 없어졌으므로(#97) 26개를 한꺼번에 꺼내도 그 앞의 달은 05:00 규칙 줄이 계속 갱신한다.
 _GEMMA4_2026_08_24 = "llm-ollama-gemma4:latest-fs2-20260824"
-OWNERS: Mapping[str, Owner] = MappingProxyType({"선블록": Owner(_GEMMA4_2026_08_24, ALWAYS)})
+# 크론 줄(`stack/crontab.d/analyze` 의 `0 8`)이 처음 도는 달. **배포가 이 달을 넘기면 이 값도 같이
+# 옮긴다** — 한 달을 늦게 적으면 그 사이의 달은 규칙이 계속 쓰고, 일찍 적으면 첫 밤이 그만큼의 밀린
+# 달을 통째로 진다.
+CRON_SINCE = "2026-08"
+# #33 의 대상 표 그대로 — 언급 행 수 내림차순 26개(합계 21,123행). 키는 `category_map` 이 산출하는
+# `lexicon_category` 다: 표에 오른 leaf 는 그 매핑값이고 표에 없는 leaf 는 항등이다 (analysis/units.py).
+_CRON_SCOPES = (
+    "에센스",
+    "쿠션",
+    "시트팩",
+    "클렌징폼",
+    "크림",
+    "헤어토닉/앰플",
+    "헤어트리트먼트",
+    "애프터선",
+    # 선스틱은 #33 의 26개 목록이 쓰인 뒤에 생긴 카테고리다 — 운영 need_mention 에 588행(2026-08-26
+    # 조정자 실측). 빠뜨리면 규칙이 계속 갱신해 조용히 남으므로 크론 대상에 넣는다.
+    "선스틱",
+    "립틴트",
+    "뷰티/위생",
+    "샴푸",
+    "염모제",
+    "클렌징워터",
+    "스킨/토너",
+    "페이셜미스트",
+    "클렌징밀크",
+    "패드",
+    "프로틴음료(고형)",
+    "올인원",
+    "BB/CC",
+    "블러셔",
+    "립틴트/라커",
+    "아이섀도우",
+    "바디로션/크림",
+    "스킨케어기기",
+    "향수",
+)
+OWNERS: Mapping[str, Owner] = MappingProxyType(
+    {"선블록": Owner(_GEMMA4_2026_08_24, ALWAYS)}
+    | {scope: Owner(_GEMMA4_2026_08_24, CRON_SINCE) for scope in _CRON_SCOPES}
+)
 # 소유가 없던 시절의 동작 그대로 — 이 표를 비우면 규칙 실행이 다시 전량을 쓰고 지운다.
 NO_OWNERS: Mapping[str, Owner] = MappingProxyType({})
 

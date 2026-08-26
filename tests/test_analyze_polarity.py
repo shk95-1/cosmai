@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import time
 import urllib.error
@@ -457,6 +458,12 @@ def _squeezed(base_url: str) -> str:
     )
 
 
+def _probe_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """시작 프로브는 통과한 밤이다 (#32) — 아래 둘이 재는 것은 그 뒤에 벌어지는 왕복이고, GPU 나 모델은
+    프로브를 지나고 나서도 사라질 수 있다."""
+    monkeypatch.setattr(OllamaPolarity, "preflight", lambda self: None)
+
+
 def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
     loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
 ):
@@ -478,6 +485,7 @@ def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
         time.sleep(SLOW_CALL_S)
         return {"message": {"content": OLLAMA_ANSWER}, "prompt_eval_count": 7, "eval_count": 3}
 
+    _probe_passes(monkeypatch)
     monkeypatch.setattr(OllamaPolarity, "_post", slow_post)
     monkeypatch.setattr(predictors, "LEXICON_URL", squeezed)  # 원장 커넥션도 압축한 곳으로 보낸다
     registry.load_implementations()
@@ -503,6 +511,7 @@ def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
     def refuse(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:
         raise urllib.error.URLError(UNREACHABLE)
 
+    _probe_passes(monkeypatch)
     monkeypatch.setattr(OllamaPolarity, "_post", refuse)
     monkeypatch.setattr(predictors, "LEXICON_URL", loaded)
     registry.load_implementations()
@@ -938,3 +947,92 @@ def test_since_still_deletes_the_stale_rows_it_will_rewrite(loaded: str, _schema
     _label(loaded, ref, need_key, sentence, "rule-v0.9", observed_at="2026-08-20", month=SINCE_MONTH)
     _run(loaded, _schema_name, since=SINCE_DAY)
     assert _stale(loaded, ref) == []
+
+
+# --- 26개 등록 + 크론 줄 (#32) — 둘은 같은 PR 로만 움직인다 ------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CRONTAB_ANALYZE = REPO_ROOT / "stack" / "crontab.d" / "analyze"
+CATEGORY_MAP_CSV = REPO_ROOT / "eval" / "lexicon" / "category_map_v1.csv"
+# 운영 행에서 뽑은 평가셋이라 `category` 열이 곧 그 행들의 lexicon_category 다 — 매핑표에 없는
+# (=항등으로 통과하는) 이름을 이 레포 안에서 대조할 수 있는 유일한 자리다.
+CROSSCAT_CSVS = ("crosscat_60.csv", "crosscat_blind40.csv")
+SUNBLOCK = "선블록"
+REGISTERED = 28  # 선블록(전량 패스 끝) + 크론이 도는 27 — 운영 need_mention 의 lexicon_category 전량
+
+
+def _gemma4_line() -> list[str]:
+    """크론이 실제로 칠 argv — 주석을 걷어낸 유일한 `--impl` 줄이다."""
+    found = [
+        line.split()
+        for raw in CRONTAB_ANALYZE.read_text(encoding="utf-8").splitlines()
+        if (line := raw.split("#", 1)[0].strip()) and "--impl" in line
+    ]
+    assert len(found) == 1, f"stack/crontab.d/analyze 의 --impl 줄이 {len(found)}개다"
+    return found[0]
+
+
+def test_the_owner_table_carries_every_category_the_cron_line_walks():
+    """등록 없는 줄은 빈 실행이다 (#32): 크론이 `--scope` 없이 도는 것은 이 표가 준 scope 전부다."""
+    assert len(OWNERS) == REGISTERED, f"등록된 scope {len(OWNERS)}개 — 선블록 + 크론 27 이어야 한다"
+    assert OWNERS[SUNBLOCK].since == ALWAYS, "선블록은 전량 패스가 끝나 모든 달이 주인 몫이다"
+    later = {scope: owner.since for scope, owner in OWNERS.items() if scope != SUNBLOCK}
+    # 크론 대상은 첫 실행이 드는 **한** 달에서 시작한다 — 달이 섞이면 그 앞의 달을 규칙이 계속 쓰는지
+    # 아닌지가 카테고리마다 달라지고, 첫 밤에 무엇이 드는지 아무도 말할 수 없다 (#97 의 절차).
+    assert len(set(later.values())) == 1, f"since 가 갈렸다: {sorted(set(later.values()))}"
+    assert MONTH.match(next(iter(later.values())))
+
+
+def test_every_lexicon_category_this_repo_can_name_has_an_owner():
+    """이름 하나가 표와 갈리면 그 카테고리는 조용히 무주공산으로 남고 크론 줄이 그것을 안 돈다 —
+    표의 키는 `category_map` 이 산출하는 이름, 그리고 운영 행에서 뜬 평가셋의 카테고리와 같은
+    문자열이어야 한다. 그 둘이 이 레포가 그 이름을 아는 전부다(나머지는 운영 DB 에만 있다)."""
+    with CATEGORY_MAP_CSV.open(encoding="utf-8") as handle:
+        named = {row["lexicon_category"] for row in csv.DictReader(handle)}
+    for name in CROSSCAT_CSVS:
+        with (REPO_ROOT / "eval" / "polarity" / name).open(encoding="utf-8") as handle:
+            named |= {row["category"] for row in csv.DictReader(handle)}
+    assert len(named) > len(OWNERS) // 2, "이름을 못 모았으면 이 단언은 진공이다"
+    assert not named - set(OWNERS), f"주인이 없는 카테고리: {sorted(named - set(OWNERS))}"
+
+
+def test_the_cron_line_runs_the_incremental_command_of_the_version_the_table_names():
+    """줄 없는 등록은 구멍, 등록 없는 줄은 빈 실행 (#32). 그 둘이 같은 문자열을 가리키는지는 여기서만
+    확인된다: 크론의 `--impl` 스펙이 만드는 판본이 표가 적은 판본이어야 한다."""
+    argv = _gemma4_line()
+    assert argv[5:8] == ["cosmai", "analyze", "polarity"], argv
+    assert "--missing" in argv, "전량 패스가 아니라 증분이다 (#98) — 매일 밤 도는 T 가 자라면 안 된다"
+    assert "--scope" not in argv, "주인은 자기 scope 전부를 한 줄로 돈다 (#97)"
+    name, _, model = argv[argv.index("--impl") + 1].partition(":")
+    assert name == "ollama" and model
+    assert OllamaPolarity(model).version == GEMMA4
+
+
+class UnreachablePolarity(OwnerPolarity):
+    """배선이 끊긴 밤의 판정자 — 프로브에서 죽고 문장은 한 건도 못 본다."""
+
+    def preflight(self) -> None:
+        raise LookupError("ollama at http://nowhere:11434 did not answer; OLLAMA_URL names that address")
+
+
+def test_a_probe_that_cannot_reach_the_model_fails_the_run_instead_of_labelling_nothing(
+    loaded: str, _schema_name: str
+):
+    """조용한 실패가 이 이슈가 세 번 밟은 병이다: 못 닿은 밤은 '0건 성공'이 아니라 failed run 이어야
+    하고, `cosmai/cli.py` 가 그 상태를 종료 코드 1 로 옮긴다 (entrypoints.md §분석)."""
+    judge = UnreachablePolarity()
+    owners = {SUNBLOCK: Owner(judge.version, ALWAYS)}
+    with connect(loaded) as conn:
+        found = run_stage(
+            conn,
+            "polarity",
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            polarity=judge,
+            owners=owners,
+            missing=True,
+        )
+    assert found.status == "failed" and "OLLAMA_URL" in found.detail
+    assert judge.judged == [], "프로브가 죽었는데 문장이 판정됐다면 프로브가 시작 자리에 없는 것이다"
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, finished_at IS NOT NULL FROM analysis_run")
+        assert cur.fetchall() == [("failed", True)]

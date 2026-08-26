@@ -9,7 +9,7 @@
 - `stack/.env` 가 있어야 한다(경로만, secret 값 없음). 없으면 compose 가 `COSMAI_SECRET_FILE_HOST` 미설정으로 죽는다.
 - 브라우저 프로필 `var/browser-profiles/{oliveyoung,glowpick}` 을 `collector-commerce` 가 bind mount 로 읽는다(`user: "1000:1000"`, `HOME=/tmp`). 사람이 `cosmai login` 으로 만든다.
 - DB `shared-postgres` 127.0.0.1:5434, database `app`(trend_radar · tubedepth · needs) · `cosmai`(cosmai-old). 슈퍼유저 `platform`. 수집기 롤 비밀번호는 스키마마다 다르다(`TREND_RADAR_DB_RUNTIME` · `TUBEDEPTH_DB_RUNTIME` · `COSMA_DB_RUNTIME`) — 공유하지 마라.
-- 분석: 매일 05:00 UTC `cosmai analyze all`(규칙). gemma4 가 선블록의 주인(`analysis/polarity/ownership.py`) — 규칙 실행은 그 scope 를 지우지도 덮지도 않는다. gemma4 크론은 없다(#32).
+- 분석: 매일 05:00 UTC `cosmai analyze all`(규칙) + 08:00 UTC gemma4 증분 패스(`analyze polarity --impl ollama:gemma4:latest --missing`, #32). `OWNERS` 는 27개 scope — 선블록(since=ALWAYS)과 #33 의 26개(since=2026-08)이고, 규칙 실행은 주인의 (scope, 달)을 지우지도 덮지도 않는다(`analysis/polarity/ownership.py`). GPU 창 08:00–16:00 UTC 는 포크의 `retrieval embed` 가 피한다.
 - secret 키 이름: `contracts/secrets.md`. 값은 어디에도 쓰지 않는다.
 - DDL 번호: upstream 006~019, 포크 020~(`contracts/versioning.md`).
 
