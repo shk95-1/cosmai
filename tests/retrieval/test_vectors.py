@@ -5,11 +5,16 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from analysis.retrieval import vectors
+
+STAMP_TOOL = Path(__file__).resolve().parents[2] / "tool" / "show-vector-stamp"
 
 
 def _unit(index: int) -> list[float]:
@@ -159,3 +164,70 @@ def test_chunked_at_max_is_not_a_required_key(store):
     검색이 통째로 StoreMissing 이 된다. 커버리지 가드가 없으면 없다고 말할 자리다(#12)."""
     assert "chunked_at_max" not in vectors.REQUIRED_MANIFEST
     assert vectors.load(store).manifest.get("chunked_at_max") is None
+
+
+def test_the_stamp_says_what_the_store_was_baked_from(store):
+    """커버리지 경고와 축이 다르다 -- 그쪽은 어긋날 때만 할 말이 있고, 판본은 언제나 있다(#49)."""
+    stamped = vectors.load(store).stamp
+    assert f"model={vectors.MODEL}" in stamped
+    assert "revision=revsha" in stamped
+    assert "vectors=3" in stamped
+
+
+def test_the_stamp_tells_an_absent_key_from_a_null_value(store):
+    """키가 없는 것(그 키 이전에 구운 저장소)과 None 인 것(빈 코퍼스를 태웠다)은 다른 사실이다 --
+    한 낱말로 뭉치면 운영 저장소가 빈 코퍼스로 읽힌다."""
+    assert "chunked_at_max=키없음" in vectors.manifest_stamp(MANIFEST, 3)
+    assert "chunked_at_max=null" in vectors.manifest_stamp({**MANIFEST, "chunked_at_max": None}, 3)
+    stamped = vectors.manifest_stamp({**MANIFEST, "chunked_at_max": "2026-08-19T09:00:00+09:00"}, 3)
+    assert "chunked_at_max=2026-08-19T09:00:00+09:00" in stamped
+
+
+def test_a_store_without_a_model_has_no_version_to_stamp():
+    """`model=` 만 적힌 판본은 판본이 아니다 -- 그런 행을 내느니 멈춘다(`load` 도 같은 자리에서 거절한다)."""
+    with pytest.raises(ValueError):
+        vectors.manifest_stamp({**MANIFEST, "model": "  "}, 3)
+
+
+def test_a_count_nobody_measured_is_not_written_as_zero():
+    """개수를 모르는 매니페스트에 0 을 적으면 "빈 저장소" 로 읽힌다 -- 모르는 것은 모른다고 적는다."""
+    assert "count" not in MANIFEST
+    assert "vectors=미상" in vectors.manifest_stamp(MANIFEST)
+
+
+def _stamp_tool(*args: str) -> subprocess.CompletedProcess[str]:
+    # 없는 파일을 부른 파이썬도 2 로 나간다 -- 도구가 있는지 먼저 보지 않으면 막힘과 구분되지 않는다.
+    assert STAMP_TOOL.exists(), STAMP_TOOL
+    return subprocess.run(
+        [sys.executable, str(STAMP_TOOL), *args], capture_output=True, text=True, check=False
+    )
+
+
+def test_the_tool_prints_the_stamp_without_opening_the_matrix(store):
+    """1.2GB 를 열어야 판본을 알 수 있으면 계약에 적힌 판본을 아무도 다시 확인하지 않는다."""
+    matrix, _, _ = vectors.paths(store)
+    matrix.unlink()
+    done = _stamp_tool(str(store))
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == vectors.manifest_stamp(MANIFEST, 3)
+
+
+def test_the_tool_counts_the_ids_instead_of_quoting_the_manifest(store):
+    """매니페스트의 `count` 를 그대로 옮기면 그 수는 잰 것이 아니라 저장소가 주장하는 것이다."""
+    _, _, manifest = vectors.paths(store)
+    manifest.write_text(json.dumps({**MANIFEST, "count": 300_000}), encoding="utf-8")
+    done = _stamp_tool(str(store))
+    assert done.returncode == 2, done.stdout
+    assert not done.stdout.strip() and "3" in done.stderr
+
+
+def test_the_tool_is_blocked_when_the_store_is_not_readable(tmp_path, store):
+    """읽을 수 없는 저장소는 실패가 아니라 막힘이다 -- `entrypoints.md` §검색 의 blocked 와 같은 자리다."""
+    gone = _stamp_tool(str(tmp_path / "없다"))
+    assert gone.returncode == 2 and gone.stderr.strip() and not gone.stdout.strip()
+    _, _, manifest = vectors.paths(store)
+    manifest.write_text(
+        json.dumps({k: v for k, v in MANIFEST.items() if k != "model"} | {"count": 3}), encoding="utf-8"
+    )
+    keyless = _stamp_tool(str(store))
+    assert keyless.returncode == 2 and "model" in keyless.stderr

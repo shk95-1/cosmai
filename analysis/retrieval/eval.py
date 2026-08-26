@@ -29,7 +29,19 @@ import psycopg
 from analysis.retrieval import bm25, topics
 
 K = 10
-FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit", "note")
+FIELDS = (
+    "mode",
+    "engine",
+    "topic_id",
+    "query",
+    "gold_size",
+    "retrieved",
+    "p_at_k",
+    "mrr",
+    "hit",
+    "note",
+    "store",
+)
 MODES = ("literal", "heldout")
 ENGINES = ("bm25", "vector", "hybrid")
 
@@ -65,6 +77,7 @@ class Row:
     mrr: float
     hit: bool
     note: str = ""  # 이 점수가 어느 코퍼스 위에서 나왔는지. 질의마다 같은 값이라 CSV 어느 줄을 봐도 읽힌다
+    store: str = ""  # 어느 벡터 저장소로 쟀는지. 어긋나지 않아도 실린다 -- note 와 축이 다르다 (#49)
 
 
 def queries(mode: str, dictionary: topics.Topics | None = None) -> list[tuple[str, str]]:

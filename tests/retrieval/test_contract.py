@@ -142,3 +142,27 @@ def test_the_runtime_role_can_write_chunks(needs_runtime_url: str):
         conn.commit()
     finally:
         conn.close()
+
+
+def test_the_scorecard_column_the_contract_names_is_a_column():
+    """계약이 `store` 열을 말하는데 FIELDS 에 없으면 CSV 는 판본을 안 싣는다 -- 종료 코드 항목이
+    하위명령마다 있는지 보는 위 테스트와 같은 자리다(#49)."""
+    from analysis.retrieval import eval as retrieval_eval
+
+    section = "\n".join(_search_section())
+    assert "CSV `store` 열" in section
+    # 판본과 경고는 축이 다른 두 열이다 -- 하나로 합치면 정상일 때 판본이 사라진다.
+    assert {"store", "note"} <= set(retrieval_eval.FIELDS)
+
+
+def test_the_baseline_names_the_store_the_vector_lines_stand_on():
+    """판본을 안 적으면 다음 재측정이 어느 저장소와의 델타인지 말할 수 없다 -- ydc 가 "1차 → 2차" 로
+    라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 자리다(#49)."""
+    text = INTERFACES.read_text(encoding="utf-8")
+    header = next(line for line in text.splitlines() if line.startswith("## 검색 실측"))
+    chunks = re.search(r"청크 ([\d,]+)", header)
+    stamped = re.search(r"vectors=(\d+)", text)
+    assert chunks and stamped, "표 머리의 청크 수와 저장소 판본 줄 중 하나가 없다"
+    # 벡터가 코퍼스를 다 덮지 않은 저장소로 잰 표는 그 사실이 표 안에 있어야 한다.
+    assert int(stamped.group(1)) == int(chunks.group(1).replace(",", ""))
+    assert "bm25 두 줄은 그 판본 위의 값이 아니다" in text

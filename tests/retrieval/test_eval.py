@@ -282,3 +282,61 @@ def test_the_scorecard_carries_the_coverage_warning(loaded, monkeypatch, tmp_pat
     assert scored[0].note in retrieval_eval.summary(scored)
     # bm25 에는 대조할 저장소가 없다 -- 없는 경고를 지어내지 않는다.
     assert all(not row.note for row in retrieval_eval.run(loaded, "literal", cache_dir=None))
+
+
+def _covering_store(conn, out):
+    """지금 청크를 그대로 덮는 저장소. 덮으면 `coverage_note` 가 None 이라 경고 자리가 빈다 --
+    판본이 경고에 얹혀 있으면 바로 그때 아무 데도 안 남는다."""
+    import numpy as np
+
+    from analysis.retrieval import vectors
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT chunk_id, source, chunked_at FROM retrieval_chunk ORDER BY chunk_id")
+        rows = cur.fetchall()
+    conn.commit()
+    matrix = np.zeros((len(rows), vectors.DIM), dtype="float32")
+    matrix[:, 0] = 1.0
+    vectors.save(
+        out,
+        matrix,
+        [(chunk_id, source) for chunk_id, source, _ in rows],
+        {
+            "model": "intfloat/multilingual-e5-base",
+            "revision": "revsha",
+            "l2_normalized": True,
+            "query_prefix": "query: ",
+            "dim": vectors.DIM,
+            "sources": ["youtube_comment"],
+            "chunked_at_max": max(chunked_at for _, _, chunked_at in rows).isoformat(),
+        },
+    )
+    return out
+
+
+def test_every_vector_row_carries_the_store_version_even_when_nothing_is_off(loaded, monkeypatch, tmp_path):
+    """어긋날 때만 남으면 **정상일 때** 판본이 안 남는다 -- ydc 에서 "1차 → 2차" 로 라벨한 델타가
+    실은 "식약처 벡터 없음 → 2차" 였고 2차 산출물을 덮어썼다(2026-08-26, #49)."""
+    from analysis.retrieval import embed, vectors
+
+    out = _covering_store(loaded, tmp_path / "e5base")
+
+    class FakeEncoder:
+        def encode(self, texts, **_kw):
+            return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_kw: FakeEncoder())
+    scored = retrieval_eval.run(loaded, "literal", engine="vector", store=out, cache_dir=None)
+    assert scored, "질의가 하나도 채점되지 않았다"
+    # 이 저장소는 청크를 다 덮는다. 경고가 있으면 이 테스트는 "정상일 때"를 재고 있지 않다.
+    assert all(not row.note for row in scored), scored[0].note
+    assert "store" in retrieval_eval.FIELDS  # CSV 로 떨어져 나가도 같이 간다
+    stamped = vectors.load(out).stamp
+    assert all(row.store == stamped for row in scored)
+    assert "model=intfloat/multilingual-e5-base" in stamped and "vectors=4" in stamped
+    assert stamped in retrieval_eval.summary(scored)
+    # 저장소를 여는 엔진이 둘이다 -- vector 만 실으면 hybrid 행이 판본 없이 남는다.
+    fused = retrieval_eval.run(loaded, "literal", engine="hybrid", store=out, cache_dir=None)
+    assert fused and all(row.store == stamped for row in fused)
+    # bm25 는 저장소를 열지 않는다 -- 없는 판본을 지어내지 않는다.
+    assert all(not row.store for row in retrieval_eval.run(loaded, "literal", cache_dir=None))

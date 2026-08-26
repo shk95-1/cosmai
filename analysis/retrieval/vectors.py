@@ -60,9 +60,19 @@ class VectorStore:
         return str(self.manifest["model"])
 
     @property
+    def stamp(self) -> str:
+        """이 저장소가 어느 판본인지 한 줄. 개수는 매니페스트가 아니라 실제 id 수다."""
+        return manifest_stamp(self.manifest, len(self.chunk_ids))
+
+    @property
     def query_prefix(self) -> str:
         # 문서에 붙인 것과 짝이 맞아야 한다. load() 가 부재를 막으므로 여기서 기본값을 대지 않는다.
         return str(self.manifest["query_prefix"])
+
+
+def manifest_stamp(manifest: dict, count: int | None = None) -> str:
+    """무엇으로 구운 벡터인가 (포크 #49). 뼈대 -- 아직 아무 판본도 내지 않는다."""
+    return ""
 
 
 def save(out: Path, matrix, rows: list[tuple[str, str]], manifest: dict) -> None:
