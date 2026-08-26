@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption,
-  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue,
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
 } from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -80,16 +80,64 @@ test('productRows: run 2의 product_ref 비어있지 않은 행이 나온다', (
 });
 
 // #87: 캡션이 각 run의 versions·note 를 보여야 손 재집계가 실제로 반영됐는지 알 수 있다.
-test('runCaption: need·wish run의 versions·note를 보인다 (#87)', () => {
-  const needRun = { run_id: 2, note: 'aggregate:1.1.0:all', versions: { aggregate: '1.1.0' } };
-  const wishRun = { run_id: 3, note: 'aggregate:1.1.0:wish', versions: { aggregate: '1.1.0' } };
-  const caption = runCaption(needRun, wishRun);
-  assert.match(caption, /#2/);
-  assert.match(caption, /#3/);
-  assert.match(caption, /aggregate:1\.1\.0:all/);
-  assert.match(caption, /aggregate:1\.1\.0:wish/);
-  assert.match(caption, /"aggregate":"1\.1\.0"/);
-  assert.equal(runCaption(null, null), '데이터 없음');
+// #122: 그 전부를 헤더에 펴면 네 줄을 먹는다 — 한 줄 요약과 접히는 상세로 나눈다.
+test('runCaptionParts: 요약은 한 줄, versions·note 는 상세로 간다 (#87, #122)', () => {
+  const needRun = { run_id: 2, finished_at: '2026-08-26T05:01:31.074893+00:00', note: 'aggregate:1.1.0:all', versions: { aggregate: '1.1.0', extractor: 'rule-v2.3' } };
+  const wishRun = { run_id: 3, finished_at: '2026-08-26T06:02:00+00:00', note: 'aggregate:1.1.0:wish', versions: { aggregate: '1.1.0' } };
+  const { summary, detail } = runCaptionParts(needRun, wishRun);
+  assert.match(summary, /#2 · 08-26 05:01 · extractor rule-v2\.3/);
+  assert.match(summary, /#3 · 08-26 06:02 · aggregate 1\.1\.0/);
+  assert.equal(summary.includes('\n'), false);
+  assert.doesNotMatch(summary, /aggregate:1\.1\.0:all/); // note 는 요약에 없다
+  assert.match(detail, /aggregate:1\.1\.0:all/);
+  assert.match(detail, /aggregate:1\.1\.0:wish/);
+  assert.match(detail, /"aggregate":"1\.1\.0"/);
+  assert.equal(runCaptionParts(null, null).summary, '데이터 없음');
+});
+
+// 실제로는 한 analyze run 이 두 표를 다 쓴다(run #24) — 같은 것을 두 번 적으면
+// 요약이 그만큼 길어져 애초에 접으려던 이유가 사라진다.
+test('runCaptionParts: need 와 wish 가 같은 run 이면 한 번만 적는다', () => {
+  const run = { run_id: 24, finished_at: '2026-08-26T05:01:31+00:00', note: 'analyze:all', versions: { extractor: 'rule-v2.3' } };
+  const { summary } = runCaptionParts(run, run);
+  assert.equal((summary.match(/#24/g) || []).length, 1);
+  assert.match(summary, /need/);
+  assert.match(summary, /wish/);
+});
+
+// finished_at 을 Date 로 파싱해 지역시간으로 찍으면 캡션이 보는 기계마다 달라진다.
+test('runCaptionParts: 시각은 ISO 문자열 그대로(UTC) 자른다', () => {
+  const run = { run_id: 7, finished_at: '2026-12-31T23:59:59+00:00', versions: {} };
+  assert.match(runCaptionParts(run, null).summary, /12-31 23:59/);
+  assert.match(runCaptionParts({ run_id: 8 }, null).summary, /#8/); // finished_at 없어도 죽지 않는다
+});
+
+// #122: 셀렉트의 첫 항목이 알파벳 순 첫 scope 라 "01 > 마스크팩 > 시트팩" 이 첫 화면이었다.
+test('defaultScope: 롤업 all 이 있으면 all 이다', () => {
+  const rows = [
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: 'all' },
+    { run_id: 2, scope: '다른 run' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'all');
+});
+
+test('defaultScope: all 이 없으면 행이 가장 많은 scope 다', () => {
+  const rows = [
+    { run_id: 1, scope: 'wish:a' },
+    { run_id: 1, scope: 'wish:b' },
+    { run_id: 1, scope: 'wish:b' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'wish:b');
+  assert.equal(defaultScope([], 1), null);
+  assert.equal(defaultScope(rows, 9), null);
+});
+
+// 동률이면 사전순 — 새로고침마다 첫 화면이 바뀌면 무엇을 보고 있는지 알 수 없다.
+test('defaultScope: 동률은 사전순으로 끊는다', () => {
+  const rows = [{ run_id: 1, scope: 'b' }, { run_id: 1, scope: 'a' }];
+  assert.equal(defaultScope(rows, 1), 'a');
 });
 
 // #41: 제품 축 행은 scope 마다 한 벌씩 나온다 — 같은 제품이 자기 카테고리와 롤업('all')에서

@@ -74,15 +74,19 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--text-secondary); }
 .controls select { font-size: 14px; padding: 4px 6px; }
 
 .chart { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
-/* 산점도는 넓어질수록 점만 커질 뿐 더 읽히지 않는다 — 판의 폭을 묶는다. */
-.chart-scatter { max-width: 780px; }
+/* svg.viz-root{width:100%} 는 viewBox 를 판 폭까지 늘리므로, 판이 render.js 가 쓴 폭보다
+   넓으면 그 비율만큼 글자까지 확대된다(#122: 420 짜리 판이 1382px 로 3.29배). max-width 는
+   render.js 의 폭 + 좌우 padding 8 + 테두리 1 이라 판이 딱 1 배로 선다. 산점도가 쓰던 수법이다. */
+.chart { max-width: 978px; }                              /* CHART_W_WIDE 960 */
+.chart-pair .chart, .chart-triple .chart { max-width: 438px; } /* CHART_W_SMALL 420 */
+.chart-scatter { max-width: 658px; }                      /* render.js 의 PLOT_W 640 */
 .chart-pair, .chart-triple { display: grid; gap: 16px; margin: 8px 0 16px; }
 .chart-pair { grid-template-columns: 1fr 1fr; }
 .chart-triple { grid-template-columns: 1fr 1fr 1fr; }
 
 svg.viz-root { width: 100%; height: auto; }
 .viz-label { fill: var(--text-secondary); font-size: 11px; dominant-baseline: middle; }
-.viz-value { fill: var(--text-primary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.viz-value { fill: var(--text-primary); font-size: 11px; font-variant-numeric: tabular-nums; dominant-baseline: middle; }
 .bar-neg { fill: var(--diverging-neg); }
 .bar-pos { fill: var(--diverging-pos); }
 .bar-magnitude-1 { fill: var(--seq-1); }
@@ -90,6 +94,9 @@ svg.viz-root { width: 100%; height: auto; }
 .viz-dot { fill: var(--seq-1); fill-opacity: 0.65; stroke: var(--seq-1); }
 .viz-axis { stroke: var(--border); stroke-width: 1; }
 .viz-quadrant { stroke: var(--gridline); stroke-width: 1; stroke-dasharray: 4 4; }
+/* 막대 판의 세로 그리드. 산점도의 사분면선과 역할이 달라 이름만 새로 두고 색은 같은
+   gridline 토큰을 쓴다 — 팔레트에 새 값을 만들지 않는다. */
+.viz-grid { stroke: var(--gridline); stroke-width: 1; }
 .viz-tick { fill: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .viz-axis-label { fill: var(--text-secondary); font-size: 11px; }
 .viz-point-label { fill: var(--text-primary); font-size: 11px; dominant-baseline: middle; }
@@ -101,8 +108,15 @@ svg.viz-root { width: 100%; height: auto; }
 
 .empty-note { color: var(--text-muted); margin: 0; padding: 12px 4px; }
 
+/* run 캡션: 한 줄 요약만 헤더에 남고 versions·note 전문은 접힌다(#122). */
+#run-caption details { margin-top: 4px; }
+#run-caption summary { cursor: pointer; color: var(--text-muted); }
+#run-caption pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; color: var(--text-muted); }
+
 .table-controls { margin: 12px 0 8px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--gridline); }
 th { color: var(--text-secondary); cursor: pointer; user-select: none; }
 td { font-variant-numeric: tabular-nums; }
+/* 숫자는 우측 정렬이라야 자리수가 세로로 맞아 크기가 눈에 들어온다. */
+th.num, td.num { text-align: right; }
