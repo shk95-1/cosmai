@@ -107,5 +107,26 @@ def check_counts(manifest: Mapping[str, Any], measured: Mapping[str, Mapping[str
         raise ManifestMismatch(
             "manifest counts do not match what arrived: "
             + "; ".join(problems)
+            + " -- the rows stay under this snapshot_id and are never activated; fix the source and"
+            " re-run the same snapshot_id, ON CONFLICT DO NOTHING fills the gaps"
+            " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+        )
+
+
+def check_unique(read: Mapping[str, int], inserted: Mapping[str, int]) -> None:
+    """새 판본에서 **읽은 행수와 들어간 행수가 같은가** = 파일 안에 같은 유일키가 두 번 없는가.
+
+    매니페스트의 `input_counts.duplicate_docs = 0` 이 여기서 선다 -- 모든 INSERT 가
+    `ON CONFLICT DO NOTHING` 이라 중복은 조용히 버려지고, 세지 않으면 잘려 들어온 파일과 구분되지
+    않는다. 이미 행이 있는 판본에 다시 부르면 들어가는 행이 0 이라 뜻이 없으므로 부르는 쪽이 새
+    판본일 때만 부른다.
+    """
+    off = {
+        name: (count, inserted[name]) for name, count in read.items() if inserted.get(name, count) != count
+    }
+    if off:
+        raise ManifestMismatch(
+            "duplicate unique keys in the source: "
+            + "; ".join(f"{n} has {c} rows but {i} arrived" for n, (c, i) in off.items())
             + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
         )

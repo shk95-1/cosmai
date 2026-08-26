@@ -98,10 +98,20 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 document 261,317 · mention 105,358 · channel 43 이고 문서 구성은 `video_long` 7,085 · `video_short`
 6,888 · `video_unknown` 6 · `comment` 247,338 이다.
 
-`input_counts`(입력 영상·댓글 행수 · 중복 문서 0 · 고아 댓글 0 · 중복 댓글 본문 237)는 **보류**다(포크
-#37): 그것은 ydc `to_common_schema.py` 가 변환 **이전**에 센 값이라 반입분 위에서 다시 셀 수 없다.
-그중 확인 가능한 둘은 이미 여기 있다 — 입력 행수의 합은 위 document 행수이고, 고아 언급 0 은
-`corpus_mention` 의 FK 가 진다(023).
+대조가 어긋나면 **행은 남는다.** 문서 26만 행을 다 읽은 뒤에야 구성이 드러나므로 거절이 반입 뒤에
+선다 — 다만 그 행들은 자기 `snapshot_id` 아래에 있고 **켜지지 않으므로** 분석은 그것을 읽지 않는다.
+출구는 지우는 것이 아니라 원본을 고쳐 **같은 `snapshot_id` 로 다시 부르는 것**이다(모든 INSERT 가
+`ON CONFLICT DO NOTHING` 이라 빠진 자리만 메운다). `DROP` 은 매번 승인이라 출구로 쓰지 않는다.
+
+`input_counts`(입력 영상 13,979 · 댓글 247,338 · 중복 문서 0 · 고아 댓글 0 · 중복 댓글 본문 237)는
+대부분 **보류**다(포크 #37): ydc `to_common_schema.py` 가 변환 **이전**에 센 값이라 반입분 위에서 다시
+셀 수 없다. 두 칸만 여기서 선다 — 입력 행수의 합(13,979 + 247,338)이 위 document 행수이고,
+`duplicate_docs = 0` 은 새 판본에서 **읽은 행수와 들어간 행수가 같은지**로 증명한다
+(`db/corpus.load` → `contract.check_unique`; `ON CONFLICT DO NOTHING` 이 중복을 조용히 버리므로 세지
+않으면 잘려 들어온 파일과 구분되지 않는다). 나머지는 그대로 보류이고, 그중
+**`orphan_comments` 는 DB 가 지지 않는다** — 댓글의 부모는 `corpus_document.parent_item_id`(023) 이고
+거기엔 FK 가 없다(부분 인덱스뿐이다). `corpus_mention` 의 FK 가 지는 것은 고아 **언급**이지 고아
+**댓글**이 아니다.
 
 ### text 의 뜻 (`manifest.text_rule`, 그대로)
 > 영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.

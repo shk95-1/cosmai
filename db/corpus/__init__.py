@@ -149,6 +149,9 @@ def check_channels(cur: psycopg.Cursor[Any], source_dir: Path, panel_version: in
     `channel.csv` 를 표로 만들지 않는 이유가 이 함수다. 채널의 역할은 분모를 정하는 값이고
     (`contracts/formats.md` §패널 명부 CSV), 그것이 두 표에 살면 두 분모가 생겨 나중 것이 앞선 것과
     조용히 갈린다. 그래서 명부는 `panel_channel` 하나로 두고, 반입은 어긋남을 **거절**한다.
+
+    돌려주는 것은 명부 크기가 아니라 **읽은 `channel.csv` 의 행수**다 -- 매니페스트의 `table_counts`
+    가 세는 것이 그쪽이고, 명부에는 이 코퍼스에 없는 채널도 있을 수 있다.
     """
     cur.execute(PANEL_SQL, (panel_version,))
     roster = {channel_id: role for channel_id, role in cur.fetchall()}
@@ -163,7 +166,6 @@ def check_channels(cur: psycopg.Cursor[Any], source_dir: Path, panel_version: in
             f"channel.csv disagrees with the active panel roster (version {panel_version}): "
             + "; ".join(problems)
         )
-    # 명부 크기가 아니라 이 파일의 행수를 돌려준다 -- 매니페스트의 table_counts 가 세는 것이 그쪽이다.
     return len(rows)
 
 
@@ -270,11 +272,15 @@ def load(
         if version is None:
             raise CorpusMismatch("no active panel roster; load db/seed --only panel first (fork #31)")
         table_counts = {"channel.csv": check_channels(cur, source_dir, version)}
+        # 이어 붙이는 재실행에서는 들어가는 행이 0 이라 삽입 행수가 중복을 말해 주지 못한다.
+        cur.execute(SNAPSHOT_COUNT_SQL, (snapshot_id,))
+        fresh = not (row := cur.fetchone()) or not row[0]
         insert_snapshot(cur, manifest, snapshot_id, label, note)
     conn.commit()
 
     by_type: Counter[str] = Counter()
-    copy_pages(
+    inserted = {}
+    inserted["document.csv"] = copy_pages(
         conn,
         DOCUMENT_SQL,
         (
@@ -285,7 +291,7 @@ def load(
         label="corpus_document",
         progress=progress,
     )
-    copy_pages(
+    inserted["mention.csv"] = copy_pages(
         conn,
         MENTION_SQL,
         (
@@ -299,6 +305,8 @@ def load(
     # 켜기 **전에** 대조한다: 뒤라면 분석은 이미 그 판본을 읽고 있다. 행은 남지만 스냅샷마다 다른
     # 키를 쓰므로 (023) 옆에 설 뿐 아무것도 덮지 않는다.
     contract.check_counts(manifest, {"table_counts": table_counts, "documents_by_content_type": by_type})
+    if fresh:
+        contract.check_unique({k: v for k, v in table_counts.items() if k in inserted}, inserted)
     with conn.cursor() as cur:
         # 판본을 켜는 것은 "분석이 이제 이것을 읽는다"는 뜻이라, 옛 스냅샷 옆에 한 벌 더 쌓기만 하는
         # 반입(#38)은 끄고 부를 수 있어야 한다. 행은 어느 쪽이든 덮이지 않는다.
