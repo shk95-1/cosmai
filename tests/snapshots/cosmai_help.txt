@@ -129,17 +129,25 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai trend --help
-usage: cosmai trend [-h] {quarter} ...
+usage: cosmai trend [-h] {quarter,judge} ...
 
 positional arguments:
-  {quarter}
-    quarter   Load needs.metrics_topic_quarter from the active corpus snapshot.
+  {quarter,judge}
+    quarter        Load needs.metrics_topic_quarter from the active corpus snapshot.
+    judge          Load needs.topic_quarter_judgement from that run's quarterly rows.
 
 options:
-  -h, --help  show this help message and exit
+  -h, --help       show this help message and exit
 
 $ cosmai trend quarter --help
 usage: cosmai trend quarter [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend judge --help
+usage: cosmai trend judge [-h] [--url URL]
 
 options:
   -h, --help  show this help message and exit

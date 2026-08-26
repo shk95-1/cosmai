@@ -114,6 +114,12 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     # 스냅샷도 명부도 인자가 아니다 -- 활성 판본이 답이고, 그것을 고르는 길이 둘이면 분모도 둘이 된다.
     quarter.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 판정은 지표를 다시 세지 않는다 -- 같은 run 의 저장된 행을 읽어 유형과 두 점수를 붙인다.
+    judged = actions.add_parser(
+        "judge", help="Load needs.topic_quarter_judgement from that run's quarterly rows."
+    )
+    judged.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
 
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
@@ -324,20 +330,24 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
+    from analysis.judge.pipeline import NoJudgement
+    from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
-    from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, run
+    from analysis.trend.pipeline import NoPopulation, TopicAxisDrift
+    from analysis.trend.pipeline import run as quarter_run
 
     try:
         conn = _connect(args.url)
     except (ValueError, LookupError, psycopg.Error) as refused:
         print(refused)
         return 2
+    act = quarter_run if args.action == "quarter" else judge_run
     try:
         with conn:
-            outcome = run(conn)
-    # 명부도 스냅샷도 주제 사전도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운 것이고,
-    # 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    except (NoPopulation, TopicAxisDrift, NoDictionary) as blocked:
+            outcome = act(conn)
+    # 명부도 스냅샷도 주제 사전도 지표 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
+    # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
+    except (NoPopulation, NoJudgement, TopicAxisDrift, NoDictionary) as blocked:
         print(blocked)
         return 2
     print(outcome.note)

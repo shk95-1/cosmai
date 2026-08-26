@@ -214,6 +214,23 @@ cosmai trend quarter [--url <url>]
   돌렸다는 뜻이라 실패가 아니라 막힘이다).
 - `analysis_run.versions.metric` 이 그 행들의 정의 판본을 든다 (`versioning.md`).
 
+## 판정 (포크 #40, ydc `judge.py` 승격)
+```
+cosmai trend judge [--url <url>]
+```
+- `cosmai trend quarter` 가 낸 **그 run 의** `needs.metrics_topic_quarter` 행을 읽어
+  `needs.topic_quarter_judgement` 를 쓴다. run 은 `quarter` 와 **같은 길**로 찾는다(활성 스냅샷·활성
+  명부에서 만든 note) — 인자가 없는 이유도 같다. 지표 행이 없으면 판정할 것이 없다.
+- **지표를 다시 계산하지 않는다.** 판정 기준(`TAU`·가중치·유형 이름)은 팀 합의로 바뀌고, 그때 지표를
+  다시 세지 않아도 되도록 두 단계를 갈라 둔 것이 ydc 의 설계이고 이 명령이 그것을 그대로 받는다.
+- 한 실행이 그 (run, scope, 명부) 의 판정 행을 통째로 다시 쓴다 — 부분 갱신이 아닌 것이 지표 행과의
+  1:1 을 지키는 방법이다.
+- 쓰고 나서 `needs.topic_quarter_judgement_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
+  코드 **1**(partial)이고 stdout 이 그 줄을 싣는다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
+  지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `analysis_run.versions.judgement` 가 그 행들의 정의 판본을 든다 (`versioning.md`).
+
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가

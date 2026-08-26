@@ -348,6 +348,27 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
     sample_ok: bool = False
 
 
+@dataclass(frozen=True)
+class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
+    # 앞 여덟 칸은 metrics_topic_quarter 의 기본키 그대로다. 판정은 그 표의 한 행을 받아 한 행을 내므로
+    # 이 여덟이 곧 FK 이고, 그래서 판정 행은 자기 근거가 되는 지표 행 없이 존재할 수 없다.
+    run_id: int
+    scope: str
+    topic_key: str
+    quarter: str
+    source: str
+    content_type: str
+    panel_version: int
+    panel_role: str
+    trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
+    judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
+    evidence_strength: float  # 0~100 (§판정)
+    single_source: bool  # 이 판정이 소스 하나만 보고 내려졌는가. v1(YouTube 단독)은 언제나 true
+    opportunity_score: float | None = None  # 제품군 내 0~100 정규화. 점수 대상이 아닌 셀은 NULL
+    gap_pp: float | None = None  # 댓글 구성비 - 영상 구성비 (%p). (주제, 분기) 사실이라 두 행이 같은 값
+    hold_reason: str = ""  # `판정 보류` 의 사유 코드. 보류가 아니면 '' (§판정 의 닫힌 어휘)
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str
