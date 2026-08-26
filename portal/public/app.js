@@ -3,12 +3,13 @@
 // 그래서 이 파일에는 테스트가 없다(data-portal/public/app.js 와 같은 분리).
 import {
   buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
-  PAGE_SIZE, nextPageOffset,
+  PAGE_SIZE, nextPageOffset, NEED_QUERIES,
 } from './query.js';
 import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, withProductNames,
+  monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
 } from './screens.js';
 import {
   renderDivergingBars, renderMagnitudeBars, renderTopBars, renderScatter,
@@ -57,9 +58,13 @@ async function apiAll(basePath, { select, order, filters }) {
   return rows;
 }
 
-// need 는 두 벌이다 — 화면 1·4 가 쓰는 카테고리 합 행과 화면 3 이 쓰는 제품 축 행.
-// #41 이 제품 행을 더한 뒤로 한 벌로 받으면 합 행 화면이 제 몫의 13배를 끌어온다.
-const state = { need: [], needProducts: [], wish: [], productNames: new Map(), needRunId: null, wishRunId: null };
+// need 는 세 벌이다 — 화면 1·4 가 쓰는 카테고리 합 행, 화면 3 이 쓰는 제품 축 행, 화면 5 가
+// 쓰는 월 행. #41 이 제품 행을 더한 뒤로 한 벌로 받으면 합 행 화면이 제 몫의 13배를 끌어오고,
+// #129 의 월 행이 얹히면 그것이 다시 두 배가 된다 — 축마다 질의를 나누는 이유다.
+const state = {
+  need: [], needProducts: [], needMonths: [], wish: [], productNames: new Map(),
+  needRunId: null, wishRunId: null,
+};
 
 // ---- 탭 --------------------------------------------------------------
 
@@ -178,6 +183,52 @@ function renderCharacterScreen(scope) {
   });
 }
 
+// ---- 화면 5: 기간(월) ---------------------------------------------------
+
+// 판이 비는 이유는 둘이고 그 둘은 다른 사실이다 — 이 니즈에 월 행이 아예 없는 것과, 월 행은
+// 있는데 그 값이 전부 null 인 것(분모가 없어 못 잰 달, screens.js 의 safeRatio 자리).
+// 한 문구로 묶으면 나중에 판이 비었을 때 어느 쪽인지 화면만 보고는 알 수 없다.
+const MONTH_EMPTY_NO_ROWS = '이 니즈의 월 행이 없음';
+const MONTH_EMPTY_NO_VALUE = {
+  neg: '이 니즈의 월 행에 불만 건수가 비어 있음',
+  unresolved: '월 행은 있으나 미해결비를 잰 달이 없음 (분모가 없다)',
+};
+
+function fillMonthNeedKeys(scope) {
+  const keys = monthNeedKeys(state.needMonths, state.needRunId, scope);
+  $('month-need').replaceChildren(...keys.map((k) => new Option(k, k)));
+}
+
+function renderMonthScreen() {
+  const scope = $('month-scope').value;
+  // "이 scope 에 월 행이 없다"와 "그 달에 0 건"은 다른 사실이다 — 앞은 문구라야 한다.
+  // 빈 판이나 0 막대로 그리면 화면이 집계가 내지 않은 사실을 주장한다.
+  if (!hasMonthRows(state.needMonths, state.needRunId, scope)) {
+    $('month-chart').innerHTML =
+      '<p class="empty-note">이 scope 에 월 행이 없음 — 집계가 이 scope 의 월 축을 아직 내지 않았습니다.</p>';
+    $('month-table').replaceChildren();
+    return;
+  }
+  const metric = $('month-metric').value;
+  const needKey = $('month-need').value;
+  // 상한은 screens.js 가 갖는다 — 여기서 숫자를 다시 적으면 두 벌이 어긋난다.
+  const rows = monthRows(state.needMonths, state.needRunId, scope, needKey);
+  // 값이 null 인 달은 막대에서 뺀다(rowsWithValue) — 0 막대로 눕히면 못 잰 달이 0 이 된다.
+  // 0 인 달은 그대로 남아 폭 0 막대가 된다.
+  //
+  // 두 값이 한 판에 같이 서는 일이 없어 색이 구분할 것이 없다 — 둘 다 기본 순차색이고,
+  // 자리수는 formatCell 을 그대로 쓴다(같은 값을 판과 표에서 다르게 적으면 한 화면이
+  // 두 가지 자리수를 말한다 — render.js 머리말).
+  $('month-chart').innerHTML = renderMagnitudeBars(rowsWithValue(rows, metric), {
+    key: metric, labelKey: 'month', hue: 'blue', fmt: (v) => formatCell(metric, v),
+    width: CHART_W_WIDE,
+    empty: rows.length === 0 ? MONTH_EMPTY_NO_ROWS : MONTH_EMPTY_NO_VALUE[metric],
+  });
+  // 표는 상한 0(전부) — 판에서 밀린 달을 볼 자리가 화면에 하나는 있어야 한다.
+  fillTable($('month-table'), ['month', 'neg', 'pos', 'unresolved', 'yt_neg', 'yt_pos'],
+    monthRows(state.needMonths, state.needRunId, scope, needKey, 0));
+}
+
 // 한 줄 요약은 그대로 보이고 versions·note 전문은 <details> 로 접는다 — 펴 두면
 // 헤더가 네 줄이 되어 첫 판이 화면 밖으로 밀린다(#122).
 function showCaption(needRun, wishRun) {
@@ -216,22 +267,8 @@ function openScope(selectId, scope, render) {
 async function boot() {
   showError('');
   try {
-    // 화면 1·4 가 쓰는 카테고리 합 행. product_ref 가 실제로 빈 문자열이라
-    // 'product_ref=eq.'(allowEmpty)가 그것을 고르는 유일한 필터다.
-    const needSelect = [
-      'run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved',
-      'population_share_pct',
-      'yt_neg', 'yt_pos', 'persist_months', 'persist_months_total',
-      'persist_products', 'persist_products_total', 'unresolved_new', 'low_share',
-      'denom_low', 'denom_site',
-    ];
-    const needFilters = [{ column: 'product_ref', op: 'eq', value: '', allowEmpty: true }];
-    // 화면 3 은 제품 축 행만 — 합 행을 같이 받으면 상위 20 이 카테고리로 채워진다.
-    const productSelect = ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved'];
-    const productFilters = [{ column: 'product_ref', op: 'neq', value: '', allowEmpty: true }];
-    // order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해
-    // offset 페이징 중 행이 빠지거나 겹칠 수 있다(query.js 상단 주석과 같은 이유).
-    const needOrder = 'run_id.desc,scope,need_key,month,product_ref';
+    // metrics_need 의 세 축(카테고리 합·제품 축·월 축) 스펙은 query.js 의 NEED_QUERIES 다 —
+    // 셋의 배타성과 select↔screens.js 의 계약을 테스트가 잡을 수 있는 자리여야 한다(#130).
     const wishSelect = ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'];
     const wishOrder = 'run_id.desc,scope,format,attribute,brand'; // metrics_wish PK 전체
     // analysis_run: "최신"의 근거(#87) — run_id 가 아니라 finished_at·status 로 고른다.
@@ -241,15 +278,17 @@ async function boot() {
     // 페이징 경로를 그대로 탄다.
     const productRefSelect = ['product_ref', 'brand', 'name', 'name_norm'];
 
-    const [runs, need, needProducts, wish, productRefs] = await Promise.all([
+    const [runs, need, needProducts, needMonths, wish, productRefs] = await Promise.all([
       apiAll('/analysis_run', { select: runSelect, order: runOrder }),
-      apiAll('/metrics_need', { select: needSelect, filters: needFilters, order: needOrder }),
-      apiAll('/metrics_need', { select: productSelect, filters: productFilters, order: needOrder }),
+      apiAll('/metrics_need', NEED_QUERIES.category),
+      apiAll('/metrics_need', NEED_QUERIES.product),
+      apiAll('/metrics_need', NEED_QUERIES.month),
       apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
       apiAll('/product_ref', { select: productRefSelect, order: 'product_ref' }),
     ]);
     state.need = need;
     state.needProducts = needProducts;
+    state.needMonths = needMonths;
     state.wish = wish;
     state.productNames = productNameIndex(productRefs);
     const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
@@ -265,9 +304,16 @@ async function boot() {
     $('wish-scope').replaceChildren(...wishScopes.map((s) => new Option(s, s)));
     // 화면 4 는 화면 1 과 같은 표(카테고리 합)를 보므로 scope 목록도 같다.
     $('character-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
+    // 화면 5 의 scope 목록도 화면 1 과 같다 — 월 행이 있는 scope 만 담으면 "이 scope 에는
+    // 월 축이 없다"는 사실을 고를 수조차 없어 그 구별이 화면에서 사라진다.
+    $('month-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
+    $('month-limit').textContent = String(MONTH_LIMIT); // 캡션의 숫자도 정본에서 온다
     $('need-scope').onchange = () => renderNeedScreen($('need-scope').value);
     $('wish-scope').onchange = () => renderWishScreen($('wish-scope').value);
     $('character-scope').onchange = () => renderCharacterScreen($('character-scope').value);
+    $('month-scope').onchange = () => { fillMonthNeedKeys($('month-scope').value); renderMonthScreen(); };
+    $('month-need').onchange = renderMonthScreen;
+    $('month-metric').onchange = renderMonthScreen;
 
     // 셀렉트를 채운 순서(사전순)의 첫 항목이 아니라 defaultScope 가 고른 scope 로 연다 —
     // 그러지 않으면 "01 > 마스크팩 > 시트팩" 이 우연히 첫 화면이 된다(#122).
@@ -275,6 +321,12 @@ async function boot() {
     openScope('wish-scope', defaultScope(wish, wishRunId), renderWishScreen);
     openScope('character-scope', defaultScope(need, needRunId), renderCharacterScreen);
     renderProductScreen();
+    // 화면 5 는 월 행이 있는 scope 로 연다 — 화면 1 의 기본(전체 행이 가장 많은 scope)으로
+    // 열면 월 축이 없는 scope 가 첫 화면이 되어 늘 문구만 보인다.
+    openScope('month-scope', defaultScope(needMonths, needRunId), (scope) => {
+      fillMonthNeedKeys(scope);
+      renderMonthScreen();
+    });
   } catch (e) {
     $('run-caption').textContent = '';
     showError(e.message);

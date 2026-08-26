@@ -28,6 +28,65 @@ export function buildQuery({ select, filters, order, limit, offset } = {}) {
   return params.toString();
 }
 
+// metrics_need 는 축이 셋이다 — 카테고리 합(화면 1·4) · 제품 축(화면 3) · 월 축(화면 5).
+// 셋의 스펙이 app.js 의 지역 상수가 아니라 여기 있는 이유는 둘 다 "스펙 사이의 관계" 라서다.
+//
+// 하나는 배타성이다: 축 하나를 더하면 나머지 둘의 필터가 같이 좁혀져야 한다. 월 행이 얹힌
+// 뒤 month=eq. 가 빠진 질의는 제 몫의 두 배를 받는다(#130, 실측 7,219행 → 대략 14,000).
+// 다른 하나는 select 가 screens.js 의 소비 함수와 맺는 계약이다: PostgREST 는 select 에
+// 적은 컬럼만 JSON 에 담으므로, 거르는 쪽이 보는 컬럼이 select 에 없으면 그 키는 응답에
+// 아예 없고 비교는 언제나 거짓이 된다 — 화면이 통째로 빈다. 스펙이 순수 모듈에 있어야
+// 테스트가 select 와 소비 함수를 한자리에서 맞춰 볼 수 있다(#130 수정 라운드).
+//
+// order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해 offset
+// 페이징 중 행이 빠지거나 겹칠 수 있다(이 파일 머리말과 같은 이유).
+const NEED_ORDER = 'run_id.desc,scope,need_key,month,product_ref';
+
+export const NEED_QUERIES = {
+  // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
+  // 가 그것을 고르는 유일한 필터다(#109, #130).
+  category: {
+    select: [
+      'run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved',
+      'population_share_pct',
+      'yt_neg', 'yt_pos', 'persist_months', 'persist_months_total',
+      'persist_products', 'persist_products_total', 'unresolved_new', 'low_share',
+      'denom_low', 'denom_site',
+    ],
+    filters: [
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+      { column: 'month', op: 'eq', value: '', allowEmpty: true },
+    ],
+    order: NEED_ORDER,
+  },
+  // 화면 3: 제품 축 행만 — 합 행을 같이 받으면 상위 20 이 카테고리로 채워진다.
+  product: {
+    select: ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved'],
+    filters: [
+      { column: 'product_ref', op: 'neq', value: '', allowEmpty: true },
+      { column: 'month', op: 'eq', value: '', allowEmpty: true },
+    ],
+    order: NEED_ORDER,
+  },
+  // 화면 5: 월 행만 — 위의 둘과 정확히 겹치지 않는 반대편이다. 분모·persist_* 는 월 행에서
+  // NULL 이라 받지 않는다(#129 의 결정: 그 달의 분모라는 것이 존재하지 않는다).
+  // product_ref 는 값이 늘 빈 문자열이지만 반드시 받는다 — screens.js 의 monthRowsOf 가
+  // 그것으로 거르는데, select 에 없으면 응답 행에 키가 없어 그 비교가 언제나 거짓이 되고
+  // 화면 5 가 어떤 scope 에서도 "월 행이 없음" 만 낸다(#130 수정 라운드).
+  month: {
+    select: [
+      'run_id', 'scope', 'need_key', 'month', 'product_ref',
+      'neg', 'pos', 'unresolved', 'yt_neg', 'yt_pos',
+    ],
+    filters: [
+      { column: 'month', op: 'neq', value: '', allowEmpty: true },
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+    ],
+    // 이 질의에서 product_ref 는 늘 빈 값이라 앞의 넷이 곧 PK 다.
+    order: 'run_id.desc,scope,need_key,month',
+  },
+};
+
 // 'Content-Range: 0-999/65646' 의 슬래시 뒤가 전체 개수다. '*' 이면 서버가
 // 세지 않은 것(Prefer: count=exact 가 빠졌다는 뜻)이라 개수를 모른다(null).
 export function parseContentRange(header) {

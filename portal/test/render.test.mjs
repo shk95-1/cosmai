@@ -270,3 +270,32 @@ test('renderMagnitudeBars: labelW 로 라벨 자리를 넓히고 titleKey 로 �
   assert.match(svg, /<title>메디힐 · 티트리 임팩트인 밸런싱 마스크 — 1<\/title>/);
   assert.match(svg, /class="viz-label">메디힐 · 티트…</);
 });
+
+// ---- 화면 5: 기간(월) 축 (#130) --------------------------------------------
+
+// 월 축은 새 렌더러를 만들지 않는다 — 크기 하나를 라벨 축에 걸어 그리는 판은 이미
+// renderMagnitudeBars 다. 라벨 축만 need_key 에서 month 로 돌린다.
+test('renderMagnitudeBars: labelKey 를 month 로 돌리면 월별 막대가 된다 (#130)', () => {
+  const rows = [
+    { month: '2026-06', neg: 30 }, { month: '2026-07', neg: 0 }, { month: '2026-08', neg: 63 },
+  ];
+  const svg = renderMagnitudeBars(rows, { key: 'neg', labelKey: 'month', width: CHART_W_WIDE });
+  assert.deepEqual(
+    [...svg.matchAll(/class="viz-label">([^<]*)</g)].map(([, m]) => m),
+    ['2026-06', '2026-07', '2026-08'],
+  );
+  // 0 건인 달은 폭 0 인 막대로 남는다 — 행째 빠지면 "그 달이 아예 없다"로 읽힌다.
+  const bars = rects(svg);
+  assert.equal(bars.length, 3);
+  assert.equal(bars[1].width, '0');
+  assert.equal(bars[2].width, String(CHART_W_WIDE - 96 - 56)); // 최댓값(63)이 판을 채운다
+});
+
+// 월 행이 하나도 없는 니즈는 빈 판이 아니라 문구다 — 이 자리에서 "0 건"과 "월 행 없음"이
+// 같은 그림이 되면 화면이 없는 사실을 주장한다.
+test('renderMagnitudeBars: 월 행이 없으면 문구다 (#130)', () => {
+  assert.match(
+    renderMagnitudeBars([], { key: 'neg', labelKey: 'month', empty: '이 니즈의 월 행이 없음' }),
+    /class="empty-note">이 니즈의 월 행이 없음</,
+  );
+});

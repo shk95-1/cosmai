@@ -194,3 +194,42 @@ export function withProductNames(rows, index, max = 20) {
     return { ...r, product, product_short: truncateLabel(product, max) };
   });
 }
+
+// ---- 화면 5: 기간(월) 축 (#130) ---------------------------------------------
+
+// 월 행은 카테고리 합에만 붙는다(#129: month <> '' 이고 product_ref = ''). 질의가 이미
+// 그렇게 좁혀 오지만 여기서 다시 거르는 것은, 이 함수가 받는 배열이 늘 그 질의의 응답이라는
+// 보장이 없어서다 — 전체 기간 행이 한 줄만 새도 그 값이 한 달의 값으로 읽힌다.
+function monthRowsOf(need, runId) {
+  return (need || []).filter((r) => r && r.run_id === runId && r.month !== '' && r.month !== undefined
+    && r.month !== null && r.product_ref === '');
+}
+
+// 판에 세울 달의 상한. 90 개월(2013-08~2026-08 실측)을 다 그리면 판이 2,500px 이 되고,
+// 그 높이는 #122 가 화면 1 에서 걷어낸 바로 그것이다. 상한은 판의 성질이라 화면 쪽이 아니라
+// 여기가 정본이고, index.html 의 캡션도 app.js 를 거쳐 이 값을 읽는다 — 두 벌로 두면
+// 한쪽만 바뀌어 화면이 안 지키는 약속을 적는다.
+export const MONTH_LIMIT = 24;
+
+// 그 (run·scope·need_key) 의 월 행을 month 오름차순으로. month 는 'YYYY-MM' 문자열이라
+// 사전순이 곧 시간순이다. limit 은 뒤에서 자른다(0 이면 전부) — 표는 0 으로 부른다:
+// 판에서 밀린 달을 볼 자리가 화면에 하나는 있어야 한다.
+export function monthRows(need, runId, scope, needKey, limit = MONTH_LIMIT) {
+  const rows = monthRowsOf(need, runId)
+    .filter((r) => r.scope === scope && r.need_key === needKey)
+    .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
+  return limit && rows.length > limit ? rows.slice(rows.length - limit) : rows;
+}
+
+// 그 scope 에서 월 행을 가진 need_key 들. 셀렉트를 채우는 목록이자, 빈 배열이 곧
+// "이 scope 에는 월 축이 없다"는 사실이다.
+export function monthNeedKeys(need, runId, scope) {
+  return [...new Set(monthRowsOf(need, runId).filter((r) => r.scope === scope).map((r) => r.need_key))].sort();
+}
+
+// "월 행이 없다"와 "그 달에 0 건"은 다른 사실이다 — 앞은 문구가 되고(집계가 아직 월 축을
+// 내지 않았거나 그 scope 를 안 돌았다), 뒤는 폭 0 인 막대가 된다. hasYoutubeMentions 가
+// 유튜브 축에서 하는 것과 같은 구별이다.
+export function hasMonthRows(need, runId, scope) {
+  return monthNeedKeys(need, runId, scope).length > 0;
+}

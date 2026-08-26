@@ -18,6 +18,7 @@
   <button type="button" data-screen="wish" class="on-off">2. 위시</button>
   <button type="button" data-screen="product" class="on-off">3. 제품별 미해결</button>
   <button type="button" data-screen="character" class="on-off">4. 니즈의 성격</button>
+  <button type="button" data-screen="month" class="on-off">5. 기간별</button>
 </nav>
 
 <section id="screen-need" class="screen">
@@ -90,6 +91,27 @@
       <div id="character-chart-low" class="chart"></div>
     </div>
   </div>
+</section>
+
+<section id="screen-month" class="screen hidden">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="month-scope"></select>
+    </label>
+    <label>니즈(need_key)
+      <select id="month-need"></select>
+    </label>
+    <label>값
+      <select id="month-metric">
+        <option value="neg">불만 건수(neg)</option>
+        <option value="unresolved">미해결비(unresolved)</option>
+      </select>
+    </label>
+    <p class="caption">카테고리 합 행의 월별 값이다 — 제품별 월 축은 없다. 일별 축도 없다: 공통 집계 그레인이 월이고(<code>contracts/formats.md</code>), 2025-09 이전 유튜브 댓글은 연도까지만 복원되며 작성 시각이 없는 리뷰는 수집일로 폴백한다 — 일별 선은 그 폴백분을 수집한 날에 뭉쳐 없는 스파이크를 그린다. 판에는 최근 <span id="month-limit">…</span> 개월까지 그리고, 그 앞의 달은 아래 표에 있다.</p>
+  </div>
+  <h2>월별 추이</h2>
+  <div id="month-chart" class="chart"></div>
+  <div id="month-table"></div>
 </section>
 
 <script type="module" src="app.js"></script>
