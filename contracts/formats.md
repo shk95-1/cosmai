@@ -13,6 +13,13 @@
 - `retrieval-topic` 은 검색 유닛의 **주제 사전**이다(포크 #8, 적재 원본 `analysis/retrieval/dict/topics_v1.csv`). 한 행 = 한 주제의 한 별칭이고 `pattern` 은 정규식이 아니라 **표기 그대로**다 — 한글은 부분문자열, 라틴은 경계 매칭(`(?<![A-Za-z])…`)이라 매칭 방식이 계열마다 다르고, 그 별칭이 Kiwi 사용자 단어이자 확장 목록이라 정규식으로는 쓸 수 없다. `extra` 가 나머지를 나른다: `term_kind ∈ {ko, latin, mfds_inci}`(`|` 로 겹칠 수 있다 — 아보벤존은 ko 이자 식약처 표기다) · `topic_type` · `trend_use` · `note`. 뒤 셋은 주제 단위 사실이라 그 주제의 아무 행에 한 번만 적고(관례: 첫 행), 두 행이 다른 값을 말하면 적재가 아니라 `analysis/retrieval/topics.py` 가 거절한다.
 - 중립 명사 쌍둥이는 같은 `aspect` 이름을 갖는다(원본 사전의 `~` 접미는 CSV 에 남기지 않는다). 쌍둥이는 원본 순서 그대로 뒤에 온다 = 같은 priority, 큰 id.
 
+### entity 사전의 `kind='stopword'` — 질의 불용어 (포크 #46)
+- 한 줄 = 질의에서 지울 표기 하나. `canonical` 은 정본 표기가 아니라 **그 표기가 걸리는 축**이다 — 지금 값은 `query` 하나뿐이고, 색인·추출 축에는 불용어를 두지 않는다는 판단(`entrypoints.md` §검색, 포크 #8·#37)이 그대로 서 있다. 축을 `kind` 로 가르지 않은 이유는 `activate` 가 kind 단위라 축을 늘릴 때마다 새 버전 축이 생기기 때문이고, `tier` 로 가르지 않은 이유는 그 칸이 brand 전용 어휘를 이미 갖고 있어서다.
+- **두 번째 축은 지금 자리가 없다.** 유일키가 `UNIQUE (kind, surface, version)`(`001_needs.sql:50`)라 `canonical` 을 안 담으므로, 다른 축이 같은 `surface` 를 가지면 `db/lexicon.py` 의 `ON CONFLICT … DO NOTHING` 이 오류 없이 **조용히 버린다**. 그러니 위 문단은 축을 늘리는 여지를 약속하지 않는다 — 늘리려면 유일키를 넓히는 추가 DDL 이 먼저다(등급 B 리뷰 M3, 2026-08-26).
+- `surface` 는 정규식도 원형도 아니라 **`bm25.tokenize` 가 실제로 내놓는 토큰**이다 — 필터가 토큰 목록 위에서 돌기 때문이다(`관해서` → `관하`, `어떻게` → `어떻`). 그래서 목록을 고치는 사람은 표기가 아니라 토큰을 적어야 하고, `tests/retrieval/test_query_stopwords.py` 가 그 파일의 프로브 질의 다섯 개에서 각 행의 토큰이 나오는지를 되묻는다(코퍼스 전수가 아니라 손으로 고른 시험 벡터다) — 나오지 않는 행은 지우지 않고 `note` 가 그 사실을 적는다(판단은 같고 도달만 못 하므로, 형태소 분석기가 바뀌면 살아난다).
+- 적재 원본은 `analysis/retrieval/dict/query_stopwords_v1.csv`(13행)이고 길은 `cosmai lexicon load/diff/activate --kind stopword` 하나다. **활성 버전**은 aspect 와 따로 돈다(`entity_lexicon` 의 `activate` 는 `WHERE kind = %s`).
+- 그러나 버전 **번호표**는 `entity_lexicon` 전역이다 — `analysis/lexicon.py` 의 `_label` 과 `analysis/aggregate/pipeline.py:149` 가 kind 를 안 가리고 `max(version)` 을 읽으므로, 이 목록을 v2 로 올리면 `brand` 가 v1 그대로여도 run 의 `versions.lexicon` 이 2 가 된다. `:149` 는 `active` 조차 안 보므로 **`activate` 전 `load` 만으로도** 그렇게 된다. 지금은 두 kind 가 다 v1 이라 무해하고, 고치는 것은 **포크 #58** 이 진다 — 이 목록이 그 선재 성질을 밟는 첫 사용자다.
+
 ## need_key 레지스트리 CSV (→ `needs.need_key`, A17)
 `need_key,canonical,note` — 두 슬라이스 어휘의 합집합. `canonical` 은 동의어 묶음의 대표이고, 대표가 없으면 자기 자신이다.
 v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · `향→향냄새` · `발림텍스처→제형발림` · `지속력워터→지속력` · `톤업색상→색상발색`. `site_axis_map.need_key` 가 p1 어휘라서 대표를 그쪽으로 맞춘다. `scope='all'` 롤업은 `canonical` 기준으로 합산한다.

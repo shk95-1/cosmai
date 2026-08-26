@@ -18,7 +18,7 @@ from pathlib import Path
 
 import psycopg
 
-from analysis.retrieval import corpus, topics
+from analysis.retrieval import corpus, stopwords, topics
 from analysis.retrieval.bm25 import TOKENIZER_INPUTS, Index
 from analysis.retrieval.chunks import (
     MAX_CHARS,
@@ -383,6 +383,9 @@ def load_index(
     """
     # 캐시를 안 쓸 때도 사전은 세워야 한다 -- 토큰화가 그 아래에서 활성 사전을 읽는다.
     topics.use_active(conn)
+    # 질의 불용어도 여기서 세운다. 색인에는 안 쓰이지만 이 색인으로 도는 질의가 전부 그 아래를 타고,
+    # DB 를 여는 자리는 여기 하나다 (#46). 없으면 빈 목록이라 세우는 것 자체가 실패하지 않는다.
+    stopwords.use_active(conn)
     cached = cache_dir / f"index-{index_signature(conn, sources)}.pkl" if cache_dir else None
     if cached and cached.exists():
         state = pickle.loads(cached.read_bytes())
@@ -471,6 +474,10 @@ def search(
     hits = ranked_chunks(
         conn, query, engine=engine, top=top, sources=sources, store=store, cache_dir=cache_dir
     )
+    # 벡터는 질의를 토큰화하지 않고 원문을 인코딩하므로 이 목록을 안 탄다 -- 그쪽에 이 줄을 찍으면
+    # 안 일어난 일을 말하게 된다.
+    if engine != "vector" and (note := stopwords.query_note(query)):
+        print(note, file=sys.stderr)
     if not hits:
         return []
     with conn.cursor() as cur:

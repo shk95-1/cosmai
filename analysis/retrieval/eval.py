@@ -121,6 +121,10 @@ def docs_with_tokens(index: bm25.Index, query: str) -> set[str]:
 
     부분문자열로 빼면 안 된다 -- `하얘서` 를 Kiwi 는 `하얗` 으로 주므로 글자로는 안 겹치는데
     토큰으로는 겹친다. 색인이 실제로 쓰는 단위로 빼야 두 검색기가 같은 판에서 겨룬다.
+
+    그래서 여기는 `tokenize_query` 가 아니라 `tokenize` 다 (#46). 정답 정의는 색인 축이고, 질의
+    불용어를 여기까지 태우면 뺄 문서가 줄어 heldout 의 정답이 넓어진다 -- 그 순간 벡터 채택의
+    근거였던 .062 가 다른 판 위의 숫자가 된다.
     """
     found: set[str] = set()
     for term in set(bm25.tokenize(query)):

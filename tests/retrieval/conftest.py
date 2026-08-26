@@ -14,7 +14,7 @@ from typing import Any, cast
 import psycopg
 import pytest
 
-from analysis.retrieval import topics
+from analysis.retrieval import stopwords, topics
 
 
 def csv_rows(path=topics.DICTIONARY_CSV) -> list[tuple[object, ...]]:
@@ -38,6 +38,28 @@ def install_topics(conn: psycopg.Connection, version: int = 1, active: bool = Tr
 
     with conn.cursor() as cur:
         insert_aspects(cur, csv_rows(), version, active=active)
+    conn.commit()
+
+
+def stopword_rows(path=None) -> list[tuple[object, ...]]:
+    """질의 불용어 CSV 한 벌을 `db.lexicon.insert_entities` 가 받는 행으로. 주제 사전과 같은 이유로
+    CLI 와 같은 함수를 탄다 -- 픽스처가 목록을 손으로 다시 적으면 사전이 두 벌이 된다."""
+    from cosmai.cli import _csv_rows
+
+    return _csv_rows(stopwords.KIND, str(path or stopwords.DICTIONARY_CSV))
+
+
+def csv_stopwords(version: int = 1) -> stopwords.QueryStopwords:
+    surface = 2  # db.lexicon.ENTITY_COLUMNS 의 자리
+    return stopwords.from_rows([(str(row[surface]), version) for row in stopword_rows()])
+
+
+def install_stopwords(conn: psycopg.Connection, version: int = 1, active: bool = True) -> None:
+    """운영에서 `cosmai lexicon load --kind stopword` + `activate` 가 하는 일."""
+    from db.lexicon import insert_entities
+
+    with conn.cursor() as cur:
+        insert_entities(cur, stopword_rows(), version, active=active)
     conn.commit()
 
 
