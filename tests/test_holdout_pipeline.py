@@ -233,6 +233,22 @@ def test_no_commerce_chunk_at_all_is_blocked_not_failed(holdable: str):
             build(conn, commerce_schema="")
 
 
+def test_a_chunk_index_that_misses_the_suncare_population_is_blocked_not_failed(holdable: str):
+    """청크는 있는데 **선케어 모집단 안에** 하나도 없는 자리. 비교할 기존 팔이 없으므로, "전부
+    홀드아웃" 이라고 답하면 그 순간 이 명령은 되묻기가 아니라 그냥 세기가 된다.
+
+    막힘 여섯 중 이 갈래만 테스트가 없어 계약에만 있었다 (#51 리뷰 §5).
+    """
+    with connect(holdable) as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM retrieval_chunk WHERE source = 'commerce_review'")
+        conn.commit()
+        # 랭킹 밖 제품(`amp`)의 리뷰 청크 하나만 남긴다 -- 청크는 있고 모집단 안에는 없다.
+        _chunk(conn, "commerce_review:oliveyoung:r-offaxis", "끈적임 없이 좋아요")
+        with pytest.raises(NoHoldout, match="no baseline arm"):
+            build(conn, commerce_schema="")
+
+
 def test_no_unseen_review_is_blocked_not_failed(holdable: str, database_url_for_tests: str):
     """되물을 새 표본이 아직 없다. 답이 계산된 것이 아니라 물음이 서지 않은 것이다."""
     with connect(holdable) as conn:
