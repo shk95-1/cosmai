@@ -366,6 +366,20 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — RATING_ASC 표본 안에 3★ 이 섞였거나 ≤2★ 가 150 미만이면 ≤2★ 는 전수다. 150 은 수집 표본 상한(`REVIEW_PAGES 3 x 50`)이고 `collectors/commerce/scope.json`(#7)과 `formats.md` 가 같은 값을 갖는다.
 
+## `metrics_need` 의 월 행 (`month <> ''`, #129)
+
+`month <> ''` 행은 **카테고리 합(`product_ref = ''`)만** 존재한다 — 제품 축은 전체 기간 행만 갖는다.
+월 행은 그 달의 언급만으로 다시 잰 값이고, 그 달에 존재하지 않는 값은 0 이 아니라 NULL 이다:
+`low_share`·`population_share_pct`·`low_mentioning`·`denom_low`·`denom_site` 는 `product_denominator`
+가 `captured_at` 스냅샷이라 "그 달의 분모" 라는 것이 없어서, `persist_*` 는 한 달짜리 모집단에서
+`persist_months` 가 늘 1 이라 뜻이 없어서 NULL 이다. `unresolved_new` 는 월 행에서도 NULL 이지만
+이유가 다르다 — 제품의 first_seen 을 구현이 아직 받지 못해 전체 기간 행에서도 NULL 이다.
+`yt_neg`·`yt_pos` 는 `observed_at_resolution = 'month'` 인 댓글만 세고, 그 달의 댓글에 그렇지 않은
+것이 하나라도 섞이면 그 달의 두 값은 NULL 이다 (상대시간 복원분은 수집 기준월 한 칸에 뭉친다 —
+`formats.md`). 리뷰의 `neg`·`pos` 는 거르지 않는다: 그쪽 폴백은 `day` 해상도라 달은 언제나 맞다.
+전체 기간 행(`month = ''`)은 이 규칙에 영향받지 않고 전 댓글을 센다 — 그래서 월 행 `yt_*` 의 합은
+전체 기간 행의 `yt_*` 보다 작거나 NULL 일 수 있다.
+
 ## 평가 하네스가 대조하는 기준선 (규칙 구현, 2026-08-23 실측)
 | task | 평가셋 | 규칙 기준선 | 채택 조건 (단일 임계값) |
 |---|---|---|---|

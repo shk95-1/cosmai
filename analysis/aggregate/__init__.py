@@ -129,6 +129,19 @@ class RuleAggregator:
         whole_period = not month
         reviews = [m for m in rows if m.src == REVIEW]
         comments = [m for m in rows if m.src == COMMENT]
+        # #129: 상대시간("n년 전")에서 역산한 댓글은 수집 기준월 한 칸에 뭉친다 — 운영 실측 16,621건이
+        # 예외 없이 <연도>-08 이었다. 그 달의 yt_* 를 그대로 세면 없는 계절 패턴("매년 8월 스파이크")이
+        # 서고, 걸러 내고 0 을 남기면 "그 달에 유튜브 불만이 없었다"는 없는 침묵이 그 자리를 대신한다.
+        # 그래서 월 행은 달을 믿을 수 있는 댓글만 세되, 못 믿을 댓글이 하나라도 섞인 달은 얼마나 빠졌는지
+        # 알 수 없으므로 결측이다 — 모르는 수는 수가 아니다. 판정은 need_key 별이 아니라 그 달의 댓글
+        # 전체로 한다: 못 믿을 값은 그 need_key 의 성질이 아니라 그 달 칸의 성질이다.
+        # 리뷰(neg/pos)는 거르지 않는다 — written_at 이 NULL 인 리뷰의 폴백은 'day' 해상도라 달은
+        # 언제나 맞고, 그 폴백조차 운영 실측 0건이다 (contracts/formats.md · _wish_row 의 같은 선례).
+        datable = comments if whole_period else [m for m in comments if m.observed_at_resolution == "month"]
+        # 전체 기간 행은 지금처럼 전 댓글을 센다. 그래서 월 행 yt_* 의 합은 전체 기간 행의 yt_* 보다
+        # 작거나 NULL 일 수 있다 — 결함이 아니라 의도다. #129 의 완료 기준은 neg 합에 대한 것이지
+        # yt_* 에 대한 것이 아니다. "합이 안 맞는다"고 되돌리기 전에 위 문단을 읽어라.
+        yt_known = len(datable) == len(comments)
         months_total = len({m.month for m in reviews})
         # B6: 언급 0건 제품은 분모에만 있다. 분모가 없을 때만 언급에서 제품 모집단을 복원한다.
         products_total = (
@@ -179,11 +192,11 @@ class RuleAggregator:
                     product_ref=product_ref,
                     neg=len(neg),
                     pos=len(pos),
-                    yt_neg=sum(1 for m in comments if key(m.need_key) == need_key and m.polarity == NEGATIVE)
-                    if comments
+                    yt_neg=sum(1 for m in datable if key(m.need_key) == need_key and m.polarity == NEGATIVE)
+                    if datable and yt_known
                     else None,
-                    yt_pos=sum(1 for m in comments if key(m.need_key) == need_key and m.polarity == POSITIVE)
-                    if comments
+                    yt_pos=sum(1 for m in datable if key(m.need_key) == need_key and m.polarity == POSITIVE)
+                    if datable and yt_known
                     else None,
                     unresolved=_ratio(len(neg), len(neg) + len(pos)),
                     low_share=low_share,

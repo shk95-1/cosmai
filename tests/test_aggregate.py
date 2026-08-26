@@ -37,7 +37,9 @@ def need(
         strength=strength,
         rating=rating,
         observed_at=date(2026, 1, 1),
-        observed_at_resolution="month",
+        # wish() 와 같은 규칙 — 2025-09 이전 유튜브 시각은 상대시간 복원분이라 달을 믿을 수 없다
+        # (formats.md). 이 헬퍼가 'month' 로 박혀 있던 동안은 #129 의 월 축 결함을 재현할 수 없었다.
+        observed_at_resolution="month" if month >= "2025-09" else "year",
         month=month,
         sentence=f"{need_key}-{ref}-{polarity}",
         kind=None,
@@ -397,3 +399,56 @@ def test_the_rollup_folds_synonyms_on_the_month_axis_too():
     # 접기가 월 축에서 풀리면 같은 달에 동의어 두 행이 남아 화면이 한 need 를 둘로 그린다.
     assert months(rows, "끈적유분")["2026-01"].neg == 2
     assert {r.need_key for r in rows} == {"끈적유분"}
+
+
+def test_a_month_that_cannot_place_its_comments_reports_no_youtube_count_at_all():
+    """운영 실측(2026-08-26): resolution='year' 댓글 16,621건이 예외 없이 <연도>-08 한 칸에 뭉쳐
+    있다 — 상대시간을 수집 기준월에서 역산한 값이기 때문이다. 그대로 세면 없는 계절 패턴이 서고,
+    걸러 내고 0 을 남기면 없는 침묵이 선다."""
+    rows = RuleAggregator().need_metrics(
+        [
+            need("밀림", "불만", ref="a/1", product="oy:a", month="2025-08"),
+            need("밀림", "불만", src="yt_comment", ref="v/1", product=None, month="2025-08"),
+            need("밀림", "만족", src="yt_comment", ref="v/2", product=None, month="2025-09"),
+            need("밀림", "불만", src="yt_comment", ref="v/3", product=None, month="2025-09"),
+        ],
+        [],
+        "선블록",
+    )
+    per_month = months(rows, "밀림")
+    assert sorted(per_month) == ["2025-08", "2025-09"]
+    # 경계: 2025-08 은 결측, 2025-09 부터가 값이다.
+    assert (per_month["2025-08"].yt_neg, per_month["2025-08"].yt_pos) == (None, None)
+    assert (per_month["2025-09"].yt_neg, per_month["2025-09"].yt_pos) == (1, 1)
+    # 리뷰 축은 거르지 않는다 — 폴백이 'day' 해상도라 달은 언제나 맞다.
+    assert per_month["2025-08"].neg == 1
+    # 전체 기간 행은 여전히 전 댓글을 센다. 그래서 월 행 yt_* 의 합이 그보다 작다 — 의도다.
+    whole = by_key(rows)["밀림"]
+    assert whole.yt_neg is not None and (whole.yt_neg, whole.yt_pos) == (2, 1)
+    assert sum(r.yt_neg or 0 for r in per_month.values()) < whole.yt_neg
+
+
+def test_one_comment_of_unknown_month_makes_that_whole_month_unknown():
+    """구현하는 것은 규칙이지 지금의 데이터 분포가 아니다 — 재수집으로 year 해상도가 다른 달에
+    떨어져도, 믿을 수 있는 댓글과 섞여도 뜻이 유지돼야 한다."""
+    stale = replace(
+        need("백탁", "불만", src="yt_comment", ref="v/9", product=None, month="2026-01"),
+        observed_at_resolution="year",
+    )
+    rows = RuleAggregator().need_metrics(
+        [
+            need("밀림", "불만", src="yt_comment", ref="v/1", product=None, month="2026-01"),
+            need("밀림", "불만", src="yt_comment", ref="v/2", product=None, month="2026-02"),
+            stale,
+        ],
+        [],
+        "선블록",
+    )
+    assert sorted(months(rows, "밀림")) == ["2026-01", "2026-02"]
+    # 못 믿을 값은 그 need_key 의 성질이 아니라 그 달 칸의 성질이다 — 같은 달의 '밀림' 도 결측이다.
+    assert months(rows, "밀림")["2026-01"].yt_neg is None
+    assert months(rows, "백탁")["2026-01"].yt_neg is None
+    # 그 달 밖은 멀쩡하다.
+    assert months(rows, "밀림")["2026-02"].yt_neg == 1
+    # 전체 기간 행은 불변이다.
+    assert (by_key(rows)["밀림"].yt_neg, by_key(rows)["백탁"].yt_neg) == (2, 1)
