@@ -93,11 +93,36 @@ def test_the_narrowing_never_regrants_what_the_after_section_calls_removed(schem
     assert not (removed & _granted_by_narrowing(schema)), sorted(removed & _granted_by_narrowing(schema))
 
 
+DEFAULT_PRIVILEGES = re.compile(
+    r"ALTER\s+DEFAULT\s+PRIVILEGES\s+FOR\s+ROLE\s+(\w+)\s+IN\s+SCHEMA\s+(\w+)\s+"
+    r"REVOKE\s+SELECT\s+ON\s+TABLES\s+FROM\s+(\w+)",
+    re.IGNORECASE,
+)
+
+
+def test_the_narrowing_only_removes_default_privileges_that_name_anon() -> None:
+    """trend_radar 의 기본권한 수혜자는 trend_radar_reader 이고 그 롤로 trend-radar-dashboard 가
+    직접 로그인한다(service/stack/docker-compose.yml:172). 지우면 앞으로 이 스키마에 생기는 표를
+    그 화면이 못 읽는다 -- 그리고 멤버십 해제만으로 anon 표류는 이미 멈추므로 지울 이유도 없다.
+    한 번 잘못 넣었던 줄이라(#168 확정 라운드) 다시 들어오면 여기서 운다."""
+    body = re.sub(r"--[^\n]*", "", NARROWING.read_text(encoding="utf-8"))
+    targets = {(schema, grantee) for _, schema, grantee in DEFAULT_PRIVILEGES.findall(body)}
+    assert ("tubedepth", "postgrest_anon") in targets, (
+        "tubedepth 의 기본권한은 anon 에게 직접 걸려 있어 반드시 지워야 한다"
+    )
+    assert all(g == "postgrest_anon" for _, g in targets), sorted(targets)
+    assert not any(s_ == "trend_radar" for s_, _ in targets), (
+        "trend_radar 의 기본권한은 dashboard 의 롤 것이다"
+    )
+
+
 def test_the_contract_names_the_two_paths_that_open_the_old_stack() -> None:
     # 계약이 "화이트리스트"만 적고 멤버십·직접 GRANT 를 빠뜨리면 #168 이 다시 생긴다.
     body = CONTRACT.read_text(encoding="utf-8")
     assert "trend_radar_reader" in body
     assert "40-postgrest-tubedepth-grants.sh" in body
+    # 비대칭을 적지 않으면 다음 사람이 trend_radar 쪽 기본권한도 지운다.
+    assert "rolcanlogin=t" in body
 
 
 def test_the_check_query_stays_read_only() -> None:

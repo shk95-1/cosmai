@@ -51,10 +51,14 @@ FROM (VALUES
 WHERE to_regclass(t) IS NOT NULL
 ORDER BY 1;
 
--- 4) 미래 테이블이 자동으로 열리는 문. 적용 후 이 질의는 **0행**이어야 한다.
+-- 4) 미래 테이블이 자동으로 열리는 문. 적용 후 남아야 하는 것은 **trend_radar 한 행뿐**이다
+--    (`trend_radar_reader=r`). 그 롤은 trend-radar-dashboard 가 직접 로그인하는 롤이라
+--    기본권한을 살려 두고, anon 은 멤버가 아니게 되어 거기 닿지 못한다. tubedepth 행은
+--    anon 에게 직접 걸려 있어 사라져야 한다 -- 적용 전 2행 -> 적용 후 1행.
 SELECT pg_get_userbyid(d.defaclrole) AS for_role,
        n.nspname AS schema,
-       array_to_string(d.defaclacl, ' ') AS default_acl
+       array_to_string(d.defaclacl, ' ') AS default_acl,
+       array_to_string(d.defaclacl, ' ') !~ 'postgrest_anon=' AS ok_after
 FROM pg_default_acl d
 JOIN pg_namespace n ON n.oid = d.defaclnamespace
 WHERE d.defaclobjtype = 'r'

@@ -27,8 +27,25 @@
 뒤의 둘은 이 레포 밖이고 `db/migrate.sh` 가 건드리지 않는다. `postgrest_anon_needs.sql` 의
 "Whitelist, not default privileges" 는 그래서 `needs` 절에만 참이었다 — `trend_radar` 와
 `tubedepth` 양쪽에 `ALTER DEFAULT PRIVILEGES` 가 살아 있어 **새 테이블이 자동으로 anon 에 열린다.**
-좁히기가 그 둘도 함께 끊는다(사용자 결정 2). 적용 후 `postgrest_anon` 은 `trend_radar_reader` 를
-포함해 **어떤 롤에도 속하지 않고**, 세 스키마 전부에서 표를 이름으로만 받는다.
+적용 후 `postgrest_anon` 은 `trend_radar_reader` 를 포함해 **어떤 롤에도 속하지 않고**, 세 스키마
+전부에서 표를 이름으로만 받는다.
+
+### DEFAULT PRIVILEGES 는 두 스키마를 다르게 다룬다 (사용자 결정 2)
+
+같은 표류인데 **수혜자가 다르기 때문에** 처방이 반대다. `pg_default_acl` 실측:
+
+| 스키마 | 기본권한의 수혜자 | 좁히기가 하는 일 |
+|---|---|---|
+| `trend_radar` | `trend_radar_reader=r/trend_radar_owner` — anon 이 아니다 | **그대로 둔다.** 멤버십을 끊으면 anon 은 그 롤의 기본권한을 물려받지 않으므로 표류가 이미 멈춘다 |
+| `tubedepth` | `postgrest_anon=r/tubedepth_owner` — anon 에게 직접 | **지운다.** 남기면 다음 마이그레이션이 만드는 표가 그대로 anon 에 붙는다 |
+
+`trend_radar` 쪽을 지우면 안 되는 이유는 `trend_radar_reader` 가 anon 의 통로이기 **이전에**
+`trend-radar-dashboard` 가 직접 로그인하는 롤이라서다(`service/stack/docker-compose.yml:172`,
+`rolcanlogin=t`). 기본권한을 없애면 앞으로 이 스키마에 생기는 표를 그 화면이 못 읽는다 —
+"지금 열려 있는 것을 바꾸지 않으면서 표류만 멈춘다"는 결정의 근거를 넘는다.
+
+그래서 적용 후 `pg_default_acl` 은 **0행이 아니라 `trend_radar` 한 행**이 남는다
+(`db/grants/postgrest_anon_check.sql` 절 4 가 그 기대를 적는다).
 
 ## needs
 

@@ -10,18 +10,24 @@
 -- needs 9 + trend_radar 9 + tubedepth 3 = 21 개여야 한다.
 --
 -- 슈퍼유저(platform)가 실행한다: REVOKE 대상 권한을 준 것이 trend_radar_owner 와
--- tubedepth_owner 이고 DEFAULT PRIVILEGES 도 그 둘 소유다.
+-- tubedepth_owner 이고, 지우는 DEFAULT PRIVILEGES 는 tubedepth_owner 소유다.
+-- 두 스키마를 다르게 다룬다 -- trend_radar 는 멤버십만 끊고 기본권한은 남긴다(1절 주석).
 
 -- ---------------------------------------------------------------------------
 -- 1. trend_radar -- 롤 멤버십 하나가 13개를 전부 열고 있었다. 직접 GRANT 는 없었다.
 -- ---------------------------------------------------------------------------
 REVOKE trend_radar_reader FROM postgrest_anon;
 
--- 미래 테이블이 따라 열리는 것을 끊는다. 남겨 두면 다음 마이그레이션이 만드는 표가 다시
--- 조용히 붙는다 -- tubedepth 가 2026-08-21 6개에서 지금 12개가 된 경로가 정확히 이것이다
--- (service/data-portal/docs/postgrest-observed.md:60).
-ALTER DEFAULT PRIVILEGES FOR ROLE trend_radar_owner IN SCHEMA trend_radar
-    REVOKE SELECT ON TABLES FROM trend_radar_reader;
+-- 이 스키마의 DEFAULT PRIVILEGES 는 **일부러 건드리지 않는다.** 빠진 것이 아니다.
+--   pg_default_acl 의 trend_radar 행은 trend_radar_owner -> `trend_radar_reader=r` 이지
+--   postgrest_anon 이 아니다. 위 한 줄로 anon 이 그 롤의 멤버가 아니게 되면 기본권한도
+--   물려받지 않으므로, anon 쪽 표류는 그 한 줄로 이미 멈춘다.
+--   반대로 지우면 대시보드가 깨진다: trend_radar_reader 는 anon 의 통로이기 이전에
+--   trend-radar-dashboard 가 **직접 로그인하는 롤**이고(service/stack/docker-compose.yml:172
+--   의 TREND_RADAR_READONLY_DATABASE_URL, rolcanlogin=t), 기본권한을 없애면 앞으로
+--   trend_radar 에 생기는 표를 그 화면이 못 읽는다. 사용자 결정 2 는 "지금 열려 있는 것을
+--   바꾸지 않으면서 표류만 멈춘다"였지 미래의 대시보드 접근을 좁히는 것이 아니었다.
+--   tubedepth 쪽(아래 2절)은 기본권한이 postgrest_anon 에게 **직접** 걸려 있어 사정이 다르다.
 
 -- 멤버십 대신 표를 이름으로 준다. 앞으로 이 스키마에서 anon 이 보는 것은 이 아홉 줄뿐이고,
 -- 새 표를 열려면 여기 한 줄을 더해야 한다.
@@ -46,6 +52,13 @@ GRANT SELECT ON
 --    api_keys 만 빼고 12개가 열려 있었다.
 -- ---------------------------------------------------------------------------
 REVOKE SELECT ON ALL TABLES IN SCHEMA tubedepth FROM postgrest_anon;
+
+-- 여기서는 DEFAULT PRIVILEGES 를 **반드시** 지운다 -- 1절과 정반대인 이유가 이것 하나다:
+-- pg_default_acl 의 tubedepth 행이 postgrest_anon=r/tubedepth_owner 로 anon 에게 직접 걸려
+-- 있어서, 남겨 두면 다음 마이그레이션이 만드는 표가 그대로 anon 에 붙는다. 이 스키마가
+-- 2026-08-21 6개에서 지금 12개가 된 경로가 정확히 이것이다
+-- (service/data-portal/docs/postgrest-observed.md:60). 지워도 잃는 롤은 없다: 이 기본권한의
+-- 수혜자는 anon 뿐이고 tubedepth_runtime 은 자기 몫을 따로 갖는다.
 ALTER DEFAULT PRIVILEGES FOR ROLE tubedepth_owner IN SCHEMA tubedepth
     REVOKE SELECT ON TABLES FROM postgrest_anon;
 
@@ -68,8 +81,9 @@ NOTIFY pgrst, 'reload schema';
 
 -- ---------------------------------------------------------------------------
 -- 되돌리기 -- 2026-08-27 실측 상태를 그대로 복원한다. 슈퍼유저로 위에서 아래로.
--- 일곱 줄이다(초안 머리말은 다섯이라 적었는데 틀렸다): 안 B 가 trend_radar 에 없던 직접
+-- 여섯 줄이다. 초안 머리말은 다섯이라 적었는데 틀렸다: 안 B 가 trend_radar 에 없던 직접
 -- GRANT 아홉을 새로 만들므로, 멤버십을 되붙이기 전에 그것부터 걷어야 ACL 이 같아진다.
+-- trend_radar 의 DEFAULT PRIVILEGES 는 애초에 건드리지 않으므로 되돌릴 줄도 없다(1절 주석).
 -- tubedepth 쪽은 ON ALL TABLES 가 12개를 다시 덮으므로 별도 REVOKE 가 필요 없다.
 -- ---------------------------------------------------------------------------
 --   REVOKE SELECT ON trend_radar.product, trend_radar.rank_snapshot, trend_radar.price_point,
@@ -77,8 +91,6 @@ NOTIFY pgrst, 'reload schema';
 --       trend_radar.review_topic, trend_radar.review_answer, trend_radar.review_summary
 --       FROM postgrest_anon;
 --   GRANT trend_radar_reader TO postgrest_anon;
---   ALTER DEFAULT PRIVILEGES FOR ROLE trend_radar_owner IN SCHEMA trend_radar
---       GRANT SELECT ON TABLES TO trend_radar_reader;
 --   GRANT SELECT ON ALL TABLES IN SCHEMA tubedepth TO postgrest_anon;
 --   REVOKE ALL ON TABLE tubedepth.api_keys FROM postgrest_anon;
 --   ALTER DEFAULT PRIVILEGES FOR ROLE tubedepth_owner IN SCHEMA tubedepth
