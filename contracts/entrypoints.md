@@ -51,8 +51,8 @@ COSMAI_DB_PORT   기본값 5434
 
 ## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
 ```sql
--- db/views/collector_health.sql 이 commerce(trend_radar.run+fetch_log)와
--- naver(needs.naver_run+naver_fetch_log) 두 팔을 UNION 한다 -- youtube 는 아래 이유로 빠져 있다
+-- db/views/collector_health.sql 이 commerce(trend_radar.run+fetch_log),
+-- naver(needs.naver_run+naver_fetch_log), youtube(tubedepth.jobs) 세 팔을 UNION 한다
 collector text, dataset text, run_id text, started_at timestamptz, finished_at timestamptz,
 status text,          -- ok | partial | blocked | failed | running
 requests int, ok int, blocked int, failed int, queued int, p90_ms int
@@ -61,29 +61,33 @@ P16 의 표가 이 뷰 하나로 나와야 한다. `requests` 는 fetch 시도 �
 2xx / 403·429 / (error 또는 5xx) 세 통뿐이다 — 셋의 합과 `requests` 의 차이가 어느 통에도 안 들어간
 응답(예: 404)이다.
 
-**youtube 는 3단계에서 이 뷰에 들어가지 않는다** (사용자 결정 2026-08-24). 12컬럼 중 다섯을 낼 원천이
-없고, 그중 `blocked`·`p90_ms` 가 하필 그 수집기의 실제 고장 모드(쿼터 소진·지연)를 보는 컬럼이라
-NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 셋(넷째는 #100 이 없앴다 — 아래):
-- `tubedepth.jobs` 에는 run 개념이 없다 — `run_id` 를 낼 것이 없고 `created_at` 은 enqueue 시각이라
-  `started_at` 도 아니다.
-- 같은 표에 지연을 잰 컬럼이 없다 — `p90_ms` 의 원천이 아예 없다.
-- `jobs.kind`(`video.metadata` 계열)가 위 §수집의 youtube dataset 어휘(`watch|work|flatten|prune`)와
-  다르다 — `dataset` 컬럼에 그대로 넣으면 다른 두 팔과 다른 어휘가 한 컬럼에 섞인다.
+**youtube 팔은 #77 이 붙였다** (3단계에서 뺐던 것을 되돌렸다 — 사용자 결정 2026-08-24 가 걸었던 근거
+셋이 #100·#101·#102 로 다 없어졌다: `jobs.error_code` 가 차단을 분류하고(#100), `jobs.started_at`·
+`jobs.elapsed_ms` 가 생겼고(#101), `jobs.dataset` 이 CLI 동사를 담는다(#102 — `queue.enqueue` 가 새
+행마다 적고, `watch` 가 만든 listing job 의 후속 job 은 원본의 `dataset` 을 물려받는다. `kind →
+dataset` 역방향 매핑은 1:N 이라 성립하지 않아 별도 컬럼으로 뒀다. 백필은 없어 옛 행은 NULL 이다).
 
-#102: 셋째 근거는 `tubedepth.jobs.dataset`(`contracts/ddl/tubedepth/003_jobs_dataset.sql`, 추가만·
-nullable)으로 원천이 생겼다 — `queue.enqueue`가 새로 넣는 모든 행에 그 행을 만든 `cosmai collect
-youtube --dataset` 동사(`watch|work|flatten|prune`)를 적고, `watch`가 만든 listing job의 후속
-(`follow_up_kind`) job은 fan-out 시 원본 job의 `dataset`을 그대로 물려받는다(둘 다 결국 `watch`가
-시작한 것이므로). `kind → dataset` 역방향 매핑은 1:N이라 성립하지 않는다(`watch` 한 동사가 최대 7가지
-`kind`를 만든다) — 그래서 매핑표가 아니라 쓰기 시점에 적는 별도 컬럼으로 뒀다. 기존 행(백필 없음)은
-NULL. 이 뷰에 youtube 를 넣는 배선 자체는 여전히 #77 의 몫이다.
+**youtube 의 한 행은 `(dataset, started_at 의 1시간 버킷)` 하나다.** `tubedepth.jobs` 에는 run 이
+없으므로 `run_id` 는 NULL 이고 — 그 자리를 늘리지 않는 것이 #10 §A-2 의 판정이다 — commerce 의 run 에
+해당하는 "유한한 일감 묶음" 을 뷰가 시간으로 만든다. 창(`최근 1h`)이 아니라 버킷인 것은 commerce 가
+지난 run 을 전부 행으로 남기기 때문이다: 창이면 크론이 한 시간 쉰 순간 youtube 팔이 표에서 사라진다.
+claim 된 적 없는 job(대기 중이거나 #101 이전의 옛 행)은 `started_at` 이 없어 `created_at` 으로 앉는다.
 
-`queued` 가 두 팔 다 NULL 인 것은 그래서다: commerce·naver 는 크론이 부르는 배치 워커라 큐가 없고,
-큐를 가진 유일한 수집기가 youtube 다. 컬럼을 지우지 않고 남겨 둔 것은 그 팔이 돌아올 자리이기 때문이다.
+**`elapsed_ms` 의 뜻은 팔마다 다르다 — 이 뷰에서 가장 틀리기 쉬운 자리다.** commerce·naver 의
+`fetch_log.elapsed_ms` 는 fetch 한 번의 왕복이고, youtube 의 `jobs.elapsed_ms` 는 job 하나의 전체
+벽시계(claim→finish)다(#101: 캐시로 답한 job 은 fetch 를 아예 안 해서 왕복으로는 잴 것이 없다). 그래서
+youtube 의 `p90_ms` 는 "요청이 얼마나 느렸나" 가 아니라 "일감 하나가 얼마나 걸렸나" 이고, 같은 이유로
+`requests` 도 HTTP 요청 수가 아니라 끝난 job 수다 — 캐시로 답한 job 도 1 로 센다. 두 팔을 나란히 놓고
+`p90_ms` 를 비교하면 안 된다. `elapsed_ms` 가 NULL 인 옛 행은 백분위에서 빠진다(0 으로 채우지 않는다).
+
+`queued` 는 commerce·naver 에서 NULL 이다: 둘 다 크론이 부르는 배치 워커라 대기 큐라는 것이 아예 없다.
+youtube 에서만 숫자이고, 0(큐가 비었다)과 NULL(큐라는 것이 없다)이 그래서 갈린다. `oldest_pending` 같은
+큐 고유값은 컬럼으로 더하지 않는다 — 12컬럼은 위 sql 펜스가 정본이고, 늘리면 다른 두 팔도 NULL 자리를
+하나씩 더 내야 한다. 큐 적체의 나이는 `queued > 0` 인 가장 오래된 버킷의 `started_at` 으로 읽는다.
 
 `error_code`(`jobs.error_code`, `String(64)`)는 #100 부터 예외 클래스명이 아니라 아래 분류값이다
-(`collectors/youtube/cli.py::_classify_error`). #77 이 이 뷰에 youtube 를 넣을 때 정본으로 읽을
-어휘다 — `blocked` 는 `quota`·`rate_limited`·`http_403`(quotaExceeded 아닌 403)·`http_429` 를
+(`collectors/youtube/cli.py::_classify_error`). 위 youtube 팔이 정본으로 읽는 어휘가 이것이다 —
+`blocked` 는 `quota`·`rate_limited`·`http_403`(quotaExceeded 아닌 403)·`http_429` 를
 합친 것으로, commerce `fetch_log.status` 의 403·429 정의와 이어진다.
 - `quota` — 403 + 본문 `error.errors[].reason == "quotaExceeded"` (YouTube Data API 는 쿼터 소진을
   429 가 아니라 이 모양으로 준다).
