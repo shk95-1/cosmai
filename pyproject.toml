@@ -73,6 +73,7 @@ extend-include = [
     "tool/measure-vector-floor",
     "tool/show-vector-stamp",
     "tool/compare-ydc-crosscheck",
+    "tool/compare-ydc-holdout",
     "tool/measure-crosscheck-keys",
     "tool/measure-lexicon-candidates",
 ]
