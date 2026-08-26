@@ -175,9 +175,10 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   `소비자` 289 < `백탁` 338). 그래서 통계가 아니라 판단이고, 판단이므로 **버전을 받는 행으로 산다**:
   `needs.entity_lexicon` 의 `kind='stopword'` · `canonical='query'` 활성 버전이 정본이고, 고치는 길은
   `cosmai lexicon load/diff/activate --kind stopword` 하나다(적재 원본은 주제 사전과 같은 자리의
-  `analysis/retrieval/dict/query_stopwords_v1.csv`). 그 kind 는 주제 사전과 **버전 축이 따로**다 —
+  `analysis/retrieval/dict/query_stopwords_v1.csv`). 그 kind 는 주제 사전과 **활성 버전이 따로**다 —
   `entity_lexicon` 의 `activate` 는 kind 하나만 켜고 끄므로(`db/lexicon.py` `ENTITY_ACTIVATE`), 질의
-  불용어 개정과 aspect 사전 개정이 같은 버전 번호를 다투지 않는다.
+  불용어 개정과 aspect 사전 개정이 서로를 끄지 않는다. 버전 **번호표**는 그렇지 않다 —
+  `formats.md` §entity 사전의 `kind='stopword'` 가 그 한계와 포크 #58 을 적는다.
 - 그 목록에 걸리는 규칙 셋. (1) **질의가 전부 불용어면 지우지 않는다** — 토큰 0개는 결과 0건이고, 필러가
   낀 순위보다 나쁘다. (2) **색인 캐시를 무효화하지 않는다**: `pipeline.index_signature` 는 이 목록을 물지
   않고, 물어서도 안 된다 — 색인은 `tokenize` 그대로라 목록이 바뀌어도 같은 색인이 맞다. heldout 정답을
@@ -185,7 +186,8 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   정의는 색인 축이다). (3) **활성 버전이 없으면 빈 목록이고 막힘이 아니다** — 주제 사전과 다른 자리다:
   주제 사전이 없으면 정답이 0건이라 점수가 거짓이 되지만, 질의 불용어가 없는 검색은 이 목록 이전의 검색
   그대로다. 그래서 `search` 는 뺀 토큰이 있을 때만 stderr 한 줄로 말하고 종료 코드를 바꾸지 않는다
-  (아래 커버리지 경고와 같은 자리).
+  (아래 커버리지 경고와 같은 자리). **v1 적재는 아직 안 했다**(2026-08-26) — 그전까지 `search` 가 보는
+  목록은 비어 있고, 위 규칙 셋은 적재·활성 뒤에야 관측된다.
 - `terms` 는 그 사전이 **못 잡는** 고빈도 명사와 사전 표기의 등장 문서 수를 stdout 표 두 개로 낸다 —
   사람이 읽고 위 CSV 를 고치는 재료다. 파일로 떨구지 않는다: 매일 자라는 코퍼스의 스냅숏이라 레포에
   두면 낡고, 무엇보다 두 번째 사전으로 오해된다. 남기려면 리다이렉트한다.
