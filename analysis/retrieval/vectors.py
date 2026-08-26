@@ -71,8 +71,30 @@ class VectorStore:
 
 
 def manifest_stamp(manifest: dict, count: int | None = None) -> str:
-    """무엇으로 구운 벡터인가 (포크 #49). 뼈대 -- 아직 아무 판본도 내지 않는다."""
-    return ""
+    """무엇으로 구운 벡터인가 한 줄로 (포크 #49). `count` 를 안 넘기면 매니페스트가 말하는 개수다.
+
+    `pipeline.coverage_note` 와 **축이 다르다**. 그쪽은 "지금 청크와 어긋나는가"라 덮으면 할 말이
+    없고, 이쪽은 "무엇으로 구운 벡터인가"라 언제나 할 말이 있다 -- 정상일 때 판본이 안 남는 것이
+    ydc 에서 "1차 → 2차" 로 라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 자리다.
+
+    `chunked_at_max` 는 없는 것과 None 인 것이 다른 사실이라 다른 낱말로 적는다 -- 없으면 그 키가
+    생기기 전에 구운 저장소이고, None 이면 빈 코퍼스를 태운 것이다.
+    """
+    model = str(manifest.get("model", "")).strip()
+    if not model:
+        # 모델 없는 판본은 판본이 아니다. 그런 행을 내느니 여기서 멈춘다(`load` 도 같은 자리에서 거절한다).
+        raise ValueError("매니페스트에 model 이 없다 -- 판본을 적을 수 없다")
+    total = manifest.get("count") if count is None else count
+    parts = [f"model={model}"]
+    if revision := str(manifest.get("revision", "")).strip():
+        parts.append(f"revision={revision}")
+    parts.append(f"vectors={total if total is not None else '미상'}")
+    if "chunked_at_max" not in manifest:
+        moment = "키없음"
+    else:
+        moment = manifest["chunked_at_max"] or "null"
+    parts.append(f"chunked_at_max={moment}")
+    return " · ".join(parts)
 
 
 def save(out: Path, matrix, rows: list[tuple[str, str]], manifest: dict) -> None:
