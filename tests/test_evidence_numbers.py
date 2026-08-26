@@ -16,6 +16,7 @@ import json
 import re
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -30,7 +31,9 @@ INTERFACES = ROOT / "contracts" / "interfaces.md"
 TOOL = ROOT / "tool" / "measure-evidence-fixture"
 
 
+@lru_cache(maxsize=1)
 def measured() -> dict[str, dict[str, float]]:
+    """도구를 **세션에 한 번만** 부른다 -- Kiwi 를 얹고 색인을 세우는 일이라 부를 때마다 몇 초다."""
     done = subprocess.run(
         [sys.executable, str(TOOL), "--json"], capture_output=True, text=True, cwd=ROOT, check=False
     )
@@ -38,6 +41,7 @@ def measured() -> dict[str, dict[str, float]]:
     return json.loads(done.stdout)
 
 
+@lru_cache(maxsize=1)
 def contract() -> str:
     body = INTERFACES.read_text(encoding="utf-8")
     start = body.index("## 근거 (판정 셀을 받치는 소비자 발화")
