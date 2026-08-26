@@ -1,0 +1,220 @@
+#!/usr/bin/env python3
+"""계약 §근거 가 인용하는 픽스처 수치를 다시 잰다 (포크 #6).
+
+계약에 숫자를 적어 두고 재는 길을 남기지 않으면, 픽스처가 자라는 순간 그 숫자는 조용히 거짓이 된다
+(#41 의 `tool/compare-ydc-sensitivity` 와 같은 자리). 이 스크립트가 그 길이고,
+`tests/test_evidence_numbers.py` 가 여기 나온 값과 계약 문장을 매번 맞댄다.
+
+DB 를 쓰지 않는다 -- 코퍼스 CSV 만 읽고 매니페스트의 모집단 규칙을 그대로 적용한다. 그래서
+`analysis/evidence/pipeline.py` 의 SQL 과 **두 벌**이고, 그 둘이 같은 수를 내는지는 같은 테스트가
+DB 파이프라인의 `candidates`·`cells`·`rows` 와 맞대어 확인한다.
+
+두 번째 일은 **검색이 근거 선별을 대신할 수 있는가**의 실측이다 (계약 §근거 의 `retrieval` 절, 포크 #11).
+축은 `analysis/retrieval/eval.py` 의 literal 모드와 같다 -- 질의는 별칭 하나, 정답은 주제 단위. 다른 것은
+코퍼스뿐이고(그 판정 모집단의 댓글), **P@10 에는 그 코퍼스가 정하는 천장이 있다**: 정답이 3건인 주제는
+어떤 엔진도 P@10 이 0.3 을 넘지 못한다. 그래서 이 스크립트는 언제나 천장을 함께 낸다 -- 천장 없이 적은
+P@10 은 전 소스 §검색 실측(.864)과 같은 자 위에 있는 것처럼 읽힌다.
+
+    tool/measure-evidence-fixture                       # 기본 픽스처
+    tool/measure-evidence-fixture --json                # 테스트가 읽는 형식
+    tool/measure-evidence-fixture --corpus <dir> --ydc-evidence <csv>
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
+
+from analysis.evidence import Candidate, is_creator, quotable, select  # noqa: E402
+from analysis.retrieval import bm25, topics  # noqa: E402
+from analysis.retrieval.chunks import MAX_CHARS, split_text  # noqa: E402
+from analysis.retrieval.eval import score, to_docs  # noqa: E402
+from analysis.retrieval.normalize import normalize_text  # noqa: E402
+
+csv.field_size_limit(10**8)
+
+FIXTURE = ROOT / "tests" / "fixtures" / "trend_sample"
+# 매니페스트 규칙 4·5·6 (contracts/formats.md §코퍼스 스냅샷). 값은 analysis/trend/pipeline.py 의 상수와
+# 같아야 하고, 같은지는 테스트가 파이프라인 산출과 맞대어 확인한다.
+LONG = "video_long"
+PRODUCT = "product"
+TOPIC_FILTER = "선크림"
+COMMENT = "youtube_comment"
+VIDEO = "youtube_video"
+K = 10
+CELL = {
+    "run_id": 0, "scope": "선블록", "content_type": "long_form",
+    "panel_version": 1, "panel_role": PRODUCT, "snapshot_id": 0,
+}  # fmt: skip
+
+
+def _read(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _quarter(published_at: str) -> str:
+    return f"{published_at[:4]}Q{(int(published_at[5:7]) - 1) // 3 + 1}"
+
+
+def _dictionary():
+    from retrieval.conftest import csv_topics  # tests/retrieval/conftest.py -- 사전은 한 벌이다
+
+    return topics.use(csv_topics())
+
+
+def candidates_of(corpus: Path, dictionary) -> tuple[list[Candidate], dict[str, str], set[str]]:
+    """(후보 전부, doc_id -> 본문, trend_use 주제). 후보는 (문서, 주제) 하나가 한 줄이다."""
+    documents = _read(corpus / "document.csv")
+    mentions = _read(corpus / "mention.csv")
+    panel = {row["channel_id"] for row in _read(corpus / "channel.csv") if row["panel_role"] == PRODUCT}
+
+    topics_of: dict[str, set[str]] = defaultdict(set)
+    term_of: dict[tuple[str, str], str] = {}
+    for mention in mentions:
+        topics_of[mention["doc_id"]].add(mention["topic_id"])
+        term_of[(mention["doc_id"], mention["topic_id"])] = mention["matched_term"]
+    judged = {entry["topic"] for entry in dictionary.entries if entry["trend_use"]}
+
+    quarter_of_video = {
+        row["source_item_id"]: _quarter(row["published_at"])
+        for row in documents
+        if row["source"] == VIDEO
+        and row["content_type"] == LONG
+        and row["channel_id"] in panel
+        and TOPIC_FILTER in topics_of.get(row["doc_id"], ())
+    }
+
+    made: list[Candidate] = []
+    texts: dict[str, str] = {}
+    for row in documents:
+        if row["source"] != COMMENT:
+            continue
+        quarter = quarter_of_video.get(row["parent_item_id"])
+        if quarter is None:
+            continue
+        texts[row["doc_id"]] = row["text"]
+        meta = json.loads(row["source_metadata"] or "{}")
+        for topic in sorted(topics_of.get(row["doc_id"], set()) & judged):
+            made.append(
+                Candidate(
+                    doc_id=row["doc_id"],
+                    quarter=quarter,
+                    topic_key=topic,
+                    source=COMMENT,
+                    channel_id=row["channel_id"],
+                    like_count=int(meta.get("like_count") or 0),
+                    author_channel_hash=str(meta.get("author_channel_hash") or ""),
+                    quality_flags=row["quality_flags"],
+                    matched_term=term_of.get((row["doc_id"], topic)),
+                )
+            )
+    return made, texts, judged
+
+
+def gates(made: list[Candidate]) -> dict[str, int]:
+    cells = {(c.topic_key, c.quarter, c.source) for c in made}
+    rows = select(made, cells=cells, **CELL)
+    pools: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for candidate in made:
+        if quotable(candidate):
+            pools[(candidate.topic_key, candidate.quarter)].append(candidate.like_count)
+    # 동점 = 그 셀 안에 좋아요가 **같은 후보가 둘 이상** 있는 셀. 후보가 둘 이상인 셀이 아니다.
+    tied = sum(1 for likes in pools.values() if len(likes) != len(set(likes)))
+    return {
+        "candidates": len(made),
+        "comments": len({c.doc_id for c in made}),
+        "creator_pairs": sum(1 for c in made if is_creator(c)),
+        "creator_comments": len({c.doc_id for c in made if is_creator(c)}),
+        "flagged_pairs": sum(1 for c in made if c.quality_flags),
+        "cells": len(cells),
+        "quoted_cells": len({(r.topic_key, r.quarter) for r in rows}),
+        "rows": len(rows),
+        "tied_cells": tied,
+    }
+
+
+def retrieval(made: list[Candidate], texts: dict[str, str], dictionary) -> dict[str, float | int]:
+    """literal 모드와 같은 축(별칭 질의 · 주제 단위 정답)을 그 판정 모집단의 댓글에만 적용한다."""
+    chunk_ids: list[str] = []
+    bodies: list[str] = []
+    split = 0
+    for doc_id, text in sorted(texts.items()):
+        pieces = split_text(normalize_text(text))
+        split += len(pieces) > 1
+        for ordinal, piece in enumerate(pieces):
+            chunk_ids.append(f"{doc_id}#{ordinal}")
+            bodies.append(piece)
+    index = bm25.Index(chunk_ids, bodies)
+
+    gold: dict[str, set[str]] = defaultdict(set)
+    for candidate in made:
+        gold[candidate.topic_key].add(candidate.doc_id)
+
+    precision: list[float] = []
+    ceiling: list[float] = []
+    reciprocal: list[float] = []
+    hits = 0
+    top_of_topic: dict[str, set[str]] = defaultdict(set)
+    for entry in dictionary.entries:
+        if not entry["trend_use"] or not gold.get(entry["topic"]):
+            continue
+        answers = gold[entry["topic"]]
+        for alias in [*entry["ko"], *entry["latin"]]:
+            ranked = to_docs([chunk for chunk, _ in index.search(alias, k=K * 4)], K)
+            top_of_topic[entry["topic"]] |= set(ranked)
+            found, reciprocal_rank, hit = score(ranked, answers)
+            precision.append(found)
+            # 정답이 K 보다 적은 주제는 어떤 엔진도 P@K 가 |정답|/K 를 넘지 못한다.
+            ceiling.append(min(1.0, len(answers) / K))
+            reciprocal.append(reciprocal_rank)
+            hits += hit
+
+    cells = {(c.topic_key, c.quarter, c.source) for c in made}
+    picked = select(made, cells=cells, **CELL)
+    reachable = sum(1 for row in picked if row.doc_id in top_of_topic[row.topic_key])
+    return {
+        "comments": len(texts),
+        "chunks": len(chunk_ids),
+        "comments_split": split,
+        "max_chars": MAX_CHARS,
+        "queries": len(precision),
+        "p_at_10": round(sum(precision) / len(precision), 3),
+        "p_at_10_ceiling": round(sum(ceiling) / len(ceiling), 3),
+        "mrr_at_10": round(sum(reciprocal) / len(reciprocal), 3),
+        "hit_at_10": round(100 * hits / len(precision), 1),
+        "evidence_rows": len(picked),
+        "evidence_in_top10": reachable,
+        "evidence_in_top10_pct": round(100 * reachable / len(picked), 1),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--corpus", type=Path, default=FIXTURE / "corpus")
+    parser.add_argument("--json", action="store_true", help="테스트가 읽는 형식으로만 낸다.")
+    args = parser.parse_args()
+
+    dictionary = _dictionary()
+    made, texts, _judged = candidates_of(args.corpus, dictionary)
+    measured = {"gates": gates(made), "retrieval": retrieval(made, texts, dictionary)}
+    if args.json:
+        print(json.dumps(measured, ensure_ascii=False, indent=2))
+        return 0
+    for section, values in measured.items():
+        print(f"[{section}]")
+        for name, value in values.items():
+            print(f"  {name:<22} {value}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

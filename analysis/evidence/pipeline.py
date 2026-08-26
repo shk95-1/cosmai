@@ -4,7 +4,9 @@
 `needs_runtime` 의 `idle_in_transaction_session_timeout` 이 15초라, 후보를 커서로 들고 접기 시작하면
 연결이 끊긴다. 읽자마자 `conn.commit()` 하고 그 뒤로는 DB 를 보지 않는 것이 이 파일의 모양이고,
 `analysis/trend/pipeline.py` 가 같은 이유로 같은 모양이다. 끌어오는 것은 본문이 아니라 포인터와
-좋아요뿐이라 전량에서도 가볍다 -- 본문은 뷰가 필요할 때 잇는다.
+좋아요뿐이다 -- 본문은 뷰가 필요할 때 잇는다. 전량(261,317문서)에서 후보 15,602행 · 질의 178ms ·
+명령 전체 0.52s · 최대 상주 73MB 로 **재 봤다**(2026-08-26, 계약 §근거 "전량 실측"); 재지 않은 채
+"가볍다"고 적어 두면 그것은 다음 사람이 밟을 단언이다.
 
 **모집단을 다시 적지 않는다.** 지표를 세운 `POPULATION` CTE 를 그대로 import 해서 쓴다. 근거만 다른
 모집단에서 고르면 카드가 인용하는 발화와 카드에 적힌 숫자가 다른 분모 위에 서고, 둘 다 그럴듯해서
@@ -62,6 +64,8 @@ SELECT c.doc_id, v.quarter, m.topic_id, c.source, c.channel_id,
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
+# TODO(#43): `content_type` 이 이 술어에도 note_of() 에도 없어, short_form 산출이 같은 run 의
+# long_form 근거를 지운다 -- `analysis/trend/pipeline.py`·`analysis/judge/pipeline.py` 와 같은 네 칸이다.
 CLEAR: LiteralString = (
     "DELETE FROM topic_quarter_evidence "
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"

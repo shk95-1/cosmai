@@ -278,7 +278,8 @@ cosmai trend cards --quarter <q> [--url <url>]
   근거만 다른 모집단에서 고르면 카드의 발화와 카드의 숫자가 다른 분모 위에 선다.
 - **후보를 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다.** 근거는 판정과 달리 코퍼스를 훑는 단계라
   `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에 그대로 걸린다 — 커서를 연 채 접으면
-  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이다.
+  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이고,
+  전량에서 후보 15,602행 · 0.52s · 73MB 로 실제로 재 봤다 (`interfaces.md` §근거 "전량 실측").
 - 한 실행이 그 (run, scope, 명부) 의 근거 행을 통째로 다시 쓴다 — 부분 갱신이면 자리(rank)의 사다리가
   조용히 구멍 난다.
 - 쓰고 나서 `needs.topic_quarter_evidence_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
