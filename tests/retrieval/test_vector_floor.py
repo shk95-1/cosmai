@@ -19,7 +19,7 @@ from __future__ import annotations
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -62,6 +62,15 @@ def test_the_three_verdicts_were_fixed_before_any_number_was_seen():
     kind, threshold = floor.verdict(NESTED_REAL, NESTED_FAKE)
     assert kind == floor.UNUSABLE and threshold == 0.84
     assert floor.verdict([], [0.5])[0] == "측정 불가"
+
+
+def test_a_tie_at_the_edge_is_not_separation():
+    """경계 부등호를 아무도 안 지키면 `<=` 로 바뀌어도 스위트가 초록이다 -- 가짜 최고가 진짜 최저와
+    **같은** 값이면 그 값의 질의는 진짜와 구별되지 않으므로 분리가 아니다."""
+    floor = loaded()
+    kind, threshold = floor.verdict([0.90, 0.91], [0.90, 0.80])
+    assert kind != floor.SEPARATED
+    assert (kind, threshold) == (floor.USABLE, 0.90)
 
 
 def test_blocking_every_fake_is_not_by_itself_a_reason_to_put_a_floor_in():
@@ -179,3 +188,42 @@ def test_the_search_section_says_the_floor_is_absent_on_purpose():
     search = body[start : body.index("\n## ", start)]
     assert "유사도 하한선을 두지 않는다" in search
     assert "§벡터 하한선" in search
+
+
+def test_a_sample_with_no_fake_left_says_so_instead_of_crashing(capsys):
+    """12개가 전부 코퍼스에 있으면 표본이 통째로 가짜가 아니다. 그 자리에서 터지면 이 도구는 약속한
+    종료 코드 1 로 "이 산출을 믿지 마라" 를 말할 기회가 없다."""
+    floor = loaded()
+    assert floor.band_of([], low=False) is None
+    measured = {
+        "store": "model=m · vectors=1 · chunked_at_max=키없음",
+        "dictionary": 2,
+        "csv_queries": {"same": True, "csv": 2, "active": 2},
+        "present": dict.fromkeys(floor.FAKE, 3),
+        "real": floor.band_of([("백탁", 0.90), ("톤 업", 0.80)], low=True),
+        "fake": None,
+        "verdict": floor.verdict([0.90, 0.80], [])[0],
+    }
+    floor.report_cosine(measured)
+    printed = capsys.readouterr().out
+    assert "측정 불가" in printed and "표본이 비었다" in printed
+    assert "가짜가 아니다" in printed
+
+
+def test_the_measurement_itself_survives_a_sample_that_is_not_fake(monkeypatch: pytest.MonkeyPatch):
+    """위 테스트는 보고만 본다. 수를 만드는 쪽도 같은 자리에서 살아남아야 한다 -- 분위수를 낼 표본이
+    없는데 내는 것이 이 함수가 하면 안 되는 일이다."""
+    floor = loaded()
+    from analysis.retrieval import embed, topics
+
+    monkeypatch.setattr(topics, "use_active", lambda _conn: topics.Topics((), 2, "x"))
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_k: object())
+    monkeypatch.setattr(floor, "literal_queries", lambda _dictionary: ["백탁", "톤 업"])
+    monkeypatch.setattr(floor, "same_as_csv", lambda _queries: {"same": True, "csv": 2, "active": 2})
+    monkeypatch.setattr(floor, "presence", lambda _conn, names: dict.fromkeys(names, 3))
+    monkeypatch.setattr(floor, "top_cosine", lambda _s, _e, queries: [(q, 0.9) for q in queries])
+
+    measured = floor.measure_cosine(None, SimpleNamespace(stamp="model=m", model="m"), "cpu")
+    assert measured["fake"] is None and measured["verdict"] == "측정 불가"
+    assert set(measured["present"]) == set(floor.FAKE), "왜 못 믿는지가 산출 안에 있어야 한다"
+    assert "overlap" not in measured and "at_ydc_trial" not in measured

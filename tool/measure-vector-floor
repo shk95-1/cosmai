@@ -146,11 +146,43 @@ def at(threshold: float, real: list[float], fake: list[float]) -> dict:
     }
 
 
+def band_of(rows: list[tuple[str, float]], *, low: bool) -> dict | None:
+    """분포 한 벌과 그 가장자리 다섯. **표본이 비면 None 이다** -- 없는 표본 위에 분위수를 지어내지 않는다."""
+    scores = [score for _query, score in rows]
+    if not scores:
+        return None
+    edge = sorted(rows, key=lambda row: row[1] if low else -row[1])[:5]
+    return {**spread(scores), "lowest" if low else "highest": edge}
+
+
+def csv_dictionary() -> topics.Topics:
+    """적재 원본 CSV 한 벌. `cosmai lexicon load` 가 쓰는 그 변환을 타되 **프로세스에 세우지는 않는다** --
+    이 도구가 재는 정본은 활성 사전이고, 이쪽은 그 활성 사전과 맞대는 상대다."""
+    from cosmai.cli import _csv_rows
+    from db.lexicon import ASPECT_COLUMNS
+
+    aspect, pattern, extra = (ASPECT_COLUMNS.index(column) for column in ("aspect", "pattern", "extra"))
+    rows = _csv_rows("aspect", str(topics.DICTIONARY_CSV))
+    return topics.from_rows([(str(row[aspect]), str(row[pattern]), row[extra]) for row in rows], 1)
+
+
+def literal_queries(dictionary: topics.Topics) -> list[str]:
+    """`retrieval eval --mode literal` 이 쓰는 그 질의. 사람이 고르지 않는다."""
+    return [query for _topic, query in retrieval_eval.queries("literal", dictionary)]
+
+
+def same_as_csv(queries: list[str]) -> dict:
+    """활성 사전의 질의가 적재 원본 CSV 의 것과 같은가. 계약이 §검색 실측 과 이 표를 잇는 근거이고,
+    사전 판본이 갈린 뒤로는 **이것이 맞댈 수 있는 유일한 짝**이다(옛 버전 행은 DB 에 없다)."""
+    from_csv = literal_queries(csv_dictionary())
+    return {"same": from_csv == queries, "csv": len(from_csv), "active": len(queries)}
+
+
 def measure_cosine(conn, store, device: str | None) -> dict:
     from analysis.retrieval import embed
 
     dictionary = topics.use_active(conn)
-    real_queries = [query for _topic, query in retrieval_eval.queries("literal", dictionary)]
+    real_queries = literal_queries(dictionary)
     found = presence(conn, FAKE)
     encoder = embed.load_encoder(store.model, device)
     real = top_cosine(store, encoder, real_queries)
@@ -158,15 +190,23 @@ def measure_cosine(conn, store, device: str | None) -> dict:
     real_scores = [score for _query, score in real]
     fake_scores = [score for _query, score in fake]
     kind, threshold = verdict(real_scores, fake_scores)
-    band = spread(real_scores)
-    return {
+    band = band_of(real, low=True)
+    measured = {
         "store": store.stamp,
         "dictionary": dictionary.version,
+        "csv_queries": same_as_csv(real_queries),
         "present": {name: count for name, count in found.items() if count},
-        "real": {**band, "lowest": sorted(real, key=lambda row: row[1])[:5]},
-        "fake": {**spread(fake_scores), "highest": sorted(fake, key=lambda row: -row[1])[:5]},
-        "overlap": max(fake_scores) >= min(real_scores),
+        "real": band,
+        "fake": band_of(fake, low=False),
         "verdict": kind,
+    }
+    if not (band and fake_scores):
+        # 한쪽 표본이 비면 판정도 겹침도 지어내는 것이다 -- 가짜가 다 코퍼스에 있는 경우가 그 자리이고,
+        # `present` 가 무엇 때문인지 말하며 종료 코드 1 이 이 산출을 믿지 말라고 말한다.
+        return measured
+    return {
+        **measured,
+        "overlap": max(fake_scores) >= min(real_scores),
         "at_threshold": at(threshold, real_scores, fake_scores) if threshold else None,
         "at_ydc_trial": at(YDC_TRIAL, real_scores, fake_scores),
         # 겹침의 크기. "겹친다"만으로는 스치는 것과 뭉쳐 있는 것이 같아 보인다.
@@ -210,7 +250,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
 
     dictionary = topics.use_active(conn)
     index, _origin = pipeline.load_index(conn, sources)
-    real = [query for _topic, query in retrieval_eval.queries("literal", dictionary)]
+    real = literal_queries(dictionary)
     shapes = frames()
     samples = {
         "real_alias": real,
@@ -225,6 +265,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
         rules["in_use"][sample] = sum(1 for query in queries if not grounding.check(query, index).ok)
     return {
         "dictionary": dictionary.version,
+        "csv_queries": same_as_csv(real),
         "minimum_length": grounding.ZERO_DF_MINLEN,
         "frames": len(shapes),
         "sizes": {sample: len(queries) for sample, queries in samples.items()},
@@ -236,19 +277,31 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
 
 def report_cosine(found: dict) -> None:
     print(f"저장소 {found['store']} · 활성 주제 사전 v{found['dictionary']}")
+    same = found["csv_queries"]
+    verdict_csv = "같다" if same["same"] else "다르다"
+    print(f"  질의 {same['active']}개 · 적재 원본 CSV({same['csv']}개)와 {verdict_csv}")
     if found["present"]:
         print(f"[가짜가 아니다] 코퍼스에 실제로 있는 후보 {found['present']}")
-    for label, key in (("진짜 질의 (주제 별칭)", "real"), ("가짜 질의 (없는 성분명)", "fake")):
+    for label, key, edge in (
+        ("진짜 질의 (주제 별칭)", "real", "lowest"),
+        ("가짜 질의 (없는 성분명)", "fake", "highest"),
+    ):
         band = found[key]
+        if band is None:
+            print(f"\n{label} 최고 코사인  표본이 비었다 -- 분포를 낼 수 없다")
+            continue
         print(
             f"\n{label} 최고 코사인  n={band['n']}\n"
             f"  최소 {band['min']:.4f} · 25% {band['p25']:.4f} · 중앙 {band['median']:.4f} "
             f"· 75% {band['p75']:.4f} · 최대 {band['max']:.4f}"
         )
-        edge = band["lowest"] if key == "real" else band["highest"]
-        print("  " + ("가장 낮은 " if key == "real" else "가장 높은 ") + "5개: ", end="")
-        print(" ".join(f"{query}={score:.3f}" for query, score in edge))
-    print(f"\n판정: **{found['verdict']}** · 겹침 {'있음' if found['overlap'] else '없음'}")
+        print(f"  가장 {'낮은' if edge == 'lowest' else '높은'} 5개: ", end="")
+        print(" ".join(f"{query}={score:.3f}" for query, score in band[edge]))
+    print(f"\n판정: **{found['verdict']}**", end="")
+    if "overlap" not in found:
+        print(" -- 한쪽 표본이 비어 겹침도 문턱도 낼 수 없다")
+        return
+    print(f" · 겹침 {'있음' if found['overlap'] else '없음'}")
     print(
         f"  진짜 {found['real_below_fake_max']}/{found['real']['n']}개가 가짜 최고보다 낮고 "
         f"· 가짜 {found['fake_inside_real_quartiles']}/{found['fake']['n']}개가 진짜의 사분위 안에 있다"
@@ -268,7 +321,11 @@ def report_df(found: dict) -> None:
         "any_len3": "하나라도 0 · 길이 >= 3",
         "in_use": f"하나라도 0 · 길이 >= {found['minimum_length']} (쓰는 규칙)",
     }
-    print(f"\n막힌 질의 수 · 활성 주제 사전 v{found['dictionary']} · 문형 {found['frames']}개")
+    same = found["csv_queries"]
+    print(
+        f"\n막힌 질의 수 · 활성 주제 사전 v{found['dictionary']} · 문형 {found['frames']}개 "
+        f"· 질의는 적재 원본 CSV 와 {'같다' if same['same'] else '다르다'}"
+    )
     for name, label in labels.items():
         counts = " · ".join(
             f"{sample} {found['rules'][name][sample]}/{size}" for sample, size in found["sizes"].items()
