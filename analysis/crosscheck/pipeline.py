@@ -34,17 +34,17 @@ SUN_BOARD = "suncare"
 SUN_CATEGORY = ("%선케어%", "%선크림%", "%선블록%", "%선스틱%", "%선쿠션%")
 CHUNK_PAGE = 20_000
 
-_SUN = """
+SUN_JOIN = """
   JOIN (SELECT DISTINCT source, product_key FROM {rank}
          WHERE board = %(board)s OR category_name ILIKE ANY(%(category)s)) sun
     USING (source, product_key)
 """
-SUN_REVIEWS = "SELECT r.source, r.review_key FROM {review} r" + _SUN
+SUN_REVIEWS = "SELECT r.source, r.review_key FROM {review} r" + SUN_JOIN
 RATED = (
     "SELECT t.source, t.product_key, t.topic_group, t.topic_name, t.share_pct, t.captured_at "
     # `share_pct` 가 NULL 인 소스는 비중 대신 가중치(`score`)를 싣는다. 가중치와 백분율은 다른 단위라
     # 섞어 평균 내면 아무것도 보여 주지 않고 틀린다 (`review_topic.score` 의 DDL 주석).
-    "FROM {topic} t" + _SUN + " WHERE t.share_pct IS NOT NULL"
+    "FROM {topic} t" + SUN_JOIN + " WHERE t.share_pct IS NOT NULL"
 )
 FORMULA = "SELECT source, product_key, ingredients FROM {product} WHERE coalesce(ingredients, '') <> ''"
 SUN_PRODUCTS = (
@@ -148,7 +148,14 @@ def _table(schema: str, table: str) -> pgsql.Composed | pgsql.Identifier:
     return pgsql.SQL("{}.{}").format(pgsql.Identifier(schema), pgsql.Identifier(table))
 
 
-def _commerce(schema: str, statement: str) -> pgsql.Composed:
+def sun_params() -> dict[str, Any]:
+    """선케어 모집단 술어의 인자. 홀드아웃(#51)도 이 술어 위에 서야 두 팔의 차이가 표본의 것이지
+    필터의 것이 아니다 -- 두 자리에 적히면 한쪽만 바뀌는 날 모집단이 조용히 갈린다."""
+    return {"board": SUN_BOARD, "category": list(SUN_CATEGORY)}
+
+
+def commerce_sql(schema: str, statement: str) -> pgsql.Composed:
+    """커머스 원천 넷을 그 스키마로 묶는다. 공개인 것은 홀드아웃이 같은 술어를 다시 적지 않기 위해서다."""
     return pgsql.SQL(statement).format(  # pyright: ignore[reportArgumentType]
         rank=_table(schema, "rank_snapshot"),
         review=_table(schema, "review"),
@@ -267,7 +274,7 @@ def load(
     commerce_schema = COMMERCE_SCHEMA if commerce_schema is None else commerce_schema
     dictionary = topic_registry.use_active(conn)
     topic_keys = tuple(entry["topic"] for entry in dictionary.entries if entry["trend_use"])
-    where = {"board": SUN_BOARD, "category": list(SUN_CATEGORY)}
+    where = sun_params()
     with conn.cursor() as cur:
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
@@ -296,18 +303,18 @@ def load(
         cells = cur.fetchall()
         if not cells:
             raise NoCrosscheck(f"run {run_id} has no topic_quarter_judgement row; run `cosmai trend judge`")
-        cur.execute(_commerce(commerce_schema, SUN_PRODUCTS), where)
+        cur.execute(commerce_sql(commerce_schema, SUN_PRODUCTS), where)
         ranked = int((cur.fetchone() or (0,))[0])
         if not ranked:
             raise NoCrosscheck(
                 "no suncare product in rank_snapshot; run `cosmai collect commerce` -- the ranking is "
                 "what decides the commerce population (contracts/interfaces.md §대조)"
             )
-        cur.execute(_commerce(commerce_schema, SUN_REVIEWS), where)
+        cur.execute(commerce_sql(commerce_schema, SUN_REVIEWS), where)
         sun_reviews = {corpus.review_doc_id(source, key) for source, key in cur.fetchall()}
-        cur.execute(_commerce(commerce_schema, RATED), where)
+        cur.execute(commerce_sql(commerce_schema, RATED), where)
         rated_rows = cur.fetchall()
-        cur.execute(_commerce(commerce_schema, FORMULA), ())
+        cur.execute(commerce_sql(commerce_schema, FORMULA), ())
         formula_rows = cur.fetchall()
         cur.execute(CHUNK_DOCS)
         documents = {str(source): int(count) for source, count in cur.fetchall()}
@@ -521,13 +528,17 @@ __all__ = [
     "COMMERCE_SCHEMA",
     "SUN_BOARD",
     "SUN_CATEGORY",
+    "SUN_JOIN",
+    "SUN_PRODUCTS",
     "Built",
     "NoCrosscheck",
     "NoPopulation",
     "Outcome",
     "Read",
     "build",
+    "commerce_sql",
     "load",
     "render",
     "run",
+    "sun_params",
 ]
