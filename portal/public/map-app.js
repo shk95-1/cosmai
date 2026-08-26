@@ -5,6 +5,7 @@
 // 노드 28개는 열 배치로 충분하다. 포털의 의존성 0 을 지키는 값이 자동배치보다 크다.
 import { buildQuery, PAGE_SIZE, nextPageOffset, describeError, MAP_QUERIES } from './query.js';
 import { nodesOf, feedbackEdges, positions, canvasSize, labelOf } from './map.js';
+import { severityClass } from './severity.js';
 
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:3000`;
 const HEADERS = { 'Accept-Profile': 'needs', Prefer: 'count=exact' };
@@ -66,8 +67,9 @@ function edgePath(from, to, isFeedback) {
   return `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
 }
 
-function render(edges, stages, now) {
+function render(edges, stages, health, now) {
   const stageByKey = new Map(stages.map((s) => [s.stage_key, s]));
+  const healthByKey = new Map((health || []).map((h) => [h.stage_key, h]));
   const pos = positions(edges);
   const { width, height } = canvasSize(edges);
   const back = new Set(feedbackEdges(edges).map((e) => `${e.from_key} ${e.to_key}`));
@@ -85,10 +87,21 @@ function render(edges, stages, now) {
   const boxes = nodesOf(edges).map((node) => {
     const box = pos.get(node.key);
     const label = labelOf(node);
-    // 라벨이 상자보다 길면 잘린다. 전체 이름은 title 로 남긴다.
-    return `<g><title>${esc(node.key)}</title>
+    const row = healthByKey.get(node.key);
+    // 상태는 **왼쪽 띠** 로 얹는다. 채움은 이미 팔(정체성)을 말하고 있어, 거기에 상태 색을
+    // 겹치면 한 모양에 색 체계가 둘이라 못 읽는다. 띠는 관제 표(#139)가 행에 쓰는 것과 같은
+    // 장치라 두 화면이 같은 말을 한다.
+    //
+    // 저장소에는 띠가 없다. 표 하나를 여러 단계가 먹일 수 있어(trend_radar.product 를
+    // commerce:ranking 과 commerce:product 둘이 쓴다) 한 단계의 상태를 물려주면 거짓이 된다.
+    const stripe = row
+      ? `<rect class="map-stripe ${severityClass(row)}" x="${box.x}" y="${box.y}" width="4" height="${box.h}"/>`
+      : '';
+    const state = row ? ` — ${row.freshness} / ${row.last_run_status ?? '—'}` : '';
+    return `<g><title>${esc(node.key + state)}</title>
       <rect class="map-node ${nodeClass(node, stageByKey)}" x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" rx="6"/>
-      <text class="map-label" x="${box.x + 10}" y="${box.y + box.h / 2 + 4}">${esc(label)}</text>
+      ${stripe}
+      <text class="map-label" x="${box.x + 12}" y="${box.y + box.h / 2 + 4}">${esc(label)}</text>
     </g>`;
   }).join('');
 
@@ -99,7 +112,9 @@ function render(edges, stages, now) {
   $('map-legend').innerHTML =
     `<p class="caption">실선 오른쪽 방향 = 단계가 표를 <b>쓴다</b> · 실선 왼쪽에서 = 표를 <b>읽는다</b> · `
     + `점선 = <b>되먹임</b>(같은 단계가 제 산출을 다시 읽는다, ${feedbackCount}개). `
-    + `회색 상자 = 저장소, 색 상자 = 단계(팔별), 흐린 상자 = 선언상 꺼진 단계.</p>`;
+    + `회색 상자 = 저장소, 색 상자 = 단계(팔별), 흐린 상자 = 선언상 꺼진 단계. `
+    + `단계 왼쪽 띠 = 지금 상태(관제 화면과 같은 색). 저장소에 띠가 없는 것은 표 하나를 여러 `
+    + `단계가 먹일 수 있어 한 단계의 상태를 물려주면 거짓이 되기 때문이다.</p>`;
 
   $('map-caption').textContent = `노드 ${nodesOf(edges).length}개 · 엣지 ${edges.length}개`;
   $('map-fetched').textContent = `마지막 갱신 ${now.toTimeString().slice(0, 5)}`;
@@ -108,16 +123,17 @@ function render(edges, stages, now) {
 async function load() {
   $('error').textContent = '';
   try {
-    const [edges, stages] = await Promise.all([
+    const [edges, stages, health] = await Promise.all([
       apiAll('/pipeline_edge', MAP_QUERIES.edge),
       apiAll('/pipeline_stage', MAP_QUERIES.stage),
+      apiAll('/pipeline_health', MAP_QUERIES.health),
     ]);
     if (edges.length === 0) {
       $('map-canvas').innerHTML = '<p class="empty-note">선언된 엣지가 없음 — 시드가 아직 안 돌았습니다.</p>';
       $('map-caption').textContent = '엣지 0개';
       return;
     }
-    render(edges, stages, new Date());
+    render(edges, stages, health, new Date());
   } catch (err) {
     $('error').textContent = err.message;
     $('map-caption').textContent = '불러오지 못했습니다';

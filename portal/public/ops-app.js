@@ -4,7 +4,8 @@
 // 지표 페이지(index.html)와 부팅을 나눈 이유: 관제만 보려고 열어도 metrics_need 세 벌을 받는
 // 일이 없어야 한다. 이 페이지가 받는 것은 pipeline_health 한 표뿐이다(#139).
 import { buildQuery, PAGE_SIZE, nextPageOffset, describeError, OPS_QUERY } from './query.js';
-import { problems, problemCount, byArm, disabled, relativeTime, describeInterval, severityOf } from './ops.js';
+import { problems, problemCount, byArm, disabled, relativeTime, describeInterval } from './ops.js';
+import { severityClass } from './severity.js';
 
 const API_BASE = `${window.location.protocol}//${window.location.hostname}:3000`;
 const HEADERS = { 'Accept-Profile': 'needs', Prefer: 'count=exact' };
@@ -35,10 +36,6 @@ async function apiAll(basePath, { select, order }) {
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-// 심각도 하나가 색을 고르고, 배지 둘이 그 심각도가 어디서 왔는지 말한다.
-const SEVERITY_CLASS = ['sev-critical', 'sev-warn', 'sev-idle', 'sev-ok', 'sev-muted'];
-const severityClass = (row) => SEVERITY_CLASS[severityOf(row)] || 'sev-idle';
 
 function statsOf(row) {
   if (row.requests === null || row.requests === undefined) return '—';

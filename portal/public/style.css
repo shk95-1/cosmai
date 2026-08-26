@@ -163,3 +163,12 @@ th.num, td.num { text-align: right; }
 .edge-read { stroke: var(--text-muted); stroke-opacity: 0.65; }
 /* 되먹임은 사실이지 결함이 아니다 — 점선으로 갈라 두되 눈에 띄게 둔다. */
 .edge-feedback { stroke: var(--seq-2); stroke-dasharray: 5 4; }
+
+/* 지도의 상태 띠(#143). 관제 표의 왼쪽 테두리와 같은 장치·같은 색이라 두 화면이 같은 말을 한다.
+   sev-* 클래스는 severity.js 가 고르고, 색은 위 관제 절의 정의를 그대로 쓴다. */
+.map-stripe { stroke: none; }
+.map-stripe.sev-critical { fill: var(--diverging-neg); }
+.map-stripe.sev-warn { fill: var(--seq-2); }
+.map-stripe.sev-idle { fill: var(--text-muted); }
+.map-stripe.sev-ok { fill: var(--diverging-pos); }
+.map-stripe.sev-muted { fill: var(--text-muted); fill-opacity: 0.4; }

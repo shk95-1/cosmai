@@ -5,12 +5,11 @@
 // 준다(#138) — 화면이 다시 판정하면 tool/status 나 알림과 답이 갈린다. 여기가 하는 것은 그
 // 판정을 *사람이 읽는 순서*로 놓는 일이다.
 
-// 심각도는 **하나의 척도**다: 0 위급 · 1 주의 · 2 아직 안 돎 · 3 정상 · 4 선언상 꺼짐.
-// 두 컬럼이 각자의 등수를 갖고 그 등수를 섞으면 비교가 뜻을 잃는다 -- 같은 자로 재야
-// "둘 중 나쁜 쪽" 이 성립한다.
-const FRESHNESS_SEVERITY = { stalled: 0, late: 1, never: 2, ok: 3, disabled: 4 };
-// yielded 는 소스 락에 밀려 물러난 run 이라 고장이 아니다(#78). blocked 는 403·429 -- 주의다.
-const STATUS_SEVERITY = { failed: 0, partial: 1, blocked: 1, yielded: 3, ok: 3 };
+// 심각도와 색은 severity.js 가 진다 -- 구조 지도(#143)가 같은 함수를 부른다. 두 화면이 같은
+// 단계를 다른 색으로 보이면 둘 다 못 믿게 된다. 여기서 다시 내보내는 것은 이미 이 모듈을
+// 부르고 있는 화면과 테스트를 위해서다.
+export { severityOf, severityClass } from './severity.js';
+import { severityOf } from './severity.js';
 
 // 배너와 '문제만 모은 덩어리'가 세는 집합. 배너가 답하는 질문은 "지금 무엇이 막혔나" 이므로
 // 여기 드는 것은 둘뿐이다: 안 돌고 있다 · 마지막 run 이 통째로 실패했다.
@@ -42,14 +41,6 @@ export function problemCount(rows) {
 
 // 두 값 중 나쁜 쪽. 화면은 이것으로 색을 고르되 두 값을 **둘 다** 표시한다 -- 하나로 접으면
 // "3일 전에 실패한 뒤로 죽어 있다" 와 "방금 실패했지만 아직 주기 안" 이 같아 보인다(#138).
-export function severityOf(row) {
-  // 모르는 값과 없는 값(아직 안 돈 단계의 last_run_status)은 판단에서 빠진다 -- 정상으로도
-  // 고장으로도 세지 않는다. 그러면 남은 한쪽이 그 행의 심각도를 결정한다.
-  const f = FRESHNESS_SEVERITY[row.freshness];
-  const s = STATUS_SEVERITY[row.last_run_status];
-  return Math.min(f === undefined ? 99 : f, s === undefined ? 99 : s);
-}
-
 export function sortByWorst(rows) {
   // stage_key 로 동률을 깬다 -- 같은 심각도의 행 순서가 응답 순서에 따라 흔들리면 매일 아침
   // 같은 화면이 다르게 보인다.
