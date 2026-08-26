@@ -120,6 +120,8 @@ OPEN_RUN: LiteralString = (
     "INSERT INTO analysis_run (status, versions, note) VALUES ('running', %s::jsonb, %s) RETURNING run_id"
 )
 CLOSE_RUN: LiteralString = "UPDATE analysis_run SET status = 'ok', finished_at = now() WHERE run_id = %s"
+# TODO(#43): `content_type` 이 이 술어에도 note_of() 에도 없어, short_form 산출이 같은 run 의
+# long_form 행을 지운다.
 CLEAR: LiteralString = (
     "DELETE FROM metrics_topic_quarter "
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
@@ -262,6 +264,7 @@ def build(
     panel_version: int | None = None,
 ) -> Built:
     """읽고, 트랜잭션을 닫고, 수식을 돌린다. 그 순서가 15초 타임아웃을 피하는 유일한 모양이다."""
+    # TODO(#44): run 을 먼저 열고 커밋하므로, 모집단이 비어 run() 이 막히면 status='running' 이 남는다.
     with conn.cursor() as cur:
         # 활성 판본을 고르는 길은 하나다 -- 맨 `WHERE active` 는 판본이 둘일 때 분모를 두 배로 만든다.
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
