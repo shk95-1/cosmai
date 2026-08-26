@@ -127,6 +127,18 @@ class Source(Protocol):
     policy: ClassVar[SourcePolicy]
     datasets: ClassVar[frozenset[Dataset]]
     scope: ClassVar[Scope]
+    # Which of this source's datasets can write `trend_radar.review` bodies. A subset of `datasets`,
+    # and usually NOT the ones whose name says "review": glowpick serves ranking and review off the
+    # same category page and its `parse()` does not gate on the dataset, so its hourly RANKING run
+    # writes review rows too (slopindustries/cosmai#144 -- 63.5% of that site's rows).
+    #
+    # Declared rather than inferred because `trend_radar.review` has no `run_id`: needs'
+    # `collection_lineage` view can only reach a review's collection run through
+    # (captured_at, sources, datasets), and reading `datasets` wrongly silently mislabels a real
+    # match as "unknown". tests/collectors/commerce/test_review_body_datasets.py replays the
+    # recorded fixtures and cries when this declaration and `parse()` disagree; the view mirrors it
+    # and tests/test_collection_lineage_view.py cries when the two drift apart.
+    review_body_datasets: ClassVar[frozenset[Dataset]]
 
     # `board` only means anything to a source that declares REVIEW_LOW (oliveyoung, #7); every other
     # source ignores it. Part of the shared signature anyway so the engine can call it uniformly.

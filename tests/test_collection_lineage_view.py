@@ -15,6 +15,7 @@ run 은 두 행이다(`collectors/commerce/storage/db.py` 의 RunLog). 그래서
 from __future__ import annotations
 
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,9 @@ from uuid import UUID
 import pytest
 from sqlalchemy import create_engine, text
 
+import collectors.commerce.sources  # noqa: F401  -- 등록이 import 부작용이다
+from collectors.commerce.registry import SOURCES
+
 pytestmark = pytest.mark.postgres
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -30,20 +34,27 @@ VIEW = REPO_ROOT / "db" / "views" / "collection_lineage.sql"
 
 BUCKET = datetime(2026, 8, 20, 3, 0, tzinfo=UTC)  # run 의 시간 버킷 = review.captured_at
 OTHER_BUCKET = datetime(2026, 8, 21, 3, 0, tzinfo=UTC)
+OY_BUCKET = datetime(2026, 8, 22, 3, 0, tzinfo=UTC)  # oliveyoung 만 돈 버킷 -- 게이트가 있는 쪽
 LOW_BUCKET = datetime(2026, 8, 23, 3, 0, tzinfo=UTC)  # review_low 걸음만 돈 버킷
 MULTI_BUCKET = datetime(2026, 8, 24, 3, 0, tzinfo=UTC)  # dataset 을 둘 담은 run 의 버킷
+GP_RANK_BUCKET = datetime(2026, 8, 25, 3, 0, tzinfo=UTC)  # glowpick 이 ranking 런으로만 돈 버킷
 LONELY = datetime(2026, 8, 26, 3, 0, tzinfo=UTC)  # run 행이 하나도 없는 버킷 (glowpick 08-20~26 자리)
 
 RUN_ONE = UUID("11111111-1111-4111-8111-111111111111")  # 다른 버킷의 유일한 run
 RUN_A = UUID("22222222-2222-4222-8222-222222222222")  # glowpick, BUCKET 첫 시도
 RUN_B = UUID("33333333-3333-4333-8333-333333333333")  # glowpick, BUCKET 재시도
-# 아래 셋이 F1 의 자리다. 앞의 둘은 같은 버킷 · **같은 소스** 이면서 dataset 만 다르다 -- sources
-# 술어로는 하나도 안 걸러진다. 셋째는 소스만 다르다(sources 술어가 아직 필요하다는 반대 방향).
-RUN_RANK = UUID("44444444-4444-4444-8444-444444444444")  # glowpick, BUCKET, 매시 ranking
-RUN_STATS = UUID("55555555-5555-4555-8555-555555555555")  # glowpick, BUCKET, review_stats
+# 같은 버킷 · **같은 소스** 이면서 dataset 만 다른 셋. oliveyoung 은 parse() 가 dataset 으로
+# 게이트하므로(oliveyoung.py:225-227) ranking·review_stats 런은 리뷰 본문을 쓰지 않는다.
+RUN_OY_RANK = UUID("44444444-4444-4444-8444-444444444444")  # oliveyoung, OY_BUCKET, 매시 ranking
+RUN_OY_STATS = UUID("55555555-5555-4555-8555-555555555555")  # oliveyoung, OY_BUCKET, review_stats
+RUN_OY_REVIEW = UUID("99999999-9999-4999-8999-999999999999")  # oliveyoung, OY_BUCKET, review
 RUN_OTHER_SITE = UUID("66666666-6666-4666-8666-666666666666")  # oliveyoung, BUCKET, review
-RUN_LOW = UUID("77777777-7777-4777-8777-777777777777")  # glowpick, LOW_BUCKET, review_low
+RUN_LOW = UUID("77777777-7777-4777-8777-777777777777")  # oliveyoung, LOW_BUCKET, review_low
 RUN_MULTI = UUID("88888888-8888-4888-8888-888888888888")  # glowpick, MULTI_BUCKET, 'ranking, review'
+# glowpick 은 게이트가 **없다**: parse() 가 payload.fetch.dataset 을 보지 않고 조건 없이
+# _reviews(...) 를 부른다(glowpick.py:108·135, 그리고 :64-66 주석이 이유를 적는다 -- ranking 과
+# review 가 같은 카테고리 페이지다). 그래서 이 런은 리뷰의 정당한 후보다.
+RUN_GP_RANK = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")  # glowpick, GP_RANK_BUCKET, ranking
 
 ART_OLD = "a" * 32
 ART_NEW = "b" * 32
@@ -90,22 +101,41 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                     "review",
                     "retry",
                 ),
-                # 매시 ranking. 같은 버킷 · 같은 소스라 sources 술어로는 안 걸러지고, 리뷰 본문은
-                # 한 줄도 쓰지 않는다 -- 이것이 운영에서 후보를 20,716 까지 부풀린 부류다.
-                (RUN_RANK, BUCKET, BUCKET, BUCKET + timedelta(minutes=2), "ok", "glowpick", "ranking", None),
+                # 매시 ranking. 같은 버킷 · 같은 소스라 sources 술어로는 안 걸러지고, oliveyoung 은
+                # parse() 가 dataset 으로 게이트하므로 리뷰 본문을 한 줄도 쓰지 않는다.
+                (
+                    RUN_OY_RANK,
+                    OY_BUCKET,
+                    OY_BUCKET,
+                    OY_BUCKET + timedelta(minutes=2),
+                    "ok",
+                    "oliveyoung",
+                    "ranking",
+                    None,
+                ),
                 # review_stats 는 _stats_fetch·_summary_fetch 만 따라간다(oliveyoung.py 의
                 # _parse_ranking) -- strpos 로 'review' 를 찾으면 이것까지 후보가 된다.
                 (
-                    RUN_STATS,
-                    BUCKET,
-                    BUCKET,
-                    BUCKET + timedelta(minutes=3),
+                    RUN_OY_STATS,
+                    OY_BUCKET,
+                    OY_BUCKET,
+                    OY_BUCKET + timedelta(minutes=3),
                     "ok",
-                    "glowpick",
+                    "oliveyoung",
                     "review_stats",
                     None,
                 ),
-                # dataset 은 맞지만 소스가 다르다 -- datasets 를 더한 뒤에도 sources 술어가 필요하다.
+                (
+                    RUN_OY_REVIEW,
+                    OY_BUCKET,
+                    OY_BUCKET + timedelta(minutes=5),
+                    OY_BUCKET + timedelta(minutes=12),
+                    "ok",
+                    "oliveyoung",
+                    "review",
+                    None,
+                ),
+                # dataset 은 맞지만 소스가 다르다 -- 사이트별 목록이 된 뒤에도 sources 술어가 필요하다.
                 (
                     RUN_OTHER_SITE,
                     BUCKET,
@@ -116,14 +146,15 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                     "review",
                     None,
                 ),
-                # review_low 는 같은 레코드 타입을 다른 걸음으로 걷는다(models.py 의 Dataset docstring).
+                # review_low 는 oliveyoung 만 선언한다(oliveyoung.py:128-130) -- 같은 레코드 타입을
+                # 다른 걸음으로 걷는다(models.py 의 Dataset docstring).
                 (
                     RUN_LOW,
                     LOW_BUCKET,
                     LOW_BUCKET,
                     LOW_BUCKET + timedelta(minutes=8),
                     "ok",
-                    "glowpick",
+                    "oliveyoung",
                     "review_low",
                     None,
                 ),
@@ -136,6 +167,18 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                     "ok",
                     " glowpick , oliveyoung ",
                     " ranking , review ",
+                    None,
+                ),
+                # glowpick 의 매시 ranking 런. 게이트가 없어 이 런이 리뷰 본문을 쓴다 -- 운영에서
+                # trend_radar.review 의 첫 기록자가 대개 이쪽이다(DO NOTHING upsert).
+                (
+                    RUN_GP_RANK,
+                    GP_RANK_BUCKET,
+                    GP_RANK_BUCKET,
+                    GP_RANK_BUCKET + timedelta(minutes=7),
+                    "ok",
+                    "glowpick",
+                    "ranking",
                     None,
                 ),
             ],
@@ -157,8 +200,10 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                 ("glowpick", "r:single", OTHER_BUCKET, "g:1", 3.0, "한 run 만 맞는 리뷰"),
                 ("glowpick", "r:many", BUCKET, "g:1", 3.0, "후보가 둘인 리뷰"),
                 ("glowpick", "r:none", LONELY, "g:1", 3.0, "run 행이 없는 리뷰"),
-                ("glowpick", "r:low", LOW_BUCKET, "g:1", 1.0, "review_low 걸음이 걷은 리뷰"),
                 ("glowpick", "r:multi", MULTI_BUCKET, "g:1", 3.0, "dataset 둘을 담은 run 의 리뷰"),
+                ("glowpick", "r:byrank", GP_RANK_BUCKET, "g:1", 3.0, "ranking 런이 걷은 glowpick 리뷰"),
+                ("oliveyoung", "r:oy", OY_BUCKET, "o:1", 3.0, "게이트가 있는 사이트의 리뷰"),
+                ("oliveyoung", "r:low", LOW_BUCKET, "o:1", 1.0, "review_low 걸음이 걷은 리뷰"),
                 ("oliveyoung", "r:single", OTHER_BUCKET, "o:1", 3.0, "다른 사이트의 같은 키"),
             ],
         )
@@ -270,29 +315,45 @@ def test_two_attempts_in_the_same_bucket_stay_two_candidates(rows: list[dict[str
 
 
 def test_a_run_that_did_not_collect_that_site_is_not_a_candidate(rows: list[dict[str, Any]]):
-    # 버킷만 보고 세면 후보가 다섯이 된다. sources 가 그중 하나를 뺀다.
+    # RUN_OTHER_SITE 는 같은 버킷의 review 런이지만 oliveyoung 것이다. 사이트별 목록이 된 뒤에도
+    # sources 술어가 없으면 그것이 glowpick 리뷰의 후보가 된다.
     found = {r["collection_id"] for r in _for(rows, "review", "glowpick", "r:many")}
     assert str(RUN_OTHER_SITE) not in found
+    assert found == {str(RUN_A), str(RUN_B)}
 
 
-def test_a_run_that_does_not_write_review_bodies_is_not_a_candidate(rows: list[dict[str, Any]]):
-    """F1: `datasets` 술어가 빠지면 매시 도는 ranking run 이 모든 리뷰의 후보가 된다.
+def test_a_gated_source_does_not_get_its_ranking_run_as_a_candidate(rows: list[dict[str, Any]]):
+    """`datasets` 술어가 빠지면 매시 도는 ranking run 이 그 사이트 모든 리뷰의 후보가 된다.
 
     같은 버킷 · **같은 소스**라 sources 술어로는 하나도 안 걸러진다 -- 운영에서 후보 짝 64,648 중
-    22,673(리뷰를 한 줄도 안 걷은 run)이 이 부류였고, unknown 이 통째로 도달 불가가 됐다.
+    22,673(리뷰를 한 줄도 안 걷은 run)이 이 부류였다. oliveyoung 은 parse() 가 dataset 으로
+    게이트하므로(oliveyoung.py:225-227) 그 사이트에서는 review 런만 후보다.
     """
-    found = {r["collection_id"] for r in _for(rows, "review", "glowpick", "r:many")}
-    assert str(RUN_RANK) not in found, "ranking run 이 리뷰의 후보가 됐다"
+    found = {r["collection_id"] for r in _for(rows, "review", "oliveyoung", "r:oy")}
+    assert str(RUN_OY_RANK) not in found, "oliveyoung 의 ranking run 이 리뷰의 후보가 됐다"
     # strpos(datasets, 'review') 로 찾으면 review_stats 까지 든다. 그 걸음은 _stats_fetch·
     # _summary_fetch 만 따라가고 trend_radar.review 에 한 줄도 쓰지 않는다.
-    assert str(RUN_STATS) not in found, "review_stats run 이 리뷰의 후보가 됐다"
-    assert found == {str(RUN_A), str(RUN_B)}
+    assert str(RUN_OY_STATS) not in found, "review_stats run 이 리뷰의 후보가 됐다"
+    assert found == {str(RUN_OY_REVIEW)}
+
+
+def test_an_ungated_source_does_get_its_ranking_run_as_a_candidate(rows: list[dict[str, Any]]):
+    """glowpick 은 게이트가 없다 -- ranking 런이 리뷰 본문을 쓴다.
+
+    `parse()` 가 `payload.fetch.dataset` 을 보지 않고 조건 없이 `_reviews(...)` 를 부르고
+    (glowpick.py:108·135), :64-66 주석이 그 이유를 적는다 -- ranking 과 review 가 같은 카테고리
+    페이지다. 크론이 ranking 매시 / review 하루 한 번이고 review 는 DO NOTHING upsert 라 운영에서
+    **첫 기록자가 대개 hourly ranking 런**이다: dataset 을 사이트와 무관하게 {review, review_low}
+    로 좁히면 glowpick 리뷰 3,597건 중 2,284건(63.5퍼센트)이 조용히 '미상' 으로 오분류된다.
+    """
+    [row] = _for(rows, "review", "glowpick", "r:byrank")
+    assert (row["match"], row["collection_id"]) == ("single", str(RUN_GP_RANK))
 
 
 def test_review_low_is_the_same_bodies_by_another_walk(rows: list[dict[str, Any]]):
     # models.py 의 Dataset docstring: REVIEW_LOW 는 REVIEW 와 같은 레코드 타입이다. 목록에서
-    # 빼면 저평점 전수 걸음이 걷은 리뷰가 통째로 '미상' 이 된다.
-    [row] = _for(rows, "review", "glowpick", "r:low")
+    # 빼면 저평점 전수 걸음이 걷은 리뷰가 통째로 '미상' 이 된다. 선언한 사이트는 oliveyoung 뿐이다.
+    [row] = _for(rows, "review", "oliveyoung", "r:low")
     assert (row["match"], row["collection_id"]) == ("single", str(RUN_LOW))
 
 
@@ -350,6 +411,39 @@ def test_the_comment_artifact_carries_its_job(rows: list[dict[str, Any]]):
 def test_a_video_with_no_artifact_is_unknown_too(rows: list[dict[str, Any]]):
     [row] = _for(rows, "yt_comment", "youtube", "c-9")
     assert (row["match"], row["candidate_count"]) == ("unknown", 0)
+
+
+# --- 뷰의 목록이 수집기의 선언을 비추는가 ---
+
+# 뷰 안의 `review_body_dataset (site, dataset) AS (VALUES ...)` 블록만 읽는다 -- 파일의 다른 VALUES 나
+# 주석 속 예시가 섞이면 이 테스트가 무엇을 재는지 흐려진다.
+_PAIR_BLOCK = re.compile(r"WITH review_body_dataset \(site, dataset\) AS \((.*?)\n\),", re.DOTALL)
+_PAIR = re.compile(r"\('([a-z_]+)',\s*'([a-z_]+)'\)")
+
+
+def _pairs_in_the_view() -> set[tuple[str, str]]:
+    block = _PAIR_BLOCK.search(VIEW.read_text(encoding="utf-8"))
+    assert block, "뷰에서 review_body_dataset VALUES 블록을 찾지 못했다 -- 이름이나 모양이 바뀌었다"
+    return set(_PAIR.findall(block.group(1)))
+
+
+def test_the_view_mirrors_the_collectors_declaration():
+    """SQL 에 사이트 목록을 손으로 적어 두면 다음에 사이트가 늘 때 아무도 안 운다 -- 여기가 그 자리다.
+
+    정본은 각 소스의 `review_body_datasets` 이고, 그 선언이 `parse()` 와 갈리는지는
+    tests/collectors/commerce/test_review_body_datasets.py 가 녹화 픽스처를 재생해서 따로 잰다.
+    이 테스트는 그 선언과 뷰 사이만 본다.
+    """
+    declared = {(cls.key, dataset.value) for cls in SOURCES.values() for dataset in cls.review_body_datasets}
+    assert _pairs_in_the_view() == declared
+
+
+def test_a_source_that_writes_no_review_bodies_is_absent_rather_than_empty():
+    # hwahae 는 랭킹만 걷는다. 빈 줄로 적어 두면 SQL 이 "이 사이트는 아무 dataset 으로도 안 쓴다" 를
+    # 뜻하는 행을 갖게 되고, 그 행은 아무 것도 걸러 주지 않으면서 목록만 늘린다.
+    sites = {site for site, _ in _pairs_in_the_view()}
+    assert "hwahae" not in sites
+    assert not SOURCES["hwahae"].review_body_datasets
 
 
 # --- 배포 경로 ---

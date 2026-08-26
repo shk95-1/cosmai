@@ -77,6 +77,8 @@ _REVIEW_BOARDS: tuple[_Board, ...] = (_BOARDS[1],)
 class DaisoMall:
     key: ClassVar[str] = "daisomall"
     datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING, Dataset.REVIEW, Dataset.NEW_PRODUCT})
+    # `wants_reviews` below gates on the dataset, so only a review run reaches the review endpoint.
+    review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.REVIEW})
     scope: ClassVar[Scope] = MappingProxyType(
         {
             Dataset.RANKING: MappingProxyType({"boards": len(_BOARDS), "page_size": PAGE_SIZE}),
