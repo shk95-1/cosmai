@@ -83,6 +83,41 @@ export const MAP_QUERIES = {
   },
 };
 
+// 계보 드릴다운(#144)이 읽는 뷰 둘. 필터는 여기 없다 — 어느 칸에서 눌렀느냐가 정하므로
+// lineage.js 의 순수 함수가 만들고, 여기는 select 와 정렬만 진다.
+//
+// 정렬은 서버에 맡긴다. 한 칸의 언급이 1,000행(PGRST_DB_MAX_ROWS)을 넘는 것이 예사라
+// offset 페이징이 필수인데, 정렬 없이 offset 을 옮기면 페이지 사이에서 행이 겹치거나 빠진다
+// (이 파일 머리말과 같은 이유). mention_id 는 need_mention·wish_mention 의 PK 이고,
+// (doc_key, candidate_rank) 는 collection_lineage 안에서 한 문서의 후보를 유일하게 짚는다.
+//
+// select 가 소비 함수가 보는 컬럼을 빠짐없이 담아야 한다는 규칙은 여기서도 같다: PostgREST 는
+// select 에 적은 컬럼만 JSON 에 담으므로, lineage.js 의 documentFilters 가 보는 doc_parent 나
+// groupByDocument 가 보는 match 가 빠지면 그 비교가 언제나 거짓이 되고 화면이 통째로 빈다(#130).
+//
+// 원문 컬럼(sentence·body·text)은 애초에 뷰에 없다 — 나가는 것은 120자 발췌뿐이다(사용자 결정).
+export const LINEAGE_QUERIES = {
+  mention: {
+    select: [
+      'kind', 'mention_id', 'src', 'site', 'ref', 'polarity', 'like_count',
+      'observed_at', 'month', 'sentence_excerpt', 'sentence_chars',
+      'doc_kind', 'doc_parent', 'doc_key', 'doc_found', 'doc_excerpt', 'doc_chars',
+      'doc_at', 'doc_rating', 'doc_like_count',
+    ],
+    order: 'mention_id',
+  },
+  collection: {
+    select: [
+      'src', 'site', 'doc_parent', 'doc_key', 'doc_at',
+      'match', 'candidate_count', 'candidate_rank',
+      'collection_kind', 'collection_id', 'collected_at',
+      'started_at', 'finished_at', 'status', 'scope_note',
+      'requests', 'ok', 'sample_url', 'bytes',
+    ],
+    order: 'doc_key,candidate_rank',
+  },
+};
+
 export const NEED_QUERIES = {
   // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
   // 가 그것을 고르는 유일한 필터다(#109, #130).

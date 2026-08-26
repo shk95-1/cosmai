@@ -62,6 +62,12 @@ _WRITTEN_FORMAT = "%Y-%m-%d %H:%M:%S"
 class Glowpick:
     key: ClassVar[str] = "glowpick"
     datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING, Dataset.REVIEW, Dataset.NEW_PRODUCT})
+    # RANKING is in here on purpose: `parse()` below never looks at `payload.fetch.dataset`
+    # (beyond splitting off NEW_PRODUCT) and calls `_reviews(...)` unconditionally, so a ranking
+    # run writes review bodies too. The cron runs ranking hourly and review once a day and the
+    # review upsert is DO NOTHING, which makes the hourly ranking run the *first writer* of most
+    # rows -- needs' collection_lineage would call 63.5% of this site's reviews "unknown" without it.
+    review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING, Dataset.REVIEW})
     # Both RANKING and REVIEW are the same category page (one request, both datasets), so both carry
     # the same board/window counts -- a review run that recorded none would describe a collection that
     # did not happen.

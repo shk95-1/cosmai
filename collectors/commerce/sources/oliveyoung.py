@@ -130,6 +130,11 @@ class OliveYoung:
             Dataset.REVIEW_STATS,
         }
     )
+    # `_parse_ranking` gates every follow-up on the dataset (`wants_reviews`/`wants_low`/
+    # `wants_stats`), so ranking and product runs reach no review endpoint at all, and REVIEW_STATS
+    # follows only `_stats_fetch`/`_summary_fetch` -- it writes review_stats rows, never bodies.
+    # REVIEW_LOW is the same record types as REVIEW by another walk (models.py's Dataset docstring).
+    review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.REVIEW, Dataset.REVIEW_LOW})
     scope: ClassVar[Scope] = MappingProxyType(
         {
             Dataset.RANKING: MappingProxyType({"boards": len(_BOARDS)}),
