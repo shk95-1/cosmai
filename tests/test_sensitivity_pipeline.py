@@ -1,8 +1,8 @@
 """민감도 명령은 답만 내고 아무것도 쓰지 않는다 (포크 #41).
 
 `tests/test_sensitivity_golden.py` 가 값을 지키고 `tests/test_sensitivity_rules.py` 가 규칙을 진다면,
-여기는 **경계**를 묻는다: 무엇이 있어야 이 명령이 서는가(막힘), 답이 흔들릴 때 종료 코드가 무엇인가,
-그리고 돌고 난 뒤 저장된 표가 그대로인가. 마지막 것이 이 단계의 계약이다 -- 반사실 모집단에는 022 의
+여기는 **경계**를 묻는다: 무엇이 있어야 이 명령이 서는가(막힘), 종료 코드가 무엇을 뜻하는가, 그리고
+돌고 난 뒤 저장된 표가 그대로인가. 마지막 것이 이 단계의 계약이다 -- 반사실 모집단에는 022 의
 어휘에도 `analysis_run` 에도 자리가 없으므로, 쓰지 않는 것이 이 명령의 성질이지 규율이 아니다.
 """
 
@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
+from analysis.sensitivity import ShortHistory
 from analysis.sensitivity.pipeline import NoBaseline, build
 from analysis.trend.pipeline import NoPopulation
 from analysis.trend.pipeline import run as run_quarter
@@ -27,6 +28,8 @@ pytestmark = pytest.mark.postgres
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "trend_sample"
+# 분기가 하나뿐인 코퍼스. 후향 검증이 설 자리가 없다는 것을 이 픽스처가 그대로 보인다.
+ONE_QUARTER = Path(__file__).resolve().parent / "fixtures" / "yt_handoff"
 VIEWS = (
     ROOT / "db" / "views" / "metrics_topic_quarter_violation.sql",
     ROOT / "db" / "views" / "topic_quarter_judgement_violation.sql",
@@ -96,23 +99,52 @@ def test_without_a_quarter_run_there_is_no_conclusion_to_be_sensitive_about(load
 def test_the_command_leaves_every_stored_table_exactly_as_it_found_it(measured: str):
     with connect(measured) as conn:
         before = _fingerprint(conn)
-    assert main(["trend", "sensitivity", "--url", measured]) in (0, 1)
+    assert main(["trend", "sensitivity", "--url", measured]) == 0
     with connect(measured) as conn:
         assert _fingerprint(conn) == before
 
 
-def test_a_conclusion_that_moves_is_reported_as_partial_and_not_as_ok(measured: str, capsys):
-    """이 표본에서는 광고·협찬 영상을 빼면 유형이 세 셀에서 바뀐다 -- "흔들린다"를 0 으로 내면
-    "안 흔들린다"와 구별되지 않는다."""
-    assert main(["trend", "sensitivity", "--url", measured]) == 1
+def test_a_conclusion_that_moves_is_a_finding_and_not_a_failed_run(measured: str, capsys):
+    """이 표본에서는 광고·협찬 영상을 빼면 유형이 세 셀에서 바뀐다. **그것이 이 명령의 답이다** --
+    실행의 실패가 아니므로 종료 코드가 아니라 `note` 의 `ad_flips=` 가 싣는다 (계약 §종료 코드).
+    전량에서 흔들림은 평상 상태라, 1 로 내면 `set -e` 셸 한 줄이 정상 실행을 실패로 읽는다."""
+    assert main(["trend", "sensitivity", "--url", measured]) == 0
     printed = capsys.readouterr().out
     assert "trend sensitivity run=" in printed
     assert "ad_flips=3" in printed
+    assert "panel_flips=0" in printed
     with connect(measured) as conn:
         built = build(conn)
-    assert built.status == "partial"
+    assert built.status == "ok"
     assert built.flipped_cells == 3
     assert built.violations == ()
+
+
+def test_a_corpus_of_one_quarter_says_it_is_not_a_backtest_instead_of_reporting_zero(empty: str):
+    """1 이 뜻하는 것은 하나다: **이 산출을 믿지 마라.** 사례가 둘 미만이면 후향 검증이라 부를 것이
+    없고(기획안 08.25), ydc `backtest.py` 도 이 하나에만 종료 코드 1 을 쓴다."""
+    seed.run_all(empty, only=("panel",))
+    _install_registry(empty)
+    with connect(empty) as conn:
+        corpus.load(conn, ONE_QUARTER)
+        run_quarter(conn)
+        built = build(conn)
+    assert built.back.rows == ()
+    assert built.status == "partial"
+    assert [line.split(" - ")[0] for line in built.violations] == ["thin_backtest"]
+    assert main(["trend", "sensitivity", "--url", empty]) == 1
+
+
+def test_a_corpus_that_vanished_under_a_stored_run_is_blocked_and_not_a_traceback(measured: str):
+    """지표 행만 남고 코퍼스가 사라지면 두 창이 설 분기가 없다. 답 대신 멈추는 자리이고, 종료 코드는
+    막힘(2)이다 -- `analysis.judge` 의 `SparseGrid`·`MissingValue` 와 달리 이 갈래는 실제로 닿는다."""
+    with connect(measured) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM corpus_mention")
+        cur.execute("DELETE FROM corpus_document")
+        conn.commit()
+    with connect(measured) as conn, pytest.raises(ShortHistory):
+        build(conn)
+    assert main(["trend", "sensitivity", "--url", measured]) == 2
 
 
 def test_the_answer_names_the_run_and_the_snapshot_it_is_about(measured: str):

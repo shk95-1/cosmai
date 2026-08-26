@@ -144,11 +144,14 @@ class Built:
 
     @property
     def status(self) -> str:
-        if self.violations:
-            return "partial"
-        # 흔들린다는 답도 답이다 -- 다만 0 으로 내면 "안 흔들린다"와 구별되지 않는다.
-        steady = not self.flipped and not self.flipped_cells and len(self.back.rows) >= 2
-        return "ok" if steady else "partial"
+        """`ok` = 답이 계산됐다. **흔들림은 여기 실리지 않는다.**
+
+        흔들린다는 것은 이 명령이 답하려고 존재하는 발견이지 실행의 실패가 아니고, 그 신호는 `note` 의
+        `panel_flips=`·`ad_flips=` 와 표가 이미 싣는다. 종료 코드에 얹으면 두 가지가 깨진다 -- 전량에서
+        1 이 평상 상태라 `set -e` 셸 한 줄이 정상 실행을 실패로 읽고, "발견했다"와 "믿지 마라"가 같은
+        수가 된다. `partial` 은 뒤의 하나만 뜻한다 (계약 §종료 코드, ydc 도 같은 자리다).
+        """
+        return "ok" if not self.violations else "partial"
 
     @property
     def note(self) -> str:
@@ -299,6 +302,11 @@ def load(
     )
 
 
+# 후향 검증이라 부르려면 사례가 둘은 있어야 한다 (기획안 08.25 "후향 검증 사례 2건 이상"). ydc
+# `backtest.py` 도 이 하나에만 종료 코드 1 을 쓴다.
+MIN_CASES = 2
+
+
 def _drift(base: list[MetricsTopicQuarterRow], stored: tuple[MetricsTopicQuarterRow, ...]) -> list[str]:
     """다시 센 기저가 저장된 행과 같은가. 다르면 세 측정의 차이는 전부 뜻을 잃는다."""
     key = lambda row: (row.source, row.topic_key, row.quarter)  # noqa: E731
@@ -323,14 +331,22 @@ def build(
 ) -> Built:
     read = load(conn, scope=scope, snapshot_id=snapshot_id, panel_version=panel_version)
     base = sensitivity.metrics(read.population, read.topics, read.frame)
+    back = sensitivity.backtest(read.population, read.topics, read.frame, base)
+    # 위반 줄은 전부 같은 말을 한다: **이 산출을 믿지 마라.** 흔들림은 여기 들지 않는다.
+    violations = _drift(base, read.stored)
+    if len(back.rows) < MIN_CASES:
+        violations.append(
+            f"thin_backtest - {len(back.rows)} directional cell(s) over {len(back.cutoffs)} cutoff(s); "
+            f"fewer than {MIN_CASES} is not a backtest"
+        )
     return Built(
         run_id=read.frame.run_id,
         snapshot_id=read.snapshot_id,
         panel_version=read.frame.panel_version,
         panel=tuple(sensitivity.panel_sensitivity(read.population, read.topics)),
-        back=sensitivity.backtest(read.population, read.topics, read.frame, base),
+        back=back,
         ad=sensitivity.ad_sensitivity(read.population, read.topics, read.frame, base),
-        violations=tuple(_drift(base, read.stored)),
+        violations=tuple(violations),
     )
 
 
@@ -389,6 +405,7 @@ def run(
 
 
 __all__ = [
+    "MIN_CASES",
     "Built",
     "Loaded",
     "NoBaseline",

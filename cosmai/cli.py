@@ -336,12 +336,11 @@ def _connect(url: str | None) -> psycopg.Connection[Any]:
 def _run_trend(args: argparse.Namespace) -> int:
     import psycopg
 
-    from analysis.judge import MissingValue, SparseGrid
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
     from analysis.sensitivity import ShortHistory
-    from analysis.sensitivity.pipeline import NoBaseline
+    from analysis.sensitivity.pipeline import NoBaseline, Outcome
     from analysis.sensitivity.pipeline import run as sensitivity_run
     from analysis.trend.pipeline import NoPopulation, TopicAxisDrift
     from analysis.trend.pipeline import run as quarter_run
@@ -357,19 +356,22 @@ def _run_trend(args: argparse.Namespace) -> int:
             outcome = act(conn)
     # 명부도 스냅샷도 주제 사전도 지표 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
     # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    # SparseGrid·MissingValue 가 여기 든 것은 #41 부터다: 판정이 저장된 표 말고 민감도의 반사실 행
-    # 위에서도 도는데, 그 행들은 불변식 뷰가 지키는 표에서 오지 않아 "격자가 아직 안 섰다"가 도달
-    # 가능한 자리가 됐다. 셋 다 같은 뜻이라 blocked(2) 다.
+    # 코퍼스가 비었는데 지표 행이 남아 있는 것(ShortHistory)도 같은 자리다: 창이 설 분기가 없다.
+    # `analysis/judge` 의 SparseGrid·MissingValue 는 여기 없다 -- #41 이 민감도의 반사실 격자에서도
+    # 도달 가능한지 확인했고 여전히 아니다(`analysis.trend.rows` 가 주제 × 분기 직사각형을 통째로
+    # 내고, 문서가 0인 계열은 행을 만들지 않는다). 그 둘을 잡을 조건은 #40 이 적어 둔 그대로 **다른
+    # 생산자가 metrics_topic_quarter 에 쓰는 날**이다.
     except (
-        NoPopulation, NoJudgement, NoBaseline, TopicAxisDrift, NoDictionary,
-        SparseGrid, MissingValue, ShortHistory,
+        NoPopulation, NoJudgement, NoBaseline, TopicAxisDrift, NoDictionary, ShortHistory,
     ) as blocked:  # fmt: skip
         print(blocked)
         return 2
     print(outcome.note)
     # 답이 표가 아니라 문장인 것은 `sensitivity` 뿐이다 -- 나머지 둘은 note 와 위반 줄이 전부다.
-    for line in getattr(outcome, "lines", ()):
-        print(line)
+    # getattr 이 아니라 isinstance 인 것은 타입 체커가 그 갈래를 지게 하려는 것이다.
+    if isinstance(outcome, Outcome):
+        for line in outcome.lines:
+            print(line)
     for violation in outcome.violations:
         print(f"  {violation}")
     # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
