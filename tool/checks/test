@@ -49,6 +49,15 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     # the view into a silent skip -- test green, production missing.
     docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1 \
         < contracts/ddl/current/app.trend_radar.sql
+    # Same reason, tubedepth: since #77 the view's youtube arm binds tubedepth.jobs. Only that one
+    # table, not the whole dump -- `analyze link` reads four other tubedepth tables, and standing
+    # those up here would silently turn test_analyze_all.py's "link fails, so the CLI exits 1" green
+    # for the wrong reason. The additive files are the ones that named jobs (#101 started_at/
+    # elapsed_ms, #102 dataset); production already has both.
+    { echo 'CREATE SCHEMA IF NOT EXISTS tubedepth;'
+      sed -n '/^CREATE TABLE tubedepth\.jobs (/,/^);$/p' contracts/ddl/current/app.tubedepth.sql
+      cat contracts/ddl/tubedepth/*_jobs_*.sql
+    } | docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1
     # Run twice: production and the test harness both re-run this on every deploy, so it must be
     # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version).
     COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
