@@ -42,6 +42,9 @@ EXPECTED = {
     # 슬라이스가 아니라 운영 선언이다 -- 크론 14줄과 1:1 이고 그 대조는
     # tests/test_pipeline_stage.py 가 한다 (#138).
     "pipeline_stage": 14,
+    # 노드 28(단계 14 + 저장소 14)을 잇는 엣지. 실재와의 대조는
+    # tests/test_pipeline_edge.py 가 한다 (#141).
+    "pipeline_edge": 31,
 }
 
 
