@@ -348,6 +348,10 @@ test('monthNeedKeys·hasMonthRows: 월 행이 없는 scope 를 구분한다 (#13
 // 담지 않으므로 그 키는 응답 행에 아예 없고, 그것을 보는 비교는 언제나 거짓이다. 픽스처를
 // 통째로 소비 함수에 먹이면 그 사실이 가려져, 거르는 쪽이 안 받아온 컬럼을 봐도 전부 통과한다
 // (#130 첫 라운드가 놓친 자리 — monthSelect 에 product_ref 가 없는데 monthRowsOf 가 그걸 봤다).
+// 흉내는 여기까지다: eq 와 neq 두 연산자뿐이고, neq 는 JS 의 !== 라 실제 Postgres 의
+// `<> ''`(NULL 이면 NULL 이라 행이 빠진다)와 뜻이 다르다. 지금 세 스펙의 month·product_ref
+// 는 NULL 이 아니라 늘 '' 센티널이라 무해하지만, 스펙에 in·gte 가 들어오거나 진짜 NULL 인
+// 컬럼에 neq 를 걸면 이 헬퍼가 조용히 안 거른다 — 그때 여기를 같이 늘려라.
 function served(rows, { select, filters }) {
   return rows
     .filter((r) => (filters || []).every(({ column, op, value }) => (
