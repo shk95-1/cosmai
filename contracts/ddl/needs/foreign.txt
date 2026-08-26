@@ -15,3 +15,7 @@
 
 retrieval_chunk        # 포크 cosmai-import-ydc 의 020_retrieval_chunk (2026-08-24 23:47 운영 적용)
 aspect_lexicon.extra   # 포크 cosmai-import-ydc 의 021_aspect_lexicon_extra (2026-08-25 18:30 운영 적용)
+panel_roster           # 포크 cosmai-import-ydc 의 022_panel_and_quarter — 패널 명부 판본 (2026-08-25 23:20 운영 적용)
+panel_channel          # 같은 022 — 43채널 명부와 panel_role
+metrics_topic_quarter  # 같은 022 — 분기 그레인 집계
+metrics_topic_quarter_violation  # 포크 db/views/ 의 뷰 (분기 표의 조밀 격자·분모 닫힘 검사). -T 는 뷰에도 걸린다
