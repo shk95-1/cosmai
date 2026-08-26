@@ -51,6 +51,9 @@ def test_every_stem_survives_whole_and_no_particle_becomes_a_token():
     assert leaked == {}
 
 
-def test_the_contract_says_neither_list_is_kept():
-    """이 처분이 코드에만 있으면 다음 사람은 "빠뜨린 것" 과 구분하지 못한다."""
-    assert "불용어 목록도 조사 목록도 두지 않는다" in ENTRYPOINTS.read_text(encoding="utf-8")
+def test_the_contract_says_the_tags_do_the_cutting():
+    """이 처분이 코드에만 있으면 다음 사람은 "빠뜨린 것" 과 구분하지 못한다.
+
+    조사 쪽만 집는다 -- 같은 절의 불용어 문장은 질의 축(포크 #46)이 다시 열 수 있고, 조사 처분 시험이
+    그 문장을 인질로 잡을 이유가 없다."""
+    assert "조사는 Kiwi 의 태그가 가른다" in ENTRYPOINTS.read_text(encoding="utf-8")
