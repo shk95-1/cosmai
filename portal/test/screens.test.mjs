@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { NEED_QUERIES } from '../public/query.js';
 import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, productLabel, truncateLabel, withProductNames,
-  monthRows, monthNeedKeys, hasMonthRows,
+  monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
 } from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -314,6 +315,22 @@ test('monthRows: limit 은 최근 N 개월만 남기고 순서는 그대로다 (
   assert.deepEqual(monthRows(needFixture, 2, '선블록', '밀림', 0).map((r) => r.month), ['2026-06', '2026-07', '2026-08']);
 });
 
+// 상한의 정본은 screens.js 다 — app.js 가 자기 숫자를 들고 있으면 둘이 조용히 어긋난다.
+// 기본값이 실제로 MONTH_LIMIT 인지를 여기서 잡는다(#130 수정 라운드).
+test('monthRows: 기본 상한은 MONTH_LIMIT 이다 (#130)', () => {
+  const many = Array.from({ length: MONTH_LIMIT + 6 }, (_, i) => ({
+    run_id: 3, scope: 'a', need_key: 'x', product_ref: '',
+    month: `20${String(20 + Math.floor(i / 12)).padStart(2, '0')}-${String((i % 12) + 1).padStart(2, '0')}`,
+    neg: i,
+  }));
+  const rows = monthRows(many, 3, 'a', 'x');
+  assert.equal(rows.length, MONTH_LIMIT);
+  // 잘린 쪽은 앞(오래된 달)이고, 마지막은 가장 최근 달 그대로다.
+  assert.equal(rows.at(-1).month, many.at(-1).month);
+  assert.equal(rows[0].month, many[6].month);
+  assert.equal(monthRows(many, 3, 'a', 'x', 0).length, many.length);
+});
+
 // "이 scope 에 월 행이 없다"는 문구가 되고 "그 달에 0 건"은 0 막대가 된다 — 그 갈림길이
 // 이 두 함수다(hasYoutubeMentions 가 유튜브 축에서 하는 구별과 같은 자리).
 test('monthNeedKeys·hasMonthRows: 월 행이 없는 scope 를 구분한다 (#130)', () => {
@@ -324,4 +341,51 @@ test('monthNeedKeys·hasMonthRows: 월 행이 없는 scope 를 구분한다 (#13
   assert.equal(hasMonthRows(needFixture, 2, '쿠션'), false);
   // 월 행이 아예 없는 run 도 같은 문구로 간다(#129 가 아직 안 돌아간 상태).
   assert.equal(hasMonthRows(needFixture, 1, '선블록'), false);
+});
+
+// PostgREST 가 이 스펙으로 돌려줄 행을 흉내 낸다 — 필터로 거르고, select 에 적은 컬럼만
+// 남긴다(없는 값은 NULL 이므로 null). 투영이 핵심이다: 서버는 select 에 없는 컬럼을 JSON 에
+// 담지 않으므로 그 키는 응답 행에 아예 없고, 그것을 보는 비교는 언제나 거짓이다. 픽스처를
+// 통째로 소비 함수에 먹이면 그 사실이 가려져, 거르는 쪽이 안 받아온 컬럼을 봐도 전부 통과한다
+// (#130 첫 라운드가 놓친 자리 — monthSelect 에 product_ref 가 없는데 monthRowsOf 가 그걸 봤다).
+function served(rows, { select, filters }) {
+  return rows
+    .filter((r) => (filters || []).every(({ column, op, value }) => (
+      op === 'neq' ? r[column] !== value : r[column] === value
+    )))
+    .map((r) => Object.fromEntries(select.map((c) => [c, c in r ? r[c] : null])));
+}
+
+const SERVED = {
+  category: served(needFixture, NEED_QUERIES.category),
+  product: served(needFixture, NEED_QUERIES.product),
+  month: served(needFixture, NEED_QUERIES.month),
+};
+
+// select 목록과 소비 함수의 계약. 스펙이 컬럼 하나를 빼면 여기서 즉시 빨개진다.
+test('월 축: 질의가 실제로 돌려주는 행으로도 소비 함수가 돈다 (#130)', () => {
+  assert.equal(SERVED.month.length, 4); // 필터는 월 행 넷을 고른다
+  assert.equal(hasMonthRows(SERVED.month, 2, '선블록'), true);
+  assert.deepEqual(monthNeedKeys(SERVED.month, 2, '선블록'), ['끈적유분', '밀림']);
+  assert.deepEqual(
+    monthRows(SERVED.month, 2, '선블록', '밀림').map((r) => [r.month, r.neg]),
+    [['2026-06', 30], ['2026-07', 0], ['2026-08', 63]],
+  );
+  // 월 행이 없는 scope 는 투영 뒤에도 문구 쪽이다 — 계약이 맞아도 이 구별은 남아야 한다.
+  assert.equal(hasMonthRows(SERVED.month, 2, '쿠션'), false);
+});
+
+// 회귀 방어선을 같은 방식으로. 다음에 누가 select 에서 컬럼을 빼도 화면 1·3·4 가 잡는다.
+test('화면 1·3·4 도 질의가 돌려주는 행으로 같은 값을 낸다 (#130)', () => {
+  const rows = needRowsForScope(SERVED.category, 2, '선블록');
+  assert.deepEqual(rows.map((r) => [r.need_key, r.neg, r.pos]), [['밀림', 93, 38], ['끈적유분', 86, 122]]);
+  const character = needCharacterRows(SERVED.category, 2, '선블록');
+  assert.deepEqual(character.map((r) => [r.yt_neg, r.yt_pos]), [[12, 3], [0, 0]]);
+  assert.equal(character[0].persist_month_ratio, 5 / 6);   // persist_* 가 select 에 남아 있다
+  assert.equal(character[0].low_share, 0.44);
+  assert.equal(hasYoutubeMentions(needCharacterRows(SERVED.category, 2, '쿠션')), false);
+  assert.deepEqual(productRows(SERVED.product, 2).map((r) => r.product_ref), ['oy:A1']);
+  assert.deepEqual(scopesForRun(SERVED.category, 2), ['선블록', '쿠션']);
+  // 셋이 픽스처를 빠짐없이·겹치지 않게 나눈다 — 겹치면 같은 행을 두 번 받는다.
+  assert.equal(SERVED.category.length + SERVED.product.length + SERVED.month.length, needFixture.length);
 });

@@ -205,11 +205,16 @@ function monthRowsOf(need, runId) {
     && r.month !== null && r.product_ref === '');
 }
 
+// 판에 세울 달의 상한. 90 개월(2013-08~2026-08 실측)을 다 그리면 판이 2,500px 이 되고,
+// 그 높이는 #122 가 화면 1 에서 걷어낸 바로 그것이다. 상한은 판의 성질이라 화면 쪽이 아니라
+// 여기가 정본이고, index.html 의 캡션도 app.js 를 거쳐 이 값을 읽는다 — 두 벌로 두면
+// 한쪽만 바뀌어 화면이 안 지키는 약속을 적는다.
+export const MONTH_LIMIT = 24;
+
 // 그 (run·scope·need_key) 의 월 행을 month 오름차순으로. month 는 'YYYY-MM' 문자열이라
-// 사전순이 곧 시간순이다. limit 은 뒤에서 자른다(0 이면 전부) — 90 개월(2013-08~2026-08
-// 실측)을 다 그리면 판이 2,500px 이 되고, 그 높이는 #122 가 화면 1 에서 걷어낸 바로
-// 그것이다. 표는 그 상한을 쓰지 않는다: 판에서 밀린 달을 볼 자리가 화면에 하나는 있어야 한다.
-export function monthRows(need, runId, scope, needKey, limit = 24) {
+// 사전순이 곧 시간순이다. limit 은 뒤에서 자른다(0 이면 전부) — 표는 0 으로 부른다:
+// 판에서 밀린 달을 볼 자리가 화면에 하나는 있어야 한다.
+export function monthRows(need, runId, scope, needKey, limit = MONTH_LIMIT) {
   const rows = monthRowsOf(need, runId)
     .filter((r) => r.scope === scope && r.need_key === needKey)
     .sort((a, b) => (a.month < b.month ? -1 : a.month > b.month ? 1 : 0));
