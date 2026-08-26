@@ -11,6 +11,7 @@ partial, 2 blocked.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -183,6 +184,44 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
     ).first()
 
 
+_QUOTA_EXCEEDED_REASON = "quotaExceeded"
+
+
+def _is_quota_exceeded(error: Exception) -> bool:
+    """YouTube Data API signals quota exhaustion as 403 with `reason: quotaExceeded` in the JSON
+    body -- not as a distinct status code -- so telling it apart from a 403 that means something
+    else (forbidden, accessNotConfigured) requires reading the body, not just `error.code`."""
+    read = getattr(error, "read", None)
+    if read is None:
+        return False
+    try:
+        body = read()
+    except Exception:  # noqa: BLE001 - a body we can't read just isn't quotaExceeded
+        return False
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    reasons = (item.get("reason") for item in payload.get("error", {}).get("errors") or [])
+    return _QUOTA_EXCEEDED_REASON in reasons
+
+
+def _classify_error(error: Exception) -> str:
+    """Bucket a fetch failure into a small vocabulary #77's collector_health view can count as
+    `blocked` (403/429, the same statuses commerce's fetch_log.status already treats as blocked) vs
+    `failed` -- contracts/entrypoints.md 수집기 절 documents this vocabulary as the source #77 reads.
+    `error.code` is how `urllib.error.HTTPError` (and any transport built the same shape) carries a
+    status; a failure with none reached no HTTP response at all (DNS, socket, timeout)."""
+    code = getattr(error, "code", None)
+    if isinstance(code, int):
+        if code == 403 and _is_quota_exceeded(error):
+            return "quota"
+        if code == 429:
+            return "rate_limited"
+        return f"http_{code}"
+    return "transport"
+
+
 def _normalize(kind: str, dump: dict[str, Any]) -> Any:
     if kind in LISTING_KINDS:
         return sources.normalize_listing(dump, source_kind=kind)
@@ -218,7 +257,7 @@ def _collect_one(
                 .values(
                     state=JobState.FAILED.value,
                     finished_at=now,
-                    error_code=type(error).__name__,
+                    error_code=_classify_error(error),
                     error_message=str(error),
                 )
             )
