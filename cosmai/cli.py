@@ -2,10 +2,10 @@
 `--help` is checkable offline in a subprocess without an installed console script (playbook
 snippets/test_stack_commands_resolve.py).
 
-TODO(#95): the sentence below is stale -- naver dispatches and dies with a traceback, not exit 2.
-`collect commerce`/`youtube` are wired (#7, #8); `naver` is #9 and refuses cleanly until then --
-declared here anyway so this module is the one place stack/crontab and stack/docker-compose.yml can be
-checked against, per contracts/entrypoints.md's collector list.
+`collect commerce`/`youtube`/`naver` are all wired (#7, #8, #9); naver has no live transport yet
+so it ends blocked (exit 2) until #10's cutover -- declared here anyway so this module is the one
+place stack/crontab and stack/docker-compose.yml can be checked against, per
+contracts/entrypoints.md's collector list.
 
 `login` (#27) is the one place a person clears a browser source's challenge by hand -- run on the
 HOST from the repo root (not inside a container -- WSL2 needs no display forwarding that way), so
@@ -55,8 +55,13 @@ def _add_analyze(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("analyze", help="Run one analysis stage over the needs schema.")
     p.add_argument("stage", choices=STAGES)
     p.add_argument("--since", default=None, help="Only units observed on or after this date.")
-    p.add_argument("--scope", default=None, help="Restrict to one lexicon category.")
+    p.add_argument("--scope", default=None, help="Restrict to one lexicon or source category.")
     p.add_argument("--impl", default=None, help="Registered polarity factory, e.g. ollama:gemma4:latest.")
+    p.add_argument(
+        "--missing",
+        action="store_true",
+        help="Owner runs only: judge the source rows that have no row of this version yet.",
+    )
     p.add_argument(
         "--url", default=None, help="SQLAlchemy URL; default is needs_runtime from the secret file."
     )
@@ -247,7 +252,9 @@ def _run_analyze(args: argparse.Namespace) -> int:
         except (ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
-        outcome = run_stage(conn, args.stage, since=since, scope=args.scope, polarity=polarity)
+        outcome = run_stage(
+            conn, args.stage, since=since, scope=args.scope, missing=args.missing, polarity=polarity
+        )
     print(outcome.note)
     return 0 if outcome.status == "ok" else 1
 
@@ -442,8 +449,8 @@ def _run_eval(args: argparse.Namespace) -> int:
         return 2
     if impl is None:
         print(
-            f"no implementation registered for {args.task!r}; the unit that owns it calls "
-            "analysis.registry.register() at import time"
+            f"no implementation registered for {args.task!r}; the unit that owns it adds its "
+            "module to analysis.registry.IMPLEMENTATIONS and registers in register_implementations()"
         )
         return 2
     import psycopg

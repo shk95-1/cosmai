@@ -19,13 +19,16 @@ class Dataset(StrEnum):
 class DatalabPoint:
     """One (group, month) cell of a Search Trend series. `ratio` is relative *within the request
     that produced it* (vendor docs: max 100 in the window) -- `terms` travels with every point so a
-    later reader can see what request produced the number, not just trust its scale."""
+    later reader can see what request produced the number, not just trust its scale. `request_key`
+    is the row-level answer to "which request" (contracts/formats.md §NAVER DataLab), computed by
+    `parsing.datalab_request_key` and shared by every point one HTTP call produced."""
 
     category: str
     group_key: str
     month: str  # 'YYYY-MM'
     ratio: float | None
     terms: tuple[str, ...]
+    request_key: str  # contracts/ddl/needs/006_naver_request.sql
     captured_at: datetime
 
     def natural_key(self) -> tuple[str, str, str]:

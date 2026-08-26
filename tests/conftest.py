@@ -29,6 +29,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption(SNAPSHOT_UPDATE, action="store_true", help="Rewrite CLI snapshots instead of comparing.")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _default_registrations_survive_the_suite() -> Iterator[None]:
+    """analysis.registry 는 process 전역 딕셔너리다 — 어떤 테스트가 register()/unregister() 를 오가며
+    기본 등록을 되돌리지 않으면 그 파일 하나가 아니라 뒤에 도는 아무 파일이나 '등록 없음'(exit 2)을
+    만난다. 이 부류가 두 번 나왔으니(#30) 세 번째를 세션 끝에서 잡는다."""
+    from analysis import registry
+
+    yield
+    # 재는 것이 먼저다: load_implementations() 는 이제 정말로 다시 등록하므로(#99), 먼저 부르면
+    # 스위트가 남긴 상태가 아니라 그 복구 결과를 재게 되어 이 가드가 절대 울리지 않는다.
+    missing = [task for task in registry.TASKS if registry.get(task) is None]
+    registry.load_implementations()
+    assert not missing, f"default registrations not restored by suite end: {missing}"
+
+
 @pytest.fixture
 def snapshot_update(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption(SNAPSHOT_UPDATE))
@@ -264,23 +279,49 @@ TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "cur
 TUBEDEPTH_NEEDS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "tubedepth"
 
 
-@pytest.fixture
-def tubedepth_schema(database_url_for_tests: str, _schema_name: str) -> str:
-    """#8's tubedepth DDL applied to a throwaway schema: the current 13-table dump verbatim (same
-    substitution `trend_radar_schema` uses), then every additive file in contracts/ddl/tubedepth/ on
-    top -- op §승인 경계: production `tubedepth` gets none of this, only the test schema does.
-    """
-    schema = _schema_name
-    engine = create_engine(database_url_for_tests)
+def _apply_tubedepth_ddl(conn: Any, schema: str) -> None:
+    """The current 13-table dump verbatim (same substitution `trend_radar_schema` uses), then every
+    additive file in contracts/ddl/tubedepth/ on top."""
     lines = [
         ln
         for ln in TUBEDEPTH_DDL.read_text(encoding="utf-8").splitlines()
         if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
     ]
     ddl = "\n".join(lines).replace("CREATE SCHEMA tubedepth;", "").replace("tubedepth.", f'"{schema}".')
+    conn.exec_driver_sql(ddl)
+    for path in sorted(TUBEDEPTH_NEEDS_DIR.glob("*.sql")):
+        conn.exec_driver_sql(path.read_text(encoding="utf-8").replace("tubedepth.", f'"{schema}".'))
+
+
+@pytest.fixture
+def tubedepth_schema(database_url_for_tests: str, _schema_name: str) -> str:
+    """#8's tubedepth DDL applied to a throwaway schema -- op §승인 경계: production `tubedepth` gets
+    none of this, only the test schema does.
+    """
+    engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        conn.exec_driver_sql(ddl)
-        for path in sorted(TUBEDEPTH_NEEDS_DIR.glob("*.sql")):
-            conn.exec_driver_sql(path.read_text(encoding="utf-8").replace("tubedepth.", f'"{schema}".'))
+        _apply_tubedepth_ddl(conn, _schema_name)
     engine.dispose()
     return database_url_for_tests
+
+
+@pytest.fixture
+def tubedepth_side_schema(database_url_for_tests: str, _schema_name: str) -> Iterator[str]:
+    """tubedepth in a schema beside the test's main one, for a test that needs trend_radar and
+    tubedepth at once (needs.collector_health binds both since #77). They cannot share one schema the
+    way needs+trend_radar do: both dumps carry an `alembic_version` table. The name swaps the prefix
+    instead of appending, because Postgres truncates identifiers at 63 bytes and `_schema_name`
+    already sits on that limit -- an appended suffix would truncate back into the main schema's name.
+    """
+    schema = f"td_{_schema_name[len(PREFIX) + 1 :]}"
+    engine = create_engine(database_url_for_tests)
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+            conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+            _apply_tubedepth_ddl(conn, schema)
+        yield schema
+    finally:
+        with engine.begin() as conn:
+            conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        engine.dispose()

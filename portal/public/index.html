@@ -9,14 +9,17 @@
 <body>
 <header>
   <h1>선케어 니즈 지표</h1>
-  <p id="run-caption" class="caption">불러오는 중…</p>
+  <div id="run-caption" class="caption">불러오는 중…</div>
   <p id="error" class="error" role="alert"></p>
+  <p class="caption"><a href="ops.html">파이프라인 관제 →</a></p>
 </header>
 
 <nav class="tabs" id="tabs">
   <button type="button" data-screen="need" class="on">1. 카테고리 니즈</button>
   <button type="button" data-screen="wish" class="on-off">2. 위시</button>
   <button type="button" data-screen="product" class="on-off">3. 제품별 미해결</button>
+  <button type="button" data-screen="character" class="on-off">4. 니즈의 성격</button>
+  <button type="button" data-screen="month" class="on-off">5. 기간별</button>
 </nav>
 
 <section id="screen-need" class="screen">
@@ -45,9 +48,10 @@
 
 <section id="screen-wish" class="screen hidden">
   <div class="controls">
-    <label>카테고리(scope)
+    <label>바람의 종류(wish_class)
       <select id="wish-scope"></select>
     </label>
+    <p class="caption">이 화면의 scope 는 카테고리가 아니라 바람의 종류다 — <code>wish:a</code> 는 제품·출시 요청(format · attribute · brand 를 센다), <code>wish:b</code> 는 크리에이터 요청(format · brand).</p>
   </div>
   <div class="chart-triple">
     <div><h3>상위 format</h3><div id="wish-chart-format" class="chart"></div></div>
@@ -60,6 +64,55 @@
   <h2>제품별 미해결(unresolved)</h2>
   <div id="product-chart" class="chart"></div>
   <div id="product-table"></div>
+</section>
+
+<section id="screen-character" class="screen hidden">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="character-scope"></select>
+    </label>
+  </div>
+  <h2>지속성 × 확산</h2>
+  <p class="caption">오른쪽 위일수록 오래 가고 여러 제품에 걸친 니즈다. 점 크기는 미해결비(unresolved).</p>
+  <div id="character-chart-scatter" class="chart chart-scatter"></div>
+  <div class="chart-triple">
+    <div>
+      <h3>출처 대조 (유튜브 불만/만족)</h3>
+      <p class="caption">리뷰 전체(neg/pos)가 아니라 유튜브 댓글 몫만 본다.</p>
+      <div id="character-chart-source" class="chart"></div>
+    </div>
+    <div>
+      <h3>신규 제품 대비 (unresolved_new / unresolved)</h3>
+      <p class="caption">100% = 신제품도 전체와 같은 미해결 수준. 낮을수록 신제품이 해결했다는 뜻.</p>
+      <div id="character-chart-new" class="chart"></div>
+    </div>
+    <div>
+      <h3>저평점 구조 (low_share)</h3>
+      <p class="caption">저평점 표본 안에서 이 니즈가 차지하는 비율.</p>
+      <div id="character-chart-low" class="chart"></div>
+    </div>
+  </div>
+</section>
+
+<section id="screen-month" class="screen hidden">
+  <div class="controls">
+    <label>카테고리(scope)
+      <select id="month-scope"></select>
+    </label>
+    <label>니즈(need_key)
+      <select id="month-need"></select>
+    </label>
+    <label>값
+      <select id="month-metric">
+        <option value="neg">불만 건수(neg)</option>
+        <option value="unresolved">미해결비(unresolved)</option>
+      </select>
+    </label>
+    <p class="caption">카테고리 합 행의 월별 값이다 — 제품별 월 축은 없다. 일별 축도 없다: 공통 집계 그레인이 월이고(<code>contracts/formats.md</code>), 2025-09 이전 유튜브 댓글은 연도까지만 복원되며 작성 시각이 없는 리뷰는 수집일로 폴백한다 — 일별 선은 그 폴백분을 수집한 날에 뭉쳐 없는 스파이크를 그린다. 판에는 최근 <span id="month-limit">…</span> 개월까지 그리고, 그 앞의 달은 아래 표에 있다.</p>
+  </div>
+  <h2>월별 추이</h2>
+  <div id="month-chart" class="chart"></div>
+  <div id="month-table"></div>
 </section>
 
 <script type="module" src="app.js"></script>

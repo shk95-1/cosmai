@@ -105,6 +105,7 @@ def write_datalab_points(connection: sa.Connection, points: Sequence[DatalabPoin
             "month": p.month,
             "ratio": p.ratio,
             "terms": list(p.terms),
+            "request_key": p.request_key,
             "captured_at": p.captured_at,
         }
         for p in points

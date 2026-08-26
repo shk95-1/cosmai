@@ -23,6 +23,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -168,8 +169,10 @@ class Sink(Protocol):
     Two requirements, and the second is the one with teeth:
 
     1. `write` is called from several threads at once. A lane runs `policy.concurrency` workers over
-       one sink and `_Lane._work` calls this outside `_lock` on purpose -- serialising a database
-       write behind the lock that guards the queue would pay for pacing twice. SQLAlchemy documents
+       one sink -- and since #25 every source's lane runs at once over that same sink, so the thread
+       count is the sum across lanes -- while `_Lane._work` calls this outside `_lock` on purpose:
+       serialising a database write behind the lock that guards the queue would pay for pacing
+       twice. SQLAlchemy documents
        `Connection` as not thread-safe, so an implementation must not close over one; at two workers
        and short statements psycopg's own lock hides that, which is exactly why it is written down
        here rather than left to be discovered.
@@ -495,13 +498,29 @@ def collect(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     lock: SourceLock = uncoordinated,
+    max_lanes: int | None = None,
 ) -> RunReport:
-    """Walk every source that declares `dataset`, one source after another.
+    """Walk every source that declares `dataset`, all of them at once.
 
-    Sources run in sequence rather than as the original's parallel lanes -- a run collects four sites
-    an hour and nothing here is waiting on wall clock -- but each source's own requests are paced and
-    capped by its `SourcePolicy` through a `Gate` of its own. `clock` and `sleep` are injected so the
-    pacing is testable without spending a source's 30-second interval.
+    One lane per source, running together (#25). #7 walked them one after another on the grounds that
+    nothing here waited on wall clock; once #10 gave every source a real transport behind a real
+    `Gate`, waiting on wall clock was all a run did, and the cost of the sum showed up in production
+    -- the hourly ranking walk took 202s against the original collector's 90s over the same four
+    sites (trend_radar.fetch_log, 2026-08-24). The original overlapped them with
+    `asyncio.gather(*(lane.run() for lane in lanes))`; this package is synchronous from the fetchers
+    up, so the lanes are threads and nothing above them changes shape.
+
+    What parallel lanes do *not* touch is the pace: every lane still owns a `Gate` of its own, so a
+    source's interval, burst and in-flight ceiling are exactly what they were when it was walked
+    alone. The sum only ever counted sources waiting for each other.
+    (tests/collectors/commerce/test_sources_walk_in_parallel_lanes.py holds that.) `clock` and
+    `sleep` are injected so the pacing is testable without spending a source's 30-second interval.
+
+    `max_lanes` caps how many walk together, and it is a *connection* budget rather than a taste:
+    `lock` pins one connection per walking lane for the length of that walk, which one-at-a-time
+    never had to count. `None` means every source at once -- right for a test with no database
+    behind it, wrong for the thing cron runs, so `collectors/commerce/cli.py` passes
+    `storage/db.py`'s `MAX_CONCURRENT_LANES` and the test file above fails a caller that does not.
 
     That gate is per lane and so per process, which is what `lock` is above: the source another run
     already holds is skipped rather than walked at twice the policy's rate. The default coordinates
@@ -510,16 +529,16 @@ def collect(
     the tests and fails the one that leaves `lock=` off.
     """
     active_journal = journal or NullJournal()
-    reports: dict[str, SourceReport] = {}
-    for source in sources:
-        if dataset not in source.datasets:
-            continue
+    walked = [source for source in sources if dataset in source.datasets]
+    if not walked:
+        return RunReport(captured_at=captured_at, sources={})
+
+    def walk(source: Source) -> SourceReport:
         # Held for the whole walk of this one source, and only this one: a source another run has is
         # given up, the rest of the run carries on.
         with lock(source.key) as held:
             if not held:
-                reports[source.key] = SourceReport(key=source.key, skipped_reason=LOCK_HELD_ELSEWHERE)
-                continue
+                return SourceReport(key=source.key, skipped_reason=LOCK_HELD_ELSEWHERE)
             lane = _Lane(
                 source=source,
                 # `Fetcher` is runtime-checkable and has one member, so this asks the plain
@@ -533,5 +552,25 @@ def collect(
                 board=board,
                 gate=Gate(source.policy, clock, sleep),
             )
-            reports[source.key] = lane.run()
+            return lane.run()
+
+    lanes = len(walked) if max_lanes is None else max(1, min(len(walked), max_lanes))
+    reports: dict[str, SourceReport] = {}
+    crashes: list[BaseException] = []
+    with ThreadPoolExecutor(max_workers=lanes, thread_name_prefix="lane") as pool:
+        started = [(source, pool.submit(walk, source)) for source in walked]
+        # Every future is waited on before anything is raised, and they are read in the caller's
+        # source order: a lane that dies of a bug must not cancel the sources beside it, and the
+        # report a run logs must not depend on which lane happened to finish first.
+        for source, future in started:
+            try:
+                reports[source.key] = future.result()
+            except BaseException as exc:  # noqa: BLE001 - re-raised below, once every lane is home
+                crashes.append(exc)
+
+    if crashes:
+        # Still loud: a crash here is a bug, not a site, and #7's plain loop ended the run with it.
+        # One is re-raised as itself so the run log keeps saying `RuntimeError: ...`; several are
+        # grouped because picking one of them would throw away the others' tracebacks.
+        raise crashes[0] if len(crashes) == 1 else BaseExceptionGroup("lanes crashed", crashes)
     return RunReport(captured_at=captured_at, sources=reports)

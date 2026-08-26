@@ -16,6 +16,10 @@
 # baseline + additive files, rebuilt here in a throwaway container -- the same composition the tests
 # use, so the two can never drift apart silently.
 #
+# app.needs, the schema this repo owns, is the exception and has its own section at the bottom:
+# it has no dump baseline because db/migrate.sh IS its expected state, and production carries
+# objects a fork put there whose files are not in this checkout (contracts/ddl/needs/foreign.txt).
+#
 # Reads nothing secret: pg_dump runs inside the production container as the superuser via docker
 # exec, the same access path db/migrate.sh already uses.
 set -e
@@ -46,8 +50,29 @@ for _ in $(seq 1 60); do
 done
 
 status=0
+# One place decides pass/fail, so the needs section below cannot drift from the loop's verdict.
+report() { # $1 = db.schema label (also the $work filename), $2 = what expected was built from
+    if diff -u "$work/expected.$1" "$work/actual.$1" > "$work/diff.$1"; then
+        echo "ddl-drift: $1 matches the contract"
+    else
+        echo "ddl-drift: $1 DRIFTED -- production is not $2" >&2
+        cat "$work/diff.$1" >&2
+        status=1
+    fi
+}
+
 # db:schema pairs, matching the contracts/ddl/current/<db>.<schema>.sql naming.
-for pair in app:trend_radar app:tubedepth cosmai:cosmai; do
+pairs='app:trend_radar app:tubedepth cosmai:cosmai'
+
+# Everything is built before anything is dumped, and no schema is dropped in between. That is not
+# tidiness. pg_dump orders objects by dependency, not by name, so a schema dumped alone sorts
+# differently from the same schema dumped beside the views that read it: since #77
+# db/views/collector_health.sql reads tubedepth.jobs, and production -- where that view exists --
+# hoists jobs to the front of the tubedepth dump, while a lone rebuild leaves it in alphabetical
+# place. Building one schema at a time and dropping it after its own dump also left db/migrate.sh
+# below with no tubedepth.jobs to bind to, so the view failed and the app.needs verdict vanished
+# altogether (#114). Expected is therefore assembled as the whole graph production carries.
+for pair in $pairs; do
     db=${pair%%:*}
     schema=${pair#*:}
     baseline=contracts/ddl/current/$db.$schema.sql
@@ -60,21 +85,93 @@ for pair in app:trend_radar app:tubedepth cosmai:cosmai; do
         [ -e "$add" ] || continue
         docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 -f - < "$add" > /dev/null
     done
-    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
-        | normalise > "$work/expected.$schema"
-    docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
-        -c "DROP SCHEMA $schema CASCADE" > /dev/null
-
-    docker exec "$container" pg_dump -U "$superuser" -d "$db" --schema-only --no-owner -x -n "$schema" \
-        | normalise > "$work/actual.$schema"
-
-    if diff -u "$work/expected.$schema" "$work/actual.$schema" > "$work/diff.$schema"; then
-        echo "ddl-drift: $db.$schema matches the contract"
-    else
-        echo "ddl-drift: $db.$schema DRIFTED -- production is not baseline + declared additive files" >&2
-        cat "$work/diff.$schema" >&2
-        status=1
-    fi
 done
+
+# ---------------------------------------------------------------------------------------------
+# app.needs is this repo's own schema, so it gets its expected state from the script production
+# runs -- db/migrate.sh -- not from a dump baseline. Assembling it from the ledger instead would
+# be impossible: needs.schema_migration records the fork's 020, whose file is not in this
+# checkout. What the fork put into production is therefore declared, not assembled:
+# contracts/ddl/needs/foreign.txt names each object that is theirs.
+needs_db=app
+foreign=contracts/ddl/needs/foreign.txt
+[ -f "$foreign" ] || { echo "ddl-drift: missing $foreign" >&2; exit 1; }
+
+exclude=
+drop_columns=
+for object in $(sed 's/#.*//' "$foreign" | awk 'NF {print $1}'); do
+    # These names are interpolated into SQL and into a pg_dump flag; anything but a plain
+    # identifier (or identifier.identifier) is a typo at best.
+    case $object in
+        *[!a-z0-9_.]* | *..* | .* | *.) echo "ddl-drift: bad entry in $foreign: $object" >&2; exit 1 ;;
+        *.*.*) echo "ddl-drift: bad entry in $foreign: $object" >&2; exit 1 ;;
+        *.*) drop_columns="$drop_columns $object" ;;
+        *) exclude="$exclude -T needs.$object" ;;
+    esac
+done
+
+# The loop above already stood up every schema db/views/*.sql binds to, so migrate.sh deploys the
+# views here rather than skipping them. The two passwords are throwaway values for this container,
+# not secrets. Output is held back rather than passed through: migrate.sh's DROP VIEW IF EXISTS
+# prints two NOTICEs on a fresh database, and two stray lines in the middle of four verdicts read
+# like a fault.
+printf 'NEEDS_DB_MIGRATOR=drift\nNEEDS_DB_RUNTIME=drift-runtime\n' > "$work/needs.env"
+COSMAI_SECRET_FILE="$work/needs.env" db/migrate.sh --container "$name" --db drift --superuser drift \
+    > /dev/null 2> "$work/migrate.err" || { cat "$work/migrate.err" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------------------------
+# Expected: all four off the finished graph, before anything is torn down for the needs replay.
+for pair in $pairs; do
+    db=${pair%%:*}
+    schema=${pair#*:}
+    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/expected.$db.$schema"
+done
+# needs's expected takes the same dump-restore-dump round trip its actual takes below, because
+# pg_dump's deparse is not a fixed point: a view body written by CREATE VIEW and the same body
+# after a dump and restore print differently -- ANY ((ARRAY[...])::text[]) comes back as
+# ANY (ARRAY[(...)::text, ...]). Comparing a once-deparsed expected against a twice-deparsed
+# actual reported every such view as drift forever, and app.needs stayed red for a reason that
+# had nothing to do with production (#120). The three pairs above need none of this: both of
+# their sides come off a single pg_dump.
+docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
+    > "$work/expected.needs.sql"
+docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
+    -c 'DROP SCHEMA needs CASCADE' > /dev/null
+docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+    -c 'SET client_min_messages = warning' -f - < "$work/expected.needs.sql" > /dev/null
+docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
+    | normalise > "$work/expected.$needs_db.needs"
+
+# Actual: the three schemas this repo does not own come straight off production.
+for pair in $pairs; do
+    db=${pair%%:*}
+    schema=${pair#*:}
+    docker exec "$container" pg_dump -U "$superuser" -d "$db" --schema-only --no-owner -x -n "$schema" \
+        | normalise > "$work/actual.$db.$schema"
+
+    report "$db.$schema" "baseline + declared additive files"
+done
+
+# pg_dump can exclude a table but not a column, so production's needs is replayed into the
+# throwaway (where the expected schema is dropped first) and the foreign columns are dropped
+# there. Both sides then come off the same pg_dump against the same server version -- and the
+# replay lands beside the same trend_radar and tubedepth the expected dump was taken next to,
+# so the views it recreates sort the way they did a moment ago.
+docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
+    -c 'DROP SCHEMA needs CASCADE' > /dev/null
+# shellcheck disable=SC2086 # $exclude is a built list of -T flags, and must word-split.
+docker exec "$container" pg_dump -U "$superuser" -d "$needs_db" --schema-only --no-owner -x -n needs \
+    $exclude > "$work/production.needs.sql"
+docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+    -c 'SET client_min_messages = warning' -f - < "$work/production.needs.sql" > /dev/null
+for object in $drop_columns; do
+    docker exec "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+        -c "ALTER TABLE needs.${object%.*} DROP COLUMN ${object#*.}" > /dev/null
+done
+docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
+    | normalise > "$work/actual.$needs_db.needs"
+
+report "$needs_db.needs" "db/migrate.sh + the objects $foreign declares as someone else's"
 
 exit $status

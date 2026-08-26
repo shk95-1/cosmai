@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -206,6 +207,36 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
         assert cur.fetchone() == (1,)
 
 
+def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """#41: 화면 3 은 product_ref <> '' 행만 읽는다 — 집계가 그 축을 내지 않으면
+    실제 run 에서 영원히 0행이다."""
+    found = _all(analysis_url, sources)
+    assert found.status == "ok", found.detail
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT scope, need_key, product_ref, neg, pos, unresolved FROM metrics_need "
+            "WHERE run_id = %s AND month = ''",
+            (found.run_id,),
+        )
+        rows = cur.fetchall()
+
+    per_product = [r for r in rows if r[2]]
+    sums = {(r[0], r[1]): r for r in rows if not r[2]}
+    assert per_product, "제품 축 행이 하나도 없다 — 화면 3 이 빈다"
+    # 화면 3 이 정렬·막대에 쓰는 값이다. 리뷰가 있는 제품 행은 unresolved 가 차 있어야 한다.
+    assert any(r[5] is not None for r in per_product)
+    # 카테고리 합 행은 그대로 남는다 — 제품 축은 그 위에 얹히는 것이지 대체가 아니다 (화면 1·골든).
+    assert sums and {(r[0], r[1]) for r in per_product} <= set(sums)
+    for scope, need_key, _, neg, pos, _ in per_product:
+        # 한 제품의 몫은 그 (scope, need_key) 합을 넘지 못한다 — 제품을 모르는 언급은 합에만 남는다.
+        assert neg <= sums[(scope, need_key)][3] and pos <= sums[(scope, need_key)][4]
+    # 롤업은 제품마다 need_key 당 한 행이다 — 화면 3 이 그 scope 로 중복을 지운다 (screens.js).
+    rolled = [(r[1], r[2]) for r in per_product if r[0] == "all"]
+    assert rolled and len(set(rolled)) == len(rolled)
+
+
 def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):
     """크론이 부르는 모양 그대로다: 소유 표를 아무도 인자로 말하지 않아도 배송값(#31)이 선다. 이 픽스처의
     리뷰는 전부 선블록이라 규칙은 리뷰를 한 건도 쓰지 않고, 주인이 라벨한 행은 그 자리에 남는다."""
@@ -216,7 +247,7 @@ def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sour
             "observed_at_resolution, month, sentence, category, lexicon_category, "
             "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
             "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
-            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"]),
+            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"].version),
         )
         conn.commit()
     with connect(analysis_url) as conn:
@@ -230,7 +261,7 @@ def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sour
             "WHERE src = 'review'"
         )
         # 규칙이 이 문장을 다시 뽑았다면 '불만'/rule-v2.2 한 줄만 남았을 것이다 (제자리 upsert).
-        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"])]
+        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"].version)]
 
 
 def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(
@@ -378,30 +409,78 @@ def test_each_stage_runs_on_its_own(analysis_url: str, sources: tuple[str, str])
     assert aggregate.status == "ok" and aggregate.counts["metrics_need"] > 0
 
 
-def test_analyze_all_stops_being_quiet_when_the_scope_axes_miss_each_other(
+def _scopes_of(url: str, run_id: int | None) -> list[str]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT scope FROM metrics_need WHERE run_id = %s ORDER BY 1", (run_id,))
+        return [r[0] for r in cur.fetchall()]
+
+
+def test_analyze_all_with_a_lexicon_scope_aggregates_what_it_labelled(
     analysis_url: str, sources: tuple[str, str]
 ):
-    """#38: polarity scopes by lexicon_category ('선블록') but aggregate scopes by the source category
-    ('스킨케어 > 선크림') — this fixture's reviews sit exactly on that mismatch, so a 6-hour pass that
-    labels 13,857 rows and aggregates none must not close as 'ok'."""
+    """#38 택2: `--scope` 는 두 축을 다 받는다. polarity 는 lexicon_category('선블록')로 거르고
+    aggregate 는 원천 카테고리('스킨케어 > 선크림')로 거른다 — 이 픽스처의 리뷰가 바로 그 어긋남 위에
+    있으므로, 라벨한 것을 그 실행이 실제로 집계해야 한다 (실측 run 16 은 6시간 45분에 0행이었다)."""
+    found = _all(analysis_url, sources, scope="선블록")
+    assert found.status == "ok", found.detail
+    assert found.counts["attempted_need"] > 0, "polarity must have actually run for this scope"
+    assert found.counts["metrics_need"] > 0
+    # metrics_need.scope 축은 그대로 원천 카테고리다 (contracts/entrypoints.md §분석) — 펼치는 것은
+    # 어느 scope 를 쓸지이지, scope 컬럼이 무엇을 뜻하는지가 아니다. 화면(#11)·골든이 그 축을 읽는다.
+    assert _scopes_of(analysis_url, found.run_id) == [CATEGORY]
+
+
+def test_a_lexicon_scope_writes_the_rows_the_unscoped_run_writes_for_that_category(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """펼친 scope 의 행은 스코프 없는 05:00 실행이 그 원천 카테고리에 쓰는 행과 같아야 한다 — scope 는
+    어느 카테고리를 쓸지를 고르지, 그 안에서 무엇이 세어지는지를 바꾸지 않는다."""
+    whole = _all(analysis_url, sources)
+    assert whole.status == "ok", whole.detail
+    rows = _dump(analysis_url, "metrics_need", NEED_METRICS, whole.run_id)
+    baseline = [r for r in rows if r[0] == CATEGORY]
+    assert baseline, "the unscoped run must write this category, or the comparison proves nothing"
+    scoped = _all(analysis_url, sources, scope="선블록")
+    assert scoped.status == "ok", scoped.detail
+    assert _dump(analysis_url, "metrics_need", NEED_METRICS, scoped.run_id) == baseline
+
+
+def test_analyze_all_still_stops_being_quiet_when_no_source_category_carries_the_scope(
+    analysis_url: str, sources: tuple[str, str], database_url_for_tests: str
+):
+    """#38 택3 은 남는다. 제품명 정규식(name_keyword)으로 붙은 라벨에는 원천 카테고리가 아예 없어
+    (analysis/units.py) 펼칠 값이 없다 — 실측 run 16 의 '(빈 값) 56' 이 그 갈래다. 그런 실행은 라벨을
+    쓰고도 한 행도 집계하지 못하므로 'ok' 로 조용히 끝나서는 안 된다."""
+    commerce, _youtube = sources
+    engine = create_engine(database_url_for_tests)
+    with engine.begin() as conn:
+        # 카테고리를 주는 것은 rank_snapshot 뿐이다 — 지우면 남는 유도 경로는 제품명 정규식뿐이고,
+        # 그 규칙은 glowpick 것만 있다 (eval/lexicon/category_map_v1.csv).
+        conn.exec_driver_sql(f'DELETE FROM "{commerce}".rank_snapshot')
+        conn.exec_driver_sql(
+            f'INSERT INTO "{commerce}".review '
+            "(source, review_key, captured_at, product_key, rating, body, written_at) "
+            "VALUES ('glowpick', 'R9', %s, 'G1', 1.0, '백탁이 너무 심해서 최악이에요', %s)",
+            (CAPTURED, WRITTEN),
+        )
+    engine.dispose()
     found = _all(analysis_url, sources, scope="선블록")
     assert found.counts["attempted_need"] > 0, "polarity must have actually run for this scope"
     assert found.counts["metrics_need"] == 0
     assert found.status == "partial", found.detail
     assert "선블록" in found.detail
-    assert CATEGORY in found.detail
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
         row = cur.fetchone()
         assert row is not None
         status, note = row
         assert status == "partial"
-        assert CATEGORY in note
+        assert "선블록" in note
 
 
-def _insert_need(url: str, category: str) -> None:
-    """The one shape of need_mention this file's --scope 선블록 tests all need: label matches, source
-    category doesn't — the #38 mismatch itself, not a stand-in for it."""
+def _insert_need(url: str, category: str | None) -> None:
+    """The one shape of need_mention this file's --scope 선블록 tests all need: the label matches and
+    the source category is something else (or nothing) — the #38 axes themselves, not a stand-in."""
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
@@ -413,12 +492,40 @@ def _insert_need(url: str, category: str) -> None:
         conn.commit()
 
 
-def test_analyze_aggregate_alone_stops_being_quiet_on_the_same_mismatch(
-    analysis_url: str, sources: tuple[str, str]
-):
-    """standalone `analyze aggregate` closes its own run — the override has to reach that row too."""
+def test_analyze_aggregate_alone_takes_the_lexicon_axis_too(analysis_url: str, sources: tuple[str, str]):
+    """단독 `analyze aggregate --scope <lexicon>` 도 같은 규칙으로 돈다 — 침묵 감시(#38 택3)가
+    운영자에게 "aggregate 를 다시 돌려라" 라고 말하는 자리가 바로 여기다."""
     commerce, _youtube = sources
     _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "ok", found.detail
+    assert found.counts["metrics_need"] > 0
+    assert _scopes_of(analysis_url, found.run_id) == [CATEGORY]
+
+
+def test_a_source_category_scope_keeps_running_exactly_as_it_did(analysis_url: str, sources: tuple[str, str]):
+    """회귀: 원천 카테고리 문자열을 그대로 준 실행은 그 한 scope 만 쓴다 (#38 택2 는 추가일 뿐이다)."""
+    commerce, _youtube = sources
+    _insert_need(analysis_url, CATEGORY)
+    with connect(analysis_url) as conn:
+        found = pipeline.run_stage(
+            conn, "aggregate", scope=CATEGORY, commerce_schema=commerce, captured_at=CAPTURED_DATE
+        )
+    assert found.status == "ok", found.detail
+    assert found.counts["metrics_need"] > 0
+    assert _scopes_of(analysis_url, found.run_id) == [CATEGORY]
+
+
+def test_analyze_aggregate_alone_stops_being_quiet_when_nothing_carries_the_scope(
+    analysis_url: str, sources: tuple[str, str]
+):
+    """standalone `analyze aggregate` closes its own run — the override has to reach that row too.
+    라벨은 '선블록' 인데 원천 카테고리가 없는 행(제품명 정규식 갈래)이 그 침묵을 남긴다."""
+    commerce, _youtube = sources
+    _insert_need(analysis_url, None)
     with connect(analysis_url) as conn:
         found = pipeline.run_stage(
             conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
@@ -431,7 +538,7 @@ def test_analyze_aggregate_alone_stops_being_quiet_on_the_same_mismatch(
         assert row is not None
         status, note = row
         assert status == "partial"
-        assert CATEGORY in note
+        assert "선블록" in note
 
 
 def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sources: tuple[str, str]):
@@ -443,7 +550,7 @@ def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sour
     이 자리를 지키는 것이 사람의 주의력뿐이면 다음 리베이스에서 조용히 뒤집힌다.
     """
     commerce, _youtube = sources
-    _insert_need(analysis_url, CATEGORY)
+    _insert_need(analysis_url, None)
     with connect(analysis_url) as conn:
         found = pipeline.run_stage(
             conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
@@ -455,7 +562,7 @@ def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sour
     assert [int(r[0]) for r in partial_rows] == [found.run_id], (
         f"one scope-silence must leave exactly the aggregate's own run partial, got {partial_rows}"
     )
-    assert CATEGORY in (partial_rows[0][1] or "")
+    assert "선블록" in (partial_rows[0][1] or "")
 
 
 def test_the_predicate_fires_on_need_alone_even_when_wish_is_not_empty(
@@ -465,7 +572,7 @@ def test_the_predicate_fires_on_need_alone_even_when_wish_is_not_empty(
     entirely and always recounts the whole population (WISH_SCOPES), so #33's plan to run this scope by
     scope repeatedly will keep the wish population non-empty — metrics_need alone has to carry this."""
     commerce, _youtube = sources
-    _insert_need(analysis_url, CATEGORY)
+    _insert_need(analysis_url, None)
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO wish_mention (src, ref, video_id, observed_at, observed_at_resolution, month, "
@@ -494,21 +601,21 @@ def test_stale_and_scope_silence_both_land_in_one_note(analysis_url: str, source
             "VALUES ('failed', '{}'::jsonb, 'analyze:polarity rewriting=review/2026-03')"
         )
         conn.commit()
-    _insert_need(analysis_url, CATEGORY)
+    _insert_need(analysis_url, None)
     with connect(analysis_url) as conn:
         found = pipeline.run_stage(
             conn, "aggregate", scope="선블록", commerce_schema=commerce, captured_at=CAPTURED_DATE
         )
     assert found.status == "partial", found.detail
     assert "half-written" in found.detail, "the stale reason must not disappear"
-    assert "선블록" in found.detail and CATEGORY in found.detail, "the scope-silence reason must show too"
+    assert "선블록" in found.detail, "the scope-silence reason must show too"
 
 
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
-    # 이 컨테이너의 trend_radar 는 비어 있고 tubedepth 는 아예 없다 (tool/checks/test 는 운영 뷰가
-    # 바인딩할 trend_radar 만 깐다) — link 가 거기서 실패한다.
+    # 이 컨테이너에는 운영 뷰가 바인딩하는 것만 있다 (tool/checks/test): trend_radar 전부는 비어 있고
+    # tubedepth 는 jobs 한 표뿐이다 — link 가 읽는 tubedepth 네 표는 없어서 거기서 실패한다.
     assert main(["analyze", "all", "--url", analysis_url]) == 1
     assert "failed" in capsys.readouterr().out
     # 단계에 닿기 전의 거절은 blocked 다 — 실패한 run 이 남는 exit 1 과 갈린다.
@@ -551,6 +658,29 @@ def test_the_crontab_schedules_analyze_all_at_the_time_the_contract_names():
     # decision (stack/docker-compose.yml), and it must not decide whether this check sees the line.
     scheduled = "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
     assert _time(scheduled) == contract
+
+
+ANALYZE_LINE = re.compile(r"^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(cosmai analyze .+)$")
+
+
+def test_the_contract_and_the_crontab_agree_on_every_analyze_line():
+    """`analyze all` 하나만 대조하던 검사를 넓힌다 (#32): gemma4 줄이 크론에만 있고 계약에 없으면
+    §스케줄 은 "매일 밤 무엇이 도는가"에 거짓을 답한다 — 간격 규칙이 서는 표가 바로 그 표다."""
+
+    def _times(text: str) -> dict[str, str]:
+        found = {}
+        for raw in text.splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if match := ANALYZE_LINE.match(line):
+                found[" ".join(match.group(2).split())] = " ".join(match.group(1).split())
+        return found
+
+    contract = _times(ENTRYPOINTS_MD.read_text(encoding="utf-8"))
+    scheduled = _times(
+        "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
+    )
+    assert scheduled, "stack/crontab.d 에 analyze 줄이 하나도 없다"
+    assert scheduled == contract, f"크론 {scheduled} vs 계약 {contract}"
 
 
 def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime():

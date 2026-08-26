@@ -171,6 +171,21 @@ services:
   analyze:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/analyze"]
+    environment:
+      # `<<:` 가 environment: 를 통째로 갈아 끼우므로 앵커의 다섯 키를 여기서 다시 적는다 --
+      # collector-commerce 가 이미 밟은 함정이고, 하나를 빠뜨리면 08:00 에야 드러난다.
+      COSMAI_DB_HOST: shared-postgres
+      COSMAI_DB_PORT: "5432"
+      COSMAI_SECRET_FILE: /run/cosmai/env
+      PYTHONUNBUFFERED: "1"
+      TZ: UTC
+      # 08:00 줄의 gemma4 가 부르는 호스트 ollama (#32). secret 이 아니라 주소 노브라 값이 여기 있다
+      # (stack/env.example, contracts/secrets.md 의 "secret 이 아닌 것"). 기본값은 컨테이너 안에서
+      # 왕복을 실측한 유일한 경로다: WSL2 미러링이 물려받은 Windows 의 Tailscale 인터페이스 --
+      # 브리지 게이트웨이(172.18.0.1)도 LAN(192.168.10.35)도 host.docker.internal 도 닿지 않았다.
+      # **Tailscale 이 꺼지면 이 주소는 사라진다** -- 그때는 stack/.env 에서 갈아 끼운다. 못 닿는
+      # 밤은 조용히 0건이 아니라 failed run 이다 (analysis/polarity/ollama.py 의 preflight).
+      OLLAMA_URL: ${OLLAMA_URL:-http://100.102.193.98:11434}
 
   # --- 노출 ---------------------------------------------------------------------------------------
   # 백엔드도 DB 자격증명도 없다: 브라우저가 PostgREST(3000)를 직접 부르므로

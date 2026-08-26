@@ -11,6 +11,7 @@ partial, 2 blocked.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -84,6 +85,7 @@ def run(
     engine = storage_db.create_engine(database_url or storage_db.runtime_url())
     payloads = PayloadStore(payload_root or Path("var") / "youtube-payloads")
     try:
+        prune_result: PruneResult | None = None
         with engine.begin() as conn:
             if wanted is Dataset.WATCH:
                 return _run_watch(conn, watchlist_path or DEFAULT_WATCHLIST, now=now)
@@ -91,7 +93,16 @@ def run(
                 return _run_work(conn, payloads, fetcher or _RaisingFetcher(), now=now)
             if wanted is Dataset.FLATTEN:
                 return _run_flatten(conn, payloads, now=now)
-            return _run_prune(conn, now=now)
+            prune_result = _run_prune(conn, now=now)
+        # Row deletes just committed above (the `with` block exited); only now is it safe to unlink
+        # files -- a file delete can't roll back, so doing it before commit would strand rows over an
+        # orphan file on any later failure in the same transaction.
+        removed_files = sum(payloads.delete(kind, digest) for kind, digest in prune_result.orphaned)
+        print(
+            f"pruned {prune_result.removed_artifacts} artifact(s), "
+            f"{prune_result.removed_jobs} finished job(s), {removed_files} payload file(s)"
+        )
+        return 0
     finally:
         engine.dispose()
 
@@ -119,6 +130,7 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
                 conn,
                 kind=directive.kind,
                 target=directive.target,
+                dataset=Dataset.WATCH.value,
                 follow_up_kind=follow_up,
                 refresh=index == 0,
                 now=now,
@@ -137,13 +149,16 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
     return 0
 
 
-def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
+def _claim(conn: Connection, *, limit: int, now: datetime) -> Sequence[Any]:
     """One atomic statement, not select-then-update: two `work` passes overlapping (a slow cron tick
     still running when the next fires, or a live worker daemon started alongside the batch CLI --
     #10) raced select-then-update at READ COMMITTED and could both pick up the same queued row before
     either's UPDATE landed. `FOR UPDATE SKIP LOCKED` on the candidate CTE is the archived
     `JobRepository.claim`'s own fix for exactly this (worker.py), applied here as one UPDATE .. FROM
-    a locked subquery so no other connection can see this batch as still queued in between."""
+    a locked subquery so no other connection can see this batch as still queued in between.
+
+    #101: stamps `started_at=now` in the same UPDATE -- this is the only place a job becomes RUNNING,
+    so it is the only correct place to record when it started."""
     candidates = (
         sa.select(jobs.c.identifier)
         .where(jobs.c.state == JobState.QUEUED.value)
@@ -155,8 +170,15 @@ def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
     stmt = (
         sa.update(jobs)
         .where(jobs.c.identifier.in_(sa.select(candidates.c.identifier)))
-        .values(state=JobState.RUNNING.value)
-        .returning(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind)
+        .values(state=JobState.RUNNING.value, started_at=now)
+        .returning(
+            jobs.c.identifier,
+            jobs.c.kind,
+            jobs.c.target,
+            jobs.c.dataset,
+            jobs.c.follow_up_kind,
+            jobs.c.started_at,
+        )
     )
     return conn.execute(stmt).all()
 
@@ -173,6 +195,44 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
     ).first()
 
 
+_QUOTA_EXCEEDED_REASON = "quotaExceeded"
+
+
+def _is_quota_exceeded(error: Exception) -> bool:
+    """YouTube Data API signals quota exhaustion as 403 with `reason: quotaExceeded` in the JSON
+    body -- not as a distinct status code -- so telling it apart from a 403 that means something
+    else (forbidden, accessNotConfigured) requires reading the body, not just `error.code`."""
+    read = getattr(error, "read", None)
+    if read is None:
+        return False
+    try:
+        body = read()
+    except Exception:  # noqa: BLE001 - a body we can't read just isn't quotaExceeded
+        return False
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return False
+    reasons = (item.get("reason") for item in payload.get("error", {}).get("errors") or [])
+    return _QUOTA_EXCEEDED_REASON in reasons
+
+
+def _classify_error(error: Exception) -> str:
+    """Bucket a fetch failure into a small vocabulary #77's collector_health view can count as
+    `blocked` (403/429, the same statuses commerce's fetch_log.status already treats as blocked) vs
+    `failed` -- contracts/entrypoints.md 수집기 절 documents this vocabulary as the source #77 reads.
+    `error.code` is how `urllib.error.HTTPError` (and any transport built the same shape) carries a
+    status; a failure with none reached no HTTP response at all (DNS, socket, timeout)."""
+    code = getattr(error, "code", None)
+    if isinstance(code, int):
+        if code == 403 and _is_quota_exceeded(error):
+            return "quota"
+        if code == 429:
+            return "rate_limited"
+        return f"http_{code}"
+    return "transport"
+
+
 def _normalize(kind: str, dump: dict[str, Any]) -> Any:
     if kind in LISTING_KINDS:
         return sources.normalize_listing(dump, source_kind=kind)
@@ -185,6 +245,15 @@ def _normalize(kind: str, dump: dict[str, Any]) -> Any:
             dump, language=dump.get("language", ""), is_automatic=bool(dump.get("is_automatic"))
         )
     raise ValueError(f"no source for job kind {kind!r}")
+
+
+def _elapsed_ms(started_at: datetime, now: datetime) -> int:
+    """#101 결정: elapsed_ms is the whole job's wall time (claim to finish), not just the fetch
+    round trip -- unlike commerce's fetch_log.elapsed_ms, a youtube job's cache hit spends no fetch
+    at all, so a fetch-only measure would leave every cache-hit row NULL. Both timestamps come from
+    the same injected `now`/`started_at` clock the rest of this module already uses, so this value
+    and `finished_at - started_at` computed later from the same columns can never disagree."""
+    return int((now - started_at).total_seconds() * 1000)
 
 
 def _collect_one(
@@ -208,7 +277,8 @@ def _collect_one(
                 .values(
                     state=JobState.FAILED.value,
                     finished_at=now,
-                    error_code=type(error).__name__,
+                    elapsed_ms=_elapsed_ms(job.started_at, now),
+                    error_code=_classify_error(error),
                     error_message=str(error),
                 )
             )
@@ -232,7 +302,11 @@ def _collect_one(
 
     if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
         video_ids = [v["video_id"] for v in payload["videos"]]
-        queue.fan_out_follow_up(conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, now=now)
+        # #102: the fanned-out job inherits the listing job's own dataset -- it exists only because
+        # that job's follow_up_kind named it, not because of anything `work` itself decided.
+        queue.fan_out_follow_up(
+            conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, dataset=job.dataset, now=now
+        )
 
     conn.execute(
         sa.update(jobs)
@@ -240,6 +314,7 @@ def _collect_one(
         .values(
             state=JobState.SUCCEEDED.value,
             finished_at=now,
+            elapsed_ms=_elapsed_ms(job.started_at, now),
             payload_digest=digest,
             payload_bytes=byte_count,
         )
@@ -248,7 +323,7 @@ def _collect_one(
 
 
 def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
-    claimed = _claim(conn, limit=DEFAULT_WORK_BATCH)
+    claimed = _claim(conn, limit=DEFAULT_WORK_BATCH, now=now)
     if not claimed:
         print("no queued jobs")
         return 0
@@ -263,14 +338,54 @@ def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> 
     return 1 if report.errors else 0
 
 
-def _run_prune(conn: Connection, *, now: datetime) -> int:
+@dataclass
+class PruneResult:
+    removed_artifacts: int
+    removed_jobs: int
+    orphaned: list[tuple[str, str]]
+
+
+def _run_prune(conn: Connection, *, now: datetime) -> PruneResult:
+    # `payloads.put(job.kind, payload)` (see _collect_one) means an `artifacts` row and a `jobs` row
+    # can name the *same* file by the same (kind, digest) pair -- a cached artifact is reused across
+    # several jobs' payload_digest. So "still referenced" has to check both tables, not just the one
+    # whose row this prune pass is deleting.
     cutoff = now - timedelta(days=PRUNE_MAX_AGE_DAYS)
+    stale_artifacts = conn.execute(
+        sa.select(artifacts.c.kind, artifacts.c.digest).where(artifacts.c.fetched_at < cutoff)
+    ).all()
+    stale_jobs = conn.execute(
+        sa.select(jobs.c.kind, jobs.c.payload_digest).where(
+            jobs.c.state.in_(FINISHED_STATES),
+            jobs.c.finished_at < cutoff,
+            jobs.c.payload_digest.is_not(None),
+        )
+    ).all()
+    candidates = {(row.kind, row.digest) for row in stale_artifacts} | {
+        (row.kind, row.payload_digest) for row in stale_jobs
+    }
+
     removed_artifacts = conn.execute(sa.delete(artifacts).where(artifacts.c.fetched_at < cutoff)).rowcount
     removed_jobs = conn.execute(
         sa.delete(jobs).where(jobs.c.state.in_(FINISHED_STATES), jobs.c.finished_at < cutoff)
     ).rowcount
-    print(f"pruned {removed_artifacts} artifact(s), {removed_jobs} finished job(s)")
-    return 0
+
+    orphaned = [(kind, digest) for kind, digest in candidates if not _still_referenced(conn, kind, digest)]
+    return PruneResult(removed_artifacts=removed_artifacts, removed_jobs=removed_jobs, orphaned=orphaned)
+
+
+def _still_referenced(conn: Connection, kind: str, digest: str) -> bool:
+    """Same transaction as the deletes above, so this sees post-delete state -- a survivor row (a
+    different job/artifact that happens to name the same payload) is exactly what must keep the file."""
+    in_artifacts = conn.execute(
+        sa.select(sa.literal(1)).where(artifacts.c.kind == kind, artifacts.c.digest == digest).limit(1)
+    ).first()
+    if in_artifacts is not None:
+        return True
+    in_jobs = conn.execute(
+        sa.select(sa.literal(1)).where(jobs.c.kind == kind, jobs.c.payload_digest == digest).limit(1)
+    ).first()
+    return in_jobs is not None
 
 
 __all__ = ["run", "Fetcher", "FetchSpec"]

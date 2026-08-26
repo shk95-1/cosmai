@@ -8,9 +8,11 @@ skipped point/post is a natural-key upsert away from being picked up cleanly on 
 
 from __future__ import annotations
 
+import hashlib
 import html
+import json
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from typing import Any
 
@@ -18,6 +20,15 @@ from collectors.naver.models import BlogPost, DatalabPoint
 
 _TAG = re.compile(r"<[^>]+>")
 _POSTDATE = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})$")
+
+
+def datalab_request_key(params: Mapping[str, Any]) -> str:
+    """Row-level request boundary (contracts/formats.md §NAVER DataLab, issue #44): a sha256 hex
+    digest of the exact request body (`keywordGroups`/`startDate`/`endDate`/`timeUnit`) as canonical
+    JSON. Same params -> same key; move `endDate` a day and the vendor rescales the whole window, so
+    the key must move too -- reproducible from the params alone, no run state involved."""
+    canonical = json.dumps(params, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _plain(value: object) -> str:
@@ -43,11 +54,13 @@ def _iso_date(value: object) -> date | None:
 
 
 def parse_datalab_response(
-    body: dict[str, Any], *, category: str, captured_at: datetime
+    body: dict[str, Any], *, category: str, captured_at: datetime, request_key: str
 ) -> list[DatalabPoint]:
     """`{"results": [{"title", "keywords", "data": [{"period", "ratio"}]}]}` -> one `DatalabPoint`
     per (series, period). `period` is the window's first day (`yyyy-mm-dd` for time_unit=month);
-    only the month is kept, per contracts/formats.md's monthly aggregation grain."""
+    only the month is kept, per contracts/formats.md's monthly aggregation grain. `request_key`
+    (`datalab_request_key` of the params that produced `body`) is stamped onto every point -- one
+    response, one request, one boundary."""
     results = body.get("results")
     if not isinstance(results, list):
         return []
@@ -75,6 +88,7 @@ def parse_datalab_response(
                     month=period[:7],
                     ratio=float(ratio) if ratio is not None else None,
                     terms=terms,
+                    request_key=request_key,
                     captured_at=captured_at,
                 )
             )
@@ -135,4 +149,10 @@ def blog_items(body: dict[str, Any]) -> Iterable[dict[str, Any]]:
     return items if isinstance(items, list) else []
 
 
-__all__ = ["parse_datalab_response", "parse_blog_response", "blog_page_is_empty", "blog_items"]
+__all__ = [
+    "datalab_request_key",
+    "parse_datalab_response",
+    "parse_blog_response",
+    "blog_page_is_empty",
+    "blog_items",
+]

@@ -1,4 +1,4 @@
-"""brand_link · product_match 평가 구현체. `analysis.registry.IMPLEMENTATIONS` 가 이 모듈을 import 한다."""
+"""brand_link · product_match 평가 구현체. `analysis.registry.load_implementations()` 가 꽂는다."""
 
 from __future__ import annotations
 
@@ -73,5 +73,7 @@ class ProductMatchPredictor:
         return out
 
 
-register("brand_link", LINKER_VERSION, BrandLinkPredictor())
-register("product_match", LINKER_VERSION, ProductMatchPredictor())
+def register_implementations() -> None:
+    """registry.load_implementations() 만이 등록을 일으킨다 (#99)."""
+    register("brand_link", LINKER_VERSION, BrandLinkPredictor())
+    register("product_match", LINKER_VERSION, ProductMatchPredictor())

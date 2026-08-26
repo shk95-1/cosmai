@@ -1,7 +1,12 @@
 [
-  {"run_id": 1, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 10, "pos": 5, "unresolved": 0.67, "population_share_pct": 0.10},
-  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 93, "pos": 38, "unresolved": 0.71, "population_share_pct": 0.21},
-  {"run_id": 2, "scope": "선블록", "need_key": "끈적유분", "month": "", "product_ref": "", "neg": 86, "pos": 122, "unresolved": 0.41, "population_share_pct": 0.05},
+  {"run_id": 1, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 10, "pos": 5, "unresolved": 0.67, "population_share_pct": 0.10, "yt_neg": 1, "yt_pos": 0, "persist_months": 1, "persist_months_total": 3, "persist_products": 2, "persist_products_total": 5, "unresolved_new": 0.20, "low_share": 0.30, "denom_low": 40, "denom_site": 200},
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "", "neg": 93, "pos": 38, "unresolved": 0.71, "population_share_pct": 0.21, "yt_neg": 12, "yt_pos": 3, "persist_months": 5, "persist_months_total": 6, "persist_products": 8, "persist_products_total": 10, "unresolved_new": 0.30, "low_share": 0.44, "denom_low": 120, "denom_site": 600},
+  {"run_id": 2, "scope": "선블록", "need_key": "끈적유분", "month": "", "product_ref": "", "neg": 86, "pos": 122, "unresolved": 0.41, "population_share_pct": 0.05, "yt_neg": 0, "yt_pos": 0, "persist_months": 2, "persist_months_total": 6, "persist_products": 3, "persist_products_total": 10, "unresolved_new": 0.10, "low_share": 0.20, "denom_low": 80, "denom_site": 400},
   {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "", "product_ref": "oy:A1", "neg": 40, "pos": 10, "unresolved": 0.8, "population_share_pct": 0.1},
-  {"run_id": 2, "scope": "쿠션", "need_key": "백탁", "month": "", "product_ref": "", "neg": 3, "pos": 20, "unresolved": 0.13, "population_share_pct": 0.02}
+  {"run_id": 2, "scope": "쿠션", "need_key": "백탁", "month": "", "product_ref": "", "neg": 3, "pos": 20, "unresolved": 0.13, "population_share_pct": 0.02, "yt_neg": 0, "yt_pos": 0, "persist_months": 0, "persist_months_total": 0, "persist_products": 0, "persist_products_total": 0, "unresolved_new": 0.00, "low_share": 0.05, "denom_low": 10, "denom_site": 100},
+
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "2026-08", "neg": 63, "pos": 23, "unresolved": 0.73, "yt_neg": 8, "yt_pos": 2, "product_ref": ""},
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "2026-06", "neg": 30, "pos": 10, "unresolved": 0.75, "yt_neg": 4, "yt_pos": 1, "product_ref": ""},
+  {"run_id": 2, "scope": "선블록", "need_key": "밀림", "month": "2026-07", "neg": 0, "pos": 5, "unresolved": 0.00, "yt_neg": 0, "yt_pos": 0, "product_ref": ""},
+  {"run_id": 2, "scope": "선블록", "need_key": "끈적유분", "month": "2026-08", "neg": 86, "pos": 122, "unresolved": 0.41, "yt_neg": 0, "yt_pos": 0, "product_ref": ""}
 ]

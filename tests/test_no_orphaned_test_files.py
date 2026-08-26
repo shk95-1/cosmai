@@ -17,8 +17,8 @@ TESTS_DIR = Path(__file__).resolve().parent
 # reviewer can see in the diff.
 ALLOWED_NON_TEST_MODULES = frozenset(
     {
-        # A fixture module analysis.registry's IMPLEMENTATIONS import-time registration reads
-        # (#2/#3/#4 shape) -- imported by other tests, not collected as one itself, holds no `def test_`.
+        # A fixture module analysis.registry's load_implementations() calls register_implementations()
+        # on (#2/#3/#4 shape) -- imported by other tests, not collected as one itself, holds no `def test_`.
         "fake_implementation.py",
     }
 )

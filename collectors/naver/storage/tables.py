@@ -54,6 +54,7 @@ naver_datalab_point = Table(
     sa.Column("month", sa.Text, primary_key=True),
     sa.Column("ratio", sa.Numeric),
     sa.Column("terms", postgresql.JSONB, nullable=False),
+    sa.Column("request_key", sa.Text, nullable=False),
     sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
 )
 

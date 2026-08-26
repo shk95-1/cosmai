@@ -1,4 +1,4 @@
-"""task → 구현체. 후속 유닛(#2·#3·#4·#6)이 자기 모듈에서 register() 로 자기 구현을 꽂는다."""
+"""task → 구현체. 후속 유닛(#2·#3·#4·#6)이 자기 모듈의 register_implementations() 에서 자기 구현을 꽂는다."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ TASKS = ("polarity", "wish_class", "brand_link", "product_match")
 
 # 구현체를 등록하는 모듈 경로. 유닛은 여기에 자기 줄 하나만 더한다 — cli.py 에 import 를 끼워 넣으면
 # 네 유닛이 같은 줄에서 충돌하고, 그 충돌을 없애는 것이 이 이슈의 목적이었다.
+# 여기 오르는 모듈은 register_implementations() 를 내놓아야 한다 (#99).
 IMPLEMENTATIONS: tuple[str, ...] = (
     "analysis.linker.evaluators",
     "analysis.predictors",
@@ -103,9 +104,13 @@ def build(task: str, spec: str) -> Implementation:
 
 
 def load_implementations() -> None:
-    """등록 모듈을 한 번씩 import 한다 — register() 는 그 import 의 부작용으로 돈다."""
+    """등록 모듈을 올린 뒤 각자의 register_implementations() 를 부른다.
+
+    등록을 import 부수효과로 두면 등록 시점이 import 캐시 순서가 된다 — 이 목록을 비워도 이미
+    import 된 모듈의 등록은 남고, 지운 등록을 되찾는 방법도 importlib.reload 밖에 없다 (#99).
+    """
     for module in IMPLEMENTATIONS:
-        importlib.import_module(module)
+        importlib.import_module(module).register_implementations()
 
 
 def get(task: str) -> Implementation | None:

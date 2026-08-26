@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -12,25 +10,15 @@ from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate.pipeline import run
 from analysis.aggregate.ranking import run_ranking
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
-CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
 VERSION = AGGREGATE_VERSION
 CAPTURED_AT = date(2026, 8, 23)
 SEEDED_METRICS_NEED = 346
 SEEDED_METRICS_WISH = 601
 POPULATION = ("slice-p1", "slice-p9")
-
-
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in CANDIDATES if p.is_dir()]
-    if not found or not found[0].is_dir():
-        pytest.skip(f"no slice-*/ under {CANDIDATES}; pass COSMAI_SLICES_DIR")
-    return found[0]
 
 
 def _snapshots():
@@ -100,8 +88,8 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
     assert denoms == [("p", "선블록", 4, True)]
 
 
-def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         run_id = run(conn, extractors=POPULATION)
         cur.execute(
@@ -139,16 +127,19 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str,
         assert cur.fetchone() == mine
 
 
-def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         # 시드 need_mention 은 두 슬라이스를 담고 '선블록' 은 양쪽에 다 있다 — 이름을 대지 않으면 거절한다.
         with pytest.raises(ValueError):
             run(conn)
         conn.rollback()
         run_id = run(conn, scope="선블록", extractors=("slice-suncare",))
+        # 카테고리 합 행끼리 견준다 — 같은 run 이 제품 축 행도 낸다 (#41).
         cur.execute(
-            "SELECT need_key, neg, pos FROM metrics_need WHERE run_id = %s ORDER BY need_key", (run_id,)
+            "SELECT need_key, neg, pos FROM metrics_need WHERE run_id = %s AND month = '' "
+            "AND product_ref = '' ORDER BY need_key",
+            (run_id,),
         )
         got = cur.fetchall()
         cur.execute(
@@ -157,3 +148,7 @@ def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: 
             "ORDER BY need_key"
         )
         assert got == cur.fetchall()
+        # 그 모집단은 제품 축에도 그대로 실린다 — 화면 3 이 읽는 행이다.
+        cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s AND product_ref <> ''", (run_id,))
+        per_product = cur.fetchone()
+        assert per_product is not None and per_product[0] > 0

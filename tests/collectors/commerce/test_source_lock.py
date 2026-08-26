@@ -39,6 +39,7 @@ from collectors.commerce.contract import Fetch, Payload, Scope, Source, SourcePo
 from collectors.commerce.engine import collect, exit_code_for
 from collectors.commerce.models import Dataset
 from collectors.commerce.registry import SOURCES
+from collectors.commerce.storage import db as storage_db
 from collectors.commerce.storage import locks
 from collectors.commerce.storage.locks import LOCK_CLASS, PostgresSourceLock, advisory_key
 from collectors.commerce.storage.tables import run as run_table
@@ -377,10 +378,12 @@ def test_the_cli_skips_a_locked_source_and_records_why(trend_radar_schema: str, 
     The other run connects as the runtime role: the CLI itself needs both of the migrator's two
     connections here (db/bootstrap.sql), its own pool and the one its lock holds.
     """
-    # The CLI's pool and the lock it holds are one engine, so this run needs 1 + the widest concurrency
-    # among the sources that declare `product` at once, and the role's own cap is two: a FATAL here
-    # would look like a lock defect instead of the ceiling it is.
-    wanted = 1 + max(cls.policy.concurrency for cls in SOURCES.values() if Dataset.PRODUCT in cls.datasets)
+    # The CLI's pool and the locks it holds are one engine, so this run needs one connection per lane
+    # it walks at once (each lane's lock is held for that whole walk, #25) plus one for whatever the
+    # sink and journal are writing through, and the role's own cap is two: a FATAL here would look
+    # like a lock defect instead of the ceiling it is.
+    declaring = sum(1 for cls in SOURCES.values() if Dataset.PRODUCT in cls.datasets)
+    wanted = min(declaring, storage_db.MAX_CONCURRENT_LANES) + 1
     cli_engine = sa.create_engine(trend_radar_schema)
     with cli_engine.connect() as conn:
         role, cap = conn.execute(

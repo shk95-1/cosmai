@@ -5,6 +5,9 @@ from __future__ import annotations
 import csv
 import json
 import re
+import urllib.error
+import urllib.request
+from typing import Any
 
 import pytest
 
@@ -12,7 +15,13 @@ from analysis.lexicon import DISCOURSE_MARKERS, WISH_MARKERS
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity.fewshot import FEWSHOT_TAG, SHOTS
 from analysis.polarity.llm import POLARITIES, version_for
-from analysis.polarity.ollama import DEFAULT_OLLAMA_MODEL, OllamaPolarity, chat_payload, ollama_url
+from analysis.polarity.ollama import (
+    DEFAULT_OLLAMA_MODEL,
+    OLLAMA_URL_KEY,
+    OllamaPolarity,
+    chat_payload,
+    ollama_url,
+)
 from analysis.polarity.prompt import LABEL_CRITERIA
 from analysis.types import AspectLexicon, AspectPattern, Polarity
 from db.seed._common import EVAL_DIR
@@ -107,3 +116,72 @@ def test_every_shot_is_a_tune_row_and_no_shot_touches_a_holdout_sentence():
         for shot in SHOTS[ruleset]:
             assert shot.sentence in tune[source], f"{ruleset}: {shot.sentence!r} is not a {source} row"
             assert shot.sentence not in holdout
+
+
+# --- 시작 프로브 (#32): 못 닿으면 크게 실패한다 --------------------------------------------------
+# 스위트는 소켓을 못 연다 (tests/conftest.py 의 _no_network) — 프로브가 왕복 대신 무엇을 읽고
+# 판단하는지가 여기서 재는 것이고, 진짜 왕복은 `local_llm` 표시가 붙은 위의 테스트가 한다.
+PROBE_URL = "http://127.0.0.1:21434"
+
+
+class _Answer:
+    def __init__(self, models: list[str]) -> None:
+        self.body = json.dumps({"models": [{"model": name} for name in models]}).encode()
+
+    def __enter__(self) -> _Answer:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.body
+
+
+def _serving(monkeypatch: pytest.MonkeyPatch, models: list[str]) -> list[str]:
+    """`/api/tags` 가 이 모델들을 답하는 ollama. 프로브가 부른 URL 을 돌려준다."""
+    called: list[str] = []
+
+    def urlopen(request: Any, *args: Any, **kwargs: Any) -> _Answer:
+        called.append(request.full_url)
+        return _Answer(models)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return called
+
+
+def _refusing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """아무도 듣지 않는 주소. 배선이 끊긴 컨테이너가 내는 것과 같은 URLError(=OSError)다."""
+
+    def urlopen(request: Any, *args: Any, **kwargs: Any) -> None:
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+
+def test_the_probe_asks_the_tags_endpoint_of_the_address_the_classifier_will_call(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """프로브가 다른 주소를 보면 통과한 프로브가 아무것도 보장하지 않는다."""
+    monkeypatch.setenv(OLLAMA_URL_KEY, PROBE_URL)
+    called = _serving(monkeypatch, [DEFAULT_OLLAMA_MODEL])
+    OllamaPolarity().preflight()  # 조용히 돌아오는 것이 통과다
+    assert called == [f"{PROBE_URL}/api/tags"]
+
+
+def test_the_probe_refuses_when_the_address_answers_but_has_no_such_model(monkeypatch: pytest.MonkeyPatch):
+    """포트가 열려 있다고 그 모델이 거기 있는 것은 아니다 — 이 갈래가 없으면 첫 배치까지 가서야 안다."""
+    _serving(monkeypatch, ["something-else:latest"])
+    with pytest.raises(LookupError) as refused:
+        OllamaPolarity(base_url=PROBE_URL).preflight()
+    assert DEFAULT_OLLAMA_MODEL in str(refused.value)
+    assert "something-else:latest" in str(refused.value), "가진 모델을 안 적으면 오타를 못 본다"
+
+
+def test_the_probe_names_the_address_and_the_knob_when_nothing_answers(monkeypatch: pytest.MonkeyPatch):
+    """크론 메일에 남는 한 줄이다: 어디로 걸었는지와 그 주소를 바꾸는 노브 이름이 같이 있어야 한다.
+    타입도 정해져 있다 — LookupError 라야 단계가 잡아 run 을 failed 로 닫는다 (analysis/pipeline.py)."""
+    _refusing(monkeypatch)
+    with pytest.raises(LookupError) as refused:
+        OllamaPolarity(base_url=PROBE_URL).preflight()
+    assert PROBE_URL in str(refused.value) and OLLAMA_URL_KEY in str(refused.value)

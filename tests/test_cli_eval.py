@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterator, Sequence
 
 import pytest
@@ -18,6 +19,18 @@ pytestmark = pytest.mark.postgres
 def harness_only(monkeypatch: pytest.MonkeyPatch) -> None:
     """이 파일은 하네스를 잰다 — 실제 구현체가 import 되면 아래 오라클을 덮어쓴다."""
     monkeypatch.setattr("analysis.registry.IMPLEMENTATIONS", ())
+
+
+@pytest.fixture(autouse=True)
+def _restore_default_registrations() -> Iterator[None]:
+    """이 파일의 여러 테스트가 쓰는 unregister() 는 기본 등록을 되돌려 주지 않는다 — 되돌리지
+    않으면 뒤에 도는 파일(test_polarity.py)이 '등록 없음'(exit 2)을 만난다 (#30).
+
+    harness_only 가 IMPLEMENTATIONS 를 비운 것이 아직 살아 있는 시점이라(monkeypatch 되돌리기가
+    나중이다) load_implementations() 가 아니라 모듈을 직접 짚는다."""
+    yield
+    for module in ("analysis.predictors", "analysis.linker.evaluators"):
+        importlib.import_module(module).register_implementations()
 
 
 @pytest.fixture
@@ -161,7 +174,7 @@ def test_without_url_flag_lexicon_url_stays_none_for_the_runtime_fallback():
     assert predictors.LEXICON_URL is None
 
 
-def test_the_registry_loads_its_implementation_modules_by_import(monkeypatch):
+def test_the_registry_loads_its_implementation_modules_from_the_list(monkeypatch):
     """유닛은 IMPLEMENTATIONS 에 한 줄만 더한다 — cli.py 에 import 를 끼우면 넷이 같은 줄에서 충돌한다."""
     import analysis.registry as reg
 
