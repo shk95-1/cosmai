@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from analysis import crosscheck
 
+ANY_REASON = crosscheck.DENIED_FOR["레티날"]["레티놀"]
+
 # 우리 표에서 그대로 뜬 성분명들. 오매칭을 재현하는 데 필요한 만큼만 든다.
 OURS = (
     "트라이에톡시카프릴릴실레인",
@@ -83,12 +85,29 @@ def test_a_key_that_catches_nothing_is_absence_not_a_mismatch():
 
 
 def test_every_denied_name_carries_the_reason_it_was_denied():
-    assert set(crosscheck.DENIED_NAMES) == {
-        "트라이에톡시카프릴릴실레인",
-        "트리에톡시카프릴릴실란",
-        "레티놀",
-    }
+    assert set(crosscheck.DENIED_NAMES) == {"트라이에톡시카프릴릴실레인", "트리에톡시카프릴릴실란"}
     assert all(crosscheck.DENIED_NAMES.values())
+    assert crosscheck.DENIED_FOR == {"레티날": {"레티놀": ANY_REASON}} or all(
+        reason for names in crosscheck.DENIED_FOR.values() for reason in names.values()
+    )
+
+
+def test_the_gate_is_as_wide_as_the_matcher():
+    """완전 일치로 물으면 매처가 부분문자열로 잡은 것을 게이트가 못 본다 -- 운영 표의 `레티놀` 7행 중
+    4행이 이미 접미사형이라, 맨 `레티놀` 3행이 사라지는 날 게이트가 조용해진다."""
+    for name in ("트라이에톡시카프릴릴실레인 (1%)", "트라이에톡시카프릴릴실레인*"):
+        (row,) = crosscheck.audit([("p1", name)], keys={"시카": ("시카",)})
+        assert row.suspect and row.denied == ("트라이에톡시카프릴릴실레인",), name
+
+
+def test_a_denial_belongs_to_a_key_not_to_the_whole_table():
+    """`레티놀` 은 `레티날` 키에만 금지다. 전역으로 두면 실측 한 줄이 펩타이드 키를 빨갛게 만든다 --
+    공백으로만 나열한 성분표에 `올리고펩타이드-1   * 레티놀 함량 509 IU/g` 가 통째로 한 이름이다."""
+    run_on = "벼에스에이치-올리고펩타이드-1   * 레티놀 함량 509 IU/g"
+    (peptide,) = crosscheck.audit([("p1", run_on)], keys={"펩타이드": ("펩타이드",)})
+    assert peptide.rows == 1 and not peptide.suspect
+    (retinal,) = crosscheck.audit([("p1", "레티놀(0.04 ppm)")], keys={"레티날": ("레티놀",)})
+    assert retinal.suspect and retinal.denied == ("레티놀",)
 
 
 def test_the_corrected_keys_pass_the_audit_on_our_own_ingredient_names():
@@ -137,8 +156,8 @@ def test_a_star_note_is_dropped_and_newlines_split():
 
 
 def test_the_sun_context_rule_names_what_the_talk_count_is_not():
-    """담론 수를 "선크림 담론" 으로 읽으면 안 된다 -- 전량에서 PDRN 은 960문서 중 150문서였다."""
-    pdrn = crosscheck.IngredientRow("PDRN", talk_youtube=960, talk_youtube_sun=150, talk_commerce=56)
+    """담론 수를 "선크림 담론" 으로 읽으면 안 된다 -- 전량에서 PDRN 은 933문서 중 149문서였다."""
+    pdrn = crosscheck.IngredientRow("PDRN", talk_youtube=933, talk_youtube_sun=149, talk_commerce=54)
     assert pdrn.sun_share < crosscheck.SUN_SHARE_LOW
     assert crosscheck.ingredient_reading(pdrn).startswith(crosscheck.READ_NOT_SUNCARE)
     sunny = crosscheck.IngredientRow("x", talk_youtube=100, talk_youtube_sun=60, talk_commerce=0)
@@ -151,7 +170,7 @@ def test_both_axes_that_divide_by_another_population_stay_locked():
     """선케어 제품 중 성분표가 있는 것은 2개다. 180 으로 나누면 PAPER_HOLD 가 정정한 그 오류다."""
     assert crosscheck.FORMULA_HOLD is True
     assert crosscheck.PAPER_HOLD is True
-    row = crosscheck.IngredientRow("PDRN", 960, 150, 56)
+    row = crosscheck.IngredientRow("PDRN", 933, 149, 54)
     assert row.formula_products is None and row.formula_pct is None
     assert row.median_order is None and row.high_dose_pct is None
 
@@ -162,3 +181,24 @@ def test_talk_is_matched_on_the_raw_text_not_on_folded_words():
     assert crosscheck.matches("나이아신아마이드 (20,000 ppm)", ("나이아신아마이드",))
     assert not crosscheck.mentions_term("선크림 콜라 겐 없이", ("콜라겐",))
     assert crosscheck.mentions_term("콜라겐 좋아요", ("콜라겐",))
+
+
+def test_the_audited_catch_list_is_self_consistent():
+    """**CI 가 지는 것은 목록의 자기 정합뿐이다.** 목록과 실제 표를 맞대는 일은 CI 가 할 수 없다 --
+    운영 표에 닿지 못한다. 그 길은 `tool/measure-crosscheck-keys` 이고, 계약 §성분 이 그렇게 적는다."""
+    known = crosscheck.known_names()
+    assert set(known) == set(crosscheck.INGREDIENT_KEYS), "목록에 없는 키가 있으면 그 키는 감사되지 않았다"
+    for key, names in known.items():
+        terms = crosscheck.INGREDIENT_KEYS[key]
+        assert all(crosscheck.matches(name, terms) for name in names), key
+        assert crosscheck.denied_in(key, names) == (), key
+    assert sum(len(names) for names in known.values()) == 190
+
+
+def test_the_measure_tool_is_what_catches_a_new_mismatch():
+    """리뷰가 주입한 변이(`"세라마이드": ("세라",)`)를 이 목록이 실제로 되묻는지 본다. 운영 표 없이
+    같은 일을 하려면 그 표에서 나온 이름을 넣고 물으면 된다 -- 카프릴릭/카프릭트라이글리세라이드는
+    에몰리언트이고 세라마이드가 아니다."""
+    emollient = "카프릴릭/카프릭트라이글리세라이드"
+    assert crosscheck.matches(emollient, ("세라",)), "이것이 잡히는 것이 변이의 내용이다"
+    assert emollient not in {n for names in crosscheck.known_names().values() for n in names}

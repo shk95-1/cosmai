@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""성분 키가 **지금 표에서** 무엇을 잡는지 다시 재고 확인된 목록과 맞댄다 (포크 #7).
+
+계약 §성분 이 지는 문장이 이것이다: *키가 무엇을 잡는지는 사람이 한 번 읽어 확인했고, 코퍼스가 자라
+새 물질이 어떤 키에 들어오면 그 사실이 드러나야 한다.* **CI 는 그 일을 할 수 없다** -- 운영 표에 닿지
+못하고, 픽스처에 고정한 문자열 몇 개는 코퍼스가 자라도 절대 깨지지 않는다. 그래서 이 스크립트가 그
+길이고(#6 의 `tool/measure-evidence-fixture` 와 같은 자리), `tests/test_crosscheck_keys.py` 는 목록
+자체의 자기 정합만 진다.
+
+무엇이 빨간가.
+
+  denied  어느 키든 `DENIED_NAMES` 를 잡았다. 이미 아는 오매칭이 되살아난 것이다 (`시카` 사고).
+  new     확인된 목록에 없는 성분명이 그 키에 들어왔다. **오매칭일 수도 있고 아닐 수도 있다** --
+          그것을 가르는 것이 사람이 이 출력을 읽는 일이고, 읽고 나면 CSV 에 줄을 더한다.
+
+`gone`(있던 이름이 사라진 것)은 빨갛지 않다 -- 제품이 빠진 것은 오매칭이 아니다.
+
+    tool/measure-crosscheck-keys                      # 운영 needs_runtime
+    tool/measure-crosscheck-keys --url <url>
+    tool/measure-crosscheck-keys --json               # 기계가 읽는 형식
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from analysis import crosscheck  # noqa: E402
+from analysis.crosscheck.pipeline import COMMERCE_SCHEMA, FORMULA, _commerce  # noqa: E402
+from db.runtime import runtime_url  # noqa: E402
+from db.seed._common import connect  # noqa: E402
+
+
+def measure(url: str, schema: str) -> dict[str, dict[str, int]]:
+    """(제품, 성분명) 행을 읽어 키별로 잡히는 고유 성분명과 그 제품 수를 낸다."""
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(_commerce(schema, FORMULA), ())
+        rows = [
+            (f"{source}:{product}", name)
+            for source, product, ingredients in cur.fetchall()
+            for name in crosscheck.parse_ingredients(ingredients)
+        ]
+        conn.commit()
+    found: dict[str, dict[str, set[str]]] = {key: {} for key in crosscheck.INGREDIENT_KEYS}
+    for product, name in rows:
+        for key, terms in crosscheck.INGREDIENT_KEYS.items():
+            if crosscheck.matches(name, terms):
+                found[key].setdefault(name, set()).add(product)
+    print(f"{len(rows):,}행 · 고유명 {len({name for _p, name in rows}):,}", file=sys.stderr)
+    return {key: {name: len(products) for name, products in names.items()} for key, names in found.items()}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+    parser.add_argument("--schema", default=COMMERCE_SCHEMA, help="Schema holding trend_radar.product.")
+    parser.add_argument("--json", action="store_true", help="기계가 읽는 형식으로만 낸다.")
+    args = parser.parse_args()
+
+    now = measure(args.url or runtime_url(), args.schema)
+    known = crosscheck.known_names()
+    report: dict[str, dict[str, list[str]]] = {}
+    bad = 0
+    for key, names in now.items():
+        denied = crosscheck.denied_in(key, names)
+        new = sorted(set(names) - known[key])
+        gone = sorted(known[key] - set(names))
+        report[key] = {"denied": list(denied), "new": new, "gone": gone}
+        bad += len(denied) + len(new)
+        if args.json:
+            continue
+        print(f"{key}  {len(names)}종 / 확인된 {len(known[key])}종")
+        for name in denied:
+            print(f"  [금지] {name} -- {crosscheck.denial_reason(key, name)}")
+        for name in new:
+            print(f"  [새것] {name} ({names[name]}제품) -- 읽고 판단해서 목록에 더해라")
+        for name in gone:
+            print(f"   (사라짐) {name}")
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if bad == 0 else 1
+    if bad:
+        print(f"\n[실패] 사람이 읽어야 할 것 {bad}건. 읽고 나면 {crosscheck.KNOWN_NAMES_CSV} 를 갱신한다")
+        return 1
+    print("\n[통과] 키가 잡는 성분명이 확인된 목록 그대로다")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

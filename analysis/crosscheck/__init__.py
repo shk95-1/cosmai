@@ -10,11 +10,13 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 # ---------------------------------------------------------------- 구성 (ydc source_composition.py)
 
@@ -134,8 +136,20 @@ REJECTED_TERMS: dict[str, str] = {
 DENIED_NAMES: dict[str, str] = {
     "트라이에톡시카프릴릴실레인": "실리콘 분산제. `시카` 별칭이 우리 표에서 209행을 이것으로 잡았다",
     "트리에톡시카프릴릴실란": "같은 물질의 다른 표기. 7행",
-    "레티놀": "레티날과 다른 물질이다. `레티날` 키가 이것을 잡으면 후한 것이 아니라 틀린 것이다",
 }
+# **그 키만** 잡아서는 안 되는 성분명. 전역으로 두면 안 되는 것이 실측으로 드러났다 -- 쉼표 없이 공백
+# 으로만 나열한 성분표 한 덩어리에 `벼에스에이치-올리고펩타이드-1   * 레티놀 함량 509 IU/g` 가 들어
+# 있어서, `레티놀` 을 전역 금지로 두면 **펩타이드 키가 빨개진다.** 그 줄은 진짜 펩타이드 행이고
+# 오매칭이 아니다. 금지의 단위는 물질이 아니라 (키, 물질)이다.
+DENIED_FOR: dict[str, dict[str, str]] = {
+    "레티날": {"레티놀": "레티날과 다른 물질이다. 후한 것이 아니라 틀린 것이다"},
+}
+
+
+def denial_reason(key: str, name: str) -> str:
+    return DENIED_NAMES.get(name) or DENIED_FOR.get(key, {}).get(name, "")
+
+
 # 담론 수를 "선크림 담론" 으로 읽으면 안 된다. 색인 전체에서 센 값이라 같은 채널이 소개한 앰플·
 # 스킨부스터가 다 들어 있다. 그래서 이 말이 **같은 청크 안에** 있는 것을 따로 센다 (계약 §성분).
 SUN_WORDS = ("선크림", "썬크림", "선스크린", "자차", "선세럼", "선쿠션", "자외선차단")
@@ -150,6 +164,12 @@ FORMULA_HOLD = True
 PAPER_HOLD = True
 
 READ_NOT_SUNCARE = "선크림 담론이 아니다"
+
+# 사람이 한 번 읽어 확인한 키별 성분명(2026-08-27 운영 표, 180제품 · 190이름). **키가 무엇을 잡는지의
+# 정본이다.** 상수 목록(DENIED_NAMES)은 이미 아는 오매칭만 막고, 아직 모르는 오매칭 -- 코퍼스가 자라
+# 새 물질이 어떤 키에 들어오는 것 -- 은 이 목록과 실제 표를 맞대야 보인다. 맞대는 길은
+# `tool/measure-crosscheck-keys` 이고, CI 는 그 일을 할 수 없다(운영 표에 닿지 못한다).
+KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.csv"
 
 # 성분표를 성분명으로 쪼개는 규칙 둘. 우리 원천에만 있는 함정이라 ydc 에 대응이 없다 (계약 §성분).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
@@ -353,6 +373,15 @@ def run_on(name: str) -> bool:
     return name.count(" ") >= RUN_ON_SPACES
 
 
+def known_names(path: Path | None = None) -> dict[str, frozenset[str]]:
+    """키 -> 그 키가 잡는다고 확인된 성분명. 키가 하나도 안 잡는 것도 빈 집합으로 답한다."""
+    found: dict[str, set[str]] = {key: set() for key in INGREDIENT_KEYS}
+    with (path or KNOWN_NAMES_CSV).open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            found.setdefault(row["key"], set()).add(row["ingredient"])
+    return {key: frozenset(names) for key, names in found.items()}
+
+
 def matches(name: str, terms: Iterable[str]) -> bool:
     """**성분명** 전용. 공백과 대소문자를 접는다 -- 성분표는 `나이아신아마이드 (20,000 ppm)` 처럼
     같은 성분을 띄어쓰기만 달리 적는다."""
@@ -364,6 +393,13 @@ def mentions_term(text: str, terms: Iterable[str]) -> bool:
     """**담론** 전용. 원문 그대로 본다 (ydc `count_terms`). 자유 문장에서 공백을 접으면 낱말 경계를
     넘어 붙어(`... 콜라` + `겐 ...`) 없는 언급이 생긴다."""
     return any(term in text for term in terms)
+
+
+def denied_in(key: str, names: Iterable[str]) -> tuple[str, ...]:
+    """이 키가 잡은 이름들 중 금지에 걸리는 것. 매처와 같은 폭(공백·대소문자를 접은 부분문자열)이다."""
+    forbidden = {**DENIED_NAMES, **DENIED_FOR.get(key, {})}
+    found = list(names)
+    return tuple(sorted({bad for bad in forbidden if any(matches(hit, (bad,)) for hit in found)}))
 
 
 def audit(
@@ -388,7 +424,10 @@ def audit(
                 rows=len(hit),
                 products=len({product for product, _name in hit}),
                 names=tuple(names.most_common(top)),
-                denied=tuple(sorted({denied for denied in DENIED_NAMES if denied in names})),
+                # **게이트는 매처와 같은 폭이어야 한다.** 완전 일치로 물으면 매처가 부분문자열로
+                # 잡은 `트라이에톡시카프릴릴실레인 (1%)` 나 `레티놀(0.04 ppm)` 을 게이트가 못 본다 --
+                # 운영 표의 `레티놀` 7행 중 4행이 이미 그런 접미사형이다.
+                denied=denied_in(key, names),
             )
         )
     return tuple(made)
@@ -403,6 +442,7 @@ def ingredient_reading(row: IngredientRow) -> str:
 
 __all__ = [
     "COMMENT",
+    "DENIED_FOR",
     "DENIED_NAMES",
     "COMMERCE_REVIEW",
     "CONSUMER",
@@ -427,11 +467,15 @@ __all__ = [
     "Ingredients",
     "IngredientRow",
     "KeyAudit",
+    "KNOWN_NAMES_CSV",
     "RatingRow",
     "SourceShare",
     "audit",
     "composition",
+    "denial_reason",
+    "denied_in",
     "ingredient_reading",
+    "known_names",
     "matches",
     "mentions_term",
     "parse_ingredients",

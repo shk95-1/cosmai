@@ -23,7 +23,7 @@ from analysis import crosscheck
 from analysis.crosscheck import IngredientRow, Ingredients, RatingRow, SourceShare
 from analysis.retrieval import corpus
 from analysis.retrieval import topics as topic_registry
-from analysis.trend.pipeline import COMMENT, SCOPE, NoPopulation, note_of
+from analysis.trend.pipeline import COMMENT, CONTENT_TYPE, PANEL_ROLE, SCOPE, NoPopulation, note_of
 from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
 
@@ -59,6 +59,9 @@ CHUNKS: LiteralString = (
 CHUNK_DOCS: LiteralString = "SELECT source, count(DISTINCT doc_id) FROM retrieval_chunk GROUP BY 1"
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
 # 판정과 지표를 한 번에. 순위·구성비는 판정 표에 없고 지표 표에 있다 (024 는 세는 칸을 들지 않는다).
+# 여덟 칸 키 중 여섯을 건다(`quarter`·`topic_key` 는 답의 축이라 남긴다). `content_type`·`panel_role` 을
+# 열어 두면 두 번째 값이 생기는 날 `_judged` 의 topic 키 dict 에서 **어느 판정이 이기는지 비결정**이다 --
+# 오늘 run 이 (long_form, product) 하나뿐이라 안 터질 뿐이다 (같은 계열이 #43).
 CELLS: LiteralString = """
 SELECT j.quarter, j.topic_key, j.trend_type, j.gap_pp, m.composition
   FROM topic_quarter_judgement j
@@ -68,7 +71,7 @@ SELECT j.quarter, j.topic_key, j.trend_type, j.gap_pp, m.composition
      = (j.run_id, j.scope, j.topic_key, j.quarter, j.source, j.content_type,
         j.panel_version, j.panel_role)
  WHERE j.run_id = %(run_id)s AND j.scope = %(scope)s AND j.panel_version = %(panel_version)s
-   AND j.source = %(source)s
+   AND j.source = %(source)s AND j.content_type = %(content_type)s AND j.panel_role = %(panel_role)s
 """
 
 
@@ -269,7 +272,17 @@ def load(
                 f"no quarter run for {scope!r} on snapshot {snapshot}; run `cosmai trend quarter`"
             )
         run_id = int(found[0])
-        cur.execute(CELLS, {"run_id": run_id, "scope": scope, "panel_version": version, "source": COMMENT})
+        cur.execute(
+            CELLS,
+            {
+                "run_id": run_id,
+                "scope": scope,
+                "panel_version": version,
+                "source": COMMENT,
+                "content_type": CONTENT_TYPE,
+                "panel_role": PANEL_ROLE,
+            },
+        )
         cells = cur.fetchall()
         if not cells:
             raise NoCrosscheck(f"run {run_id} has no topic_quarter_judgement row; run `cosmai trend judge`")
@@ -377,7 +390,7 @@ def build(
     # 위반 줄은 전부 같은 말을 한다: **이 산출을 믿지 마라.** 어긋남은 여기 들지 않는다.
     violations = [
         f"key_mismatch {audit.key} caught {', '.join(audit.denied)} -- "
-        f"{crosscheck.DENIED_NAMES[audit.denied[0]]}"
+        f"{crosscheck.denial_reason(audit.key, audit.denied[0])}"
         for audit in ingredients.suspects
     ]
     violations += [
