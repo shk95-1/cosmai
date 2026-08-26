@@ -7,6 +7,7 @@ import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, productLabel, truncateLabel, withProductNames,
+  monthRows, monthNeedKeys, hasMonthRows,
 } from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -260,4 +261,67 @@ test('withProductNames: 행마다 전체 라벨과 짧은 라벨을 얹는다', 
   assert.ok(rows[0].product_short.length < rows[0].product.length);
   assert.equal(rows[0].unresolved, 1); // 원래 컬럼은 그대로 남는다
   assert.equal(rows[1].product_ref, 'A000000186166');
+});
+
+// ---- 화면 5: 기간(월) 축 (#130) --------------------------------------------
+
+// 이 PR 의 회귀 방어선. 픽스처에 월 행이 섞인 뒤에도 화면 1·3·4 는 월 행이 없던 때와
+// 같은 값을 내야 한다 — 월 행이 하나라도 새면 합 행의 neg 가 두 배로 읽힌다.
+// (월 행을 픽스처에 넣기 전에 먼저 통과시켜 두고, 넣은 뒤에도 통과하는지가 시험이다.)
+test('월 행이 섞여도 화면 1·3·4 는 같은 값을 낸다 (#130 회귀 방어선)', () => {
+  const { needRunId } = latestRuns(runsFixture, needFixture, wishFixture);
+  // 화면 1: 카테고리 합 행만 — 월 행이 새면 need_key 가 늘거나 neg 가 커진다.
+  const rows = needRowsForScope(needFixture, needRunId, '선블록');
+  assert.deepEqual(rows.map((r) => [r.need_key, r.neg, r.pos]), [['밀림', 93, 38], ['끈적유분', 86, 122]]);
+  assert.equal(rows.every((r) => r.month === ''), true);
+  // 화면 4: 행 수와 유튜브 값도 그대로다.
+  const character = needCharacterRows(needFixture, needRunId, '선블록');
+  assert.deepEqual(character.map((r) => [r.yt_neg, r.yt_pos]), [[12, 3], [0, 0]]);
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, needRunId, '쿠션')), false);
+  // 화면 3: 제품 축은 그 한 행뿐이다.
+  assert.deepEqual(productRows(needFixture, needRunId).map((r) => r.product_ref), ['oy:A1']);
+  // scope 목록도 늘지 않는다 — 월 행은 새 scope 를 만들지 않는다.
+  assert.deepEqual(scopesForRun(needFixture, needRunId), ['선블록', '쿠션']);
+});
+
+// #129 가 내는 월 행은 카테고리 합(product_ref='')에만 붙는다 — 전체 기간 행(month='')도
+// 제품 축 행도 이 축에 섞이면 안 된다. 순서는 month 오름차순이라야 왼쪽이 과거다.
+test('monthRows: 그 (run·scope·need_key) 의 월 행만 오름차순으로 준다 (#130)', () => {
+  const rows = monthRows(needFixture, 2, '선블록', '밀림');
+  assert.deepEqual(rows.map((r) => r.month), ['2026-06', '2026-07', '2026-08']);
+  assert.deepEqual(rows.map((r) => r.neg), [30, 0, 63]);
+  assert.equal(rows.some((r) => r.month === '' || r.product_ref !== ''), false);
+  // 같은 scope 의 다른 need_key 는 자기 월 행만 본다.
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '끈적유분').map((r) => r.month), ['2026-08']);
+  // 다른 run·없는 scope 는 빈 배열이다.
+  assert.deepEqual(monthRows(needFixture, 1, '선블록', '밀림'), []);
+});
+
+// 이 코드베이스의 가장 큰 금기: 없는 사실을 그리는 것. 2026-07 은 neg 가 0 인 달이고
+// 그것은 "행이 없는 달"과 다른 사실이라 0 막대로 남아야 한다 — 빼면 없던 달이 된다.
+test('monthRows: 그 달에 0 건인 행은 남는다 — 월 행이 없는 것과 다르다 (#130)', () => {
+  const rows = monthRows(needFixture, 2, '선블록', '밀림');
+  assert.deepEqual(rows.filter((r) => r.month === '2026-07').map((r) => r.neg), [0]);
+  assert.equal(rows.length, 3);
+});
+
+// 90 개월(2013-08~2026-08 실측)을 다 그리면 판이 2,500px 이 된다(#122 가 걷어낸 높이다).
+// 자를 때도 순서는 오름차순 그대로여야 한다 — 최근 N 개월을 뒤에서 자른다.
+test('monthRows: limit 은 최근 N 개월만 남기고 순서는 그대로다 (#130)', () => {
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '밀림', 2).map((r) => r.month), ['2026-07', '2026-08']);
+  assert.equal(monthRows(needFixture, 2, '선블록', '밀림', 99).length, 3);
+  // 0 은 상한 없음이다 — 표는 판에서 밀린 달까지 보인다.
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '밀림', 0).map((r) => r.month), ['2026-06', '2026-07', '2026-08']);
+});
+
+// "이 scope 에 월 행이 없다"는 문구가 되고 "그 달에 0 건"은 0 막대가 된다 — 그 갈림길이
+// 이 두 함수다(hasYoutubeMentions 가 유튜브 축에서 하는 구별과 같은 자리).
+test('monthNeedKeys·hasMonthRows: 월 행이 없는 scope 를 구분한다 (#130)', () => {
+  assert.deepEqual(monthNeedKeys(needFixture, 2, '선블록'), ['끈적유분', '밀림']);
+  assert.equal(hasMonthRows(needFixture, 2, '선블록'), true);
+  // 쿠션은 전체 기간 행만 있다 — 니즈가 없는 것이 아니라 월 축이 아직 없는 것이다.
+  assert.deepEqual(monthNeedKeys(needFixture, 2, '쿠션'), []);
+  assert.equal(hasMonthRows(needFixture, 2, '쿠션'), false);
+  // 월 행이 아예 없는 run 도 같은 문구로 간다(#129 가 아직 안 돌아간 상태).
+  assert.equal(hasMonthRows(needFixture, 1, '선블록'), false);
 });

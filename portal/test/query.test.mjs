@@ -45,6 +45,38 @@ test('buildQuery builds the product-axis filter product_ref=neq. (#109)', () => 
   assert.equal(new URLSearchParams(q).get('product_ref'), 'neq.');
 });
 
+// #130: 월 행이 얹히면 metrics_need 가 두 배가 된다(실측 7,219행 → 대략 14,000). 기존 두
+// 질의는 화면에서 걸러 안 보일 뿐 네트워크로는 다 받으므로, 질의 자체를 month=eq. 로 좁힌다.
+// 월 축은 그 반대편(month=neq. · product_ref=eq.)이다 — 세 질의가 서로 겹치지 않는다.
+test('buildQuery: 전체 기간 질의는 month=eq. 로 월 행을 뺀다 (#130)', () => {
+  const q = buildQuery({
+    filters: [
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+      { column: 'month', op: 'eq', value: '', allowEmpty: true },
+    ],
+  });
+  const params = new URLSearchParams(q);
+  assert.equal(params.get('product_ref'), 'eq.');
+  assert.equal(params.get('month'), 'eq.');
+});
+
+test('buildQuery: 월 축 질의는 month=neq. 와 product_ref=eq. 를 함께 건다 (#130)', () => {
+  const q = buildQuery({
+    select: ['run_id', 'scope', 'need_key', 'month', 'neg', 'pos', 'unresolved', 'yt_neg', 'yt_pos'],
+    filters: [
+      { column: 'month', op: 'neq', value: '', allowEmpty: true },
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+    ],
+    order: 'run_id.desc,scope,need_key,month',
+  });
+  const params = new URLSearchParams(q);
+  assert.equal(params.get('month'), 'neq.');
+  assert.equal(params.get('product_ref'), 'eq.');
+  // 분모·persist_* 는 월 행에서 NULL 이라 받을 이유가 없다(#129 의 결정).
+  assert.equal(params.get('select').includes('denom_'), false);
+  assert.equal(params.get('select').includes('persist_'), false);
+});
+
 test('parseContentRange reads the total after the slash', () => {
   assert.equal(parseContentRange('0-999/65646'), 65646);
   assert.equal(parseContentRange('0-999/*'), null);

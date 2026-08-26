@@ -72,6 +72,8 @@ h3 { font-size: 13px; margin: 0 0 6px; color: var(--text-secondary); }
 
 .controls { margin-bottom: 12px; }
 .controls select { font-size: 14px; padding: 4px 6px; }
+/* 화면 5 는 셀렉트가 셋이다 — 붙여 두면 어느 라벨이 어느 셀렉트의 것인지 안 읽힌다. */
+.controls label + label { margin-left: 16px; }
 
 .chart { overflow-x: auto; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
 /* svg.viz-root{width:100%} 는 viewBox 를 판 폭까지 늘리므로, 판이 render.js 가 쓴 폭보다
