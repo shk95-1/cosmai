@@ -127,6 +127,19 @@ for pair in $pairs; do
     docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n "$schema" \
         | normalise > "$work/expected.$db.$schema"
 done
+# needs's expected takes the same dump-restore-dump round trip its actual takes below, because
+# pg_dump's deparse is not a fixed point: a view body written by CREATE VIEW and the same body
+# after a dump and restore print differently -- ANY ((ARRAY[...])::text[]) comes back as
+# ANY (ARRAY[(...)::text, ...]). Comparing a once-deparsed expected against a twice-deparsed
+# actual reported every such view as drift forever, and app.needs stayed red for a reason that
+# had nothing to do with production (#120). The three pairs above need none of this: both of
+# their sides come off a single pg_dump.
+docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
+    > "$work/expected.needs.sql"
+docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = warning' \
+    -c 'DROP SCHEMA needs CASCADE' > /dev/null
+docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+    -c 'SET client_min_messages = warning' -f - < "$work/expected.needs.sql" > /dev/null
 docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
     | normalise > "$work/expected.$needs_db.needs"
 
