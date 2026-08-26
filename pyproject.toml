@@ -67,7 +67,7 @@ target-version = "py312"
 exclude = ["analysis/slices", "playbook"]  # 참조용 원본: 이식 시 패키지로 옮기며 검사 대상이 된다
 # 확장자 없는 실행 파일은 기본 수집에 안 걸린다. `tool/` 의 파이썬 도구는 이름으로 들여보낸다 --
 # 안 그러면 훅의 format·lint 가 그 파일 앞에서 조용히 아무 말도 하지 않는다 (포크 #41).
-extend-include = ["tool/compare-ydc-sensitivity"]
+extend-include = ["tool/compare-ydc-sensitivity", "tool/measure-query-routing"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
