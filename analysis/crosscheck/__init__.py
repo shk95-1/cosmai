@@ -14,7 +14,7 @@ import re
 import statistics
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 # ---------------------------------------------------------------- 구성 (ydc source_composition.py)
 
@@ -324,24 +324,9 @@ def ratings(
             youtube_trend_type=trend_type,
         )
         # 표본이 얇은 주제는 수치를 그대로 싣되 해석을 쓰지 않는다 (계약 §평가).
-        made.append(row if row.thin else replace_reading(row, rating_reading(mean, gap)))
+        made.append(row if row.thin else replace(row, reading=rating_reading(mean, gap)))
     made.sort(key=lambda row: (-row.products_rated, row.topic_key))
     return tuple(made)
-
-
-def replace_reading(row: RatingRow, reading: str) -> RatingRow:
-    return RatingRow(
-        topic_key=row.topic_key,
-        commerce_groups=row.commerce_groups,
-        products_rated=row.products_rated,
-        positive_rate_mean=row.positive_rate_mean,
-        positive_rate_median=row.positive_rate_median,
-        youtube_rank_comment=row.youtube_rank_comment,
-        youtube_composition_pct=row.youtube_composition_pct,
-        youtube_gap_pp=row.youtube_gap_pp,
-        youtube_trend_type=row.youtube_trend_type,
-        reading=reading,
-    )
 
 
 def parse_ingredients(text: str) -> list[str]:
@@ -453,7 +438,6 @@ __all__ = [
     "polarity",
     "positive_rate",
     "ranks",
-    "replace_reading",
     "run_on",
     "rating_reading",
     "ratings",
