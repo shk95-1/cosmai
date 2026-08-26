@@ -27,9 +27,10 @@ def test_the_kiwi_dictionaries_ship_with_the_package():
 
 
 def test_the_dictionaries_read_at_runtime_are_the_packaged_copies_not_the_slice():
-    """analysis/slices/ydc/seeds/ 에 md5 가 같은 사본이 있어 정본이 둘로 보인다(#9 가 지운다).
+    """md5 가 같은 사본이 analysis/slices/ydc/seeds/ 에 있어 정본이 둘로 보였다(#9 가 지웠다).
     토크나이저가 읽는 경로도 캐시 서명이 해시하는 경로도 패키지 쪽이라는 것을 여기서 못박는다 --
-    "중복이니 합치자" 가 슬라이스 쪽을 정본으로 삼는 날 조용히 읽기 전용 파일이 정본이 된다(#18 M15)."""
+    사본이 다시 들어오는 날 "중복이니 합치자" 가 그쪽을 정본으로 삼으면 조용히 읽기 전용 파일이
+    정본이 된다(#18 M15)."""
     package = Path(bm25.__file__).resolve().parent
     for path in (*DICTIONARIES, *bm25.TOKENIZER_INPUTS):
         assert path.resolve().is_relative_to(package), path

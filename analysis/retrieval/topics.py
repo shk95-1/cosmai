@@ -1,5 +1,8 @@
 """주제 사전. BM25 의 토큰 확장과 검색 평가의 정답이 모두 여기서 나온다.
 
+규칙의 출처는 ydc `analysis/slices/ydc/topics.py`(`v0.1.0` `02440ab`)이고, 슬라이스를 import 하지 않고
+옮겨 적었다 (그 사본은 포크 #9 가 지웠다).
+
 사전의 원천은 `needs.aspect_lexicon` 의 **활성 버전**(ruleset = `retrieval-topic`)이다. 리터럴로
 이 파일에 얼어 있던 동안은 사전을 고쳐도 `cosmai lexicon load/diff/activate` 를 타지 않아 변경이
 버전을 받지 못했다(포크 #8). 레포의 `dict/topics_v1.csv` 는 그 v1 의 적재 원본이고, 사전을 고치는

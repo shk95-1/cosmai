@@ -32,8 +32,8 @@ NOUN_TAGS = frozenset({"NNG", "NNP"})
 # 0 으로 두면 등록해도 기존 분석을 못 이겨 `신제품` 이 신(XPN) + 제품(NNG) 으로 갈린다.
 USER_WORD_SCORE = 3.0
 
-# 정본은 이 디렉터리다. analysis/slices/ydc/seeds/ 에 md5 가 같은 사본이 있지만 그쪽은 이식 전
-# 원본(읽기 전용 참조, #9 가 지운다)이라 고쳐도 색인에 아무 일도 일어나지 않는다(#18 M15).
+# 정본은 이 디렉터리다 -- md5 가 같은 사본이 analysis/slices/ydc/seeds/ 에 있어 정본이 둘로 보였고,
+# 그 사본은 #9 가 지웠다(#18 M15).
 DICT_DIR = Path(__file__).resolve().parent / "dict"
 DICTIONARIES = (DICT_DIR / "user_dictionary.tsv", DICT_DIR / "ingredient_dictionary.tsv")
 # 토큰을 정하는 입력 중 **파일인 것** 전부. 주제 별칭도 토큰을 정하지만(Kiwi 사용자 단어이자

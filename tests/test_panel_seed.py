@@ -46,7 +46,7 @@ def _roles(cur: psycopg.Cursor[Any]) -> dict[str, int]:
 
 # ---------- 원본이 슬라이스 밖에 있다 ----------
 def test_the_panel_seed_csv_sits_outside_the_slice_that_9_deletes():
-    """#9 가 `analysis/slices/ydc/` 를 지우면 그 안에 남은 원본은 같이 사라진다."""
+    """#9 가 `analysis/slices/ydc/` 를 지웠다 -- 그 안에 원본을 남겼다면 같이 사라졌을 자리다."""
     assert SEED_CSV.is_file()
     assert not SLICE_CSV.exists()
 
