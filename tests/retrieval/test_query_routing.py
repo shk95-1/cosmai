@@ -20,7 +20,10 @@ import json
 import subprocess
 import sys
 from functools import lru_cache
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -58,10 +61,56 @@ def surfaces() -> set[str]:
     return {line.split("\t")[0] for line in lines if line.strip() and not line.startswith("#")}
 
 
+def loaded() -> ModuleType:
+    """확장자가 없어 평범한 import 로는 안 들어온다. 종료 코드 2 를 확인하려면 상수를 갈아야 해서
+    프로세스 밖이 아니라 안에서 부른다."""
+    spec = spec_from_loader("measure_query_routing", SourceFileLoader("measure_query_routing", str(TOOL)))
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_the_tool_still_runs_and_answers_in_the_shape_the_test_reads():
     got = measured()
-    assert set(got) == {"dictionary", "candidates", "sample", "ydc_published"}
+    assert set(got) == {"dictionary", "candidates", "sample", "ydc_published", "brand_only"}
     assert got["sample"]["size"] == 10 and got["sample"]["topics"] == 15
+
+
+def test_a_missing_source_is_blocked_and_not_a_quietly_empty_answer(monkeypatch: pytest.MonkeyPatch):
+    """0 으로 나가면 "재 봤더니 함정이 없더라"로 읽힌다 -- 원천이 없는 것은 막힘이다."""
+    module = loaded()
+    monkeypatch.setattr(module, "INGREDIENTS", ROOT / "analysis" / "retrieval" / "dict" / "없는파일.tsv")
+    monkeypatch.setattr(sys, "argv", ["measure-query-routing", "--json"])
+    assert module.main() == 2
+
+
+def test_the_case_against_a_partial_router_is_a_measurement_not_a_flourish():
+    """기본값이 vector 면 부분 라우터가 아무것도 악화시키지 않는다 -- 그 반론을 막는 것은 이 수다."""
+    only = measured()["brand_only"]
+    assert only["correct"] == 0 and only["misrouted"] > 0, only
+    assert only["traces"]["밀려"] == ["려"] and only["traces"]["화이트닝"] == ["화이트"]
+    # 짧은 표기가 원인이다. 다 길어지면 오탐이 사라지고 이 줄을 다시 재야 한다.
+    assert only["short_surfaces"] > 0 and only["short_surfaces"] < only["surfaces"]
+
+
+def test_the_collagen_seat_is_measured_on_the_axis_that_actually_holds_it():
+    """`mfds_inci ∩ 토크나이저 사전` 15 는 순수 INCI 화학명이라 담론어의 **정반대**다. `콜라겐` 자리는
+    `mfds_inci ∩ ko` 이고, 그 둘을 바꿔 쓰면 문단이 자기 표와 어긋난다."""
+    shape = measured()["dictionary"]
+    both = shape["inci_also_asked_with"]
+    assert len(both) == 3 and set(both) == {"아보벤존", "옥토크릴렌", "자외선차단제"}
+    assert len(both) < shape["inci_in_dictionary"], "두 축이 같아지면 계약 문단을 다시 읽어야 한다"
+    assert f"**{len(both)}개** 있다 — `아보벤존`" in contract()
+    assert f"`콜라겐` 자리 | **{len(both)}** |" in contract()
+
+
+def test_the_sample_admits_that_choosing_the_alias_rule_was_also_a_choice():
+    """질의를 손으로 고르는 자의성은 규칙이 없앴지만 규칙을 고르는 자의성은 남는다."""
+    wobble = measured()["sample"]["alias_rules"]
+    assert wobble["rates"]["first_ko"] == measured()["sample"]["misrouted"]
+    assert wobble["low"] < wobble["rates"]["first_ko"] < wobble["high"]
+    assert f"**{wobble['low']}~{wobble['high']}** 사이에서 움직인다" in contract()
 
 
 def test_the_tokenizer_dictionary_carries_discourse_words_so_it_is_not_an_ingredient_list():
@@ -146,7 +195,15 @@ def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
     assert f"`mfds_inci` 표기 {found['dictionary']['inci_surfaces']}개" in table
     assert f"{found['dictionary']['surfaces']:,}표기" in table
     assert f"{found['candidates']['entity_rows']}행 / {found['candidates']['entity_keys']}키" in table
-    assert f"`category='ingredient'` 는 **{found['candidates']['entity_ingredient_keys']}키**" in table
+    keys = found["candidates"]["entity_ingredient_keys"]
+    # 분모를 함께 건다 -- 8 만 적히면 바로 옆의 28키 대비로 읽힌다(실측은 원본 CSV 32키 중 8이다).
+    assert f"`category='ingredient'` 는 **32키 중 {keys}키**" in table
+    assert f"32키의 `category` 가 **{found['candidates']['entity_categories']}종**" in table
+    only = found["brand_only"]
+    assert f"`kind='brand'` {only['rows']}행 / 고유 표기 {only['surfaces']}" in table
+    assert f"**{only['short_surfaces']}개가 2자 이하**" in table
+    assert f"주제 별칭 {only['queries']}개에서 `bm25` 로 보내는 질의 | **{only['misrouted']}**" in table
+    assert f"그중 옳은 것 **{only['correct']}**" in table
 
 
 def test_the_decision_and_its_blockers_are_still_written_down():
@@ -156,3 +213,8 @@ def test_the_decision_and_its_blockers_are_still_written_down():
     assert "slopindustries/cosmai#73" in table
     assert "§검색 실측 과 **같은 자가 아니다**" in table
     assert "라우터는 #11 을 대체하지 못한다" in table
+    # 오독되는 수(`4/10`)는 리터럴로 박혀 있는데 그것을 무력화하는 문장이 안 박히면 비대칭이다.
+    assert "**그래서 이 절의 답은 첫 줄이 아니라 넷째 줄과 마지막 줄이다**" in table
+    assert "어느 것도 #11 의 입력이 아니다" in table
+    assert "**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.**" in table
+    assert "이득 0 · 손해 2" in table
