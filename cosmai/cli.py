@@ -170,13 +170,23 @@ def _add_lexicon(subparsers: argparse._SubParsersAction) -> None:
     ):
         sub = actions.add_parser(name, help=helptext)
         sub.add_argument("--kind", required=True, choices=KINDS, help="Which dictionary.")
-        sub.add_argument("--version", required=True, type=int, help="The dictionary version to act on.")
+        # diff 는 한쪽이 적재 원본 CSV 일 수 있어 --version 이 필수가 아니다 (포크 #62).
+        sub.add_argument(
+            "--version",
+            required=name != "diff",
+            type=int,
+            default=None,
+            help="The dictionary version to act on.",
+        )
         sub.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
         if name == "load":
             sub.add_argument("csv", help="CSV in the shape contracts/formats.md gives for this kind.")
         if name == "diff":
             sub.add_argument(
                 "--against", type=int, default=None, help="Version to compare with (default: active)."
+            )
+            sub.add_argument(
+                "--csv", default=None, help="Compare this load CSV with a version instead of two versions."
             )
 
 
@@ -521,7 +531,15 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
 def _run_lexicon(args: argparse.Namespace) -> int:
     import psycopg
 
-    from db.lexicon import ASPECT_KIND, activate, active_version, diff, insert_aspects, insert_entities
+    from db.lexicon import (
+        ASPECT_KIND,
+        activate,
+        active_version,
+        diff,
+        diff_csv,
+        insert_aspects,
+        insert_entities,
+    )
 
     with _connect(args.url) as conn, conn.cursor() as cur:
         try:
@@ -541,16 +559,22 @@ def _run_lexicon(args: argparse.Namespace) -> int:
                 conn.commit()
                 print(f"{args.kind} v{args.version} is now the active version ({touched} rows touched)")
                 return 0
+            # 어느 쪽이 그 판본인지 둘이 말하면 답이 둘이다. 하나도 안 말하면 맞댈 것이 없다.
+            if (args.csv is None) == (args.version is None):
+                raise ValueError("diff needs exactly one of --version and --csv")
             against = args.against if args.against is not None else active_version(cur, args.kind)
             if against is None:
                 print(f"{args.kind} has no active version to compare with; pass --against")
                 return 2
-            d = diff(cur, args.kind, args.version, against)
+            if args.csv:
+                d = diff_csv(cur, args.kind, _csv_rows(args.kind, args.csv), against)
+            else:
+                d = diff(cur, args.kind, args.version, against)
         # 잘못된 CSV 도 CHECK 위반도 blocked 다 — 트레이스백은 종료 코드 1 이 되어 규약을 깬다.
         except (ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
-    print(f"{d.kind} v{d.version} vs v{d.against}: +{len(d.added)} -{len(d.removed)} ~{len(d.changed)}")
+    print(f"{d.kind} {d.version} vs {d.against}: +{len(d.added)} -{len(d.removed)} ~{len(d.changed)}")
     for mark, keys in (("+", d.added), ("-", d.removed), ("~", d.changed)):
         for key in keys:
             print(f"{mark} {key}")
