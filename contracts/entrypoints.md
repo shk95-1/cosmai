@@ -63,17 +63,32 @@ P16 의 표가 이 뷰 하나로 나와야 한다. `requests` 는 fetch 시도 �
 
 **youtube 는 3단계에서 이 뷰에 들어가지 않는다** (사용자 결정 2026-08-24). 12컬럼 중 다섯을 낼 원천이
 없고, 그중 `blocked`·`p90_ms` 가 하필 그 수집기의 실제 고장 모드(쿼터 소진·지연)를 보는 컬럼이라
-NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 넷:
+NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 셋(넷째는 #100 이 없앴다 — 아래):
 - `tubedepth.jobs` 에는 run 개념이 없다 — `run_id` 를 낼 것이 없고 `created_at` 은 enqueue 시각이라
   `started_at` 도 아니다.
 - 같은 표에 지연을 잰 컬럼이 없다 — `p90_ms` 의 원천이 아예 없다.
-- `collectors/youtube/cli.py:211` 이 `error_code` 에 예외 클래스명(`type(error).__name__`)만 넣는다 —
-  429·쿼터 소진을 `failed` 와 갈라 `blocked` 로 셀 방법이 없다.
 - `jobs.kind`(`video.metadata` 계열)가 위 §수집의 youtube dataset 어휘(`watch|work|flatten|prune`)와
   다르다 — `dataset` 컬럼에 그대로 넣으면 다른 두 팔과 다른 어휘가 한 컬럼에 섞인다.
 
 `queued` 가 두 팔 다 NULL 인 것은 그래서다: commerce·naver 는 크론이 부르는 배치 워커라 큐가 없고,
 큐를 가진 유일한 수집기가 youtube 다. 컬럼을 지우지 않고 남겨 둔 것은 그 팔이 돌아올 자리이기 때문이다.
+
+`error_code`(`jobs.error_code`, `String(64)`)는 #100 부터 예외 클래스명이 아니라 아래 분류값이다
+(`collectors/youtube/cli.py::_classify_error`). #77 이 이 뷰에 youtube 를 넣을 때 정본으로 읽을
+어휘다 — `blocked` 는 `quota`·`rate_limited`·`http_403`(quotaExceeded 아닌 403)·`http_429` 를
+합친 것으로, commerce `fetch_log.status` 의 403·429 정의와 이어진다.
+- `quota` — 403 + 본문 `error.errors[].reason == "quotaExceeded"` (YouTube Data API 는 쿼터 소진을
+  429 가 아니라 이 모양으로 준다).
+- `rate_limited` — 429.
+- `http_<code>` — 그 외 HTTP 상태(`http_403`은 quotaExceeded 가 아닌 403 — forbidden·
+  accessNotConfigured 등 — 을 포함, `http_500` 등).
+- `transport` — HTTP 상태 자체가 없는 실패(DNS·소켓·타임아웃).
+
+`error_message`(`Text`)는 그대로 `str(error)` — 원문 예외 텍스트는 컬럼을 옮기지 않았다, `error_code`
+가 클래스명 자리를 분류값으로 대체했을 뿐이다. 라이브 트랜스포트가 아직 없어(#10 이전, `_RaisingFetcher`
+가 기본값) 실제 403 응답 본문에 이 코드가 닿아본 적은 없다 — 분류기는 `urllib.error.HTTPError` 모양
+(`.code`·`.read()`)을 기준으로 짰고, #10 이 어떤 전송을 붙이든 그 모양으로 예외를 던지게 하는 것이
+그때의 몫이다.
 
 분석판은 `db/views/analysis_health.sql` 의 `needs.analysis_health` 다: run 별 started/finished/
 status/versions 와 그 run 의 `metrics_need`·`metrics_wish` 행 수. `need_mention`·`wish_mention` 은
