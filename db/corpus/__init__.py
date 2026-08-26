@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, LiteralString
@@ -151,9 +152,10 @@ def check_channels(cur: psycopg.Cursor[Any], source_dir: Path, panel_version: in
     """
     cur.execute(PANEL_SQL, (panel_version,))
     roster = {channel_id: role for channel_id, role in cur.fetchall()}
+    rows = list(read_csv(source_dir / "channel.csv"))
     problems = [
         f"{row['channel_id']}: corpus says {row['panel_role']}, roster says {roster.get(row['channel_id'])}"
-        for row in read_csv(source_dir / "channel.csv")
+        for row in rows
         if roster.get(row["channel_id"]) != row["panel_role"]
     ]
     if problems:
@@ -161,7 +163,22 @@ def check_channels(cur: psycopg.Cursor[Any], source_dir: Path, panel_version: in
             f"channel.csv disagrees with the active panel roster (version {panel_version}): "
             + "; ".join(problems)
         )
-    return len(roster)
+    # 명부 크기가 아니라 이 파일의 행수를 돌려준다 -- 매니페스트의 table_counts 가 세는 것이 그쪽이다.
+    return len(rows)
+
+
+def _tally(
+    rows: Iterator[dict[str, str]],
+    counts: dict[str, int],
+    name: str,
+    by_type: Counter[str] | None = None,
+) -> Iterator[dict[str, str]]:
+    """흐르는 CSV 를 세면서 넘긴다 -- 174M 를 세자고 한 번 더 읽으면 반입이 두 배로 든다."""
+    for row in rows:
+        counts[name] = counts.get(name, 0) + 1
+        if by_type is not None:
+            by_type[row["content_type"]] += 1
+        yield row
 
 
 def _pages(rows: Iterator[tuple[Any, ...]], batch: int) -> Iterator[list[tuple[Any, ...]]]:
@@ -252,14 +269,18 @@ def load(
         version = panel_version if panel_version is not None else panel.active_version(cur)
         if version is None:
             raise CorpusMismatch("no active panel roster; load db/seed --only panel first (fork #31)")
-        check_channels(cur, source_dir, version)
+        table_counts = {"channel.csv": check_channels(cur, source_dir, version)}
         insert_snapshot(cur, manifest, snapshot_id, label, note)
     conn.commit()
 
+    by_type: Counter[str] = Counter()
     copy_pages(
         conn,
         DOCUMENT_SQL,
-        (document_row(row, snapshot_id, runs) for row in read_csv(source_dir / "document.csv")),
+        (
+            document_row(row, snapshot_id, runs)
+            for row in _tally(read_csv(source_dir / "document.csv"), table_counts, "document.csv", by_type)
+        ),
         batch=batch,
         label="corpus_document",
         progress=progress,
@@ -267,11 +288,17 @@ def load(
     copy_pages(
         conn,
         MENTION_SQL,
-        (mention_row(row, snapshot_id) for row in read_csv(source_dir / "mention.csv")),
+        (
+            mention_row(row, snapshot_id)
+            for row in _tally(read_csv(source_dir / "mention.csv"), table_counts, "mention.csv")
+        ),
         batch=batch,
         label="corpus_mention",
         progress=progress,
     )
+    # 켜기 **전에** 대조한다: 뒤라면 분석은 이미 그 판본을 읽고 있다. 행은 남지만 스냅샷마다 다른
+    # 키를 쓰므로 (023) 옆에 설 뿐 아무것도 덮지 않는다.
+    contract.check_counts(manifest, {"table_counts": table_counts, "documents_by_content_type": by_type})
     with conn.cursor() as cur:
         # 판본을 켜는 것은 "분석이 이제 이것을 읽는다"는 뜻이라, 옛 스냅샷 옆에 한 벌 더 쌓기만 하는
         # 반입(#38)은 끄고 부를 수 있어야 한다. 행은 어느 쪽이든 덮이지 않는다.

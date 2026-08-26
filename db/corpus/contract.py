@@ -51,6 +51,10 @@ TEXT_RULE = (
     "그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외."
 )
 
+# 매니페스트가 선언한 행수를 담는 두 칸. 문장이 아니라 수라 상수로 옮기지 않고 대조만 한다 --
+# 판본마다 다른 값이고, 계약이 지는 것은 "대조한다"는 규칙 쪽이다(contracts/formats.md §코퍼스 스냅샷).
+COUNT_KEYS = ("table_counts", "documents_by_content_type")
+
 # 적재기가 아는 어휘. DDL 의 CHECK 와 같은 목록이어야 한다 (023).
 SOURCES = ("youtube_video", "youtube_comment")
 CONTENT_TYPES = ("video_long", "video_short", "video_unknown", "comment")
@@ -79,5 +83,29 @@ def check(manifest: Mapping[str, Any]) -> None:
         raise ManifestMismatch(
             "manifest declares rules the contract does not carry: "
             + ", ".join(problems)
+            + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+        )
+
+
+def check_counts(manifest: Mapping[str, Any], measured: Mapping[str, Mapping[str, int]]) -> None:
+    """매니페스트가 선언한 행수와 반입이 실제로 읽은 행수가 같은가.
+
+    잘려 들어온 CSV 는 행이 **적을 뿐** 오류가 없다 -- 그러면 이 스냅샷의 모든 비율이 조용히 달라지고,
+    그 사실은 어떤 숫자에도 나타나지 않는다. 판본마다 값이 다르므로 계약이 지는 것은 수가 아니라
+    대조한다는 규칙이다.
+    """
+    problems: list[str] = []
+    for key in COUNT_KEYS:
+        declared = manifest.get(key)
+        if declared is None:
+            problems.append(f"{key} is missing")
+            continue
+        found = measured[key]
+        if dict(declared) != dict(found):
+            problems.append(f"{key} declares {dict(declared)} but the load read {dict(found)}")
+    if problems:
+        raise ManifestMismatch(
+            "manifest counts do not match what arrived: "
+            + "; ".join(problems)
             + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
         )

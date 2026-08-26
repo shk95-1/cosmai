@@ -88,6 +88,19 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 매니페스트가 그것과 다르면 반입을 거절한다 — 다른 규칙으로 만들어진 코퍼스가 같은 표에 섞이면 그
 표의 모든 비율이 오류 없이 달라진다.
 
+### 매니페스트가 선언한 행수 (`manifest.table_counts` · `documents_by_content_type`)
+적재기는 **선언한 행수와 반입분을 대조한다**(`db/corpus.load` → `contract.check_counts`) — 다르면 켜기
+전에 거절한다. 규칙·한계와 달리 이 값은 판본마다 달라서 계약이 수를 지지 않고 대조한다는 규칙만
+진다. 잘려 들어온 CSV 는 행이 **적을 뿐** 오류가 없고, 그러면 이 스냅샷의 모든 비율이 조용히 달라진다
+— `reproduces` 는 선크림 한 주제만 다시 세므로 그 바깥이 잘린 것을 잡지 못한다. 2026-08-19 판본의 값은
+document 261,317 · mention 105,358 · channel 43 이고 문서 구성은 `video_long` 7,085 · `video_short`
+6,888 · `video_unknown` 6 · `comment` 247,338 이다.
+
+`input_counts`(입력 영상·댓글 행수 · 중복 문서 0 · 고아 댓글 0 · 중복 댓글 본문 237)는 **보류**다(포크
+#37): 그것은 ydc `to_common_schema.py` 가 변환 **이전**에 센 값이라 반입분 위에서 다시 셀 수 없다.
+그중 확인 가능한 둘은 이미 여기 있다 — 입력 행수의 합은 위 document 행수이고, 고아 언급 0 은
+`corpus_mention` 의 FK 가 진다(023).
+
 ### text 의 뜻 (`manifest.text_rule`, 그대로)
 > 영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.
 

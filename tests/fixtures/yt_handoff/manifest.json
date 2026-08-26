@@ -6,11 +6,11 @@
   ],
   "table_counts": {
     "document.csv": 12,
-    "mention.csv": 8,
+    "mention.csv": 9,
     "channel.csv": 3
   },
   "documents_by_content_type": {
-    "video_long": 3,
+    "video_long": 4,
     "video_short": 1,
     "video_unknown": 1,
     "comment": 6
