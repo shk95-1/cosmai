@@ -145,6 +145,15 @@ def test_search_uses_the_query_tokenizer(installed):
     assert index.search("백탁 관련해서 소비자들이")[0][0] == "topic"
 
 
+def test_the_note_names_what_was_dropped_and_says_nothing_otherwise(installed):
+    """`search` 의 유일한 창구다. 뺀 것이 없을 때도 찍으면 그 줄은 곧 읽히지 않는 줄이 된다."""
+    assert stopwords.query_note("백탁") is None
+    assert stopwords.query_note("사람들 반응") is None  # 전부 불용어라 아무것도 안 뺐다
+    note = stopwords.query_note("백탁 관련해서 소비자들이")
+    assert note is not None
+    assert "관련" in note and "소비자" in note and "v1" in note and "백탁" not in note
+
+
 def test_a_query_that_is_all_stopwords_keeps_its_tokens(installed):
     """빈 질의는 결과 0건이고, 필러가 낀 순위보다 나쁘다."""
     tokens = bm25.tokenize("사람들 반응")
