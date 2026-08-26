@@ -106,6 +106,15 @@ docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP
 
 # f. operational views, owner-owned. Each file drops and recreates its own view, so re-applying a
 # deploy is a no-op and a view whose columns changed still deploys (CREATE OR REPLACE would not).
+#
+# The sweep first: a view that reads another view (needs.pipeline_health reads collector_health and
+# analysis_health, #138) makes the per-file DROP fail on the *second* deploy -- "cannot drop view
+# analysis_health because other objects depend on it". Ordering the files around that would encode
+# the dependency graph in filenames, silently, and the next such view would break the deploy again.
+# Dropping every view in the schema up front makes the files order-independent: the loop below
+# recreates all of them, so a partial state cannot outlive this step.
+{ printf "SET ROLE needs_owner;\nDO \$\$DECLARE v text; BEGIN FOR v IN SELECT viewname FROM pg_views WHERE schemaname = 'needs' LOOP EXECUTE format('DROP VIEW IF EXISTS needs.%%I CASCADE', v); END LOOP; END\$\$;\n"; } \
+    | migrator_psql || { echo "needs: could not clear the operational views" >&2; exit 1; }
 for file in db/views/*.sql; do
     [ -e "$file" ] || continue
     { printf 'BEGIN;\nSET ROLE needs_owner;\n'; cat "$file"; printf '\nCOMMIT;\n'; } | migrator_psql \
