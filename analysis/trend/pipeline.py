@@ -35,7 +35,8 @@ CONTENT_TYPE = "long_form"
 VIDEO = "youtube_video"
 COMMENT = "youtube_comment"
 # 댓글을 부모로 되찾는 길은 (snapshot_id, parent_item_id) WHERE content_type='comment' 부분 인덱스다
-# (023). `source = 'youtube_comment'` 은 같은 행을 고르지만 그 인덱스를 타지 못해 26만 행을 훑는다.
+# (023). 두 술어를 나란히 두는 것은 계약이 그 둘의 동치를 보장하지 않기 때문이고, 부분 인덱스는
+# `content_type` 으로 골라지므로 계획은 그대로다 -- `source` 하나만 걸면 26만 행을 훑는다.
 CORPUS_COMMENT = "comment"
 # 언급량 집계는 quality_flags 가 빈 문서만 세고, 중복 포함 분모는 같은 영상 안 복붙까지 센다 (규칙 9).
 COUNTED_FLAGS = ("", "duplicate_in_parent")
@@ -85,7 +86,7 @@ SELECT v.quarter, count(*)
   FROM corpus_document c
   JOIN video v ON v.source_item_id = c.parent_item_id
  WHERE c.snapshot_id = %(snapshot)s AND c.content_type = '{CORPUS_COMMENT}'
-   AND c.quality_flags = ''
+   AND c.source = '{COMMENT}' AND c.quality_flags = ''
  GROUP BY 1
 """
 )  # noqa: S608
@@ -99,7 +100,7 @@ SELECT m.topic_id, v.quarter, c.quality_flags = '' AS counted,
   JOIN video v ON v.source_item_id = c.parent_item_id
   JOIN corpus_mention m ON m.snapshot_id = %(snapshot)s AND m.doc_id = c.doc_id AND m.trend_use
  WHERE c.snapshot_id = %(snapshot)s AND c.content_type = '{CORPUS_COMMENT}'
-   AND c.quality_flags = ANY(%(flags)s)
+   AND c.source = '{COMMENT}' AND c.quality_flags = ANY(%(flags)s)
  GROUP BY 1, 2, 3
 """
 )  # noqa: S608
