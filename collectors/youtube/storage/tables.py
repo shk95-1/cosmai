@@ -44,6 +44,10 @@ jobs = Table(
     sa.Column("payload_bytes", sa.Integer),
     sa.Column("error_code", sa.String(64)),
     sa.Column("error_message", sa.Text),
+    # #101: `_claim` stamps started_at when a job goes RUNNING -- `created_at` is enqueue time
+    # (#10 §A-2 근거 2), not start, so collector_health's youtube arm needs this to compute p90_ms.
+    sa.Column("started_at", sa.DateTime(timezone=True)),
+    sa.Column("elapsed_ms", sa.Integer),
     # Written on every enqueue (watchlist.py, queue.enqueue) but read by nothing in this
     # package -- #8 수정 라운드 2 made freshness (artifacts.fresh_until) the sole re-fetch
     # decision. Kept as a column (not dropped) only because the DDL diff-0 bar this issue is

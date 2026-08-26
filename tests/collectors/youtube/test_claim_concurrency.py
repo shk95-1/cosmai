@@ -34,8 +34,8 @@ def test_two_concurrent_claims_land_on_different_jobs(tubedepth_schema: str):
     try:
         txn1 = conn1.begin()
         txn2 = conn2.begin()
-        claimed1 = _claim(conn1, limit=1)
-        claimed2 = _claim(conn2, limit=1)
+        claimed1 = _claim(conn1, limit=1, now=NOW)
+        claimed2 = _claim(conn2, limit=1, now=NOW)
 
         assert len(claimed1) == 1
         assert len(claimed2) == 1
@@ -54,8 +54,8 @@ def test_claim_marks_rows_running_so_a_third_claim_gets_nothing(tubedepth_schema
     with engine.begin() as conn:
         queue.enqueue(conn, kind="video.metadata", target="only-one", now=NOW)
     with engine.begin() as conn:
-        first = _claim(conn, limit=10)
-        second = _claim(conn, limit=10)
+        first = _claim(conn, limit=10, now=NOW)
+        second = _claim(conn, limit=10, now=NOW)
     assert len(first) == 1
     assert second == []
     engine.dispose()

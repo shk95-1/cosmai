@@ -148,13 +148,16 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
     return 0
 
 
-def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
+def _claim(conn: Connection, *, limit: int, now: datetime) -> Sequence[Any]:
     """One atomic statement, not select-then-update: two `work` passes overlapping (a slow cron tick
     still running when the next fires, or a live worker daemon started alongside the batch CLI --
     #10) raced select-then-update at READ COMMITTED and could both pick up the same queued row before
     either's UPDATE landed. `FOR UPDATE SKIP LOCKED` on the candidate CTE is the archived
     `JobRepository.claim`'s own fix for exactly this (worker.py), applied here as one UPDATE .. FROM
-    a locked subquery so no other connection can see this batch as still queued in between."""
+    a locked subquery so no other connection can see this batch as still queued in between.
+
+    #101: stamps `started_at=now` in the same UPDATE -- this is the only place a job becomes RUNNING,
+    so it is the only correct place to record when it started."""
     candidates = (
         sa.select(jobs.c.identifier)
         .where(jobs.c.state == JobState.QUEUED.value)
@@ -166,8 +169,8 @@ def _claim(conn: Connection, *, limit: int) -> Sequence[Any]:
     stmt = (
         sa.update(jobs)
         .where(jobs.c.identifier.in_(sa.select(candidates.c.identifier)))
-        .values(state=JobState.RUNNING.value)
-        .returning(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind)
+        .values(state=JobState.RUNNING.value, started_at=now)
+        .returning(jobs.c.identifier, jobs.c.kind, jobs.c.target, jobs.c.follow_up_kind, jobs.c.started_at)
     )
     return conn.execute(stmt).all()
 
@@ -236,6 +239,15 @@ def _normalize(kind: str, dump: dict[str, Any]) -> Any:
     raise ValueError(f"no source for job kind {kind!r}")
 
 
+def _elapsed_ms(started_at: datetime, now: datetime) -> int:
+    """#101 결정: elapsed_ms is the whole job's wall time (claim to finish), not just the fetch
+    round trip -- unlike commerce's fetch_log.elapsed_ms, a youtube job's cache hit spends no fetch
+    at all, so a fetch-only measure would leave every cache-hit row NULL. Both timestamps come from
+    the same injected `now`/`started_at` clock the rest of this module already uses, so this value
+    and `finished_at - started_at` computed later from the same columns can never disagree."""
+    return int((now - started_at).total_seconds() * 1000)
+
+
 def _collect_one(
     conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
 ) -> bool:
@@ -257,6 +269,7 @@ def _collect_one(
                 .values(
                     state=JobState.FAILED.value,
                     finished_at=now,
+                    elapsed_ms=_elapsed_ms(job.started_at, now),
                     error_code=_classify_error(error),
                     error_message=str(error),
                 )
@@ -289,6 +302,7 @@ def _collect_one(
         .values(
             state=JobState.SUCCEEDED.value,
             finished_at=now,
+            elapsed_ms=_elapsed_ms(job.started_at, now),
             payload_digest=digest,
             payload_bytes=byte_count,
         )
@@ -297,7 +311,7 @@ def _collect_one(
 
 
 def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
-    claimed = _claim(conn, limit=DEFAULT_WORK_BATCH)
+    claimed = _claim(conn, limit=DEFAULT_WORK_BATCH, now=now)
     if not claimed:
         print("no queued jobs")
         return 0

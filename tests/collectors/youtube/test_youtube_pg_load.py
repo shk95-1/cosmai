@@ -99,6 +99,17 @@ def test_watch_work_flatten_lands_every_table(tubedepth_schema: str, tmp_path: P
         assert conn.execute(sa.select(sa.func.count()).select_from(transcripts)).scalar_one() == 2
         new_cols = sa.select(comments.c.published_at_resolution, comments.c.channel_is_brand_owner)
         assert conn.execute(new_cols).first() == (None, None)  # #8: no writer for either yet -- see report
+
+        # #101: every finished job carries its own timing now -- `_claim` stamps started_at (RUNNING),
+        # `_collect_one` stamps elapsed_ms on both its success and failure branches. `now` is one frozen
+        # clock reading per `run()` call (this test passes the same AT to every "work" pass), so
+        # started_at == finished_at == AT for each job and elapsed_ms is exactly that difference: 0.
+        timing = conn.execute(sa.select(jobs.c.started_at, jobs.c.finished_at, jobs.c.elapsed_ms)).all()
+        assert len(timing) == 9  # 3 listing jobs + 6 fanned-out follow-ups (2 videos x 3 listing jobs)
+        for started_at, finished_at, elapsed_ms in timing:
+            assert started_at is not None
+            assert finished_at is not None
+            assert elapsed_ms == int((finished_at - started_at).total_seconds() * 1000)
     engine.dispose()
 
 
