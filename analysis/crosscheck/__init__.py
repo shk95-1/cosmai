@@ -1,5 +1,10 @@
 """소스를 나란히 놓고 어긋나는 자리를 찾는다 (포크 #7). **합산하지 않는다.**
 
+규칙의 출처는 ydc `source_composition.py` · `commerce_crosscheck.py` · `cross_source.py` 이고, 슬라이스를
+import 하지 않고 옮겨 적었다. **핀(`v0.1.0` `02440ab`)이 아니라 `v0.3.0`(`e5a1b00`)이다** — 성분 키와
+선크림 문맥이 그 판에서 정정됐고 `cross_source.py` 는 핀 사본에 아예 없었다. 대조는
+`tool/compare-ydc-crosscheck` 가 ydc 레포를 태그째 읽어 돌린다.
+
 왜 합산하지 않나. 소스마다 분모가 다르다 -- 구성비는 그 소스의 13주제 언급 합 대비, 플랫폼 속성 평가는
 `topic_group` 안의 응답 비중, 성분 담론은 문서 수다. 더하거나 평균 내면 그 순간 뜻이 없어진다. 그래서
 **크기가 아니라 순위와 방향**을 본다 (`contracts/interfaces.md` §대조).

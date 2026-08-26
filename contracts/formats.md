@@ -68,7 +68,7 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 - **역할은 원천이 아니라 `needs` 파생에 산다**(사용자 결정 2026-08-26). 원천(`tubedepth`)의 채널 표는 upstream 계약이고 `tool/checks/ddl-drift` 가 지키는 자리라 포크가 컬럼을 더할 자리가 아니다. 43채널은 고정 목록이라 시드 한 벌로 충분하고, 패널 구성이 바뀌면 시드를 다시 적재한다.
 - **대가는 알고 받는다: 새 채널이 수집에 들어와도 역할이 자동으로 붙지 않는다.** 명부에 없는 채널은 패널 밖이므로 분모에 안 들어가는 것이 맞고, 그 사실이 행에서 읽히기만 하면 된다 — `metrics_topic_quarter` 의 `panel_version`·`panel_role`·`denom_channels` 가 그 자리다. '역할 비슷한 값'이 들어올 자리는 없다(DDL 의 CHECK, 022).
 - 버전은 사전과 같은 모양이다: 적재 시 `version` 을 부여하고 `active` 로 교체한다. 집계 행은 자기가 쓴 명부를 `panel_version` 으로 가리키므로, 패널이 바뀐 뒤에도 옛 행이 무엇을 분모로 삼았는지 남는다. 그 판본은 한 줄짜리 부모 `needs.panel_roster(version)` 에 살고 명부 행과 집계 행이 **둘 다 FK 로** 그 줄을 가리킨다 — `needs_runtime` 이 두 표에 DELETE 를 갖고 있어, 부모가 없으면 명부 판본이 지워진 뒤 그 문장이 거짓이 된다.
-- 적재는 `db/seed/panel.py`(`python -m db.seed --only panel`) 하나다 — 새 CLI 가 아니라 다른 시드와 같은 자리다(포크 #31). 원본은 슬라이스에 있었고 #9 가 그 디렉터리를 지우므로 `eval/` 로 옮겼다. 옮기며 **UTF-8 BOM 을 뗐다**: `db/seed/_common.read_csv` 는 utf-8 로 열어서 BOM 이 남으면 첫 열 이름이 `channel_id` 가 아니게 되고, 열 이름 11개는 그대로다.
+- 적재는 `db/seed/panel.py`(`python -m db.seed --only panel`) 하나다 — 새 CLI 가 아니라 다른 시드와 같은 자리다(포크 #31). 원본은 슬라이스에 있었고 #9 가 그 디렉터리를 지웠으므로 `eval/` 로 옮겼다. 옮기며 **UTF-8 BOM 을 뗐다**: `db/seed/_common.read_csv` 는 utf-8 로 열어서 BOM 이 남으면 첫 열 이름이 `channel_id` 가 아니게 되고, 열 이름 11개는 그대로다.
 - **활성 판본은 언제나 하나다.** `active` 가 행 단위라 부분 인덱스는 두 판본이 동시에 켜진 상태를 막지 못하고, 그러면 `WHERE active` 를 타는 분모가 43 대신 86 이 된다. 부분 유니크 인덱스로는 "활성 행의 distinct version 이 하나"를 쓸 수 없으므로 이 불변식은 적재기가 진다 — 한 문장짜리 `SET active = (version = n)`(`db/seed/panel.activate`)과, 둘이면 답 대신 멈추는 `panel.active_version` (포크 #3 리뷰 L6 · #31).
 
 ## 코퍼스 스냅샷 (→ `needs.corpus_snapshot` / `corpus_document` / `corpus_mention`, 포크 #4)
