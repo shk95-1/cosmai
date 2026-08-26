@@ -47,12 +47,19 @@ def enqueue(
     *,
     kind: str,
     target: str,
+    dataset: str | None = None,
     follow_up_kind: str | None = None,
     refresh: bool = False,
     max_attempts: int = 3,
     now: datetime,
 ) -> EnqueueOutcome:
-    """One job, or a reason none was added. Every insert into `jobs` goes through here."""
+    """One job, or a reason none was added. Every insert into `jobs` goes through here.
+
+    `dataset` (#102) names which `cosmai collect youtube --dataset` verb produced this row --
+    `kind` is a different vocabulary (video.metadata 계열), not the one contracts/entrypoints.md's
+    collector_health arm counts by. Defaults to None so tests exercising queue mechanics don't have to
+    care about it; real callers (cli.py) always pass it explicitly.
+    """
     dup_where = (
         jobs.c.follow_up_kind.is_(None) if follow_up_kind is None else jobs.c.follow_up_kind == follow_up_kind
     )
@@ -70,6 +77,7 @@ def enqueue(
             identifier=uuid.uuid4().hex,
             kind=kind,
             target=target,
+            dataset=dataset,
             follow_up_kind=follow_up_kind,
             refresh=refresh,
             state=JobState.QUEUED.value,
@@ -100,6 +108,7 @@ def fan_out_follow_up(
     *,
     video_ids: Sequence[str],
     follow_up_kind: str,
+    dataset: str | None = None,
     max_attempts: int = 3,
     now: datetime,
 ) -> FanOutReport:
@@ -108,6 +117,10 @@ def fan_out_follow_up(
     active for that video, not just this one -- a video reachable from two different listings (a
     channel and a search result, say) must not accumulate more active follow-ups than one video ever
     should, regardless of which listings named it.
+
+    `dataset` (#102) is passed straight through to `enqueue` -- a fanned-out follow-up job only ever
+    exists because a listing job's `follow_up_kind` named it, and only `watch` sets `follow_up_kind`,
+    so the follow-up inherits its caller's dataset rather than picking one of its own.
     """
     report = FanOutReport()
     for video_id in video_ids:
@@ -119,7 +132,9 @@ def fan_out_follow_up(
         if active_for_video >= MAX_FOLLOWUPS_PER_VIDEO:
             report.per_video_capped += 1
             continue
-        outcome = enqueue(conn, kind=follow_up_kind, target=video_id, max_attempts=max_attempts, now=now)
+        outcome = enqueue(
+            conn, kind=follow_up_kind, target=video_id, dataset=dataset, max_attempts=max_attempts, now=now
+        )
         if outcome is EnqueueOutcome.ENQUEUED:
             report.enqueued += 1
         elif outcome is EnqueueOutcome.DUPLICATE:

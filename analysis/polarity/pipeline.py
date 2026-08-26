@@ -7,8 +7,8 @@ idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징�
 쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
 자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
 (삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
-같은 계열 안에서 두 극성 구현이 공존하는 자리는 scope 로 갈린다 — 소유 표(ownership.py)가 배정한
-lexicon_category 는 그 주인만 쓰고 지운다.
+같은 계열 안에서 두 극성 구현이 공존하는 자리는 (scope, 기간)으로 갈린다 — 소유 표(ownership.py)가
+배정한 lexicon_category 의 since 이후 달은 그 주인만 쓰고 지우고, 그 앞의 달은 규칙이 계속 갱신한다.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from psycopg import sql as pgsql
 from analysis.extractor import RuleExtractor
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
-from analysis.polarity.ownership import OWNERS, foreign_scopes
+from analysis.polarity.ownership import OWNERS, Owner, Scopes, may_write, scopes_of
 from analysis.types import (
     AspectLexicon,
     Candidate,
@@ -48,6 +48,7 @@ FIVE = 5.0
 REVIEW_COLUMNS = ("source", "product_key", "review_key", "rating", "body", "written_at", "captured_at")
 REVIEW_KEY = ("source", "review_key")  # trend_radar.review 의 PK
 REVIEW_KEY_AT = (0, 2)  # REVIEW_COLUMNS 안에서의 자리
+REVIEW_REF_AT = (1, 2)  # need_mention.ref 를 이루는 자리 (product_key/review_key)
 COMMENT_COLUMNS = ("video_id", "comment_id", "text", "like_count", "published_at", "first_seen_at")
 COMMENT_KEY = ("video_id", "comment_id")  # tubedepth.comments 의 PK
 COMMENT_KEY_AT = (0, 1)
@@ -61,22 +62,53 @@ RUN_NOTE: LiteralString = "UPDATE analysis_run SET note = %s WHERE run_id = %s"
 # 그 안에서 죽으면 원천은 그대로여도 그 달의 need_mention 은 반쪽이고, 주인 있는 scope 는 규칙이
 # 배제하므로(#31) 사람이 다시 돌릴 때까지 아무도 메우지 않는다. 창 안에 있다는 사실을 DB 가 말한다.
 MARKER = "rewriting="
-NEED_DELETE: LiteralString = """
+# ownership.py 의 may_write 를 SQL 로 옮긴 술어 하나 — 삭제문과 DO UPDATE 가 같은 것을 쓴다. 앞 줄이
+# 남의 (scope, 기간) 행을 밖에 두고(lexicon_category 가 NULL 이면 맞는 쌍이 없어 통과한다), 뒷 줄이
+# 표에 오른 구현을 자기 (scope, 기간) 안에 가둔다. 두 배열이 다 비면 소유 이전의 동작 그대로다.
+OWNED: LiteralString = """(
+  NOT EXISTS (SELECT 1 FROM unnest(%s::text[], %s::text[]) AS theirs(scope, since)
+              WHERE theirs.scope = need_mention.lexicon_category AND need_mention.month >= theirs.since)
+  AND (cardinality(%s::text[]) = 0
+       OR EXISTS (SELECT 1 FROM unnest(%s::text[], %s::text[]) AS mine(scope, since)
+                  WHERE mine.scope = need_mention.lexicon_category AND need_mention.month >= mine.since))
+)"""
+NEED_DELETE: LiteralString = (
+    """
 DELETE FROM need_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND NOT (extractor_version = %s AND polarity_version = %s)
-AND (lexicon_category IS NULL OR lexicon_category <> ALL(%s::text[]))
-"""
-# 마지막 줄이 남의 scope(ownership.py)를 삭제 밖에 둔다 — 빈 배열이면 <> ALL 이 전부 참이라 옛 동작이다.
+AND """
+    + OWNED
+    + "\n"
+)
 # --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
 # 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
 NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
+# `--since D` 는 읽기만 잘랐다(`_months`·`_pages`): D 가 든 달의 삭제는 그대로 전량이라, 매 실행이 그
+# 달의 D 이전 행을 지우고 D 이후만 다시 썼다 — 크론에 그대로 넣으면 매일 구멍을 판다 (#98).
+# 축은 삭제문 쪽 `observed_at` 이고 그 값은 원천의 `coalesce(written_at, captured_at)` 이라 두 필터가
+# 같은 행 집합을 가리킨다 (analysis/units.py).
+DELETE_SINCE: LiteralString = "AND observed_at >= %s\n"
 WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
 """
+# 증분 실행이 페이지마다 묻는 한 줄: 이 (src, ref) 들 중 이 실행이 *지금 쓸 모양 그대로* 이미 쓴 것.
+# 두 버전을 다 거는 것은 그것이 이 실행이 만들 행의 모양이기 때문이다 — 어느 쪽이 올라도 새 행이 생기므로
+# "이미 했다"가 거짓이 된다. 005 의 자연키 인덱스(src, ref, need_key, extractor_version, md5(sentence))의
+# 앞 컬럼을 그대로 타서 한 페이지분이 30s 한도 안에 들어온다.
+MINE_ALREADY: LiteralString = (
+    "SELECT DISTINCT ref FROM need_mention WHERE src = %s AND ref = ANY(%s::text[]) "
+    "AND extractor_version = %s AND polarity_version = %s"
+)
+# 규칙과 표에 없는 구현에는 소유가 없어 '내 판본 행'이 곧 규칙 모집단 전량이다 — 증분이 뜻을 잃는다.
+NO_MISSING = (
+    "--missing needs an owned (scope, since): {version} owns none, so 'the rows of my version' is the "
+    "whole rule population; register it in analysis/polarity/ownership.py or drop --missing"
+)
 # 005 로 extractor_version 이 자연키에 들어간 뒤로 시드 행(slice-*)은 이 INSERT 와 애초에 충돌하지
 # 않는다 — 충돌하는 행은 반드시 이 실행과 같은 버전이므로 DO UPDATE 에 버전 필터가 필요 없다.
-NEED_UPSERT: LiteralString = """
+NEED_UPSERT: LiteralString = (
+    """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key, aspect_scope,
    polarity, strength, rating, observed_at, observed_at_resolution, month, sentence, kind, marker,
@@ -91,9 +123,11 @@ SET site = EXCLUDED.site, product_ref = EXCLUDED.product_ref,
     month = EXCLUDED.month, kind = EXCLUDED.kind, marker = EXCLUDED.marker,
     polarity_reason = EXCLUDED.polarity_reason, extractor_version = EXCLUDED.extractor_version,
     polarity_version = EXCLUDED.polarity_version
-WHERE need_mention.lexicon_category IS NULL OR need_mention.lexicon_category <> ALL(%s::text[])
-"""
-# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category 가 남의 scope 면 갱신도 하지 않는다.
+WHERE """
+    + OWNED
+    + "\n"
+)
+# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category·month 가 남의 자리면 갱신도 하지 않는다.
 # 저장된 scope 와 지금 매핑이 갈리면(rank_snapshot 최신 행·category_map 이 매일 다시 계산한다) 이 실행은
 # 그 문장을 자기 것으로 보고 다시 뽑는다: 두 구현이 같은 need_key 를 고르면 자연키가 통째로 겹쳐, 삭제를
 # 피한 주인의 행을 제자리 upsert 가 갈아 끼운다. WISH_UPSERT 가 쓰는 그 자리(DO UPDATE ... WHERE)다.
@@ -124,11 +158,15 @@ class StageResult:
     replaced: int
     captured_at_fallbacks: int  # formats.md: 0 이 아니게 되는 순간이 시간 규칙을 다시 볼 때다
     polarity_version: str = RulePolarity.version
+    missing: bool = False
 
     @property
     def note(self) -> str:
+        # 증분 실행은 replaced=0 을 언제나 낸다 — 그것만으로는 '지울 것이 없었다'와 구별되지 않아,
+        # 무엇이 이 run 의 T 를 만들었는지 원장에서 되짚을 수 없다 (#32 가 이 명령의 T 를 잰다).
+        mode = " missing=1" if self.missing else ""
         return (
-            f"analyze:polarity:{self.polarity_version} units={self.units} need={self.need_rows} "
+            f"analyze:polarity:{self.polarity_version}{mode} units={self.units} need={self.need_rows} "
             f"wish={self.wish_rows} replaced={self.replaced} "
             f"captured_at_fallback={self.captured_at_fallbacks}"
         )
@@ -231,6 +269,12 @@ def _pages(
         cursor = tuple(page[-1][i] for i in key_at)
 
 
+def _refs_of(page: Sequence[tuple[Any, ...]], at: Sequence[int]) -> list[str]:
+    """need_mention.ref 는 원천 키 둘을 '/' 로 이은 것이다 (analysis/units.py 의 review_unit)."""
+    first, second = at
+    return [f"{row[first]}/{row[second]}" for row in page]
+
+
 def _product_facts(
     conn: psycopg.Connection[Any], schema: str
 ) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], str]]:
@@ -284,7 +328,7 @@ class PolarityStage:
         conn: psycopg.Connection[Any],
         batch: int = BATCH,
         polarity: Polarity | None = None,
-        owners: Mapping[str, str] = OWNERS,
+        owners: Mapping[str, Owner] = OWNERS,
     ) -> None:
         self.conn = conn
         self.batch = batch
@@ -292,8 +336,11 @@ class PolarityStage:
         # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
         self.rule = RulePolarity()
         self.polarity: Polarity = polarity or self.rule
-        # 다른 구현이 주인인 scope — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
-        self.foreign = foreign_scopes(owners, self.polarity.version)
+        self.owners = owners
+        # 남이 주인인 (scope, 기간) — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
+        self.foreign: Scopes = scopes_of(owners, self.polarity.version, mine=False)
+        # 이 실행이 주인인 (scope, 기간) — 비어 있지 않으면 이 실행은 그 안에서만 쓰고 지운다.
+        self.owned: Scopes = scopes_of(owners, self.polarity.version, mine=True)
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
@@ -307,6 +354,39 @@ class PolarityStage:
             "polarity": self.polarity.version,
             "lexicon": {"entity": self.lexicon.version, "aspect": self.aspects[GENERIC_RULESET].version},
         }
+
+    def _owner_args(self) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
+        """OWNED 술어가 받는 다섯 인자 — 남의 쌍 둘, 내 쌍 셋(cardinality 검사가 첫 배열을 한 번 더 본다)."""
+        theirs = [list(part) for part in zip(*self.foreign, strict=True)] or [[], []]
+        mine = [list(part) for part in zip(*self.owned, strict=True)] or [[], []]
+        return (theirs[0], theirs[1], mine[0], mine[0], mine[1])
+
+    def owns(self, lexicon_category: str | None, month: str) -> bool:
+        """읽기 건너뛰기가 묻는 것 — 삭제문·갱신문의 OWNED 와 같은 술어다 (ownership.py 의 may_write)."""
+        return may_write(self.owners, self.polarity.version, lexicon_category, month)
+
+    def floor(self, scope: str | None) -> str | None:
+        """이 실행이 한 행이라도 쓸 수 있는 첫 달 — 주인이 아니면 없다(모든 달이 규칙의 몫이다).
+
+        주인은 자기 `since` 앞의 달에 아무것도 쓰지 못하고(`owns`), 그 달의 삭제문도 같은 술어에 걸려
+        0행이다. 그래서 그 달을 도는 것은 DELETE 한 번과 페이징 한 번의 순수한 비용이고, #31 의 26개
+        카테고리를 꺼내면 매일 그만큼 곱해진다. `ALWAYS` 는 어떤 YYYY-MM 보다 작아 아무것도 자르지 않는다.
+        """
+        reach = [since for owned, since in self.owned if scope is None or owned == scope]
+        return min(reach) if reach else None
+
+    def already(self, src: str, refs: Sequence[str]) -> frozenset[str]:
+        """이 원천 행들 중 이 실행이 지금 쓸 모양으로 **이미** 행을 가진 것 — 증분이 건너뛸 자리다.
+
+        후보가 하나도 없는 리뷰는 어느 실행도 행을 만들지 않아(need_key='' 센티널조차 후보가 있어야
+        생긴다) 매번 여기 걸리지 않고 추출을 다시 탄다 — 추출은 규칙이라 싸고, 판정은 부르지 않는다.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(MINE_ALREADY, (src, list(refs), RuleExtractor.version, self.polarity.version))
+            found = frozenset(row[0] for row in cur.fetchall())
+        # 읽자마자 닫는다 — `_pages` 와 같은 이유다 (idle_in_transaction 15s).
+        self.conn.rollback()
+        return found
 
     def _scope_of(self, aspects: AspectLexicon, category: str | None, aspect: str) -> str:
         for pattern in self.rule.patterns_for(aspects, category):
@@ -399,18 +479,27 @@ class PolarityStage:
             extractor_version=RuleExtractor.version,
         )
 
-    def replace_stale(self, src: str, month: str, scope: str | None = None) -> int:
-        """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다."""
-        versions = (RuleExtractor.version, self.polarity.version, list(self.foreign))
+    def replace_stale(self, src: str, month: str, scope: str | None = None, since: date | None = None) -> int:
+        """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다.
+
+        `since` 는 다시 쓸 자리를 정확히 그만큼 좁히므로 삭제도 같이 좁힌다 (#98): 좁히지 않으면 그 달의
+        D 이전 행은 지워지고 다시 쓰이지 않는다.
+        """
+        need: LiteralString = NEED_DELETE if scope is None else NEED_DELETE_SCOPED
+        wish: LiteralString = WISH_DELETE
+        versions = (RuleExtractor.version, self.polarity.version, *self._owner_args())
+        args: tuple[Any, ...] = (src, month, *versions) if scope is None else (src, month, *versions, scope)
+        wish_args: tuple[Any, ...] = (src, month, RuleExtractor.version)
+        if since is not None:
+            need, args = need + DELETE_SINCE, (*args, since)
+            wish, wish_args = wish + DELETE_SINCE, (*wish_args, since)
         with self.conn.cursor() as cur:
-            if scope is None:
-                cur.execute(NEED_DELETE, (src, month, *versions))
-            else:
-                cur.execute(NEED_DELETE_SCOPED, (src, month, *versions, scope))
+            cur.execute(need, args)
             replaced = cur.rowcount
             # wish_mention 에는 lexicon_category 가 없고 스코프 실행은 wish 행을 하나도 만들지 않는다.
-            if scope is None:
-                cur.execute(WISH_DELETE, (src, month, RuleExtractor.version))
+            # 주인 있는 구현도 마찬가지다 — 소유가 성립하지 않는 표라 그 행은 규칙의 것이다.
+            if scope is None and not self.owned:
+                cur.execute(wish, wish_args)
                 replaced += cur.rowcount
         self.conn.commit()
         return replaced
@@ -423,7 +512,7 @@ class PolarityStage:
             self.conn.commit()
 
     def flush(self, needs: Sequence[NeedMentionRow], wishes: Sequence[WishMentionRow]) -> None:
-        self._write(NEED_UPSERT, needs, (list(self.foreign),))
+        self._write(NEED_UPSERT, needs, self._owner_args())
         self._write(WISH_UPSERT, wishes)
 
 
@@ -432,11 +521,12 @@ def run(
     *,
     since: date | None = None,
     scope: str | None = None,
+    missing: bool = False,
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     batch: int = BATCH,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
     on_run_open: Callable[[int], None] | None = None,
 ) -> StageResult:
     """`on_run_open` 은 run 행이 열린 그 순간 호출자에게 run_id 를 넘긴다 — 이 단계 안에서 죽어도
@@ -444,11 +534,22 @@ def run(
     구별할 단서가 표에 없다 (analysis/pipeline.py)."""
     stage = PolarityStage(conn, batch, polarity, owners)
     version = stage.polarity.version
-    if scope is not None and scope in stage.foreign:
+    # since 와 무관하게 남의 scope 면 거절한다: 주인의 기간 앞 달은 스코프 없는 05:00 줄이 도는 자리라,
+    # 그 이름을 --scope 로 부르는 한 줄은 어느 달을 노렸든 손실행이다.
+    if scope is not None and any(taken == scope for taken, _ in stage.foreign):
         # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
         raise ValueError(
-            f"{scope} is owned by {owners[scope]}, not {version} (analysis/polarity/ownership.py)"
+            f"{scope} is owned by {owners[scope].version} since {owners[scope].since}, not {version} "
+            "(analysis/polarity/ownership.py)"
         )
+    # 남의 scope 거절과 같은 자리·같은 모양이다: run 이 열리기 전에 멈춰야 운영자가 표를 본다.
+    if missing and not stage.owned:
+        raise ValueError(NO_MISSING.format(version=version))
+    # 배선이 끊긴 밤이 첫 배치까지 가서 죽으면 `--missing` 은 rewriting 표식을 안 달아 그 죽음을 되짚을
+    # 자리가 없다 — 규칙에는 없는 선택 훅이라 이름으로 찾는다 (analysis/polarity/ollama.py 의 preflight).
+    if (probe := getattr(stage.polarity, "preflight", None)) is not None:
+        probe()
+    floor = stage.floor(scope)
     with conn.cursor() as cur:
         cur.execute(
             RUN_START,
@@ -467,9 +568,14 @@ def run(
         categories, names = _product_facts(conn, commerce_schema)
         table = _table(commerce_schema, "review")
         for month in _months(conn, table, "written_at", "captured_at", since):
+            if floor is not None and month < floor:
+                continue
             months += 1
-            _note(conn, run_id, _rewriting(base_note, "review", month, scope))
-            replaced += stage.replace_stale("review", month, scope)
+            # 증분은 없는 것을 더할 뿐 갈아끼우지 않는다 — 지우지 않으니 그 달이 반쪽으로 남는 창도 없고,
+            # 그래서 rewriting 표식도 달지 않는다 (달면 `_abandoned` 가 멀쩡한 달을 stale 로 보고한다).
+            if not missing:
+                _note(conn, run_id, _rewriting(base_note, "review", month, scope))
+                replaced += stage.replace_stale("review", month, scope, since)
             for page in _pages(
                 conn,
                 table,
@@ -483,6 +589,9 @@ def run(
                 batch,
             ):
                 pending: list[_Pending] = []
+                # 고르는 기준이 날짜가 아니라 이것이다: 수집은 늦게 와 written_at 으로는 "안 한 것"을
+                # 못 고르고, 같은 문장의 재판정은 gemma4 가 비결정이라 라벨을 바꿔놓는다 (#98).
+                done = stage.already("review", _refs_of(page, REVIEW_REF_AT)) if missing else frozenset()
                 for source, product_key, review_key, rating, body, written_at, captured_at in page:
                     fallbacks += written_at is None
                     unit = review_unit(
@@ -498,26 +607,32 @@ def run(
                     lexicon_category = stage.categories.lexicon_category(
                         source, unit.category, names.get((source, product_key))
                     )
-                    # 주인이 따로 있는 scope 는 판정 자체를 하지 않는다: 자연키에 polarity_version 이
+                    # 주인이 따로 있는 (scope, 달)은 판정 자체를 하지 않는다: 자연키에 polarity_version 이
                     # 없어 여기서 한 줄만 흘러도 upsert 가 주인의 라벨을 제자리에서 덮는다.
-                    if lexicon_category in stage.foreign or (scope and lexicon_category != scope):
+                    if (
+                        not stage.owns(lexicon_category, month_of(unit.observed_at))
+                        or (scope and lexicon_category != scope)
+                        or unit.ref in done
+                    ):
                         continue
                     units += 1
                     pending.extend(stage.candidates(unit, lexicon_category))
                 needs = stage.need_rows(pending)
                 need_rows += len(needs)
                 stage.flush(needs, ())
-            _note(conn, run_id, base_note)
+            if not missing:
+                _note(conn, run_id, base_note)
 
     # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
-    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다).
-    if scope is None and _exists(conn, youtube_schema, "comments"):
+    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다). 주인 있는
+    # 구현도 같다: lexicon_category 가 없는 행에는 소유가 성립하지 않아 판정이 한 줄도 통과하지 못한다.
+    if scope is None and not stage.owned and _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
         for month in _months(conn, table, "published_at", "first_seen_at", since):
             months += 1
             _note(conn, run_id, _rewriting(base_note, "yt_comment", month, None))
-            replaced += stage.replace_stale("yt_comment", month)
+            replaced += stage.replace_stale("yt_comment", month, since=since)
             for page in _pages(
                 conn,
                 table,
@@ -566,6 +681,7 @@ def run(
         replaced=replaced,
         captured_at_fallbacks=fallbacks,
         polarity_version=version,
+        missing=missing,
     )
     with conn.cursor() as cur:
         cur.execute(RUN_END, (result.note, run_id))

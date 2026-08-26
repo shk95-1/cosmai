@@ -14,6 +14,7 @@ import pytest
 import collectors.commerce.sources  # noqa: F401 -- registers every source
 from collectors.commerce.models import Dataset
 from collectors.commerce.registry import SOURCES
+from collectors.commerce.storage.db import MAX_CONCURRENT_LANES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
@@ -170,16 +171,22 @@ def _paced_seconds(policy, requests: int) -> float:
 def _run_seconds(line: _Line, *, capped: bool) -> float:
     """How long that cron line runs. `capped=False` is the seed floor (every source walks exactly
     the requests `seeds()` hands it, nothing followed); `capped=True` is the budget tier, where
-    every source spends its whole `max_requests_per_run`. Sources are summed, not maxed, because
-    `engine.collect` walks them one after another.
+    every source spends its whole `max_requests_per_run`.
 
-    The budget tier is not a ceiling. Besides the widening in `_paced_seconds`, a source with
+    Sources are **maxed, not summed** (#25): `engine.collect` walks them as parallel lanes, so a line
+    costs its slowest source rather than all of them added up. Two floors, and the line pays the
+    higher: the slowest single source, and the whole line's work spread evenly over the lanes it is
+    allowed -- `MAX_CONCURRENT_LANES` is a connection budget (collectors/commerce/storage/db.py), so
+    a dataset with more sources than lanes queues the surplus. Neither is a schedule: a real run
+    hands lanes out in registry order, not longest-first, so it can only take longer than this.
+
+    The budget tier is not a ceiling either. Besides the widening in `_paced_seconds`, a source with
     `max_requests_per_run=None` has no budget to charge, so it is priced at its seed count while
     `max_depth` lets it follow further -- all four declare one since #10, but the branch stays
     because a new source is not obliged to. Read the tier as "at least this long", never "at most".
     """
     dataset = Dataset(line.dataset)
-    total = 0.0
+    lanes = []
     for key in sorted(SOURCES):
         cls = SOURCES[key]
         if dataset not in cls.datasets:
@@ -188,8 +195,11 @@ def _run_seconds(line: _Line, *, capped: bool) -> float:
         budget = cls.policy.max_requests_per_run
         if capped and budget is not None:
             requests = max(requests, budget)
-        total += _paced_seconds(cls.policy, requests)
-    return total
+        lanes.append(_paced_seconds(cls.policy, requests))
+    if not lanes:
+        return 0.0
+    at_once = min(len(lanes), MAX_CONCURRENT_LANES)
+    return max(max(lanes), sum(lanes) / at_once)
 
 
 CRON_LINES = _commerce_cron_lines(crontab_text())

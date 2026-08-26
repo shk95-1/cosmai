@@ -115,6 +115,30 @@ def test_datalab_writes_a_point_per_group_and_month(needs_runtime_url: str, secr
     assert len(fetcher.calls) == 1
 
 
+def test_datalab_shares_one_request_key_within_a_run_and_a_different_one_across_runs(
+    needs_runtime_url: str, secret_file: Path
+):
+    fetcher = _FakeFetcher()
+    run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
+    later = datetime(2026, 9, 1, 6, 10, tzinfo=UTC)  # a later run's endDate moves -> a new window
+    run(
+        "datalab",
+        database_url=needs_runtime_url,
+        secrets_path=secret_file,
+        fetcher=fetcher,
+        captured_at=later,
+    )
+
+    engine = sa.create_engine(needs_runtime_url)
+    with engine.begin() as conn:
+        keys = conn.execute(sa.select(naver_datalab_point.c.request_key)).scalars().all()
+    engine.dispose()
+
+    # the second run's fresh window rescaled every group's ratio -- all 5 rows now share its key.
+    assert len(set(keys)) == 1
+    assert keys[0] != ""
+
+
 def test_datalab_rerun_of_the_same_month_upserts_not_duplicates(needs_runtime_url: str, secret_file: Path):
     fetcher = _FakeFetcher()
     run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
@@ -136,6 +160,18 @@ def test_datalab_is_blocked_when_the_fetcher_fails_every_category(needs_runtime_
         captured_at=AT,
     )
     assert code == 2
+
+
+def test_datalab_is_blocked_with_a_message_when_no_fetcher_is_injected(
+    needs_runtime_url: str, secret_file: Path, capsys
+):
+    """Same #95 path as the blog test above, for datalab -- both datasets go through
+    `_run_datalab`/`_run_blog`'s own `fetcher.fetch` call, so both need the guard."""
+    code = run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "no live transport" in out
+    assert "#95" in out or "_RaisingFetcher" in out
 
 
 def test_blog_writes_one_post_per_query_term(needs_runtime_url: str, secret_file: Path):
@@ -179,6 +215,20 @@ def test_blog_is_blocked_when_every_query_fails(needs_runtime_url: str, secret_f
         captured_at=AT,
     )
     assert code == 2
+
+
+def test_blog_is_blocked_with_a_message_when_no_fetcher_is_injected(
+    needs_runtime_url: str, secret_file: Path, capsys
+):
+    """#95: the default fetcher (`_RaisingFetcher`, no live transport yet) must end the run exit 2
+    with a one-line explanation, not let `NotImplementedError` escape silently or as a traceback.
+    Unlike every other test here, this one deliberately does not pass `fetcher=` -- that's the path
+    #95 found broken."""
+    code = run("blog", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
+    assert code == 2
+    out = capsys.readouterr().out
+    assert "no live transport" in out
+    assert "#95" in out or "_RaisingFetcher" in out
 
 
 def test_cosmai_collect_naver_reaches_this_module():

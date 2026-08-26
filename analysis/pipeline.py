@@ -25,7 +25,7 @@ from analysis.locks import ANALYZE, analyze_lock
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
-from analysis.polarity.ownership import OWNERS
+from analysis.polarity.ownership import OWNERS, Owner
 from analysis.polarity.pipeline import MARKER
 from analysis.types import Polarity
 
@@ -49,15 +49,17 @@ SKIPPED = (
 )
 STALE = "half-written month(s) left behind by a run that died: {}"
 # #38: polarity scopes need_mention by lexicon_category, aggregate scopes metrics by the source
-# category (need_mention.category) — a --scope can own the first axis and miss the second entirely,
-# so a multi-hour pass writes labels and aggregates none of them. metrics_wish ignores --scope
-# altogether (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every
-# time, scoped or not), so it carries no signal about this scope and never enters the predicate —
-# only a scoped run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
+# category (need_mention.category). `scopes_for` bridges the two axes, but it can only expand a label
+# into source categories its own rows carry — a name_keyword label carries none — so a scoped pass can
+# still write labels and aggregate none of them. metrics_wish ignores --scope altogether
+# (analysis/aggregate/pipeline.py sums the whole wish population over WISH_SCOPES every time, scoped
+# or not), so it carries no signal about this scope and never enters the predicate — only a scoped
+# run's metrics_need hitting 0 after aggregate ran means anything (review round 1).
 SILENT_SCOPE = (
-    "--scope {scope!r} wrote 0 metrics_need rows: aggregate scopes by the source category "
-    "(need_mention.category), not lexicon_category — rerun aggregate with --scope matching "
-    "the source category: {categories}"
+    "--scope {scope!r} wrote 0 metrics_need rows: nothing in this run's population sits in that scope "
+    "on either axis — no mention carries it as its source category, and no mention labelled with it "
+    "carries a source category to expand into. Source categories seen for that lexicon_category: "
+    "{categories}"
 )
 SCOPE_CATEGORIES: LiteralString = (
     "SELECT DISTINCT category FROM need_mention WHERE lexicon_category = %s ORDER BY 1"
@@ -202,7 +204,11 @@ def _skipped(conn: psycopg.Connection[Any], stage: str) -> StageOutcome:
 
 
 def _scope_categories(conn: psycopg.Connection[Any], scope: str) -> tuple[str, ...]:
-    """The source category values aggregate actually filters on for this scope's lexicon_category."""
+    """The source category values this scope's lexicon_category is seen on, over the whole table.
+
+    Wider than the expansion `scopes_for` does (that one sees only this run's population), and the
+    gap is itself a reason a scope can be silent: the labels sit under another extractor_version.
+    """
     with conn.cursor() as cur:
         cur.execute(SCOPE_CATEGORIES, (scope,))
         found = tuple(str(r[0]) for r in cur.fetchall() if r[0])
@@ -285,11 +291,12 @@ def run_all(
     conn: psycopg.Connection[Any],
     since: date | None,
     scope: str | None,
+    missing: bool,
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
     stale: Sequence[str] = (),
 ) -> StageOutcome:
     counts: dict[str, int] = {}
@@ -312,6 +319,7 @@ def run_all(
             conn,
             since=since,
             scope=scope,
+            missing=missing,
             commerce_schema=commerce_schema,
             youtube_schema=youtube_schema,
             polarity=polarity,
@@ -344,11 +352,12 @@ def run_stage(
     *,
     since: date | None = None,
     scope: str | None = None,
+    missing: bool = False,
     commerce_schema: str = COMMERCE_SCHEMA,
     youtube_schema: str = YOUTUBE_SCHEMA,
     captured_at: date | None = None,
     polarity: Polarity | None = None,
-    owners: Mapping[str, str] = OWNERS,
+    owners: Mapping[str, Owner] = OWNERS,
 ) -> StageOutcome:
     """한 실행 = 한 락. 못 잡으면 아무것도 열지 않고 양보한다 (analysis/locks.py)."""
     with analyze_lock(conn) as held:
@@ -357,10 +366,29 @@ def run_stage(
         stale = _abandoned(conn)
         if stage == "all":
             return run_all(
-                conn, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+                conn,
+                since,
+                scope,
+                missing,
+                commerce_schema,
+                youtube_schema,
+                captured_at,
+                polarity,
+                owners,
+                stale,
             )
         return _one(
-            conn, stage, since, scope, commerce_schema, youtube_schema, captured_at, polarity, owners, stale
+            conn,
+            stage,
+            since,
+            scope,
+            missing,
+            commerce_schema,
+            youtube_schema,
+            captured_at,
+            polarity,
+            owners,
+            stale,
         )
 
 
@@ -369,11 +397,12 @@ def _one(
     stage: str,
     since: date | None,
     scope: str | None,
+    missing: bool,
     commerce_schema: str,
     youtube_schema: str,
     captured_at: date | None,
     polarity: Polarity | None,
-    owners: Mapping[str, str],
+    owners: Mapping[str, Owner],
     stale: Sequence[str],
 ) -> StageOutcome:
     run_id: int | None = None
@@ -395,6 +424,7 @@ def _one(
                 conn,
                 since=since,
                 scope=scope,
+                missing=missing,
                 commerce_schema=commerce_schema,
                 youtube_schema=youtube_schema,
                 polarity=polarity,

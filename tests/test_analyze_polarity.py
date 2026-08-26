@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import os
+import csv
+import re
 import time
 import urllib.error
 from collections.abc import Iterator, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +21,11 @@ from analysis import predictors, registry
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
-from analysis.polarity.ownership import NO_OWNERS, OWNERS, unready
+from analysis.polarity.ownership import ALWAYS, NO_OWNERS, OWNERS, Owner, unready
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
@@ -255,21 +256,10 @@ def test_the_source_tables_are_read_as_needs_runtime(loaded: str, _schema_name: 
             cur.execute("CREATE TABLE nope (i int)")
 
 
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    """tests/test_seed.py 와 같은 탐색 — 시드 CSV 없이는 충돌을 실물로 재현할 수 없다."""
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in (DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect")]
-    for path in found:
-        if path.is_dir():
-            return path
-    return pytest.skip("no slice-*/ next to the repo; pass COSMAI_SLICES_DIR")
-
-
 @pytest.fixture
-def seeded(loaded: str, sources: str, slices: Path) -> Iterator[str]:
+def seeded(loaded: str, sources: str) -> Iterator[str]:
     """시드 언급 전량 + 그 시드 행과 같은 자연키를 만드는 원천 행."""
-    seed.run_all(loaded, slices=slices, only=("products", "mentions"))
+    seed.run_all(loaded, only=("products", "mentions"))
     site, product_key, review_key, _, _ = SEED_NEED
     video_id, comment_id = SEED_WISH
     with connect(sources) as conn, conn.cursor() as cur:
@@ -468,6 +458,12 @@ def _squeezed(base_url: str) -> str:
     )
 
 
+def _probe_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """시작 프로브는 통과한 밤이다 (#32) — 아래 둘이 재는 것은 그 뒤에 벌어지는 왕복이고, GPU 나 모델은
+    프로브를 지나고 나서도 사라질 수 있다."""
+    monkeypatch.setattr(OllamaPolarity, "preflight", lambda self: None)
+
+
 def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
     loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
 ):
@@ -489,6 +485,7 @@ def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
         time.sleep(SLOW_CALL_S)
         return {"message": {"content": OLLAMA_ANSWER}, "prompt_eval_count": 7, "eval_count": 3}
 
+    _probe_passes(monkeypatch)
     monkeypatch.setattr(OllamaPolarity, "_post", slow_post)
     monkeypatch.setattr(predictors, "LEXICON_URL", squeezed)  # 원장 커넥션도 압축한 곳으로 보낸다
     registry.load_implementations()
@@ -514,6 +511,7 @@ def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
     def refuse(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:
         raise urllib.error.URLError(UNREACHABLE)
 
+    _probe_passes(monkeypatch)
     monkeypatch.setattr(OllamaPolarity, "_post", refuse)
     monkeypatch.setattr(predictors, "LEXICON_URL", loaded)
     registry.load_implementations()
@@ -550,7 +548,8 @@ def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _
 
 
 # 구현 소유권 (#31): 선블록은 gemma4 가, 나머지는 규칙이 갱신한다 — 표는 ownership.py 한 곳이다.
-GEMMA4 = OWNERS["선블록"]
+MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")  # need_mention.month 의 모양 (formats.md)
+GEMMA4 = OWNERS["선블록"].version
 # 규칙 실행이 다시 뽑지 않는 자리에 남은 주인의 행 — 삭제문이 이것을 지우는지 본다.
 OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 # 규칙 실행이 같은 자연키로 다시 쓰는 자리 — 005 의 자연키에 polarity_version 이 없어 제자리 upsert 가
@@ -558,14 +557,24 @@ OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 CONTESTED = ("P1/R2", "백탁", "백탁이 너무 심해서 최악이에요")
 
 
-def _label(url: str, ref: str, need_key: str, sentence: str, version: str, polarity: str = "만족") -> None:
+def _label(
+    url: str,
+    ref: str,
+    need_key: str,
+    sentence: str,
+    version: str,
+    polarity: str = "만족",
+    lexicon_category: str = "선블록",
+    observed_at: str = "2026-03-04",
+    month: str = "2026-03",
+) -> None:
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
             " observed_at, observed_at_resolution, month, sentence, extractor_version,"
-            " polarity_version) VALUES ('review', 'oliveyoung', %s, '선블록', %s, %s, '2026-03-04',"
-            " 'day', '2026-03', %s, 'rule-v2.3', %s)",
-            (ref, need_key, polarity, sentence, version),
+            " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, %s,"
+            " 'day', %s, %s, 'rule-v2.3', %s)",
+            (ref, lexicon_category, need_key, polarity, observed_at, month, sentence, version),
         )
         conn.commit()
 
@@ -601,9 +610,16 @@ def test_an_unscoped_rule_run_does_not_overwrite_the_owners_label(loaded: str, _
 
 
 class OwnerPolarity:
-    """선블록의 주인 자리에 꽂는 스텁 — 규칙과도 경쟁자와도 다른 버전을 내는 것이 요점이다."""
+    """선블록의 주인 자리에 꽂는 스텁 — 규칙과도 경쟁자와도 다른 버전을 내는 것이 요점이다.
+
+    판정한 문장을 적어 둔다: 증분 실행이 무엇을 다시 판정하지 *않는지*는 행만 봐서는 안 보인다 —
+    gemma4 는 비결정이라 두 번째 판정이 같은 라벨을 낼 보장이 없고, 값은 GPU 시간이다 (#98).
+    """
 
     version = "stub-owner-v9"
+
+    def __init__(self) -> None:
+        self.judged: list[str] = []
 
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
@@ -611,6 +627,7 @@ class OwnerPolarity:
         return PolarityResult(aspect="백탁", polarity="만족", reason="owner", version=self.version)
 
     def classify_many(self, items: Sequence[PolarityRequest], aspects: AspectLexicon) -> list[PolarityResult]:
+        self.judged.extend(x.sentence for x in items)
         return [self.classify(x.sentence, x.rating, x.category, aspects) for x in items]
 
 
@@ -637,7 +654,7 @@ def _by_scope(url: str) -> list[tuple[Any, ...]]:
 def test_the_owner_keeps_the_scope_a_later_unscoped_run_walks_over(loaded: str, _schema_name: str):
     """두 구현이 같은 문장을 두고 다툰다: 주인이 먼저 선블록을 라벨하고, 그 뒤 스코프 없는 실행이 전량을
     돈다. 주인의 scope 는 그대로, 나머지(샴푸)는 나중 실행의 것이다."""
-    owners = {"선블록": OwnerPolarity.version}
+    owners = {"선블록": Owner(OwnerPolarity.version, ALWAYS)}
     _run(loaded, _schema_name, scope="선블록", polarity=OwnerPolarity(), owners=owners)
     _run(loaded, _schema_name, polarity=RivalPolarity(), owners=owners)
     assert _by_scope(loaded) == [
@@ -681,14 +698,16 @@ def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quiet
 def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
     """소유가 바뀌면(구현 교체 · few-shot/프롬프트 판본 상승) 이 단언이 먼저 깨진다 — 표만 옮기고
     산출 행의 버전이 따라오지 않으면 주인 없는 scope 가 조용히 생긴다."""
-    assert OWNERS["선블록"] == OllamaPolarity().version
+    assert OWNERS["선블록"].version == OllamaPolarity().version
 
 
-def test_every_registered_scope_names_the_same_owner_version():
-    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 등록된 1개가
-    가리키는 값이 하나인지를 표 자체로 확인한다."""
-    assert len(OWNERS) == 1
-    assert set(OWNERS.values()) == {OllamaPolarity().version}
+def test_every_registered_scope_names_that_version_and_a_month_the_rows_carry():
+    """오타로 한 줄만 다른 문자열이 되면 그 카테고리는 조용히 무주공산이 된다 (#31) — 표가 몇 줄이든
+    가리키는 판본은 하나여야 한다. since 는 need_mention.month 와 같은 입자여야 한다: 술어가 그 열과
+    문자열로 견주므로 다른 모양이 들어오면 조용히 어긋난다 (#97)."""
+    assert {owner.version for owner in OWNERS.values()} == {OllamaPolarity().version}
+    for scope, owner in OWNERS.items():
+        assert owner.since == ALWAYS or MONTH.match(owner.since), f"{scope} = {owner.since!r}"
 
 
 # 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
@@ -720,7 +739,12 @@ def test_a_sentence_whose_scope_moved_keeps_the_owners_label_beside_the_new_scop
     ref, sentence = MOVED
     _label(loaded, ref, "백탁", sentence, GEMMA4)
     with connect(loaded) as conn:
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners={"선블록": GEMMA4})
+        run(
+            conn,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            owners={"선블록": Owner(GEMMA4, ALWAYS)},
+        )
     assert _labels(loaded, ref) == [("백탁", "만족", GEMMA4), (RULE_KEY, "불만", "rule-v2.2")]
 
 
@@ -753,13 +777,262 @@ def test_a_rerun_with_a_new_version_clears_the_rows_that_have_no_lexicon_categor
     assert _comment_versions(loaded) == [DriftedPolarity.version]
 
 
-def test_only_the_rule_may_be_let_loose_without_a_scope():
-    """`--impl` 을 풀어줄지 마는지의 기준은 유료 여부가 아니라 '규칙이 아닌 구현'이다: 전량이 기본인
-    것은 05:00 의 규칙 하나뿐이고, 나머지는 시간이든 돈이든 자기 자리에서만 쓴다 (cosmai/cli.py)."""
+# --- (scope, 기간) 소유 (#97): 등록은 즉시, 과거분은 규칙이 계속 갱신한다 ----------------------------
+# loaded 의 리뷰는 두 달에 앉는다: 2026-03(written_at)과 2026-08(written_at NULL → captured_at).
+FUTURE = "2026-09"  # 그 두 달보다 뒤 — 등록은 했고 주인의 패스는 아직 한 번도 안 돈 상태다
+OWNER_SINCE = "2026-08"  # 주인이 8월분부터 책임진다: 3월분은 규칙 몫으로 남는다
+STALE_SHAMPOO = ("P2/R9", "백탁", "등록 전 규칙이 남긴 문장")
+
+
+def _by_month(url: str) -> list[tuple[Any, ...]]:
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT lexicon_category, month, polarity_version FROM need_mention WHERE src = 'review'"
+            " GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+        )
+        return cur.fetchall()
+
+
+def test_a_scope_registered_from_a_later_month_is_still_the_rules_until_then(loaded: str, _schema_name: str):
+    """#31 의 소유는 scope 전체였다 — 26개를 등록만 하고 패스를 미루면 그 카테고리의 새 리뷰에 행이 아예
+    안 생겼다(#84 가 막힌 자리). 기간으로 자르면 등록과 패스가 분리된다: since 이전은 규칙이 계속 쓰고
+    지운다."""
+    owners = {"선블록": Owner(GEMMA4, ALWAYS), "샴푸": Owner(GEMMA4, FUTURE)}
+    ref, need_key, sentence = STALE_SHAMPOO
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", "불만", "샴푸")
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners=owners)
+    assert _by_month(loaded) == [("샴푸", "2026-03", RulePolarity.version)]
+    assert _stale(loaded, ref) == []
+
+
+def test_the_owner_leaves_the_months_before_its_since_to_the_rule(loaded: str, _schema_name: str):
+    """양방향이다: 규칙은 주인 기간을 비워 두고, 주인은 자기 기간 밖을 쓰지도 지우지도 않는다.
+
+    주인은 이제 `--scope` 없이 돌 수 있다 — 그 제약의 이유였던 '전량 재라벨'을 since 가 잘랐다.
+    """
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    _run(loaded, _schema_name, owners=owners)  # 05:00 크론의 자리
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)  # 주인의 패스
+    assert _by_month(loaded) == [
+        ("샴푸", "2026-03", RulePolarity.version),
+        ("선블록", "2026-03", RulePolarity.version),
+        ("선블록", "2026-08", OwnerPolarity.version),
+    ]
+
+
+def test_an_unscoped_owner_run_writes_nothing_that_has_no_lexicon_category(loaded: str, _schema_name: str):
+    """댓글과 위시에는 lexicon_category 가 없어 주인이 성립하지 않는다 — 주인의 스코프 없는 실행이
+    그 행을 가져가면 규칙 라벨이 사라지고 위시는 그 달에서 통째로 지워진다."""
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    _run(loaded, _schema_name, owners=owners)
+    wishes = _rows(loaded, "wish_mention")
+    assert wishes, "위시 행이 없으면 이 단언은 진공이다"
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)
+    assert _comment_versions(loaded) == [RulePolarity.version]
+    assert _rows(loaded, "wish_mention") == wishes
+
+
+def test_a_run_without_a_scope_must_own_one():
+    """`--impl` 을 풀어줄지 마는지의 기준은 유료 여부가 아니라 '표에 자기 자리가 있는가'다: 표에 없는
+    구현의 스코프 없는 한 줄은 여전히 전량 재라벨이다 (cosmai/cli.py)."""
     assert unready(OWNERS, RulePolarity.version, None) is None
-    assert "--scope" in str(unready(OWNERS, GEMMA4, None))
+    # 주인은 자기 scope 전부를 한 줄로 돈다 — 기간이 그 한 줄의 값을 정하므로 전량 재라벨이 아니다 (#97).
+    assert unready(OWNERS, GEMMA4, None) is None
+    assert "--scope" in str(unready(OWNERS, "stub-v9", None))
     # 아직 주인이 없는 카테고리(OWNERS 에 없는 이름) — 안 막으면 성공하고도 다음 05:00 에 지워진다.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
     assert unready(OWNERS, GEMMA4, "선블록") is None
     # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
     assert unready(OWNERS, "stub-v9", "선블록") is None
+
+
+# --- 증분 실행 (#98): 주인은 "내 판본 행이 없는 원천 행"만 판정한다 ------------------------------------
+# 늦게 도착한 리뷰. written_at 은 옛 달이라 롤링 창(`--since 어제`)이 못 잡고, 고정 컷은 컷 이후 전량을
+# 매일 다시 판정한다 — 축이 written_at 이라 날짜로는 "안 한 것"을 고를 수 없다 (contracts/formats.md §시간).
+LATE_REVIEW = ("oliveyoung", "R6", "P1", 1.0, "백탁이 진짜 심해서 못 쓰겠어요", WRITTEN)
+# `--since D` 가 든 달에 앉았지만 D 보다 앞선 행 — 삭제를 같이 좁히지 않으면 매 실행이 이것을 판다.
+BEFORE_SINCE = ("P7/R7", "끈적유분", "since 앞에 앉은 옛 행")
+AFTER_SINCE = ("P7/R8", "끈적유분", "since 뒤에 앉은 옛 행")
+SINCE_MONTH = "2026-08"  # loaded 의 written_at NULL 리뷰가 captured_at 으로 앉는 달
+SINCE_DAY = date(2026, 8, 10)
+
+
+def _mentions(url: str) -> list[tuple[Any, ...]]:
+    """mention_id 를 함께 읽는다 — 지우고 다시 넣으면 값이 커지므로 '행 변화 0' 이 그대로 보인다."""
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT mention_id, ref, need_key, polarity, polarity_version FROM need_mention"
+            " ORDER BY mention_id"
+        )
+        return cur.fetchall()
+
+
+def _owner_only() -> dict[str, Owner]:
+    return {"선블록": Owner(OwnerPolarity.version, ALWAYS)}
+
+
+def test_a_repeated_missing_run_judges_nothing_and_leaves_every_row_untouched(loaded: str, _schema_name: str):
+    """크론이 매일 돌릴 명령이다: 원천이 그대로면 두 번째 실행은 판정을 한 번도 부르지 않는다.
+    행 비교는 mention_id 까지 본다 — 지우고 같은 값으로 다시 넣는 것도 재판정이다."""
+    owners = _owner_only()
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners, missing=True)
+    before = _mentions(loaded)
+    assert before, "첫 실행이 아무 행도 안 썼으면 이 단언은 진공이다"
+    again = OwnerPolarity()
+    _run(loaded, _schema_name, polarity=again, owners=owners, missing=True)
+    assert again.judged == []
+    assert _mentions(loaded) == before
+
+
+def test_a_missing_run_judges_only_the_source_row_that_has_no_row_of_its_version(
+    loaded: str, needs_schema: str, _schema_name: str
+):
+    """수집은 늦게 온다 — 새 리뷰의 written_at 은 옛 달이다. 고른 기준이 날짜가 아니라 '내 판본 행이
+    없는 원천 행'이라야 그 하나만 판정한다."""
+    owners = _owner_only()
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners, missing=True)
+    before = _mentions(loaded)
+    with connect(needs_schema) as conn, conn.cursor() as cur:
+        source, key, product, rating, body, written = LATE_REVIEW
+        cur.execute(
+            "INSERT INTO review (source, review_key, captured_at, product_key, rating, body, written_at)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (source, key, CAPTURED, product, rating, body, written),
+        )
+        conn.commit()
+    again = OwnerPolarity()
+    _run(loaded, _schema_name, polarity=again, owners=owners, missing=True)
+    after = _mentions(loaded)
+    assert len(again.judged) == 1, again.judged
+    assert [row[1] for row in after if row not in before] == ["P1/R6"]
+    assert [row for row in before if row not in after] == []
+
+
+def test_a_missing_run_adds_what_is_absent_and_replaces_nothing(loaded: str, _schema_name: str):
+    """증분은 없는 것을 더하기만 한다 — 갈아끼우기(역사 보정·판본 상승)는 --scope 전량 경로의 몫이다.
+    그래서 옛 판본이 남긴 행은 이 모드가 지우지 않는다."""
+    ref, need_key, sentence = OWNED_ONLY
+    _label(loaded, ref, need_key, sentence, "rule-v0.9")
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=_owner_only(), missing=True)
+    assert _labels(loaded, ref) == [(need_key, "만족", "rule-v0.9")]
+
+
+def test_missing_is_refused_for_a_run_that_owns_no_scope(loaded: str, _schema_name: str):
+    """규칙은 매일 전량이 맞다 — 소유가 없으면 '내 판본 행'이 곧 그 모집단 전량이라 증분이 뜻을 잃는다."""
+    with pytest.raises(ValueError, match="--missing"):
+        _run(loaded, _schema_name, missing=True)
+
+
+def test_an_owner_run_does_not_walk_the_months_before_its_earliest_since(loaded: str, _schema_name: str):
+    """주인은 자기 since 앞의 달에 한 행도 쓸 수 없다(소유 술어). 그 달을 훑는 것은 삭제 한 번과 읽기
+    한 번의 순수한 비용이다 — 26개 카테고리를 꺼내면 매일 그만큼 곱해진다."""
+    owners = {"선블록": Owner(OwnerPolarity.version, OWNER_SINCE)}
+    found = _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners)
+    assert found.months == 1  # loaded 의 두 달 중 2026-08 만
+
+
+def test_since_does_not_delete_the_rows_that_sit_before_it(loaded: str, _schema_name: str):
+    """`--since D` 는 읽기만 자르고 삭제는 안 잘랐다 — D 가 든 달의 D 이전 행을 전부 지우고 D 이후만
+    다시 썼다. 그대로 크론에 넣으면 매일 구멍을 판다."""
+    ref, need_key, sentence = BEFORE_SINCE
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", observed_at="2026-08-01", month=SINCE_MONTH)
+    _run(loaded, _schema_name, since=SINCE_DAY)
+    assert _stale(loaded, ref) == [(need_key, "선블록")]
+
+
+def test_since_still_deletes_the_stale_rows_it_will_rewrite(loaded: str, _schema_name: str):
+    """반대 방향도 같은 실행이 지킨다: D 이후는 이 실행이 다시 쓰는 자리라 옛 판본 행이 남으면 안 된다."""
+    ref, need_key, sentence = AFTER_SINCE
+    _label(loaded, ref, need_key, sentence, "rule-v0.9", observed_at="2026-08-20", month=SINCE_MONTH)
+    _run(loaded, _schema_name, since=SINCE_DAY)
+    assert _stale(loaded, ref) == []
+
+
+# --- 26개 등록 + 크론 줄 (#32) — 둘은 같은 PR 로만 움직인다 ------------------------------------------
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CRONTAB_ANALYZE = REPO_ROOT / "stack" / "crontab.d" / "analyze"
+CATEGORY_MAP_CSV = REPO_ROOT / "eval" / "lexicon" / "category_map_v1.csv"
+# 운영 행에서 뽑은 평가셋이라 `category` 열이 곧 그 행들의 lexicon_category 다 — 매핑표에 없는
+# (=항등으로 통과하는) 이름을 이 레포 안에서 대조할 수 있는 유일한 자리다.
+CROSSCAT_CSVS = ("crosscat_60.csv", "crosscat_blind40.csv")
+SUNBLOCK = "선블록"
+REGISTERED = 28  # 선블록(전량 패스 끝) + 크론이 도는 27 — 운영 need_mention 의 lexicon_category 전량
+
+
+def _gemma4_line() -> list[str]:
+    """크론이 실제로 칠 argv — 주석을 걷어낸 유일한 `--impl` 줄이다."""
+    found = [
+        line.split()
+        for raw in CRONTAB_ANALYZE.read_text(encoding="utf-8").splitlines()
+        if (line := raw.split("#", 1)[0].strip()) and "--impl" in line
+    ]
+    assert len(found) == 1, f"stack/crontab.d/analyze 의 --impl 줄이 {len(found)}개다"
+    return found[0]
+
+
+def test_the_owner_table_carries_every_category_the_cron_line_walks():
+    """등록 없는 줄은 빈 실행이다 (#32): 크론이 `--scope` 없이 도는 것은 이 표가 준 scope 전부다."""
+    assert len(OWNERS) == REGISTERED, f"등록된 scope {len(OWNERS)}개 — 선블록 + 크론 27 이어야 한다"
+    assert OWNERS[SUNBLOCK].since == ALWAYS, "선블록은 전량 패스가 끝나 모든 달이 주인 몫이다"
+    later = {scope: owner.since for scope, owner in OWNERS.items() if scope != SUNBLOCK}
+    # 크론 대상은 첫 실행이 드는 **한** 달에서 시작한다 — 달이 섞이면 그 앞의 달을 규칙이 계속 쓰는지
+    # 아닌지가 카테고리마다 달라지고, 첫 밤에 무엇이 드는지 아무도 말할 수 없다 (#97 의 절차).
+    assert len(set(later.values())) == 1, f"since 가 갈렸다: {sorted(set(later.values()))}"
+    assert MONTH.match(next(iter(later.values())))
+
+
+def test_every_lexicon_category_this_repo_can_name_has_an_owner():
+    """이름 하나가 표와 갈리면 그 카테고리는 조용히 무주공산으로 남고 크론 줄이 그것을 안 돈다 —
+    표의 키는 `category_map` 이 산출하는 이름, 그리고 운영 행에서 뜬 평가셋의 카테고리와 같은
+    문자열이어야 한다. 그 둘이 이 레포가 그 이름을 아는 전부다(나머지는 운영 DB 에만 있다)."""
+    with CATEGORY_MAP_CSV.open(encoding="utf-8") as handle:
+        named = {row["lexicon_category"] for row in csv.DictReader(handle)}
+    for name in CROSSCAT_CSVS:
+        with (REPO_ROOT / "eval" / "polarity" / name).open(encoding="utf-8") as handle:
+            named |= {row["category"] for row in csv.DictReader(handle)}
+    assert len(named) > len(OWNERS) // 2, "이름을 못 모았으면 이 단언은 진공이다"
+    assert not named - set(OWNERS), f"주인이 없는 카테고리: {sorted(named - set(OWNERS))}"
+
+
+def test_the_cron_line_runs_the_incremental_command_of_the_version_the_table_names():
+    """줄 없는 등록은 구멍, 등록 없는 줄은 빈 실행 (#32). 그 둘이 같은 문자열을 가리키는지는 여기서만
+    확인된다: 크론의 `--impl` 스펙이 만드는 판본이 표가 적은 판본이어야 한다."""
+    argv = _gemma4_line()
+    assert argv[5:8] == ["cosmai", "analyze", "polarity"], argv
+    assert "--missing" in argv, "전량 패스가 아니라 증분이다 (#98) — 매일 밤 도는 T 가 자라면 안 된다"
+    assert "--scope" not in argv, "주인은 자기 scope 전부를 한 줄로 돈다 (#97)"
+    name, _, model = argv[argv.index("--impl") + 1].partition(":")
+    assert name == "ollama" and model
+    assert OllamaPolarity(model).version == GEMMA4
+
+
+class UnreachablePolarity(OwnerPolarity):
+    """배선이 끊긴 밤의 판정자 — 프로브에서 죽고 문장은 한 건도 못 본다."""
+
+    def preflight(self) -> None:
+        raise LookupError("ollama at http://nowhere:11434 did not answer; OLLAMA_URL names that address")
+
+
+def test_a_probe_that_cannot_reach_the_model_fails_the_run_instead_of_labelling_nothing(
+    loaded: str, _schema_name: str
+):
+    """조용한 실패가 이 이슈가 세 번 밟은 병이다: 못 닿은 밤은 '0건 성공'이 아니라 failed run 이어야
+    하고, `cosmai/cli.py` 가 그 상태를 종료 코드 1 로 옮긴다 (entrypoints.md §분석)."""
+    judge = UnreachablePolarity()
+    owners = {SUNBLOCK: Owner(judge.version, ALWAYS)}
+    with connect(loaded) as conn:
+        found = run_stage(
+            conn,
+            "polarity",
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            polarity=judge,
+            owners=owners,
+            missing=True,
+        )
+    assert found.status == "failed" and "OLLAMA_URL" in found.detail
+    assert judge.judged == [], "프로브가 죽었는데 문장이 판정됐다면 프로브가 시작 자리에 없는 것이다"
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, finished_at IS NOT NULL FROM analysis_run")
+        assert cur.fetchall() == [("failed", True)]

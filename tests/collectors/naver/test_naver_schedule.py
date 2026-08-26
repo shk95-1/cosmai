@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # stack/crontab became one file per supercronic container. Reading the directory keeps the collision
 # check below looking at the whole schedule, not just the container naver happens to live in today.
 CRONTAB_D = REPO_ROOT / "stack" / "crontab.d"
+ENTRYPOINTS_MD = REPO_ROOT / "contracts" / "entrypoints.md"
 
 
 def _lines() -> list[str]:
@@ -53,7 +54,41 @@ def _all_collector_times() -> list[tuple[str, tuple[str, ...]]]:
     return out
 
 
-# TODO(#93): commerce and youtube guard that the contract names every dataset's schedule; naver does not.
+def _entrypoints_schedule_block() -> str:
+    """The §스케줄 fenced block in contracts/entrypoints.md -- copied from the commerce/youtube
+    guards rather than imported, since tests/ is not a package and a cross-test import would be the
+    more fragile of the two."""
+    text = ENTRYPOINTS_MD.read_text(encoding="utf-8")
+    start = text.index("## 스케줄")
+    fence_start = text.index("```", start) + 3
+    fence_end = text.index("```", fence_start)
+    return text[fence_start:fence_end]
+
+
+def _contract_named_datasets() -> set[str]:
+    """Dataset names mentioned on the `naver:` line of the §스케줄 block. Commerce and youtube state
+    a time/period per dataset there; naver states a schedule in prose (`datalab 월 1회 ...`), so this
+    checks the weaker thing prose can promise -- every dataset gets named at all."""
+    for raw in _entrypoints_schedule_block().splitlines():
+        head, sep, rest = raw.partition("naver:")
+        if not sep or head.strip():
+            continue
+        words = set(rest.split())
+        return {d.value for d in Dataset if d.value in words}
+    return set()
+
+
+def test_the_contract_names_every_naver_dataset():
+    # Same guard commerce and youtube keep over their §스케줄 lines (#93): if the naver line stops
+    # naming a dataset, that dataset's schedule is nowhere in the contract and nothing else notices.
+    named = _contract_named_datasets()
+    all_naver = {d.value for d in Dataset}
+    assert named == all_naver, (
+        f"contracts/entrypoints.md §스케줄 names naver datasets {sorted(named)}, "
+        f"but every naver dataset is {sorted(all_naver)}"
+    )
+
+
 def test_there_is_something_to_check():
     assert list(Dataset)
     assert _lines()

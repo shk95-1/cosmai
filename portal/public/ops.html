@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>파이프라인 관제</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>파이프라인 관제</h1>
+  <div id="ops-caption" class="caption">불러오는 중…</div>
+  <p id="error" class="error" role="alert"></p>
+  <p class="caption"><a href="index.html">← 니즈 지표</a> · <a href="map.html">파이프라인 구조 →</a></p>
+</header>
+
+<!-- 매일 아침 이것만 보고 닫는 날이 대부분이어야 한다. 스크롤 없이 답이 나오는 자리. -->
+<section id="ops-banner" class="screen"></section>
+
+<!-- 문제가 없으면 이 절은 통째로 사라진다 — 빈 표를 남기지 않는다. -->
+<section id="ops-problems" class="screen"></section>
+
+<section id="ops-arms" class="screen"></section>
+
+<!-- 선언상 안 도는 것. 목록에서 사라지는 것과 조용히 안 도는 것은 다르다. -->
+<section id="ops-disabled" class="screen"></section>
+
+<footer class="caption">
+  <button type="button" id="ops-refresh">새로고침</button>
+  <span id="ops-fetched"></span>
+</footer>
+
+<script type="module" src="ops-app.js"></script>
+</body>
+</html>

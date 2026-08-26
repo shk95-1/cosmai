@@ -3,22 +3,57 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption } from '../public/screens.js';
+import { NEED_QUERIES } from '../public/query.js';
+import {
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
+  productNameIndex, productLabel, truncateLabel, withProductNames,
+  monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
+} from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const needFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_need.sample.json'), 'utf8'));
 const wishFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_wish.sample.json'), 'utf8'));
+const runsFixture = JSON.parse(readFileSync(join(here, 'fixtures/analysis_run.sample.json'), 'utf8'));
 
 // 시드는 슬라이스별로 다른 run(need=2, wish=3, 에픽 #16 §1단계 판정 4) — 표마다
 // 자기 run을 써야 한다. 하나의 runId를 공유하면 wish가 항상 빈다(수정 라운드 1 결함 1).
 test('latestRuns: need와 wish는 각자의 최신 run_id를 갖는다', () => {
-  const { needRunId, wishRunId } = latestRuns(needFixture, wishFixture);
+  const { needRunId, wishRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   assert.equal(needRunId, 2);
   assert.equal(wishRunId, 3);
 });
 
+// #87: 손으로 돌린 aggregate 는 note 로 기존 run 을 재사용해 더 작은 run_id 에 쓴다
+// (analysis/aggregate/pipeline.py의 _run_id) — max(run_id) 로는 그 run 이 안 보인다.
+// analysis_run.finished_at·status='ok' 로 "가장 나중에 끝난 run"을 골라야 한다.
+test('latestRuns: run_id 크기가 아니라 finished_at·status로 최신을 고른다 (#87)', () => {
+  const runs = [
+    { run_id: 2, status: 'ok', finished_at: '2026-02-01T00:00:00Z', versions: { aggregate: '1.0.0' }, note: 'analyze all' },
+    { run_id: 1, status: 'ok', finished_at: '2026-03-01T00:00:00Z', versions: { aggregate: '1.1.0' }, note: 'aggregate:1.1.0:all' },
+  ];
+  const need = [
+    { run_id: 1, scope: 'a', need_key: 'x' },
+    { run_id: 2, scope: 'a', need_key: 'y' },
+  ];
+  const { needRunId, needRun } = latestRuns(runs, need, []);
+  assert.equal(needRunId, 1);
+  assert.equal(needRun.note, 'aggregate:1.1.0:all');
+});
+
+// status='running'(끝나지 않은 run)은 화면에 아직 보이면 안 된다 — finished_at 도 아직 없다.
+test('latestRuns: status가 ok가 아닌 run은 건너뛴다', () => {
+  const runs = [
+    { run_id: 1, status: 'ok', finished_at: '2026-01-01T00:00:00Z', versions: {}, note: 'old' },
+    { run_id: 2, status: 'running', finished_at: null, versions: {}, note: 'new but unfinished' },
+  ];
+  const need = [{ run_id: 1, scope: 'a' }, { run_id: 2, scope: 'a' }];
+  const { needRunId } = latestRuns(runs, need, []);
+  assert.equal(needRunId, 1);
+});
+
 test('wishRowsForScope: wish 자신의 run(3)으로 걸러야 행이 나온다', () => {
-  const { wishRunId } = latestRuns(needFixture, wishFixture);
+  const { wishRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   const rows = wishRowsForScope(wishFixture, wishRunId, 'wish:a');
   assert.equal(rows.length, 4);
 });
@@ -26,7 +61,7 @@ test('wishRowsForScope: wish 자신의 run(3)으로 걸러야 행이 나온다',
 // 결함 2 재현: wish scope 셀렉트를 need scope(카테고리명)로 채우면 wish:* 값이
 // 하나도 없다 — 화면마다 자기 표의 scope 목록을 써야 한다.
 test('scopesForRun: need scope와 wish scope는 서로 다른 값 집합이다', () => {
-  const { needRunId, wishRunId } = latestRuns(needFixture, wishFixture);
+  const { needRunId, wishRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   const needScopes = scopesForRun(needFixture, needRunId);
   const wishScopes = scopesForRun(wishFixture, wishRunId);
   assert.deepEqual(needScopes, ['선블록', '쿠션']);
@@ -35,19 +70,326 @@ test('scopesForRun: need scope와 wish scope는 서로 다른 값 집합이다',
 });
 
 test('needRowsForScope: 카테고리 합(product_ref/month 빈 값)만 남는다', () => {
-  const { needRunId } = latestRuns(needFixture, wishFixture);
+  const { needRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   const rows = needRowsForScope(needFixture, needRunId, '선블록');
   assert.deepEqual(rows.map((r) => r.need_key), ['밀림', '끈적유분']);
 });
 
 test('productRows: run 2의 product_ref 비어있지 않은 행이 나온다', () => {
-  const { needRunId } = latestRuns(needFixture, wishFixture);
+  const { needRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   const rows = productRows(needFixture, needRunId);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].product_ref, 'oy:A1');
 });
 
-test('runCaption: need·wish run을 함께 보인다', () => {
-  assert.equal(runCaption(2, 3), 'need run #2 · wish run #3');
-  assert.equal(runCaption(null, null), '데이터 없음');
+// #87: 캡션이 각 run의 versions·note 를 보여야 손 재집계가 실제로 반영됐는지 알 수 있다.
+// #122: 그 전부를 헤더에 펴면 네 줄을 먹는다 — 한 줄 요약과 접히는 상세로 나눈다.
+test('runCaptionParts: 요약은 한 줄, versions·note 는 상세로 간다 (#87, #122)', () => {
+  const needRun = { run_id: 2, finished_at: '2026-08-26T05:01:31.074893+00:00', note: 'aggregate:1.1.0:all', versions: { aggregate: '1.1.0', extractor: 'rule-v2.3' } };
+  const wishRun = { run_id: 3, finished_at: '2026-08-26T06:02:00+00:00', note: 'aggregate:1.1.0:wish', versions: { aggregate: '1.1.0' } };
+  const { summary, detail } = runCaptionParts(needRun, wishRun);
+  assert.match(summary, /#2 · 08-26 05:01 · extractor rule-v2\.3/);
+  assert.match(summary, /#3 · 08-26 06:02 · aggregate 1\.1\.0/);
+  assert.equal(summary.includes('\n'), false);
+  assert.doesNotMatch(summary, /aggregate:1\.1\.0:all/); // note 는 요약에 없다
+  assert.match(detail, /aggregate:1\.1\.0:all/);
+  assert.match(detail, /aggregate:1\.1\.0:wish/);
+  assert.match(detail, /"aggregate":"1\.1\.0"/);
+  assert.equal(runCaptionParts(null, null).summary, '데이터 없음');
+});
+
+// 실제로는 한 analyze run 이 두 표를 다 쓴다(run #24) — 같은 것을 두 번 적으면
+// 요약이 그만큼 길어져 애초에 접으려던 이유가 사라진다.
+test('runCaptionParts: need 와 wish 가 같은 run 이면 한 번만 적는다', () => {
+  const run = { run_id: 24, finished_at: '2026-08-26T05:01:31+00:00', note: 'analyze:all', versions: { extractor: 'rule-v2.3' } };
+  const { summary } = runCaptionParts(run, run);
+  assert.equal((summary.match(/#24/g) || []).length, 1);
+  assert.match(summary, /need/);
+  assert.match(summary, /wish/);
+});
+
+// finished_at 을 Date 로 파싱해 지역시간으로 찍으면 캡션이 보는 기계마다 달라진다.
+test('runCaptionParts: 시각은 ISO 문자열 그대로(UTC) 자른다', () => {
+  const run = { run_id: 7, finished_at: '2026-12-31T23:59:59+00:00', versions: {} };
+  assert.match(runCaptionParts(run, null).summary, /12-31 23:59/);
+  assert.match(runCaptionParts({ run_id: 8 }, null).summary, /#8/); // finished_at 없어도 죽지 않는다
+});
+
+// #122: 셀렉트의 첫 항목이 알파벳 순 첫 scope 라 "01 > 마스크팩 > 시트팩" 이 첫 화면이었다.
+test('defaultScope: 롤업 all 이 있으면 all 이다', () => {
+  const rows = [
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: 'all' },
+    { run_id: 2, scope: '다른 run' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'all');
+});
+
+test('defaultScope: all 이 없으면 행이 가장 많은 scope 다', () => {
+  const rows = [
+    { run_id: 1, scope: 'wish:a' },
+    { run_id: 1, scope: 'wish:b' },
+    { run_id: 1, scope: 'wish:b' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'wish:b');
+  assert.equal(defaultScope([], 1), null);
+  assert.equal(defaultScope(rows, 9), null);
+});
+
+// 동률이면 사전순 — 새로고침마다 첫 화면이 바뀌면 무엇을 보고 있는지 알 수 없다.
+test('defaultScope: 동률은 사전순으로 끊는다', () => {
+  const rows = [{ run_id: 1, scope: 'b' }, { run_id: 1, scope: 'a' }];
+  assert.equal(defaultScope(rows, 1), 'a');
+});
+
+// #41: 제품 축 행은 scope 마다 한 벌씩 나온다 — 같은 제품이 자기 카테고리와 롤업('all')에서
+// 두 번 걸리면 상위 20이 중복으로 찬다. 롤업이 있으면 롤업만 본다.
+test('productRows: 롤업 scope 가 있으면 제품이 두 번 나오지 않는다 (#41)', () => {
+  const need = [
+    { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: '', neg: 9, unresolved: 0.6 },
+    { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+    { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+    { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:B2', neg: 2, unresolved: 0.5 },
+  ];
+  const rows = productRows(need, 5);
+  assert.deepEqual(rows.map((r) => [r.scope, r.product_ref]), [['all', 'oy:A1'], ['all', 'oy:B2']]);
+});
+
+// --scope 로 좁혀 돈 run 에는 'all' 이 없다 — 그때는 있는 scope 를 그대로 쓴다.
+test('productRows: 롤업이 없는 run 은 카테고리 scope 의 제품 행을 낸다 (#41)', () => {
+  const need = [
+    { run_id: 6, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
+  ];
+  assert.deepEqual(productRows(need, 6).map((r) => r.product_ref), ['oy:A1']);
+});
+
+// ---- 화면 4: 니즈의 성격 --------------------------------------------------
+
+test('safeRatio: 분모가 0·없음이면 null 이다 (0 이 아니다)', () => {
+  assert.equal(safeRatio(3, 4), 0.75);
+  assert.equal(safeRatio(0, 4), 0);
+  assert.equal(safeRatio(3, 0), null);
+  assert.equal(safeRatio(3, null), null);
+  assert.equal(safeRatio(null, 4), null);
+  assert.equal(safeRatio(undefined, undefined), null);
+});
+
+test('needCharacterRows: 카테고리 합 행에 세 비율을 얹는다', () => {
+  const rows = needCharacterRows(needFixture, 2, '선블록');
+  assert.deepEqual(rows.map((r) => r.need_key), ['밀림', '끈적유분']);
+  const 밀림 = rows[0];
+  assert.equal(밀림.persist_month_ratio, 5 / 6);
+  assert.equal(밀림.persist_product_ratio, 8 / 10);
+  assert.equal(밀림.new_ratio, 0.3 / 0.71);
+  assert.equal(밀림.low_share, 0.44);
+});
+
+// unresolved 가 0 인 니즈(불만이 다 해소됨)에서 신규 비율은 계산될 수 없다.
+test('needCharacterRows: unresolved 가 0 이면 신규 비율은 null 이다', () => {
+  const need = [{ run_id: 9, scope: 'a', need_key: 'x', month: '', product_ref: '', unresolved: 0, unresolved_new: 0, persist_months: 1, persist_months_total: 2, persist_products: 1, persist_products_total: 2 }];
+  const rows = needCharacterRows(need, 9, 'a');
+  assert.equal(rows[0].new_ratio, null);
+  assert.equal(rows[0].persist_month_ratio, 0.5);
+});
+
+test('needCharacterRows: 제품 축 행은 섞이지 않는다 (#41)', () => {
+  const rows = needCharacterRows(needFixture, 2, '선블록');
+  assert.equal(rows.some((r) => r.product_ref !== ''), false);
+});
+
+test('hasYoutubeMentions: yt_neg·yt_pos 가 전부 0 인 scope 는 false', () => {
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, 2, '선블록')), true);
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, 2, '쿠션')), false);
+  assert.equal(hasYoutubeMentions([]), false);
+});
+
+test('rowsWithValue: 비율이 null 인 행은 막대에서 빠진다', () => {
+  const rows = [{ need_key: 'a', new_ratio: 0.5 }, { need_key: 'b', new_ratio: null }, { need_key: 'c', new_ratio: 0 }];
+  assert.deepEqual(rowsWithValue(rows, 'new_ratio').map((r) => r.need_key), ['a', 'c']);
+});
+
+
+// ---- 화면 3: 제품 이름 (#122 §10) -----------------------------------------
+
+// 화면 3 은 metrics_need 의 ref 만 갖고 있어 'oy:A000000149577' 이 막대 라벨이 된다.
+// needs.product_ref 에 brand·name 이 있고 anon 화이트리스트에도 들어 있다(#11 입력).
+const CATALOG = [
+  { product_ref: 'oy:A000000149577', brand: '메디힐', name: '메디힐 티트리 임팩트인 밸런싱 마스크 10매', name_norm: '티트리 임팩트인 밸런싱 마스크' },
+  { product_ref: 'da:1079392', brand: '본셉 메이크업', name: '[05 바닐라워터] 본셉 워터 베일 틴트', name_norm: '본셉 워터 베일 틴트' },
+  { product_ref: 'da:9', brand: '', name: '이름만 있는 제품', name_norm: '' },
+];
+
+// name 은 '[8월올영픽/트러블손절크림] … 80ml 1+1 기획' 처럼 기획 문구와 용량을 달고 있다 —
+// name_norm 이 그것을 걷어낸 이름이라 라벨에는 그쪽이 맞다.
+test('productLabel: 카탈로그에 있으면 브랜드 · 제품명이다', () => {
+  const index = productNameIndex(CATALOG);
+  assert.equal(productLabel('oy:A000000149577', index), '메디힐 · 티트리 임팩트인 밸런싱 마스크');
+  assert.equal(productLabel('da:1079392', index), '본셉 메이크업 · 본셉 워터 베일 틴트');
+  assert.equal(productLabel('da:9', index), '이름만 있는 제품'); // 브랜드가 없으면 이름만
+});
+
+// 링커가 못 붙인 mention 은 사이트의 원래 키가 그대로 ref 가 된다(aggregate 의
+// _product: product_ref or source_product_key). 그 자리에 이름을 지어 주면 화면이
+// 파이프라인이 하지 않은 연결을 주장한다 — ref 를 그대로 보인다.
+test('productLabel: 카탈로그에 없는 ref 는 ref 그대로다', () => {
+  const index = productNameIndex(CATALOG);
+  assert.equal(productLabel('A000000186166', index), 'A000000186166');
+  assert.equal(productLabel('101473', new Map()), '101473');
+});
+
+test('productNameIndex: product_ref 없는 행은 담지 않는다', () => {
+  const index = productNameIndex([...CATALOG, { product_ref: '', brand: 'x', name: 'y' }, null]);
+  assert.equal(index.size, 3);
+  assert.equal(productNameIndex(null).size, 0);
+});
+
+// 막대의 라벨 자리는 폭이 정해져 있어 긴 이름은 옆 막대 위로 넘친다 — 자르고 전체
+// 이름은 <title>(호버) 몫이다.
+test('truncateLabel: 자리를 넘는 이름만 말줄임한다', () => {
+  assert.equal(truncateLabel('짧은이름', 10), '짧은이름');
+  assert.equal(truncateLabel('메디힐 · 티트리 임팩트인 밸런싱 마스크', 10), '메디힐 · 티트리…');
+});
+
+test('withProductNames: 행마다 전체 라벨과 짧은 라벨을 얹는다', () => {
+  const index = productNameIndex(CATALOG);
+  const rows = withProductNames([
+    { product_ref: 'oy:A000000149577', unresolved: 1 },
+    { product_ref: 'A000000186166', unresolved: 0.5 },
+  ], index);
+  assert.equal(rows[0].product, '메디힐 · 티트리 임팩트인 밸런싱 마스크');
+  assert.equal(rows[1].product, 'A000000186166');
+  assert.ok(rows[0].product_short.length < rows[0].product.length);
+  assert.equal(rows[0].unresolved, 1); // 원래 컬럼은 그대로 남는다
+  assert.equal(rows[1].product_ref, 'A000000186166');
+});
+
+// ---- 화면 5: 기간(월) 축 (#130) --------------------------------------------
+
+// 이 PR 의 회귀 방어선. 픽스처에 월 행이 섞인 뒤에도 화면 1·3·4 는 월 행이 없던 때와
+// 같은 값을 내야 한다 — 월 행이 하나라도 새면 합 행의 neg 가 두 배로 읽힌다.
+// (월 행을 픽스처에 넣기 전에 먼저 통과시켜 두고, 넣은 뒤에도 통과하는지가 시험이다.)
+test('월 행이 섞여도 화면 1·3·4 는 같은 값을 낸다 (#130 회귀 방어선)', () => {
+  const { needRunId } = latestRuns(runsFixture, needFixture, wishFixture);
+  // 화면 1: 카테고리 합 행만 — 월 행이 새면 need_key 가 늘거나 neg 가 커진다.
+  const rows = needRowsForScope(needFixture, needRunId, '선블록');
+  assert.deepEqual(rows.map((r) => [r.need_key, r.neg, r.pos]), [['밀림', 93, 38], ['끈적유분', 86, 122]]);
+  assert.equal(rows.every((r) => r.month === ''), true);
+  // 화면 4: 행 수와 유튜브 값도 그대로다.
+  const character = needCharacterRows(needFixture, needRunId, '선블록');
+  assert.deepEqual(character.map((r) => [r.yt_neg, r.yt_pos]), [[12, 3], [0, 0]]);
+  assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, needRunId, '쿠션')), false);
+  // 화면 3: 제품 축은 그 한 행뿐이다.
+  assert.deepEqual(productRows(needFixture, needRunId).map((r) => r.product_ref), ['oy:A1']);
+  // scope 목록도 늘지 않는다 — 월 행은 새 scope 를 만들지 않는다.
+  assert.deepEqual(scopesForRun(needFixture, needRunId), ['선블록', '쿠션']);
+});
+
+// #129 가 내는 월 행은 카테고리 합(product_ref='')에만 붙는다 — 전체 기간 행(month='')도
+// 제품 축 행도 이 축에 섞이면 안 된다. 순서는 month 오름차순이라야 왼쪽이 과거다.
+test('monthRows: 그 (run·scope·need_key) 의 월 행만 오름차순으로 준다 (#130)', () => {
+  const rows = monthRows(needFixture, 2, '선블록', '밀림');
+  assert.deepEqual(rows.map((r) => r.month), ['2026-06', '2026-07', '2026-08']);
+  assert.deepEqual(rows.map((r) => r.neg), [30, 0, 63]);
+  assert.equal(rows.some((r) => r.month === '' || r.product_ref !== ''), false);
+  // 같은 scope 의 다른 need_key 는 자기 월 행만 본다.
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '끈적유분').map((r) => r.month), ['2026-08']);
+  // 다른 run·없는 scope 는 빈 배열이다.
+  assert.deepEqual(monthRows(needFixture, 1, '선블록', '밀림'), []);
+});
+
+// 이 코드베이스의 가장 큰 금기: 없는 사실을 그리는 것. 2026-07 은 neg 가 0 인 달이고
+// 그것은 "행이 없는 달"과 다른 사실이라 0 막대로 남아야 한다 — 빼면 없던 달이 된다.
+test('monthRows: 그 달에 0 건인 행은 남는다 — 월 행이 없는 것과 다르다 (#130)', () => {
+  const rows = monthRows(needFixture, 2, '선블록', '밀림');
+  assert.deepEqual(rows.filter((r) => r.month === '2026-07').map((r) => r.neg), [0]);
+  assert.equal(rows.length, 3);
+});
+
+// 90 개월(2013-08~2026-08 실측)을 다 그리면 판이 2,500px 이 된다(#122 가 걷어낸 높이다).
+// 자를 때도 순서는 오름차순 그대로여야 한다 — 최근 N 개월을 뒤에서 자른다.
+test('monthRows: limit 은 최근 N 개월만 남기고 순서는 그대로다 (#130)', () => {
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '밀림', 2).map((r) => r.month), ['2026-07', '2026-08']);
+  assert.equal(monthRows(needFixture, 2, '선블록', '밀림', 99).length, 3);
+  // 0 은 상한 없음이다 — 표는 판에서 밀린 달까지 보인다.
+  assert.deepEqual(monthRows(needFixture, 2, '선블록', '밀림', 0).map((r) => r.month), ['2026-06', '2026-07', '2026-08']);
+});
+
+// 상한의 정본은 screens.js 다 — app.js 가 자기 숫자를 들고 있으면 둘이 조용히 어긋난다.
+// 기본값이 실제로 MONTH_LIMIT 인지를 여기서 잡는다(#130 수정 라운드).
+test('monthRows: 기본 상한은 MONTH_LIMIT 이다 (#130)', () => {
+  const many = Array.from({ length: MONTH_LIMIT + 6 }, (_, i) => ({
+    run_id: 3, scope: 'a', need_key: 'x', product_ref: '',
+    month: `20${String(20 + Math.floor(i / 12)).padStart(2, '0')}-${String((i % 12) + 1).padStart(2, '0')}`,
+    neg: i,
+  }));
+  const rows = monthRows(many, 3, 'a', 'x');
+  assert.equal(rows.length, MONTH_LIMIT);
+  // 잘린 쪽은 앞(오래된 달)이고, 마지막은 가장 최근 달 그대로다.
+  assert.equal(rows.at(-1).month, many.at(-1).month);
+  assert.equal(rows[0].month, many[6].month);
+  assert.equal(monthRows(many, 3, 'a', 'x', 0).length, many.length);
+});
+
+// "이 scope 에 월 행이 없다"는 문구가 되고 "그 달에 0 건"은 0 막대가 된다 — 그 갈림길이
+// 이 두 함수다(hasYoutubeMentions 가 유튜브 축에서 하는 구별과 같은 자리).
+test('monthNeedKeys·hasMonthRows: 월 행이 없는 scope 를 구분한다 (#130)', () => {
+  assert.deepEqual(monthNeedKeys(needFixture, 2, '선블록'), ['끈적유분', '밀림']);
+  assert.equal(hasMonthRows(needFixture, 2, '선블록'), true);
+  // 쿠션은 전체 기간 행만 있다 — 니즈가 없는 것이 아니라 월 축이 아직 없는 것이다.
+  assert.deepEqual(monthNeedKeys(needFixture, 2, '쿠션'), []);
+  assert.equal(hasMonthRows(needFixture, 2, '쿠션'), false);
+  // 월 행이 아예 없는 run 도 같은 문구로 간다(#129 가 아직 안 돌아간 상태).
+  assert.equal(hasMonthRows(needFixture, 1, '선블록'), false);
+});
+
+// PostgREST 가 이 스펙으로 돌려줄 행을 흉내 낸다 — 필터로 거르고, select 에 적은 컬럼만
+// 남긴다(없는 값은 NULL 이므로 null). 투영이 핵심이다: 서버는 select 에 없는 컬럼을 JSON 에
+// 담지 않으므로 그 키는 응답 행에 아예 없고, 그것을 보는 비교는 언제나 거짓이다. 픽스처를
+// 통째로 소비 함수에 먹이면 그 사실이 가려져, 거르는 쪽이 안 받아온 컬럼을 봐도 전부 통과한다
+// (#130 첫 라운드가 놓친 자리 — monthSelect 에 product_ref 가 없는데 monthRowsOf 가 그걸 봤다).
+// 흉내는 여기까지다: eq 와 neq 두 연산자뿐이고, neq 는 JS 의 !== 라 실제 Postgres 의
+// `<> ''`(NULL 이면 NULL 이라 행이 빠진다)와 뜻이 다르다. 지금 세 스펙의 month·product_ref
+// 는 NULL 이 아니라 늘 '' 센티널이라 무해하지만, 스펙에 in·gte 가 들어오거나 진짜 NULL 인
+// 컬럼에 neq 를 걸면 이 헬퍼가 조용히 안 거른다 — 그때 여기를 같이 늘려라.
+function served(rows, { select, filters }) {
+  return rows
+    .filter((r) => (filters || []).every(({ column, op, value }) => (
+      op === 'neq' ? r[column] !== value : r[column] === value
+    )))
+    .map((r) => Object.fromEntries(select.map((c) => [c, c in r ? r[c] : null])));
+}
+
+const SERVED = {
+  category: served(needFixture, NEED_QUERIES.category),
+  product: served(needFixture, NEED_QUERIES.product),
+  month: served(needFixture, NEED_QUERIES.month),
+};
+
+// select 목록과 소비 함수의 계약. 스펙이 컬럼 하나를 빼면 여기서 즉시 빨개진다.
+test('월 축: 질의가 실제로 돌려주는 행으로도 소비 함수가 돈다 (#130)', () => {
+  assert.equal(SERVED.month.length, 4); // 필터는 월 행 넷을 고른다
+  assert.equal(hasMonthRows(SERVED.month, 2, '선블록'), true);
+  assert.deepEqual(monthNeedKeys(SERVED.month, 2, '선블록'), ['끈적유분', '밀림']);
+  assert.deepEqual(
+    monthRows(SERVED.month, 2, '선블록', '밀림').map((r) => [r.month, r.neg]),
+    [['2026-06', 30], ['2026-07', 0], ['2026-08', 63]],
+  );
+  // 월 행이 없는 scope 는 투영 뒤에도 문구 쪽이다 — 계약이 맞아도 이 구별은 남아야 한다.
+  assert.equal(hasMonthRows(SERVED.month, 2, '쿠션'), false);
+});
+
+// 회귀 방어선을 같은 방식으로. 다음에 누가 select 에서 컬럼을 빼도 화면 1·3·4 가 잡는다.
+test('화면 1·3·4 도 질의가 돌려주는 행으로 같은 값을 낸다 (#130)', () => {
+  const rows = needRowsForScope(SERVED.category, 2, '선블록');
+  assert.deepEqual(rows.map((r) => [r.need_key, r.neg, r.pos]), [['밀림', 93, 38], ['끈적유분', 86, 122]]);
+  const character = needCharacterRows(SERVED.category, 2, '선블록');
+  assert.deepEqual(character.map((r) => [r.yt_neg, r.yt_pos]), [[12, 3], [0, 0]]);
+  assert.equal(character[0].persist_month_ratio, 5 / 6);   // persist_* 가 select 에 남아 있다
+  assert.equal(character[0].low_share, 0.44);
+  assert.equal(hasYoutubeMentions(needCharacterRows(SERVED.category, 2, '쿠션')), false);
+  assert.deepEqual(productRows(SERVED.product, 2).map((r) => r.product_ref), ['oy:A1']);
+  assert.deepEqual(scopesForRun(SERVED.category, 2), ['선블록', '쿠션']);
+  // 셋이 픽스처를 빠짐없이·겹치지 않게 나눈다 — 겹치면 같은 행을 두 번 받는다.
+  assert.equal(SERVED.category.length + SERVED.product.length + SERVED.month.length, needFixture.length);
 });

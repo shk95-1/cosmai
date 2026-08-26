@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 from db import seed
-from db.seed._common import DEFAULT_SLICES, REPO_ROOT, connect
+from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
-
-# ../architect from the repo, or ../../architect when the repo is checked out as a sibling worktree.
-CANDIDATES = [DEFAULT_SLICES, REPO_ROOT.parents[1] / "architect"]
 
 # 기대 행 수. 출처: 각 슬라이스 README.md 산출물 표 + eval/README.md 건수 열.
 EXPECTED = {
@@ -48,27 +42,24 @@ EXPECTED = {
     "analysis_run": 3,  # 슬라이스마다 run 하나: seed:slice-{suncare,p1,p9}
     "metrics_need": 346,  # suncare 15 + 30 (suncare run) + p1 301 (p1 run)
     "metrics_wish": 601,  # slice-p9-wish-mining/wish_aggregates.csv
+    # 슬라이스가 아니라 운영 선언이다 -- 크론 14줄과 1:1 이고 그 대조는
+    # tests/test_pipeline_stage.py 가 한다 (#138).
+    "pipeline_stage": 14,
+    # 노드 28(단계 14 + 저장소 14)을 잇는 엣지. 실재와의 대조는
+    # tests/test_pipeline_edge.py 가 한다 (#141).
+    "pipeline_edge": 31,
 }
 
 
-@pytest.fixture(scope="module")
-def slices() -> Path:
-    named = os.environ.get("COSMAI_SLICES_DIR")
-    found = [Path(named)] if named else [p for p in CANDIDATES if p.is_dir()]
-    if not found or not found[0].is_dir():
-        pytest.skip(f"no slice-*/ under {CANDIDATES}; pass COSMAI_SLICES_DIR")
-    return found[0]
-
-
-def test_seed_loads_the_slice_row_counts_and_is_idempotent(needs_runtime_url: str, slices: Path):
+def test_seed_loads_the_slice_row_counts_and_is_idempotent(needs_runtime_url: str):
     # Production loads as needs_runtime, not needs_migrator -- prove the seed runs under that role too.
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT current_user")
         row = cur.fetchone()
     assert row == ("needs_runtime",)
-    first = seed.run_all(needs_runtime_url, slices=slices)
+    first = seed.run_all(needs_runtime_url)
     assert first == EXPECTED
-    second = seed.run_all(needs_runtime_url, slices=slices)
+    second = seed.run_all(needs_runtime_url)
     assert second == EXPECTED
 
 
@@ -99,11 +90,13 @@ FILLED = {
     "select count(*) from metrics_wish where videos is null or example is null": 0,
     # suncare 2,266(전부 선블록) + p1 의 lexicon_category 있는 11,537, 충돌 0 (B10 · 005)
     "select count(*) from need_mention where lexicon_category is not null": 13803,
+    # #92: seeded runs must close out like production runs, not linger with finished_at NULL.
+    "select count(*) from analysis_run where finished_at is null": 0,
 }
 
 
-def test_the_seed_fills_the_columns_the_audit_added(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices)
+def test_the_seed_fills_the_columns_the_audit_added(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         got = {}
         for query, _ in FILLED.items():
@@ -117,8 +110,8 @@ def test_the_seed_fills_the_columns_the_audit_added(needs_runtime_url: str, slic
 SENTINEL = "sentinel-not-from-csv"
 
 
-def test_the_seed_backfills_only_the_aspect_rows_that_have_no_ruleset(needs_runtime_url: str, slices: Path):
-    seed.run_all(needs_runtime_url, slices=slices, only=("lexicon",))
+def test_the_seed_backfills_only_the_aspect_rows_that_have_no_ruleset(needs_runtime_url: str):
+    seed.run_all(needs_runtime_url, only=("lexicon",))
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         # 002 이전의 운영 상태: v1 행은 있고 새 두 컬럼만 DEFAULT. 한 행만 사람이 넣은 값을 갖는다.
         cur.execute("UPDATE aspect_lexicon SET ruleset = '', priority = 0")
@@ -127,7 +120,7 @@ def test_the_seed_backfills_only_the_aspect_rows_that_have_no_ruleset(needs_runt
             (SENTINEL,),
         )
         conn.commit()
-    seed.run_all(needs_runtime_url, slices=slices, only=("lexicon",))
+    seed.run_all(needs_runtime_url, only=("lexicon",))
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT ruleset, count(*) FROM aspect_lexicon GROUP BY ruleset")
         by_ruleset = dict(cur.fetchall())

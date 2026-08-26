@@ -42,11 +42,17 @@ COSMAI_DB_PORT   기본값 5434
 - 세 자리가 같은 규칙을 따른다: `db/runtime.py`(needs_runtime), `collectors/commerce/storage/db.py`,
   `collectors/youtube/storage/db.py`. 함수에 명시된 host/port 인자가 env 를 이긴다.
 - 롤·DB 이름·secret 키 이름은 노브가 아니다 (`contracts/secrets.md`).
+- **읽자마자 커밋한다. 서버 커서는 수명 내내 트랜잭션을 연다.** `needs_runtime` 롤은
+  `db/bootstrap.sql` 이 `statement_timeout = 30s` · `idle_in_transaction_session_timeout = 15s` ·
+  `transaction_timeout = 60s` 로 건다 — 트랜잭션을 연 채 느린 CPU/IO(토큰화, 큰 행렬 로드, LLM 왕복)를
+  하면 그 자리에서 끊긴다. 픽스처: `tests/test_aggregate_scale.py`(`IDLE_LIMIT`) ·
+  `tests/test_analyze_polarity.py`(`SQUEEZED_TIMEOUTS`) · `tests/test_ollama_predictor_connection.py`
+  (같은 이름) 가 세 한도를 압축해 재현한다. 새 DB 코드 리뷰는 이 불릿을 체크리스트로 쓴다.
 
 ## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
 ```sql
--- db/views/collector_health.sql 이 commerce(trend_radar.run+fetch_log)와
--- naver(needs.naver_run+naver_fetch_log) 두 팔을 UNION 한다 -- youtube 는 아래 이유로 빠져 있다
+-- db/views/collector_health.sql 이 commerce(trend_radar.run+fetch_log),
+-- naver(needs.naver_run+naver_fetch_log), youtube(tubedepth.jobs) 세 팔을 UNION 한다
 collector text, dataset text, run_id text, started_at timestamptz, finished_at timestamptz,
 status text,          -- ok | partial | blocked | failed | running
 requests int, ok int, blocked int, failed int, queued int, p90_ms int
@@ -55,28 +61,116 @@ P16 의 표가 이 뷰 하나로 나와야 한다. `requests` 는 fetch 시도 �
 2xx / 403·429 / (error 또는 5xx) 세 통뿐이다 — 셋의 합과 `requests` 의 차이가 어느 통에도 안 들어간
 응답(예: 404)이다.
 
-**youtube 는 3단계에서 이 뷰에 들어가지 않는다** (사용자 결정 2026-08-24). 12컬럼 중 다섯을 낼 원천이
-없고, 그중 `blocked`·`p90_ms` 가 하필 그 수집기의 실제 고장 모드(쿼터 소진·지연)를 보는 컬럼이라
-NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 넷:
-- `tubedepth.jobs` 에는 run 개념이 없다 — `run_id` 를 낼 것이 없고 `created_at` 은 enqueue 시각이라
-  `started_at` 도 아니다.
-- 같은 표에 지연을 잰 컬럼이 없다 — `p90_ms` 의 원천이 아예 없다.
-- `collectors/youtube/cli.py:211` 이 `error_code` 에 예외 클래스명(`type(error).__name__`)만 넣는다 —
-  429·쿼터 소진을 `failed` 와 갈라 `blocked` 로 셀 방법이 없다.
-- `jobs.kind`(`video.metadata` 계열)가 위 §수집의 youtube dataset 어휘(`watch|work|flatten|prune`)와
-  다르다 — `dataset` 컬럼에 그대로 넣으면 다른 두 팔과 다른 어휘가 한 컬럼에 섞인다.
+**youtube 팔은 #77 이 붙였다** (3단계에서 뺐던 것을 되돌렸다 — 사용자 결정 2026-08-24 가 걸었던 근거
+셋이 #100·#101·#102 로 다 없어졌다: `jobs.error_code` 가 차단을 분류하고(#100), `jobs.started_at`·
+`jobs.elapsed_ms` 가 생겼고(#101), `jobs.dataset` 이 CLI 동사를 담는다(#102 — `queue.enqueue` 가 새
+행마다 적고, `watch` 가 만든 listing job 의 후속 job 은 원본의 `dataset` 을 물려받는다. `kind →
+dataset` 역방향 매핑은 1:N 이라 성립하지 않아 별도 컬럼으로 뒀다. 백필은 없어 옛 행은 NULL 이다).
 
-`queued` 가 두 팔 다 NULL 인 것은 그래서다: commerce·naver 는 크론이 부르는 배치 워커라 큐가 없고,
-큐를 가진 유일한 수집기가 youtube 다. 컬럼을 지우지 않고 남겨 둔 것은 그 팔이 돌아올 자리이기 때문이다.
+**youtube 의 한 행은 `(dataset, started_at 의 1시간 버킷)` 하나다.** `tubedepth.jobs` 에는 run 이
+없으므로 `run_id` 는 NULL 이고 — 그 자리를 늘리지 않는 것이 #10 §A-2 의 판정이다 — commerce 의 run 에
+해당하는 "유한한 일감 묶음" 을 뷰가 시간으로 만든다. 창(`최근 1h`)이 아니라 버킷인 것은 commerce 가
+지난 run 을 전부 행으로 남기기 때문이다: 창이면 크론이 한 시간 쉰 순간 youtube 팔이 표에서 사라진다.
+claim 된 적 없는 job(대기 중이거나 #101 이전의 옛 행)은 `started_at` 이 없어 `created_at` 으로 앉는다.
+
+**`elapsed_ms` 의 뜻은 팔마다 다르다 — 이 뷰에서 가장 틀리기 쉬운 자리다.** commerce·naver 의
+`fetch_log.elapsed_ms` 는 fetch 한 번의 왕복이고, youtube 의 `jobs.elapsed_ms` 는 job 하나의 전체
+벽시계(claim→finish)다(#101: 캐시로 답한 job 은 fetch 를 아예 안 해서 왕복으로는 잴 것이 없다). 그래서
+youtube 의 `p90_ms` 는 "요청이 얼마나 느렸나" 가 아니라 "일감 하나가 얼마나 걸렸나" 이고, 같은 이유로
+`requests` 도 HTTP 요청 수가 아니라 끝난 job 수다 — 캐시로 답한 job 도 1 로 센다. 두 팔을 나란히 놓고
+`p90_ms` 를 비교하면 안 된다. `elapsed_ms` 가 NULL 인 옛 행은 백분위에서 빠진다(0 으로 채우지 않는다).
+
+`queued` 는 commerce·naver 에서 NULL 이다: 둘 다 크론이 부르는 배치 워커라 대기 큐라는 것이 아예 없다.
+youtube 에서만 숫자이고, 0(큐가 비었다)과 NULL(큐라는 것이 없다)이 그래서 갈린다. `oldest_pending` 같은
+큐 고유값은 컬럼으로 더하지 않는다 — 12컬럼은 위 sql 펜스가 정본이고, 늘리면 다른 두 팔도 NULL 자리를
+하나씩 더 내야 한다. 큐 적체의 나이는 `queued > 0` 인 가장 오래된 버킷의 `started_at` 으로 읽는다.
+
+`error_code`(`jobs.error_code`, `String(64)`)는 #100 부터 예외 클래스명이 아니라 아래 분류값이다
+(`collectors/youtube/cli.py::_classify_error`). 위 youtube 팔이 정본으로 읽는 어휘가 이것이다 —
+`blocked` 는 `quota`·`rate_limited`·`http_403`(quotaExceeded 아닌 403)·`http_429` 를
+합친 것으로, commerce `fetch_log.status` 의 403·429 정의와 이어진다.
+- `quota` — 403 + 본문 `error.errors[].reason == "quotaExceeded"` (YouTube Data API 는 쿼터 소진을
+  429 가 아니라 이 모양으로 준다).
+- `rate_limited` — 429.
+- `http_<code>` — 그 외 HTTP 상태(`http_403`은 quotaExceeded 가 아닌 403 — forbidden·
+  accessNotConfigured 등 — 을 포함, `http_500` 등).
+- `transport` — HTTP 상태 자체가 없는 실패(DNS·소켓·타임아웃).
+
+`error_message`(`Text`)는 그대로 `str(error)` — 원문 예외 텍스트는 컬럼을 옮기지 않았다, `error_code`
+가 클래스명 자리를 분류값으로 대체했을 뿐이다. 라이브 트랜스포트가 아직 없어(#10 이전, `_RaisingFetcher`
+가 기본값) 실제 403 응답 본문에 이 코드가 닿아본 적은 없다 — 분류기는 `urllib.error.HTTPError` 모양
+(`.code`·`.read()`)을 기준으로 짰고, #10 이 어떤 전송을 붙이든 그 모양으로 예외를 던지게 하는 것이
+그때의 몫이다.
 
 분석판은 `db/views/analysis_health.sql` 의 `needs.analysis_health` 다: run 별 started/finished/
 status/versions 와 그 run 의 `metrics_need`·`metrics_wish` 행 수. `need_mention`·`wish_mention` 은
 run_id 를 갖지 않으므로(versioning.md A19) 각 단계가 만든 행 수는 `analysis_run.note` 가 이름=값으로
 나른다. `db/migrate.sh` 가 배포마다 다시 적용한다 (CREATE OR REPLACE).
 
+### 단계의 지금 상태 — `needs.pipeline_health`
+
+위 둘은 **run 하나당 한 줄인 로그**라 "지금 무엇이 막혔나" 에 답하지 못한다. 그 답을 지는 것이
+`db/views/pipeline_health.sql` 의 `needs.pipeline_health` 이고, 기대 주기는 `needs.pipeline_stage`
+(DDL 007)가 선언한다 — 크론탭(`stack/crontab.d/`)은 DB 에 없고 포털은 PostgREST 로 DB 만 읽는다.
+크론탭을 파싱해 넣지 않는 이유는 `enabled` 다: `youtube watch` 는 크론 줄이 **있는데** compose
+profile 뒤라 안 돈다. 선언과 크론탭의 어긋남은 `tests/test_pipeline_stage.py` 가 막는다.
+
+행은 선언된 단계마다 정확히 하나이고, 컬럼은 `stage_key` · `arm` · `dataset` · `enabled` ·
+`expected_interval` · `last_success_at` · `last_run_at` · `last_run_status` · `overdue_by` ·
+`freshness` · `requests` · `ok` · `blocked` · `failed` · `p90_ms` 다.
+
+**두 사실을 하나로 접지 않는다.** `freshness` 는 "안 돌았다" 만, `last_run_status` 는 "돌았는데
+어떻게 끝났나" 만 말한다. 셋째 사실을 넣지 않는 이유는 3일 전에 실패하고 그 뒤로 안 돈 단계가 한
+값으로는 둘 중 하나로만 보이기 때문이다.
+
+`freshness` 는 마지막으로 **돈** run 의 `finished_at` 을 기준으로 다섯 값 중 하나다. "돈" 것에는
+`status = 'ok'` 와 **`partial` 이 든다** — 돌았고 대부분을 걷었으면 돈 것이고, 얼마나 잘 끝났는지는
+`last_run_status` 가 나란히 말한다. 들지 않는 것은 `yielded`(소스 락에 전부 밀려 물러나 아무것도 안
+걷었다, #78) · `failed` · `blocked` 다. 이 선을 "깨끗하게 돌았나" 로 좁히면 매일 정시에 돌지만 늘
+`partial` 인 단계가 이틀 뒤 `stalled` 로 굳어 영원히 빨갛다(#154 가 그것을 실측으로 잡았다):
+
+| 값 | 뜻 |
+|---|---|
+| `disabled` | `pipeline_stage.enabled = false` — 선언상 안 도는 것. 최신 성공이 있어도 이것이 이긴다 |
+| `never` | 성공한 run 이 한 번도 없다. `overdue_by` 는 NULL 이다 — 늦었냐는 질문이 성립하지 않는다 |
+| `ok` | 마지막 성공이 `expected_interval` 안 |
+| `late` | 그것을 넘었지만 `2 × expected_interval` 안 |
+| `stalled` | `2 × expected_interval` 을 넘었다 |
+
+눈금이 절대값이 아니라 주기의 배수인 것은 주기가 5분(`youtube work`)부터 한 달(`naver datalab`)까지
+벌어져 있어서다 — 상수 여유를 두면 어느 한쪽에서 반드시 틀린다.
+
+분석 두 줄은 `analysis_run.note` 의 `missing=` 으로 갈린다. `stage` 는 구현 판본을 달고 있어 그대로
+쓸 수 없고, 크론 줄로도 갈리지 않는다. `eval:*`·`trend-quarter:*` 는 크론 단계가 아니라 이 뷰에
+오지 않는다. 분석 팔에는 외부 fetch 가 없어 `requests`·`ok`·`blocked`·`failed`·`p90_ms` 가 NULL 이다.
+
+### 무엇이 무엇을 먹이는가 — `needs.pipeline_edge`
+
+`pipeline_stage` 는 단계 *목록* 일 뿐 관계가 없다. 관계는 `needs.pipeline_edge`(DDL 008)가 진다 —
+그림(#142)도 상태 전파(#143)도 계보 추적(#144)도 그 위에 선다.
+
+**노드 표를 따로 두지 않는다.** 단계는 `pipeline_stage.stage_key` 가 이미 선언하고, 저장소는 **정규화된
+표 이름 그 자체**가 키다. 그 이름이 실재하는지는 `tests/test_pipeline_edge.py` 가 **이 체크아웃의 DDL** 에
+묻는다 — 라이브 DB 에 묻지 않는 이유는 그러면 "이 체크아웃이 아는 표인가" 가 아니라 "지금 그 서버에
+있나" 를 재게 되고, 그러면 upstream 계약이 남의 객체를 참조해도 초록이기 때문이다(#107·#150 과 같은 자리).
+
+방향은 둘 다 담는다 — `stage → store` 는 **쓴다**, `store → stage` 는 **읽는다**. 한 방향만 담으면
+계보가 한쪽으로만 흘러 지표에서 수집분으로 거꾸로 타지 못한다. **단계끼리는 잇지 않는다**(DDL 이 CHECK 로
+막는다): 단계 사이에는 언제나 그것이 남긴 표가 있고, 건너뛰면 계보가 "무엇을 통해" 를 잃는다.
+
+저장소 노드를 고르는 기준은 **다른 단계나 화면이 소비하는 표** 다. 그 기준이 최소 집합을 강제한다 —
+단계마다 적어도 하나의 엣지가 있어야 하므로(테스트가 묻는다) 어느 단계의 유일한 산출물은 반드시 노드가
+된다. 지금은 **단계 14 + 저장소 14 = 28 노드, 31 엣지**. 일부러 뺀 것과 그 이유는 `db/seed/pipeline.py`
+의 주석에 있다 — 그중 `needs.corpus_*` 는 포크 DDL 023 이 만드는 표라 upstream 계약이 참조하지
+않는다(운영에서 `analyze` 가 실제로 읽으므로 그림이 그만큼 빈다; 그 엣지는 포크가 제 계약에 더한다).
+
+읽는 롤은 둘이다: `needs_runtime`(뷰 파일의 GRANT)과 `postgrest_anon`
+(`db/grants/postgrest_anon_needs.sql`) — 포털은 anon 으로 묻기 때문에 앞의 것만으로는 화면이 아무것도
+받지 못한다. 상류 두 뷰는 anon 에 열지 않는다: 화면이 읽는 것은 판정이 끝난 이 뷰 하나다.
+
 ## 분석
 ```
-cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>]
+cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
   stage ∈ {link, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
 cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
@@ -85,18 +179,48 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
 - 산출 행은 반드시 `*_version` 을 가진다 (`versioning.md`).
-- `analyze --impl <spec>` 는 `eval` 과 같은 레지스트리·같은 스펙 문법이다(`ollama:gemma4:latest`·`llm:claude-sonnet-5`). 없으면 규칙이 돌고, 있으면 그 구현의 버전이 `analysis_run.versions.polarity` 와 산출 행에 남는다. **규칙이 아닌 구현은 `--scope` 없이는 거절한다** — 무료여도 그렇다(analyze 의 기본은 전량이라 스코프 없는 한 줄이 곧 전량 재라벨이고, 값은 돈이거나 GPU 시간이다). 그 `--scope` 가 아직 소유 표에 주인이 없는 `lexicon_category` 여도 거절한다: 등록이 패스보다 먼저여야 그 결과가 다음 05:00 에 지워지지 않는다. 유료(`registry.is_paid`) 구현은 그보다 앞서 돈을 이유로 한 번 더 걸린다 — `eval` 의 `--split` 강제와 같은 자리다. 두 거절 모두 run 이 열리기 전이라 blocked(종료 코드 2)이고, 판정은 `analysis/polarity/ownership.py` 가 한다.
+- `analyze --impl <spec>` 는 `eval` 과 같은 레지스트리·같은 스펙 문법이다(`ollama:gemma4:latest`·`llm:claude-sonnet-5`). 없으면 규칙이 돌고, 있으면 그 구현의 버전이 `analysis_run.versions.polarity` 와 산출 행에 남는다. **소유 표에 자기 자리가 없는 구현은 `--scope` 없이는 거절한다** — 무료여도 그렇다(analyze 의 기본은 전량이라 그런 구현의 스코프 없는 한 줄은 곧 전량 재라벨이고, 값은 돈이거나 GPU 시간이다). 표에 자리가 있는 구현(=주인)은 `--scope` 없이 돌 수 있다: 그 한 줄이 도는 것은 자기 `(scope, 기간)` 뿐이고 `--scope` 는 그것을 더 좁히기만 한다. 그 `--scope` 가 아직 소유 표에 주인이 없는 `lexicon_category` 여도 거절한다: 등록이 패스보다 먼저여야 그 결과가 다음 05:00 에 지워지지 않는다. 유료(`registry.is_paid`) 구현은 그보다 앞서 돈을 이유로 한 번 더 걸린다 — `eval` 의 `--split` 강제와 같은 자리다. 두 거절 모두 run 이 열리기 전이라 blocked(종료 코드 2)이고, 판정은 `analysis/polarity/ownership.py` 가 한다.
 - `analyze all` 은 `needs.analysis_run` 행 하나를 만들고(polarity 가 열고 aggregate 가 그 `run_id` 로
   metrics 를 쓴다) `versions` 에 linker·extractor·polarity·aggregate 와 `lexicon`(활성 버전 + ruleset)을
   기록한다. 한 단계라도 실패하면 그 run 은 `status='failed'` + note 로 닫히고 종료 코드는 1 이다.
 - `analyze all` 의 aggregate 모집단은 그 run 이 방금 쓴 `extractor_version` 하나다 — 시드(`slice-*`)를
   같은 scope 에 섞으면 한 문장이 두 번 세어진다. 고른 모집단은 `versions.extractor` 에 남는다.
-- 그 모집단 안에서 **극성 구현은 scope 마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가 한
-  `lexicon_category` 를 한 `polarity_version` 에 배정하고, 주인이 아닌 실행은 그 scope 의 `need_mention`
-  행을 쓰지도 지우지도 않는다(삭제문과 `DO UPDATE` 에 같이 선 소유 술어가 그것을 세운다) — 005 의
-  자연키가 `polarity_version` 을 담지 않아 소유는 행이 아니라 scope 단위로만 성립하기 때문이다. 주인
-  없는 `lexicon_category` 와 `lexicon_category IS NULL` 인 행(유튜브 댓글·카테고리를 못 붙인 리뷰)은
+- 그 모집단 안에서 **극성 구현은 (scope, 기간)마다 하나다**: 소유 표(`analysis/polarity/ownership.py`)가
+  한 `lexicon_category` 를 한 `polarity_version` 과 그 판본이 책임지는 첫 달(`since`, `need_mention.month`
+  와 같은 YYYY-MM)에 배정하고, 그 scope 의 `month >= since` 인 `need_mention` 행은 **주인만** 쓰고
+  지운다. 반대 방향도 같다: **주인은 자기 `since` 앞의 달을 쓰지도 지우지도 않는다.** 양쪽 다 읽기
+  건너뛰기·삭제문·`DO UPDATE` 에 같은 모양으로 선 소유 술어 하나가 세운다. 소유가 행이 아니라
+  `(scope, 기간)` 단위인 것은 005 의 자연키가 `polarity_version` 을 담지 않기 때문이고, 기간이 붙는
+  것은 등록과 패스를 떼어놓기 위해서다 — `since` 를 다음 달로 적어 등록하면 그 앞의 달은 규칙이 계속
+  갱신하므로, 전량 패스가 끝나기를 기다렸다가 등록할 이유가 없다. 주인 없는 `lexicon_category`,
+  주인의 `since` 앞의 달, `lexicon_category IS NULL` 인 행(유튜브 댓글·카테고리를 못 붙인 리뷰)은
   지금처럼 규칙이 갱신한다.
+- 그래서 **주인 기간인데 주인이 아직 안 닿은 달에는 행이 없다**(등록 직후, 그리고 주인의 패스 사이).
+  규칙이 임시로 채우지 않는 것은 두 구현이 같은 문장에서 다른 `need_key` 를 고르면 그 임시 행이 주인의
+  행 옆에 그대로 남아 집계가 한 문장을 두 번 세기 때문이다 — 아래 '카테고리가 움직인 문장' 문단이 같은
+  자리를 말한다. 이 구멍의 수명은 주인 패스의 주기다.
+- **`--missing` 은 주인의 증분 실행이다**: 고르는 기준이 날짜가 아니라 **'이 실행이 지금 쓸 모양
+  (`extractor_version`+`polarity_version`)의 `need_mention` 행이 아직 없는 원천 행'** 이다. 한 페이지를
+  읽을 때마다 그 `(src, ref)` 들을 `need_mention` 에 묻고, 있으면 추출도 판정도 하지 않는다. 후보가
+  하나도 없는 리뷰는 어느 실행도 행을 만들지 않으므로 매번 추출을 다시 타지만 판정은 부르지 않는다
+  (추출은 규칙이라 싸다). **이 모드는 아무것도 지우지 않는다** — `replace_stale` 을 부르지 않고,
+  따라서 그 달이 반쪽으로 남는 창도 rewriting 표식도 없다. 없는 것을 더할 뿐이므로 갈아끼우기(역사
+  보정·판본 상승·`need_key` 가 바뀐 옛 행 청소)는 여전히 `--scope` 전량 경로의 몫이다. 소유가 없는
+  실행(규칙, 표에 없는 구현)에는 '내 판본 행'이 곧 규칙 모집단 전량이라 뜻이 없어 **거절한다** —
+  남의 scope 거절과 같은 자리·같은 모양이다(run 이 열리기 전, `status='failed'` + 종료 코드 1).
+  그 run 의 `note` 는 `missing=1` 을 달아 전량 패스와 갈린다(증분은 `replaced=0` 을 언제나 낸다).
+- `--since <date>` 와는 축이 다르다: `--since` 는 `coalesce(written_at, captured_at)` 로 **읽기와
+  삭제를 함께** 자르고, `--missing` 은 **이미 한 일**을 자른다. 수집이 늦게 오므로(`formats.md` §시간)
+  그 둘은 겹치지 않는다 — 어제 긁힌 옛 리뷰는 롤링 `--since` 가 놓치고, 고정 컷은 컷 이후 전부를 매일
+  다시 판정한다. 크론이 도는 것은 `--missing` 쪽이다.
+- **`--since D` 는 삭제도 같이 좁힌다**: D 가 든 달의 `observed_at >= D` 인 행만 지운다(`need_mention`·
+  `wish_mention` 둘 다). 좁히지 않으면 그 달의 D 이전 행은 지워지고 다시 쓰이지 않아, 매 실행이 같은
+  구멍을 판다. 삭제문의 `observed_at` 은 원천의 `coalesce(written_at, captured_at)` 과 같은 값이라
+  읽기 필터와 같은 행 집합을 가리킨다.
+- **주인 실행은 자기 `since` 앞의 달을 아예 훑지 않는다**: 그 달에는 소유 술어가 한 행도 통과시키지
+  않아 삭제도 0행, 쓰기도 0행이므로 순회가 순수한 비용이다. 자르는 기준은 그 실행이 닿는 `(scope,
+  since)` 들 중 가장 이른 `since` 이고(`--scope` 가 있으면 그 scope 의 것), `ALWAYS` 면 아무것도
+  자르지 않는다. 모드와 무관하다.
 - 그래서 한 문장의 라벨은 그 문장의 `lexicon_category` 를 소유한 구현의 것 하나다 — 그 카테고리가
   움직이지 않는 동안은. `rank_snapshot` 의 최신 행과 `category_map` 이 매일 다시 계산하므로 제품은
   카테고리를 옮겨 다니고, 옮겨간 뒤 옛 scope 에 남은 주인의 행은 아무도 지우지 못한다(주인 아닌 실행은
@@ -104,13 +228,33 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   자기 것으로 뽑으므로, **두 구현이 다른 `need_key` 를 고르면 그 동안 한 문장이 두 행을 갖고 집계도 둘을
   센다** — 같은 `need_key` 면 자연키가 겹치고 소유 술어가 갱신을 막아 주인의 행 하나로 남는다. 옛 행은
   주인의 `polarity_version` 이 오르는 첫 실행이 치운다.
+- 반대로 제품이 남의 scope에서 **주인의 scope 안으로** 옮겨오면 회수 주체가 다르다. 옮겨오기 전에
+  규칙이 써 둔 행은 저장된 `lexicon_category` 가 옛 카테고리 그대로이고, 규칙 실행은 **그 달이 주인
+  기간이면** 그 유닛을 건너뛴다(`analysis/polarity/pipeline.py` 가 `lexicon_category` 와 그 유닛의 달을
+  소유 술어에, 그리고 지금 `--scope` 에 견줘 판정 자체를 하지 않는다). 주인의 `since` 앞의 달이면
+  규칙이 그 유닛을 그대로 돌아 **새** 카테고리로 다시 뽑으므로, 아래의 이중 계수가 그 달에서는 규칙
+  실행 하나로 생긴다. 주인이 도는 `--scope` 삭제문(`NEED_DELETE_SCOPED`)은
+  `lexicon_category = <그 scope>` 로 좁혀져 있어 옛 카테고리를 단 그 행을 맞히지 못한다 — 그래서 이
+  방향의 옛 행을 치우는 것은 주인 패스가 아니라 **규칙 자신의 버전이 오르는 실행**이다:
+  `NEED_DELETE` 의 `NOT (extractor_version = ... AND polarity_version = ...)` 술어가 규칙의
+  `extractor_version`·`polarity_version` 이 바뀔 때 그 옛 행을 stale 로 잡아 지운다. 그 사이 이중
+  계수는 주인 패스를 몇 번 다시 돌려도 없어지지 않는다.
 - `metrics_need` 의 `scope` 축은 `lexicon_category` 가 아니라 원천 카테고리이고 rollup
   scope(`all`)는 전 카테고리를 합치므로 **한 집계 행이 두 구현의 라벨을 함께 셀 수 있다**. 무엇이 어느
   scope 를 셌는지는 소유 표가 답한다: `analyze all` 의 `analysis_run.versions.polarity` 는 **그 run 을
   돈 구현**의 버전이지 그 run 이 집계한 모든 라벨의 버전이 아니다.
-- 그 두 축의 어긋남이 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
+- `--scope <값>` 은 **두 축을 다 받는다**(#38): 값이 `lexicon_category` 면 aggregate 는 그 run 의 모집단에서
+  그 라벨을 단 언급들의 **원천 카테고리 집합**으로 펼쳐 그 scope 들에 쓰고, 원천 카테고리 문자열이면 그
+  한 scope 만 쓴다(`analysis/aggregate/pipeline.py` 의 `scopes_for`). 어느 쪽이든 `metrics_need.scope` 에
+  남는 값은 위 줄 그대로 **원천 카테고리**이고, 펼친 scope 의 행은 `--scope` 없는 실행이 그 카테고리에
+  쓰는 행과 같다 — scope 는 어느 카테고리를 쓸지를 고를 뿐 그 안에서 무엇이 세어지는지를 바꾸지 않는다.
+  역방향(lexicon → 원천)은 `needs.category_map` 만으로 복원되지 않는다: 표에 없는 leaf 는 항등이고
+  (`formats.md`) `name_keyword` 라벨은 원천 카테고리가 아예 없다 — 그래서 답은 표가 아니라 그 run 의
+  언급에서 나온다.
+- 펼치고도 **조용히 0 을 내는 것**은 막는다(#38): `--scope` 실행이 aggregate 까지 갔는데
   `metrics_need` 를 0행 쓰면 그 run 은 락을 놓친 실행과 같은 어휘·같은 자리로 `partial` + 종료 코드 **1**
-  로 닫히고, note 와 stdout 이 준 scope 값과 그 scope 가 실제로 걸려야 할 원천 category 문자열을 말한다.
+  로 닫히고, note 와 stdout 이 준 scope 값과 그 `lexicon_category` 를 단 언급들이 실제로 갖고 있는 원천
+  category 문자열을 말한다(하나도 없으면 없다고 말한다 — `name_keyword` 라벨이 그 갈래다).
   **`metrics_wish` 는 이 술어에 들어가지 않는다** — `analysis/aggregate/pipeline.py` 의 wish 집계는
   `--scope` 를 아예 보지 않고 그 모집단의 위시 전량을 매번 다시 세므로(`WISH_SCOPES` 는 스코프 인자와
   무관), 0 이든 아니든 이 scope 에 대해 아무것도 말해주지 않는다. `--scope` 없는 실행(05:00 크론)은 이
@@ -406,9 +550,13 @@ cosmai trend crosscheck [--url <url>]
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는
 여기 숫자로 적지 않는다 — 코드에서 나온다. 그 dataset(그리고 `--board`)을 선언한 소스들을 `engine.collect`가
-순차로 돌고, 소스마다 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼 걸린다. 요청 수의 기준이 둘이라
+**소스마다 레인 하나씩 동시에** 돌고(#25), 한 소스는 `SourcePolicy.min_interval_s` × (요청 수 − `burst`)만큼
+걸린다. 그래서 한 줄의 소요는 소스들의 **합이 아니라 가장 느린 소스**의 것이다. 레인 수에는 상한이 있고
+(`collectors/commerce/storage/db.py` 의 `MAX_CONCURRENT_LANES`) 그것은 취향이 아니라 커넥션 예산이다 —
+레인마다 소스 락 커넥션 하나를 걷는 내내 쥐므로, 소스가 레인보다 많은 줄은 "전체 작업량 ÷ 레인 수"라는
+두 번째 하한을 하나 더 갖는다. 요청 수의 기준이 둘이라
 소요도 둘이다: `seeds()` 길이만 도는 **씨드 기준**과 `max_requests_per_run`까지 차는 **예산 기준**. 예산 기준으로는
-매시 ranking이 한 시간의 절반 가까이를 점유해 02:10 product·04:15 review가 아직 그 안에 들어간다 — 크론을 옮겨
+매시 ranking이 가장 느린 소스(daisomall) 하나만으로도 02:10 product·04:15 review의 시작 시각을 넘겨 점유한다 — 크론을 옮겨
 풀 겹침이 아니라 소스별 어드바이저리 락(#10 §A-8-1, `collectors/commerce/storage/locks.py`)이 닫는 겹침이고,
 그 락은 이미 운영 진입점에 무조건 배선돼 있다(`collectors/commerce/cli.py`,
 `tests/collectors/commerce/test_source_lock.py`가 그 자리를 붙든다). 간격 산술은 락을 볼 수 없으므로
@@ -419,15 +567,18 @@ commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간
 **둘 다 상한이 아니라 하한이다.** 위 계산은 정책이 *선언한* 페이스를 쓰는데, `Gate._back_off`는 사이트가
 403·429·503으로 답하면 살아 있는 인터벌을 `Gate.MAX_INTERVAL_S`(300초)까지 벌린다 — daisomall의 30초가
 300초가 된다. 응답 지연과 재시도도 값에 없고, `max_requests_per_run`이 없는 소스는 예산 기준에서도
-씨드 수로만 계산된다(#10 이후 네 소스 모두 선언하므로 오늘 그런 소스는 없다). 그러니 이 숫자는 "적어도 이만큼"이지 "많아야 이만큼"이 아니다. 겹치지 않는다는 보장은
+씨드 수로만 계산된다(#10 이후 네 소스 모두 선언하므로 오늘 그런 소스는 없다). 레인 산술도 마찬가지로
+낙관적이다: 실제 실행은 레인을 등록 순서대로 나눠 주지 긴 소스부터 주지 않으므로, 소스가 레인보다 많은
+줄은 위 두 하한 중 어느 쪽보다도 오래 걸릴 수 있다. 그러니 이 숫자는 "적어도 이만큼"이지 "많아야 이만큼"이 아니다. 겹치지 않는다는 보장은
 간격이 아니라 락이 준다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
 무해하므로 이 규칙에서 제외된다. 다만 `analyze all` 에도 간격 규칙이 하나 있고 그것은 락이 세운다:
-같은 락을 쓰는 주인의 극성 패스와 겹치면 뒤에 온 쪽이 그 밤을 통째로 건너뛰므로, 그 패스에 크론 줄이
-생기는 날 그 줄과 `0 5` 사이의 간격은 패스의 최악 소요보다 넓어야 한다. **전량 패스의 실측은 하나 있다**:
-선블록 하나를 도는 run 16 이 6h44m 만에 끝났다 — 그러니 `0 2`(간격 3h)도 `0 0`(5h)도 실측으로 탈락한다.
-**줄은 상한을 잰 뒤에 넣는다**, 그것도
-#32 의 `--since` 증분이 붙은 뒤 크론이 실제로 돌릴 명령으로 잰 값으로(전량 패스의 소요와 증분 패스의
-소요는 다른 수다). 계산은 `stack/crontab.d/analyze` 에 적혀 있다.
+같은 락을 쓰는 주인의 극성 패스와 겹치면 뒤에 온 쪽이 그 밤을 통째로 건너뛰므로, 그 줄과 `0 5` 사이의
+간격은 그 패스의 최악 소요 T 보다 넓어야 한다. **그 줄은 이제 있다**(`0 8`, #32) — 명령은 증분
+(`--missing`, #98)이고 **그 T 는 아직 미측정이다**: 운영 실행이 조정자의 몫이라 줄을 넣은 작업이 재지
+못했다. 그래서 시각은 T 를 아는 대신 간격을 최대로 벌려 골랐다 — `0 8` 은 `0 5` 에 3h 를 주고 자기는
+21h 를 받는다. 실측이 있는 유일한 값은 전량 패스의 것이고(선블록 하나를 도는 run 16 이 **6h44m**),
+21h 는 그 3배다. 조정자가 첫 밤과 정상 밤의 T 를 재고, 21h 를 위협하면 이 두 시각을 옮긴다. 계산과
+GPU 창(08:00–16:00 UTC, `retrieval embed` 가 피한다)은 `stack/crontab.d/analyze` 에 적혀 있다.
 
 youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋만 있었고 큐를 비우는 줄이
 없었다). 상주 데몬이 아니라 크론인 이유는 `collectors/youtube/cli.py:_run_work` 가 한 번에
@@ -441,6 +592,7 @@ youtube 의 `work` 는 2026-08-24 에 이 표에 더해졌다(그전에는 셋�
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
+0 8 * * *   cosmai analyze polarity --impl ollama:gemma4:latest --missing
 youtube: watch 1h · work 5m · flatten 15m · prune 1d  (팬아웃 상한 적용 후)
-naver:   datalab 월 1회 (키워드 사전 기준)
+naver:   datalab 월 1회 (키워드 사전 기준) · blog 월 1회
 ```

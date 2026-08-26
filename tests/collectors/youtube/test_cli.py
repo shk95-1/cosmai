@@ -44,6 +44,59 @@ def test_watch_reports_partial_when_the_queue_is_capped(
     engine.dispose()
 
 
+def test_watch_stamps_dataset_on_the_job_it_creates(tubedepth_schema: str, tmp_path: Path):
+    """#102: `jobs.kind` (video.metadata 계열) is not the entrypoints.md dataset vocabulary
+    (watch|work|flatten|prune) -- collector_health's youtube arm needs a column in that vocabulary."""
+    watchlist = tmp_path / "watch.txt"
+    watchlist.write_text("video dQw4w9WgXcQ\n")
+    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT) == 0
+
+    engine = sa.create_engine(tubedepth_schema)
+    with engine.begin() as conn:
+        from collectors.youtube.storage.tables import jobs
+
+        row = conn.execute(sa.select(jobs.c.dataset)).one()
+    engine.dispose()
+    assert row.dataset == "watch"
+
+
+def test_a_follow_up_job_fanned_out_during_work_inherits_watch(tubedepth_schema: str, tmp_path: Path):
+    """The follow-up job that `work` fans out from a listing job's `follow_up_kind` was still started
+    by `watch` -- only `watch` ever sets `follow_up_kind`, so the fan-out has no other dataset to name."""
+    from collectors.youtube.cli import FetchSpec
+    from collectors.youtube.storage.tables import jobs
+
+    listing_dump = {
+        "id": "UUsome_channel_id",
+        "title": "Uploads",
+        "entries": [{"id": "dQw4w9WgXcQ", "title": "t", "channel_id": "UUsome_channel_id"}],
+    }
+
+    class _ListingFetcher:
+        def fetch(self, spec: FetchSpec) -> dict:
+            return listing_dump
+
+    watchlist = tmp_path / "watch.txt"
+    watchlist.write_text("channel @beauty_channel\n")
+    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT) == 0
+    work_exit = run(
+        "work",
+        database_url=tubedepth_schema,
+        fetcher=_ListingFetcher(),
+        payload_root=tmp_path / "p",
+        captured_at=AT,
+    )
+    assert work_exit == 0
+
+    engine = sa.create_engine(tubedepth_schema)
+    with engine.begin() as conn:
+        follow_up = conn.execute(
+            sa.select(jobs.c.dataset).where(jobs.c.kind == "video.metadata", jobs.c.target == "dQw4w9WgXcQ")
+        ).one()
+    engine.dispose()
+    assert follow_up.dataset == "watch"
+
+
 def test_cosmai_collect_youtube_reaches_this_module():
     """Not `--help` -- that only proves the parser accepts `youtube`. This proves _run_collect's
     dispatch actually imports collectors.youtube.cli rather than the "not wired yet" refusal."""

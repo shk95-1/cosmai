@@ -31,19 +31,22 @@ WHERE to_regclass(t) IS NOT NULL \gexec
 -- 원천을 읽어야 하는 롤은 needs_runtime 이 아니라 needs_owner 다 (needs_runtime 은 뷰만 읽는다).
 
 SELECT format('GRANT USAGE ON SCHEMA %I TO needs_owner', n)
-FROM (VALUES ('trend_radar')) v(n)
+FROM (VALUES ('trend_radar'), ('tubedepth')) v(n)
 WHERE EXISTS (SELECT FROM pg_namespace WHERE nspname = n) \gexec
 
 SELECT format('GRANT SELECT ON %s TO needs_owner', t)
 FROM (VALUES
     ('trend_radar.run'),        -- commerce 팔의 run_id/started_at/finished_at/status
-    ('trend_radar.fetch_log')   -- 같은 팔의 dataset/requests/ok/blocked/failed/p90_ms (status,error,elapsed_ms)
+    ('trend_radar.fetch_log'),  -- 같은 팔의 dataset/requests/ok/blocked/failed/p90_ms (status,error,elapsed_ms)
+    ('trend_radar.run_source'),  -- #78: status='partial' 인 run 이 전부 skipped 인지 가르는 상관 서브쿼리
+    ('tubedepth.jobs')          -- #77: youtube 팔의 12컬럼 전부 (dataset,state,error_code,started_at,
+                                -- created_at,finished_at,elapsed_ms). 이 스키마에서 뷰가 읽는 유일한 표다.
 ) v(t)
 WHERE to_regclass(t) IS NOT NULL \gexec
 
 -- 미래 테이블까지 자동으로 열리게 하지 않는다: DEFAULT PRIVILEGES 는 일부러 부여하지 않는다.
 -- 새 원천 테이블을 읽어야 하면 여기 한 줄을 더하고 근거(슬라이스 file:line)를 주석에 남긴다.
--- 읽지 않는 것(근거): needs_runtime 은 trend_radar.run/fetch_log 에 직접 닿지 않는다 -- 그 둘은
--- needs_owner 가 뷰를 통해서만 읽는다 · trend_radar.review_summary · trend_radar.run_source(뷰가
--- 쓰지 않는다) · tubedepth 전부(운영 뷰의 youtube 팔은 3단계에서 빠졌다, contracts/entrypoints.md)
--- · tubedepth.channel_snapshots · tubedepth 수집기 내부 상태 테이블 · cosmai.* 전부.
+-- 읽지 않는 것(근거): needs_runtime 은 trend_radar.run/fetch_log/run_source 와 tubedepth.jobs 에
+-- 직접 닿지 않는다 -- 넷 다 needs_owner 가 운영 뷰를 통해서만 읽는다 · trend_radar.review_summary ·
+-- tubedepth.channel_snapshots · tubedepth 수집기 내부 상태 표 중 jobs 를 뺀 나머지(artifacts·
+-- lane_health·flatten_progress 등, 뷰의 youtube 팔이 jobs 하나로 12컬럼을 다 낸다) · cosmai.* 전부.

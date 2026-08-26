@@ -9,11 +9,17 @@ export const PAGE_SIZE = 1000;
 // PostgREST 문법의 쿼리스트링을 만든다. 앞의 '?' 는 붙이지 않는다.
 // order 를 항상 붙이는 것이 핵심: 정렬 없이 offset 을 옮기면 페이지 사이에
 // 행이 중복되거나 빠진다 (DB 가 순서를 보장하지 않는다).
+//
+// 빈 값의 필터는 기본적으로 버린다 — 아무것도 안 고른 셀렉트가 필터로 둔갑하지
+// 않게 하려는 것이다. 다만 metrics_need 의 카테고리 합 행은 product_ref 가 실제로
+// 빈 문자열이라 'product_ref=eq.' 가 유일한 필터다(#109) — 그 자리는 allowEmpty 로
+// "빈 값을 값으로 쓰겠다"고 밝힌다.
 export function buildQuery({ select, filters, order, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (select && select.length > 0) params.append('select', select.join(','));
   for (const f of filters || []) {
-    if (!f || !f.column || f.value === undefined || f.value === null || f.value === '') continue;
+    if (!f || !f.column || f.value === undefined || f.value === null) continue;
+    if (f.value === '' && !f.allowEmpty) continue;
     params.append(f.column, `${f.op}.${f.value}`);
   }
   if (order) params.append('order', order);
@@ -21,6 +27,106 @@ export function buildQuery({ select, filters, order, limit, offset } = {}) {
   if (offset !== undefined) params.append('offset', String(offset));
   return params.toString();
 }
+
+// metrics_need 는 축이 셋이다 — 카테고리 합(화면 1·4) · 제품 축(화면 3) · 월 축(화면 5).
+// 셋의 스펙이 app.js 의 지역 상수가 아니라 여기 있는 이유는 둘 다 "스펙 사이의 관계" 라서다.
+//
+// 하나는 배타성이다: 축 하나를 더하면 나머지 둘의 필터가 같이 좁혀져야 한다. 월 행이 얹힌
+// 뒤 month=eq. 가 빠진 질의는 제 몫의 두 배를 받는다(#130, 실측 7,219행 → 대략 14,000).
+// 다른 하나는 select 가 screens.js 의 소비 함수와 맺는 계약이다: PostgREST 는 select 에
+// 적은 컬럼만 JSON 에 담으므로, 거르는 쪽이 보는 컬럼이 select 에 없으면 그 키는 응답에
+// 아예 없고 비교는 언제나 거짓이 된다 — 화면이 통째로 빈다. 스펙이 순수 모듈에 있어야
+// 테스트가 select 와 소비 함수를 한자리에서 맞춰 볼 수 있다(#130 수정 라운드).
+//
+// order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해 offset
+// 페이징 중 행이 빠지거나 겹칠 수 있다(이 파일 머리말과 같은 이유).
+const NEED_ORDER = 'run_id.desc,scope,need_key,month,product_ref';
+
+// 운영 관제(#139)가 읽는 단 하나의 표 -- needs.pipeline_health. 판정(freshness·last_run_status)은
+// 뷰가 이미 끝냈으므로 화면은 받아서 놓기만 한다.
+//
+// select 가 소비 함수가 거르는 컬럼을 빠짐없이 담아야 한다는 규칙은 여기서도 같다: PostgREST 는
+// select 에 적은 컬럼만 JSON 에 담으므로, ops.js 의 isProblem 이 보는 freshness·last_run_status 나
+// byArm 이 보는 arm 이 빠지면 그 비교가 언제나 거짓이 되고 화면이 통째로 빈다(#130 이 데인 자리).
+//
+// 필터도 정렬도 서버에 맡기지 않는다 -- 행이 선언된 단계 수(지금 14)뿐이라 한 페이지에 들어오고,
+// 순서는 ops.js 의 순수 함수가 심각도로 정한다. 서버 정렬을 섞으면 그 판단이 두 자리로 갈린다.
+export const OPS_QUERY = {
+  select: [
+    'stage_key', 'arm', 'dataset', 'enabled', 'expected_interval',
+    'last_success_at', 'last_run_at', 'last_run_status', 'overdue_by', 'freshness',
+    'requests', 'ok', 'blocked', 'failed', 'p90_ms',
+  ],
+  order: 'stage_key',
+};
+
+// 구조 지도(#142)가 읽는 둘. 엣지가 노드까지 진다(#141 -- 노드 표를 두지 않는 것이 설계다).
+// 단계 표를 따로 받는 것은 arm 과 enabled 때문이다: 그림이 팔로 색을 나누고, 꺼진 단계를
+// 회색으로 두려면 그 둘이 필요하다. 엣지만으로는 알 수 없다.
+//
+// 정렬을 서버에 맡긴다 -- 여기서는 페이지 경계를 안정시키는 것이 목적이고, 그림의 순서는
+// map.js 의 순수 함수가 계층으로 정한다.
+export const MAP_QUERIES = {
+  edge: {
+    select: ['from_key', 'from_kind', 'to_key', 'to_kind', 'note'],
+    order: 'from_key,to_key',
+  },
+  stage: {
+    select: ['stage_key', 'arm', 'dataset', 'enabled'],
+    order: 'stage_key',
+  },
+  // 상태를 그림에 얹는다(#143). 판정은 뷰가 이미 끝냈으므로 두 컬럼만 받으면 된다 --
+  // 색을 고르는 severity.js 가 보는 것이 그 둘뿐이다.
+  health: {
+    select: ['stage_key', 'freshness', 'last_run_status'],
+    order: 'stage_key',
+  },
+};
+
+export const NEED_QUERIES = {
+  // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
+  // 가 그것을 고르는 유일한 필터다(#109, #130).
+  category: {
+    select: [
+      'run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved',
+      'population_share_pct',
+      'yt_neg', 'yt_pos', 'persist_months', 'persist_months_total',
+      'persist_products', 'persist_products_total', 'unresolved_new', 'low_share',
+      'denom_low', 'denom_site',
+    ],
+    filters: [
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+      { column: 'month', op: 'eq', value: '', allowEmpty: true },
+    ],
+    order: NEED_ORDER,
+  },
+  // 화면 3: 제품 축 행만 — 합 행을 같이 받으면 상위 20 이 카테고리로 채워진다.
+  product: {
+    select: ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved'],
+    filters: [
+      { column: 'product_ref', op: 'neq', value: '', allowEmpty: true },
+      { column: 'month', op: 'eq', value: '', allowEmpty: true },
+    ],
+    order: NEED_ORDER,
+  },
+  // 화면 5: 월 행만 — 위의 둘과 정확히 겹치지 않는 반대편이다. 분모·persist_* 는 월 행에서
+  // NULL 이라 받지 않는다(#129 의 결정: 그 달의 분모라는 것이 존재하지 않는다).
+  // product_ref 는 값이 늘 빈 문자열이지만 반드시 받는다 — screens.js 의 monthRowsOf 가
+  // 그것으로 거르는데, select 에 없으면 응답 행에 키가 없어 그 비교가 언제나 거짓이 되고
+  // 화면 5 가 어떤 scope 에서도 "월 행이 없음" 만 낸다(#130 수정 라운드).
+  month: {
+    select: [
+      'run_id', 'scope', 'need_key', 'month', 'product_ref',
+      'neg', 'pos', 'unresolved', 'yt_neg', 'yt_pos',
+    ],
+    filters: [
+      { column: 'month', op: 'neq', value: '', allowEmpty: true },
+      { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
+    ],
+    // 이 질의에서 product_ref 는 늘 빈 값이라 앞의 넷이 곧 PK 다.
+    order: 'run_id.desc,scope,need_key,month',
+  },
+};
 
 // 'Content-Range: 0-999/65646' 의 슬래시 뒤가 전체 개수다. '*' 이면 서버가
 // 세지 않은 것(Prefer: count=exact 가 빠졌다는 뜻)이라 개수를 모른다(null).
@@ -43,6 +149,19 @@ export function rangeLength(header) {
   return end - start + 1;
 }
 
+// 다음 페이지의 offset, 더 받을 것이 없으면 null. 서버가 이번 페이지에서
+// 실제로 보낸 행 수(rangeLength)와 전체 개수(parseContentRange)로 판단한다 —
+// '*'(개수 모름)일 때도 이번 페이지가 PAGE_SIZE 보다 짧으면 마지막 페이지다.
+export function nextPageOffset(offset, header) {
+  const got = rangeLength(header);
+  if (got === 0) return null;
+  const total = parseContentRange(header);
+  const next = offset + got;
+  if (total !== null && next >= total) return null;
+  if (got < PAGE_SIZE) return null;
+  return next;
+}
+
 // CSV 페이지를 이어붙인다. 두 번째 페이지부터는 헤더 줄을 버린다.
 export function appendCsvPage(accumulated, page, isFirst) {
   if (isFirst) return page;
@@ -54,8 +173,9 @@ export function appendCsvPage(accumulated, page, isFirst) {
   return accumulated + sep + body;
 }
 
-// 'analysis_run' 은 anon 화이트리스트에 없다(#11 1차 결정) — metrics_need 가
-// 이미 담고 온 run_id 중 최댓값을 "최신 run"으로 쓴다.
+// #87: 'analysis_run' 이 anon 화이트리스트에 들어온 뒤로 "최신 run" 판정은
+// screens.js의 latestRuns/okRunsByRecency(analysis_run.finished_at·status)가 한다.
+// 이 함수는 run_id 최댓값이 필요한 범용 자리(테스트 픽스처 등)에만 남는다.
 export function latestRunId(rows) {
   let max = null;
   for (const r of rows || []) {
@@ -63,6 +183,16 @@ export function latestRunId(rows) {
     if (Number.isFinite(id) && (max === null || id > max)) max = id;
   }
   return max;
+}
+
+// analysis_run 행 중 끝난 것(status='ok', finished_at 있음)만 최근순으로 정렬한다.
+// 손으로 돌린 aggregate 는 note 로 기존 run 을 재사용해 더 작은 run_id 를 쓸 수 있어
+// (analysis/aggregate/pipeline.py의 _run_id) run_id 크기로는 "최신"을 못 고른다(#87).
+export function okRunsByRecency(runs) {
+  return (runs || [])
+    .filter((r) => r && r.status === 'ok' && r.finished_at)
+    .slice()
+    .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at));
 }
 
 // need_key/product_ref 등 정렬 가능한 표 정렬. 원본 배열은 건드리지 않는다.
