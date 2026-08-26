@@ -98,7 +98,12 @@ def queries(mode: str, dictionary: topics.Topics | None = None) -> list[tuple[st
     return out
 
 
-def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None = None) -> dict[str, set[str]]:
+def gold_from_chunks(
+    conn: psycopg.Connection,
+    sources: tuple[str, ...] | None = None,
+    *,
+    dictionary: topics.Topics | None = None,
+) -> dict[str, set[str]]:
     """topic_id -> doc_id 집합. 청크 본문에 match_topics 를 돌려 만든다.
 
     문서 단위로 접는다 -- 정답이 chunk_id 면 한 문서의 조각 수가 점수를 좌우한다.
@@ -112,8 +117,9 @@ def gold_from_chunks(conn: psycopg.Connection, sources: tuple[str, ...] | None =
     주제 매칭은 커밋한 뒤에 도는 것도 그래서다 -- 느린 쪽이 트랜잭션 밖에 있어야 한다.
     """
     # 정답을 만드는 사전은 **이 DB 의 활성 버전**이다 -- 프로세스에 남아 있던 사전으로 채점하면
-    # 그 점수가 어느 사전 위에서 나왔는지 아무도 답할 수 없다.
-    dictionary = topics.use_active(conn)
+    # 그 점수가 어느 사전 위에서 나왔는지 아무도 답할 수 없다. 넘겨받았으면 그것을 쓴다: 정답과
+    # 질의와 행이 적는 판본이 **같은 한 벌**이어야 판본이 그 점수의 판본이다 (#62).
+    dictionary = dictionary or topics.use_active(conn)
 
     narrow, params = "", ()
     if sources:
@@ -194,7 +200,10 @@ def run(
     from analysis.retrieval.pipeline import coverage_note, load_index, ranked_chunks
 
     index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
-    gold_all = gold_from_chunks(conn, sources)
+    # 사전 한 벌을 여기서 세우고 정답·질의·행의 판본이 모두 그것을 본다. 각자 활성 사전을 다시
+    # 읽으면 실행 도중에 activate 가 들어온 날 세 답이 서로 다른 사전 위에 선다 (#62).
+    dictionary = topics.use_active(conn)
+    gold_all = gold_from_chunks(conn, sources, dictionary=dictionary)
 
     # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
     vector_store = encoder = None
@@ -211,7 +220,7 @@ def run(
         encoder = embed.load_encoder(vector_store.model)
 
     rows: list[Row] = []
-    for topic_id, query in queries(mode):
+    for topic_id, query in queries(mode, dictionary):
         gold = set(gold_all.get(topic_id, ()))
         skip: set[str] = set()
         if mode == "heldout":
@@ -234,7 +243,22 @@ def run(
         )
         ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)
-        rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit, coverage, stamp))
+        rows.append(
+            Row(
+                mode,
+                engine,
+                topic_id,
+                query,
+                len(gold),
+                len(ranked),
+                p,
+                mrr,
+                hit,
+                coverage,
+                stamp,
+                dictionary.stamp,
+            )
+        )
     return rows
 
 
@@ -250,6 +274,9 @@ def summary(rows: list[Row]) -> str:
     # 판본과 커버리지 경고는 CSV 를 안 열어도 보여야 한다 -- 요약만 읽고 표에 옮겨 적는 것이 실제 용법이다.
     if stamp := next((r.store for r in rows if r.store), ""):
         lines.append(f"저장소 {stamp}")
+    # 사전은 엔진을 안 가린다 -- bm25 요약에도 이 줄이 있어야 그 점수가 어느 사전 위의 값인지 읽힌다.
+    if known := next((r.dictionary for r in rows if r.dictionary), ""):
+        lines.append(f"사전 {known}")
     if note := next((r.note for r in rows if r.note), ""):
         lines.append(note)
     return "\n".join(lines)
