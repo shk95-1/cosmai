@@ -957,7 +957,7 @@ CATEGORY_MAP_CSV = REPO_ROOT / "eval" / "lexicon" / "category_map_v1.csv"
 # (=항등으로 통과하는) 이름을 이 레포 안에서 대조할 수 있는 유일한 자리다.
 CROSSCAT_CSVS = ("crosscat_60.csv", "crosscat_blind40.csv")
 SUNBLOCK = "선블록"
-REGISTERED = 27  # 선블록 + #33 의 대상 26개
+REGISTERED = 28  # 선블록(전량 패스 끝) + 크론이 도는 27 — 운영 need_mention 의 lexicon_category 전량
 
 
 def _gemma4_line() -> list[str]:
@@ -971,12 +971,12 @@ def _gemma4_line() -> list[str]:
     return found[0]
 
 
-def test_the_owner_table_carries_the_twenty_six_categories_the_cron_line_walks():
+def test_the_owner_table_carries_every_category_the_cron_line_walks():
     """등록 없는 줄은 빈 실행이다 (#32): 크론이 `--scope` 없이 도는 것은 이 표가 준 scope 전부다."""
-    assert len(OWNERS) == REGISTERED, f"등록된 scope {len(OWNERS)}개 — 선블록 + 26 이어야 한다"
+    assert len(OWNERS) == REGISTERED, f"등록된 scope {len(OWNERS)}개 — 선블록 + 크론 27 이어야 한다"
     assert OWNERS[SUNBLOCK].since == ALWAYS, "선블록은 전량 패스가 끝나 모든 달이 주인 몫이다"
     later = {scope: owner.since for scope, owner in OWNERS.items() if scope != SUNBLOCK}
-    # 26개는 크론 첫 실행이 드는 **한** 달에서 시작한다 — 달이 섞이면 그 앞의 달을 규칙이 계속 쓰는지
+    # 크론 대상은 첫 실행이 드는 **한** 달에서 시작한다 — 달이 섞이면 그 앞의 달을 규칙이 계속 쓰는지
     # 아닌지가 카테고리마다 달라지고, 첫 밤에 무엇이 드는지 아무도 말할 수 없다 (#97 의 절차).
     assert len(set(later.values())) == 1, f"since 가 갈렸다: {sorted(set(later.values()))}"
     assert MONTH.match(next(iter(later.values())))
