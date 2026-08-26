@@ -61,6 +61,26 @@ def test_postgrest_anon_cannot_select_the_remaining_tables(conn: Connection, tab
     assert allowed is False
 
 
+# 화면이 읽는 뷰. 표가 아니라 뷰라서 자리가 다르다 -- migrate 는 배포마다 뷰를 DROP 하고 다시
+# 만들고(단계 f), 그것은 이 파일이 도는 단계(d)보다 *뒤*다. 그래서 이 GRANT 가 여기 있으면
+# 주자마자 지워진다. 뷰의 권한은 뷰 파일이 진다(#158).
+@pytest.mark.parametrize("view", ["pipeline_health"])
+def test_postgrest_anon_can_select_the_view_the_ops_page_reads(conn: Connection, view: str):
+    granted = conn.execute(
+        text("select has_table_privilege('postgrest_anon', :v, 'SELECT')"), {"v": f"needs.{view}"}
+    ).scalar()
+    assert granted, f"needs.{view} 가 anon 에 안 열려 있다 -- 화면은 PostgREST 에 anon 으로 묻는다"
+
+
+# 판정이 끝난 뷰 하나만 연다. 원본 로그까지 여는 것은 필요 없는 노출이다(#138).
+@pytest.mark.parametrize("view", ["collector_health", "analysis_health"])
+def test_postgrest_anon_cannot_select_the_upstream_views(conn: Connection, view: str):
+    granted = conn.execute(
+        text("select has_table_privilege('postgrest_anon', :v, 'SELECT')"), {"v": f"needs.{view}"}
+    ).scalar()
+    assert not granted
+
+
 def test_postgrest_anon_has_usage_on_the_needs_schema(conn: Connection):
     allowed = conn.execute(
         text("select has_schema_privilege('postgrest_anon', 'needs', 'USAGE')")
