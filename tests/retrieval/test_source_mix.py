@@ -22,8 +22,8 @@ from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
 
+import psycopg
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,19 +111,72 @@ def test_the_composition_is_counted_in_one_scan():
     assert round(rows[0].chunk_share, 4) == round(288914 / (288914 + 23156), 4)
 
 
-def test_ranked_chunks_narrows_but_does_not_allocate():
-    """계약의 성질을 코드에서 잡는다 -- 분배를 넣는 날 이 줄이 빨개지고, 그때 §소스별 분배 를 함께 고친다."""
-    pytest.importorskip("kiwipiepy")
-    from analysis.retrieval import bm25, pipeline
+# 지배 소스 아홉이 같은 낱말을 밀도 높게 말하고, 소수 소스 하나는 같은 낱말을 길게 한 번 말한다 --
+# 전역 순위에서는 마지막이다. §소스별 분배 가 잰 그 모양을 열 행으로 줄인 것뿐이다.
+CHUNKS = [(f"youtube_comment:c{i}#0", "youtube_comment", "백탁 백탁 백탁") for i in range(9)] + [
+    ("commerce_review:r0#0", "commerce_review", "백탁 " + "끈적임 " * 60)
+]
 
-    # 소수 소스 한 건이 같은 낱말을 말하지만 더 길고 덜 말한다 -- 전역 순위에서는 마지막이다.
-    ids = [f"maj:{i}#0" for i in range(9)] + ["min:0#0"]
-    texts = ["백탁 백탁 백탁"] * 9 + ["백탁 " + "끈적임 " * 60]
-    index = bm25.Index(ids, texts)
-    # bm25 는 색인을 넘기면 DB 를 안 연다 -- 이 성질을 재는 데 연결이 필요 없다는 것도 계약의 일부다.
-    hits = pipeline.ranked_chunks(cast("Any", None), "백탁", top=5, index=index, cache_dir=None)
-    assert [chunk_id for chunk_id, _ in hits] == [f"maj:{i}#0" for i in range(5)]
-    assert all(not chunk_id.startswith("min:") for chunk_id, _ in hits)
+
+@pytest.fixture
+def conn(needs_runtime_url: str):
+    """파이프라인이 도는 롤. `sources` 로 좁히는 자리가 SQL 이라 진짜 표가 있어야 재진다.
+
+    `test_pipeline.conn` 과 같은 길이되 원천 스키마는 세우지 않는다 -- 여기서 재는 것은 청킹이 아니라
+    이미 청크가 있는 표 위의 검색이다."""
+    from sqlalchemy.engine import make_url
+
+    from tests.retrieval.conftest import install_topics
+
+    parsed = make_url(needs_runtime_url)
+    connection = psycopg.connect(
+        host=parsed.host,
+        port=parsed.port,
+        user=parsed.username,
+        password=parsed.password,
+        dbname=parsed.database,
+        options=parsed.query["options"],  # pyright: ignore[reportArgumentType]
+    )
+    install_topics(connection)  # 색인은 활성 주제 사전 없이는 서지 않는다 (#8)
+    with connection.cursor() as cur:
+        cur.executemany(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES (%s, %s, %s, 0, %s, md5(%s))",
+            [(cid, cid.split("#")[0], source, text, text) for cid, source, text in CHUNKS],
+        )
+    connection.commit()
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+@pytest.mark.postgres
+def test_sources_narrows_the_pool(conn):
+    """`--source` 가 실제로 좁히는지를 SQL 까지 태워 본다 -- 좁힘은 `load_index` 의 WHERE 에 있고,
+    색인을 주입하면 그 자리가 통째로 건너뛰어져 이름만 남는다."""
+    pytest.importorskip("kiwipiepy")
+    from analysis.retrieval import pipeline
+
+    hits = pipeline.ranked_chunks(conn, "백탁", top=10, sources=("commerce_review",), cache_dir=None)
+    assert [chunk_id for chunk_id, _ in hits] == ["commerce_review:r0#0"]
+
+
+@pytest.mark.postgres
+def test_the_narrowed_pool_is_still_ranked_globally_not_by_share(conn):
+    """계약의 성질을 코드에서 잡는다 -- 분배를 넣는 날 이 줄이 빨개지고, 그때 §소스별 분배 를 함께 고친다.
+
+    좁히지 않으면 소수 소스는 상위 k 에 자리를 못 받는다. 몫이 있었다면 열 자리 중 얼마는 그 소스의
+    것이어야 하는데, 여기서는 관련도만 자리를 정한다."""
+    pytest.importorskip("kiwipiepy")
+    from analysis.retrieval import pipeline
+
+    hits = pipeline.ranked_chunks(conn, "백탁", top=5, cache_dir=None)
+    assert [chunk_id for chunk_id, _ in hits] == [f"youtube_comment:c{i}#0" for i in range(5)]
+    assert all(not chunk_id.startswith("commerce_review:") for chunk_id, _ in hits)
+    # 그 소수 청크는 후보에서 빠진 것이 아니라 **밀린** 것이다 -- k 를 넓히면 나온다.
+    deeper = [chunk_id for chunk_id, _ in pipeline.ranked_chunks(conn, "백탁", top=10, cache_dir=None)]
+    assert deeper[-1] == "commerce_review:r0#0"
 
 
 def test_the_contract_carries_the_verdict_and_the_numbers_it_was_measured_with():

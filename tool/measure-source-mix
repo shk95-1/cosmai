@@ -133,6 +133,19 @@ def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
             counted[source] = counted.get(source, 0) + n
     total = sum(counted.values()) or 1
     ranks = [rank for row in rows for source, rank in row["minority_first"].items() if row["pool"].get(source)]
+    by_source: dict[str, dict] = {}
+    for share in shares:
+        if share.source == dominant:
+            continue
+        # 소스마다 따로도 낸다 -- 합산 중앙값 하나는 "가끔 이기고 대개 밀리는" 이중분포를 감춘다.
+        own = [row["minority_first"][share.source] for row in rows if row["pool"].get(share.source)]
+        by_source[share.source] = {
+            "queries_with_candidates": len(own),
+            "beyond_k": sum(1 for rank in own if rank > k),
+            "within_k": sum(1 for rank in own if rank <= k),
+            "median": statistics.median(own) if own else None,
+            "max": max(own) if own else None,
+        }
     index_share = next(s.chunk_share for s in shares if s.source == dominant)
     topk_share = counted.get(dominant, 0) / total
     return {
@@ -152,6 +165,7 @@ def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
             "max": max(ranks) if ranks else None,
             "beyond_k": sum(1 for rank in ranks if rank > k),
         },
+        "minority_first_rank_by_source": by_source,
         "queries_with_only_dominant_in_top_k": sum(1 for r in rows if set(r["top_k"]) == {dominant}),
         "verdict": verdict(index_share, topk_share, ranks),
         "rows": rows,
@@ -174,6 +188,10 @@ def report(measured: dict) -> None:
           f" (질의별 평균 {measured['dominant_share_mean_per_query'] * 100:.2f}%)")
     print(f"후보를 가진 소수 소스 (질의, 소스) {first['n']}쌍 · 첫 등장 순위 중앙값 {first['median']}"
           f" · 최대 {first['max']} · 상위 {K} 밖 {first['beyond_k']}")
+    for source, cell in measured["minority_first_rank_by_source"].items():
+        print(f"  {source:20s} 후보 있는 질의 {cell['queries_with_candidates']:3d} · 상위 {K} 안"
+              f" {cell['within_k']:3d} · 밖 {cell['beyond_k']:3d} · 첫 등장 중앙값 {cell['median']}"
+              f" · 최대 {cell['max']}")
     print(f"상위 {K} 가 지배 소스뿐인 질의 {measured['queries_with_only_dominant_in_top_k']}개")
     print(f"\n판정: {measured['verdict']}  (기준: 쏠림은 색인 구성비 이상, 밀림은 중앙값 {BURIED_RANK}위 이상)")
 
