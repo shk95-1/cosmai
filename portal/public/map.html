@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>파이프라인 구조</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>파이프라인 구조</h1>
+  <div id="map-caption" class="caption">불러오는 중…</div>
+  <p id="error" class="error" role="alert"></p>
+  <p class="caption"><a href="ops.html">← 관제</a> · <a href="index.html">니즈 지표</a></p>
+</header>
+
+<!-- 그림은 선언에서 나온다(needs.pipeline_edge, #141). 좌표를 손으로 잡지 않는다. -->
+<section id="map-canvas" class="screen"></section>
+
+<section id="map-legend" class="screen"></section>
+
+<footer class="caption">
+  <button type="button" id="map-refresh">새로고침</button>
+  <span id="map-fetched"></span>
+</footer>
+
+<script type="module" src="map-app.js"></script>
+</body>
+</html>
