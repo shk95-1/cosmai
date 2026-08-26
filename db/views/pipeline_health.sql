@@ -83,3 +83,10 @@ LEFT JOIN last_run r USING (stage_key)
 LEFT JOIN last_ran o USING (stage_key);
 
 GRANT SELECT ON needs.pipeline_health TO needs_runtime;
+-- 화면은 PostgREST 에 anon 으로 묻는다. 이 GRANT 가 db/grants/postgrest_anon_needs.sql 에 있으면
+-- 살아남지 못한다: 그 파일은 migrate 단계 (d) 이고 뷰를 DROP 하고 다시 만드는 것은 (f) 라, 새
+-- 객체에 옛 GRANT 가 따라오지 않는다. 뷰의 권한은 뷰가 소유한다(#158 -- 화면이 401 이었다).
+GRANT SELECT ON needs.pipeline_health TO postgrest_anon;
+-- 권한이 바뀌었으니 PostgREST 의 스키마 캐시를 깨운다. (d) 의 NOTIFY 는 이 뷰가 만들어지기
+-- 전에 돌아서, 그것만으로는 새 GRANT 를 보지 못한 채 401 이 그대로 남는다.
+NOTIFY pgrst, 'reload schema';
