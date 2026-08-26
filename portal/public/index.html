@@ -9,7 +9,7 @@
 <body>
 <header>
   <h1>선케어 니즈 지표</h1>
-  <p id="run-caption" class="caption">불러오는 중…</p>
+  <div id="run-caption" class="caption">불러오는 중…</div>
   <p id="error" class="error" role="alert"></p>
 </header>
 
@@ -46,9 +46,10 @@
 
 <section id="screen-wish" class="screen hidden">
   <div class="controls">
-    <label>카테고리(scope)
+    <label>바람의 종류(wish_class)
       <select id="wish-scope"></select>
     </label>
+    <p class="caption">이 화면의 scope 는 카테고리가 아니라 바람의 종류다 — <code>wish:a</code> 는 제품·출시 요청(format · attribute · brand 를 센다), <code>wish:b</code> 는 크리에이터 요청(format · brand).</p>
   </div>
   <div class="chart-triple">
     <div><h3>상위 format</h3><div id="wish-chart-format" class="chart"></div></div>

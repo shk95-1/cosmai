@@ -4,8 +4,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
-  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaption,
-  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue,
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
+  productNameIndex, productLabel, truncateLabel, withProductNames,
 } from '../public/screens.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -80,16 +81,64 @@ test('productRows: run 2의 product_ref 비어있지 않은 행이 나온다', (
 });
 
 // #87: 캡션이 각 run의 versions·note 를 보여야 손 재집계가 실제로 반영됐는지 알 수 있다.
-test('runCaption: need·wish run의 versions·note를 보인다 (#87)', () => {
-  const needRun = { run_id: 2, note: 'aggregate:1.1.0:all', versions: { aggregate: '1.1.0' } };
-  const wishRun = { run_id: 3, note: 'aggregate:1.1.0:wish', versions: { aggregate: '1.1.0' } };
-  const caption = runCaption(needRun, wishRun);
-  assert.match(caption, /#2/);
-  assert.match(caption, /#3/);
-  assert.match(caption, /aggregate:1\.1\.0:all/);
-  assert.match(caption, /aggregate:1\.1\.0:wish/);
-  assert.match(caption, /"aggregate":"1\.1\.0"/);
-  assert.equal(runCaption(null, null), '데이터 없음');
+// #122: 그 전부를 헤더에 펴면 네 줄을 먹는다 — 한 줄 요약과 접히는 상세로 나눈다.
+test('runCaptionParts: 요약은 한 줄, versions·note 는 상세로 간다 (#87, #122)', () => {
+  const needRun = { run_id: 2, finished_at: '2026-08-26T05:01:31.074893+00:00', note: 'aggregate:1.1.0:all', versions: { aggregate: '1.1.0', extractor: 'rule-v2.3' } };
+  const wishRun = { run_id: 3, finished_at: '2026-08-26T06:02:00+00:00', note: 'aggregate:1.1.0:wish', versions: { aggregate: '1.1.0' } };
+  const { summary, detail } = runCaptionParts(needRun, wishRun);
+  assert.match(summary, /#2 · 08-26 05:01 · extractor rule-v2\.3/);
+  assert.match(summary, /#3 · 08-26 06:02 · aggregate 1\.1\.0/);
+  assert.equal(summary.includes('\n'), false);
+  assert.doesNotMatch(summary, /aggregate:1\.1\.0:all/); // note 는 요약에 없다
+  assert.match(detail, /aggregate:1\.1\.0:all/);
+  assert.match(detail, /aggregate:1\.1\.0:wish/);
+  assert.match(detail, /"aggregate":"1\.1\.0"/);
+  assert.equal(runCaptionParts(null, null).summary, '데이터 없음');
+});
+
+// 실제로는 한 analyze run 이 두 표를 다 쓴다(run #24) — 같은 것을 두 번 적으면
+// 요약이 그만큼 길어져 애초에 접으려던 이유가 사라진다.
+test('runCaptionParts: need 와 wish 가 같은 run 이면 한 번만 적는다', () => {
+  const run = { run_id: 24, finished_at: '2026-08-26T05:01:31+00:00', note: 'analyze:all', versions: { extractor: 'rule-v2.3' } };
+  const { summary } = runCaptionParts(run, run);
+  assert.equal((summary.match(/#24/g) || []).length, 1);
+  assert.match(summary, /need/);
+  assert.match(summary, /wish/);
+});
+
+// finished_at 을 Date 로 파싱해 지역시간으로 찍으면 캡션이 보는 기계마다 달라진다.
+test('runCaptionParts: 시각은 ISO 문자열 그대로(UTC) 자른다', () => {
+  const run = { run_id: 7, finished_at: '2026-12-31T23:59:59+00:00', versions: {} };
+  assert.match(runCaptionParts(run, null).summary, /12-31 23:59/);
+  assert.match(runCaptionParts({ run_id: 8 }, null).summary, /#8/); // finished_at 없어도 죽지 않는다
+});
+
+// #122: 셀렉트의 첫 항목이 알파벳 순 첫 scope 라 "01 > 마스크팩 > 시트팩" 이 첫 화면이었다.
+test('defaultScope: 롤업 all 이 있으면 all 이다', () => {
+  const rows = [
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: '01 > 마스크팩 > 시트팩' },
+    { run_id: 1, scope: 'all' },
+    { run_id: 2, scope: '다른 run' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'all');
+});
+
+test('defaultScope: all 이 없으면 행이 가장 많은 scope 다', () => {
+  const rows = [
+    { run_id: 1, scope: 'wish:a' },
+    { run_id: 1, scope: 'wish:b' },
+    { run_id: 1, scope: 'wish:b' },
+  ];
+  assert.equal(defaultScope(rows, 1), 'wish:b');
+  assert.equal(defaultScope([], 1), null);
+  assert.equal(defaultScope(rows, 9), null);
+});
+
+// 동률이면 사전순 — 새로고침마다 첫 화면이 바뀌면 무엇을 보고 있는지 알 수 없다.
+test('defaultScope: 동률은 사전순으로 끊는다', () => {
+  const rows = [{ run_id: 1, scope: 'b' }, { run_id: 1, scope: 'a' }];
+  assert.equal(defaultScope(rows, 1), 'a');
 });
 
 // #41: 제품 축 행은 scope 마다 한 벌씩 나온다 — 같은 제품이 자기 카테고리와 롤업('all')에서
@@ -156,4 +205,59 @@ test('hasYoutubeMentions: yt_neg·yt_pos 가 전부 0 인 scope 는 false', () =
 test('rowsWithValue: 비율이 null 인 행은 막대에서 빠진다', () => {
   const rows = [{ need_key: 'a', new_ratio: 0.5 }, { need_key: 'b', new_ratio: null }, { need_key: 'c', new_ratio: 0 }];
   assert.deepEqual(rowsWithValue(rows, 'new_ratio').map((r) => r.need_key), ['a', 'c']);
+});
+
+
+// ---- 화면 3: 제품 이름 (#122 §10) -----------------------------------------
+
+// 화면 3 은 metrics_need 의 ref 만 갖고 있어 'oy:A000000149577' 이 막대 라벨이 된다.
+// needs.product_ref 에 brand·name 이 있고 anon 화이트리스트에도 들어 있다(#11 입력).
+const CATALOG = [
+  { product_ref: 'oy:A000000149577', brand: '메디힐', name: '메디힐 티트리 임팩트인 밸런싱 마스크 10매', name_norm: '티트리 임팩트인 밸런싱 마스크' },
+  { product_ref: 'da:1079392', brand: '본셉 메이크업', name: '[05 바닐라워터] 본셉 워터 베일 틴트', name_norm: '본셉 워터 베일 틴트' },
+  { product_ref: 'da:9', brand: '', name: '이름만 있는 제품', name_norm: '' },
+];
+
+// name 은 '[8월올영픽/트러블손절크림] … 80ml 1+1 기획' 처럼 기획 문구와 용량을 달고 있다 —
+// name_norm 이 그것을 걷어낸 이름이라 라벨에는 그쪽이 맞다.
+test('productLabel: 카탈로그에 있으면 브랜드 · 제품명이다', () => {
+  const index = productNameIndex(CATALOG);
+  assert.equal(productLabel('oy:A000000149577', index), '메디힐 · 티트리 임팩트인 밸런싱 마스크');
+  assert.equal(productLabel('da:1079392', index), '본셉 메이크업 · 본셉 워터 베일 틴트');
+  assert.equal(productLabel('da:9', index), '이름만 있는 제품'); // 브랜드가 없으면 이름만
+});
+
+// 링커가 못 붙인 mention 은 사이트의 원래 키가 그대로 ref 가 된다(aggregate 의
+// _product: product_ref or source_product_key). 그 자리에 이름을 지어 주면 화면이
+// 파이프라인이 하지 않은 연결을 주장한다 — ref 를 그대로 보인다.
+test('productLabel: 카탈로그에 없는 ref 는 ref 그대로다', () => {
+  const index = productNameIndex(CATALOG);
+  assert.equal(productLabel('A000000186166', index), 'A000000186166');
+  assert.equal(productLabel('101473', new Map()), '101473');
+});
+
+test('productNameIndex: product_ref 없는 행은 담지 않는다', () => {
+  const index = productNameIndex([...CATALOG, { product_ref: '', brand: 'x', name: 'y' }, null]);
+  assert.equal(index.size, 3);
+  assert.equal(productNameIndex(null).size, 0);
+});
+
+// 막대의 라벨 자리는 폭이 정해져 있어 긴 이름은 옆 막대 위로 넘친다 — 자르고 전체
+// 이름은 <title>(호버) 몫이다.
+test('truncateLabel: 자리를 넘는 이름만 말줄임한다', () => {
+  assert.equal(truncateLabel('짧은이름', 10), '짧은이름');
+  assert.equal(truncateLabel('메디힐 · 티트리 임팩트인 밸런싱 마스크', 10), '메디힐 · 티트리…');
+});
+
+test('withProductNames: 행마다 전체 라벨과 짧은 라벨을 얹는다', () => {
+  const index = productNameIndex(CATALOG);
+  const rows = withProductNames([
+    { product_ref: 'oy:A000000149577', unresolved: 1 },
+    { product_ref: 'A000000186166', unresolved: 0.5 },
+  ], index);
+  assert.equal(rows[0].product, '메디힐 · 티트리 임팩트인 밸런싱 마스크');
+  assert.equal(rows[1].product, 'A000000186166');
+  assert.ok(rows[0].product_short.length < rows[0].product.length);
+  assert.equal(rows[0].unresolved, 1); // 원래 컬럼은 그대로 남는다
+  assert.equal(rows[1].product_ref, 'A000000186166');
 });

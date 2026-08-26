@@ -47,20 +47,73 @@ export function productRows(need, runId, limit = 20) {
   return sortRows(rolled.length ? rolled : rows, 'unresolved', 'desc').slice(0, limit);
 }
 
-// run 하나를 "#id (note, versions)"로 적는다 — 손 재집계 직후 화면이 그 run을 골랐는지
-// 눈으로 확인하려면 run_id 만으로는 부족하다(#87 완료 기준).
-function describeRun(run) {
-  if (!run) return null;
-  const versions = run.versions && typeof run.versions === 'object' ? JSON.stringify(run.versions) : '';
-  const detail = [run.note, versions].filter(Boolean).join(', ');
-  return detail ? `#${run.run_id} (${detail})` : `#${run.run_id}`;
+// finished_at 은 '2026-08-26T05:01:31.074893+00:00' 같은 ISO 문자열이다. Date 로 파싱해
+// 지역시간으로 찍으면 같은 run 이 보는 기계마다 다른 시각으로 적히므로 문자열에서 자른다.
+function stampOf(finishedAt) {
+  const m = /^\d{4}-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(String(finishedAt || ''));
+  return m ? `${m[1]}-${m[2]} ${m[3]}:${m[4]}` : '';
 }
 
-export function runCaption(needRun, wishRun) {
-  const need = describeRun(needRun);
-  const wish = describeRun(wishRun);
-  if (need === null && wish === null) return '데이터 없음';
-  return `need run ${need ?? '없음'} · wish run ${wish ?? '없음'}`;
+// versions 는 lexicon 처럼 중첩된 값까지 담아 헤더 네 줄을 먹었다(#122) — 요약에는
+// 파이프라인을 특정하는 한 짝만 적고 나머지는 접히는 상세의 몫이다. extractor 를 먼저
+// 보는 것은 화면의 숫자가 무엇으로 뽑혔는지가 가장 먼저 궁금한 값이어서다.
+const HEADLINE_VERSION = 'extractor';
+function headlineVersion(versions) {
+  if (!versions || typeof versions !== 'object') return '';
+  const keys = Object.keys(versions);
+  const key = keys.includes(HEADLINE_VERSION)
+    ? HEADLINE_VERSION
+    : keys.find((k) => typeof versions[k] === 'string');
+  return key ? `${key} ${versions[key]}` : '';
+}
+
+// run 하나를 "#24 · 08-26 05:01 · extractor rule-v2.3" 한 줄로 — 손 재집계 직후 화면이
+// 그 run 을 골랐는지 눈으로 확인하려면 run_id 만으로는 부족하다(#87 완료 기준).
+export function runBrief(run) {
+  if (!run) return '없음';
+  return [`#${run.run_id}`, stampOf(run.finished_at), headlineVersion(run.versions)]
+    .filter(Boolean).join(' · ');
+}
+
+function runDetail(name, run) {
+  const versions = run.versions && typeof run.versions === 'object' ? JSON.stringify(run.versions) : '';
+  return [`${name} run #${run.run_id}`, run.note, versions].filter(Boolean).join('\n');
+}
+
+// 헤더에 걸 한 줄(summary)과 <details> 안에 접을 전문(detail)을 나눈다 — app.js 가
+// 그 둘을 DOM 으로 엮는다. 나누는 판단 자체는 순수 함수라야 테스트가 붙는다.
+export function runCaptionParts(needRun, wishRun) {
+  if (!needRun && !wishRun) return { summary: '데이터 없음', detail: '' };
+  // 실제로는 한 analyze run 이 두 표를 다 쓴다(run #24) — 같은 것을 두 번 적으면
+  // 애초에 접으려던 이유(길이)가 그대로 남는다.
+  const same = needRun && wishRun && needRun.run_id === wishRun.run_id;
+  const pairs = same
+    ? [['need·wish', needRun]]
+    : [['need', needRun], ['wish', wishRun]];
+  const summary = same
+    ? `need·wish run ${runBrief(needRun)}`
+    : `need run ${runBrief(needRun)} · wish run ${runBrief(wishRun)}`;
+  const detail = pairs.filter(([, r]) => r).map(([name, r]) => runDetail(name, r)).join('\n\n');
+  return { summary, detail };
+}
+
+// 셀렉트의 첫 항목은 사전순 첫 scope 라 "01 > 마스크팩 > 시트팩" 같은 우연한 카테고리가
+// 첫 화면이 됐다(#122). 롤업 'all' 이 있으면 그것이 전체 그림이고, 없으면 행이 가장 많은
+// scope 가 그 run 이 실제로 본 곳이다. 동률은 사전순으로 끊는다 — 새로고침마다 첫 화면이
+// 바뀌면 무엇을 보고 있는지 알 수 없다.
+export function defaultScope(rows, runId) {
+  const counts = new Map();
+  for (const r of rows || []) {
+    if (!r || r.run_id !== runId) continue;
+    counts.set(r.scope, (counts.get(r.scope) || 0) + 1);
+  }
+  if (counts.size === 0) return null;
+  if (counts.has('all')) return 'all';
+  let best = null;
+  for (const scope of [...counts.keys()].sort()) {
+    if (best === null || counts.get(scope) > counts.get(best)) best = scope;
+  }
+  return best;
 }
 
 // 0 나누기 방어: 분모가 없거나 0 이면 비율은 null 이다 — 0 으로 눕히면 "분모가 없는
@@ -98,5 +151,46 @@ export function rowsWithValue(rows, key) {
   return (rows || []).filter((r) => {
     const v = r[key];
     return v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  });
+}
+
+// ---- 화면 3: 제품 이름 -----------------------------------------------------
+
+// metrics_need 는 ref 만 갖고 있어 화면 3 의 막대 라벨이 'oy:A000000149577' 이었다.
+// needs.product_ref 에 brand·name 이 있고 anon 화이트리스트에도 들어 있다(#11 입력).
+// name 은 '[8월올영픽] … 80ml 1+1 기획' 처럼 기획 문구와 용량을 달고 있어 라벨에는
+// 그것을 걷어낸 name_norm 을 쓰고, 없을 때만 name 으로 내려간다.
+export function productNameIndex(rows) {
+  const index = new Map();
+  for (const r of rows || []) {
+    if (!r || !r.product_ref) continue;
+    index.set(r.product_ref, { brand: r.brand || '', name: r.name_norm || r.name || '' });
+  }
+  return index;
+}
+
+// 카탈로그에 없는 ref 는 ref 그대로 둔다. 링커가 못 붙인 mention 은 사이트의 원래 키가
+// 그대로 ref 가 되는데(aggregate 의 _product), 그 자리에 이름을 지어 주면 화면이
+// 파이프라인이 하지 않은 연결을 주장한다.
+export function productLabel(ref, index) {
+  const hit = index && typeof index.get === 'function' ? index.get(ref) : undefined;
+  if (!hit) return String(ref);
+  const parts = [hit.brand, hit.name].filter(Boolean);
+  return parts.length ? parts.join(' · ') : String(ref);
+}
+
+// 막대의 라벨 자리는 폭이 정해져 있어 긴 이름은 옆 막대 위로 넘친다 — 자른 라벨을 그리고
+// 전체 이름은 <title>(호버)이 갖는다.
+export function truncateLabel(text, max = 20) {
+  const s = String(text);
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+// 화면 3 의 행에 라벨 두 벌(전체·자른 것)을 얹는다. 원래 컬럼은 그대로 남는다 —
+// product_ref 는 표에도 남아야 링커가 못 붙인 자리를 알아볼 수 있다.
+export function withProductNames(rows, index, max = 20) {
+  return (rows || []).map((r) => {
+    const product = productLabel(r.product_ref, index);
+    return { ...r, product, product_short: truncateLabel(product, max) };
   });
 }
