@@ -40,7 +40,6 @@ KST = timezone(timedelta(hours=9))
 ABSENT_RANK = 101
 # collectors/commerce/scope.json 의 oliveyoung.review_low.low_complete_threshold (#7) 와 같은 값이다.
 LOW_COMPLETE_THRESHOLD = 150
-CATEGORY_SEP = " > "
 SCOPE_JSON = Path(__file__).resolve().parents[2] / "collectors" / "commerce" / "scope.json"
 WINDOWS = (6, 12, 24)
 
@@ -217,9 +216,17 @@ def price_events(
 
 
 def latest_categories(snapshots: Iterable[RankSnapshot]) -> dict[tuple[str, str], str]:
-    """제품의 카테고리는 가장 최근 스냅샷이 말한다 (contracts/formats.md §카테고리 표기)."""
-    _ = snapshots
-    return {}
+    """제품의 카테고리는 가장 최근 스냅샷이 말한다 — polarity 쪽 DISTINCT ON ... ORDER BY captured_at
+    DESC 와 같은 규칙이어야 두 자리가 같은 문자열을 적는다 (contracts/formats.md §카테고리 표기)."""
+    out: dict[tuple[str, str], tuple[datetime, str]] = {}
+    for s in snapshots:
+        if not s.category_name:
+            continue
+        key = (s.source, s.product_key)
+        seen = out.get(key)
+        if seen is None or s.captured_at > seen[0]:
+            out[key] = (s.captured_at, s.category_name)
+    return {key: name for key, (_, name) in out.items()}
 
 
 def denominators(
@@ -244,7 +251,9 @@ def denominators(
                 source=source,
                 product_key=product,
                 captured_at=captured_at,
-                category=(categories.get((source, product)) or "").split(CATEGORY_SEP)[-1] or None,
+                # formats.md §카테고리 표기: 사이트가 발행한 경로를 자르지 않는다 — leaf 로 자르면
+                # need_mention.category 에서 나온 metrics_need.scope 와 절대 같아지지 않는다 (#123).
+                category=categories.get((source, product)) or None,
                 site_review_count=stat.review_count if stat else None,
                 low_collected=low,
                 # interfaces.md: 표본이 상한에 닿지 않았거나 3★ 이 섞였으면 ≤2★ 는 전수다.
@@ -344,7 +353,7 @@ def run_ranking(
     conn.commit()
 
     # 리뷰 행에는 카테고리가 없다 — 사이트가 그 제품을 걸어 둔 보드 이름이 유일한 출처다 (B6).
-    categories = {(s.source, s.product_key): s.category_name for s in snapshots if s.category_name}
+    categories = latest_categories(snapshots)
     daily = rank_daily(snapshots, version)
     events = price_events(prices, snapshots, version)
     denoms = denominators(reviews, stats, categories, captured_at, version)
