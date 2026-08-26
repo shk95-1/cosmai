@@ -92,23 +92,11 @@ done
 # runs -- db/migrate.sh -- not from a dump baseline. Assembling it from the ledger instead would
 # be impossible: needs.schema_migration records the fork's 020, whose file is not in this
 # checkout. What the fork put into production is therefore declared, not assembled:
-# contracts/ddl/needs/foreign.txt names each object that is theirs.
+# contracts/ddl/needs/foreign.txt names each object that is theirs -- minus whatever this
+# checkout turns out to declare after all, which is the fork's own case (cosmai#108, below).
 needs_db=app
 foreign=contracts/ddl/needs/foreign.txt
 [ -f "$foreign" ] || { echo "ddl-drift: missing $foreign" >&2; exit 1; }
-
-exclude=
-drop_columns=
-for object in $(sed 's/#.*//' "$foreign" | awk 'NF {print $1}'); do
-    # These names are interpolated into SQL and into a pg_dump flag; anything but a plain
-    # identifier (or identifier.identifier) is a typo at best.
-    case $object in
-        *[!a-z0-9_.]* | *..* | .* | *.) echo "ddl-drift: bad entry in $foreign: $object" >&2; exit 1 ;;
-        *.*.*) echo "ddl-drift: bad entry in $foreign: $object" >&2; exit 1 ;;
-        *.*) drop_columns="$drop_columns $object" ;;
-        *) exclude="$exclude -T needs.$object" ;;
-    esac
-done
 
 # The loop above already stood up every schema db/views/*.sql binds to, so migrate.sh deploys the
 # views here rather than skipping them. The two passwords are throwaway values for this container,
@@ -118,6 +106,28 @@ done
 printf 'NEEDS_DB_MIGRATOR=drift\nNEEDS_DB_RUNTIME=drift-runtime\n' > "$work/needs.env"
 COSMAI_SECRET_FILE="$work/needs.env" db/migrate.sh --container "$name" --db drift --superuser drift \
     > /dev/null 2> "$work/migrate.err" || { cat "$work/migrate.err" >&2; exit 1; }
+
+# Which of $foreign's entries are really someone else's is decided by the checkout, not by the
+# list: the same nine lines mean the opposite in the fork, which declares 020~025 and their views
+# itself (cosmai#108). The needs schema migrate.sh just built IS this checkout's declaration, so
+# the question goes to pg_catalog rather than to a second parser of the same .sql files -- views
+# and ADD COLUMNs fall out of it for free. tool/ddl-foreign-entries applies the rule and rejects a
+# malformed entry, which is why that check now happens here rather than before the container.
+docker exec "$name" psql -U drift -d drift -X -Atq \
+    -c "SELECT table_name FROM information_schema.tables WHERE table_schema = 'needs'
+        UNION ALL
+        SELECT table_name || '.' || column_name FROM information_schema.columns
+         WHERE table_schema = 'needs'" > "$work/declared"
+tool/ddl-foreign-entries "$foreign" "$work/declared" > "$work/foreign"
+
+exclude=
+drop_columns=
+while read -r kind object; do
+    case $kind in
+        table) exclude="$exclude -T needs.$object" ;;
+        column) drop_columns="$drop_columns $object" ;;
+    esac
+done < "$work/foreign"
 
 # ---------------------------------------------------------------------------------------------
 # Expected: all four off the finished graph, before anything is torn down for the needs replay.
@@ -172,6 +182,6 @@ done
 docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
     | normalise > "$work/actual.$needs_db.needs"
 
-report "$needs_db.needs" "db/migrate.sh + the objects $foreign declares as someone else's"
+report "$needs_db.needs" "db/migrate.sh + the objects $foreign declares as someone else's and this checkout does not"
 
 exit $status
