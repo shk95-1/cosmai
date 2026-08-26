@@ -209,6 +209,86 @@ def test_a_channel_the_active_roster_gives_another_role_is_refused(seeded: str, 
         corpus.load(conn, source, snapshot_id=3, label="bad-roles")
 
 
+@pytest.mark.postgres
+def test_a_manifest_that_declares_more_rows_than_arrive_is_refused(seeded: str, tmp_path: Path):
+    """잘려 들어온 CSV 는 행이 적을 뿐 오류가 없다 -- 그러면 이 스냅샷의 모든 비율이 조용히 달라진다."""
+    source = _rewritten(tmp_path)
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    manifest["table_counts"]["document.csv"] += 1
+    (source / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    with connect(seeded) as conn, pytest.raises(contract.ManifestMismatch, match="table_counts"):
+        corpus.load(conn, source, snapshot_id=4, label="short-load")
+
+
+@pytest.mark.postgres
+def test_a_snapshot_whose_counts_do_not_match_never_becomes_the_active_one(seeded: str, tmp_path: Path):
+    """거절이 활성 전환보다 먼저다 -- 뒤라면 분석은 이미 그 판본을 읽고 있다."""
+    _load(seeded)
+    source = _rewritten(tmp_path)
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    manifest["documents_by_content_type"]["comment"] -= 1
+    (source / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    with connect(seeded) as conn, pytest.raises(contract.ManifestMismatch):
+        corpus.load(conn, source, snapshot_id=5, label="wrong-mix")
+    with connect(seeded) as conn, conn.cursor() as cur:
+        assert corpus.active_snapshot(cur) == 1
+
+
+@pytest.mark.postgres
+def test_the_declared_counts_are_the_counts_the_load_reads(seeded: str):
+    """픽스처가 자기 행수를 잘못 적으면 스위트가 다른 코퍼스를 검증하게 된다."""
+    _load(seeded)
+    manifest = json.loads((FIXTURE / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["table_counts"] == {"document.csv": 12, "mention.csv": 9, "channel.csv": 3}
+    assert manifest["documents_by_content_type"] == {
+        "video_long": 4,
+        "video_short": 1,
+        "video_unknown": 1,
+        "comment": 6,
+    }
+
+
+@pytest.mark.postgres
+def test_a_file_that_carries_the_same_unique_key_twice_is_refused(seeded: str, tmp_path: Path):
+    """ON CONFLICT DO NOTHING 은 중복을 조용히 버린다 -- 세지 않으면 잘려 들어온 것과 구분되지 않는다.
+    매니페스트의 `input_counts.duplicate_docs = 0` 이 여기서 증명된다."""
+    source = _rewritten(tmp_path)
+    lines = (source / "document.csv").read_text(encoding="utf-8-sig").splitlines(keepends=True)
+    (source / "document.csv").write_text("\ufeff" + "".join([*lines, lines[1]]), encoding="utf-8")
+    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+    # 선언 행수도 함께 올린다 -- 안 그러면 check_counts 가 먼저 걸려 중복을 시험하지 못한다.
+    manifest["table_counts"]["document.csv"] += 1
+    manifest["documents_by_content_type"]["video_long"] += 1
+    (source / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    with connect(seeded) as conn, pytest.raises(contract.ManifestMismatch, match="duplicate"):
+        corpus.load(conn, source, snapshot_id=6, label="dup-key")
+
+
+@pytest.mark.postgres
+def test_a_comment_whose_parent_video_is_absent_is_not_refused_by_the_database(seeded: str):
+    """계약이 `orphan_comments` 를 DB 가 진다고 적으면 거짓이 된다: 댓글의 부모는 parent_item_id 이고
+    거기엔 FK 가 없다(023 은 부분 인덱스만 둔다). FK 가 지는 것은 고아 **언급** 쪽이다."""
+    _load(seeded)
+    with connect(seeded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO corpus_document (snapshot_id, source, source_item_id, content_type,"
+            " parent_item_id, channel_id, published_at, text, collected_at, source_run)"
+            " VALUES (1, 'youtube_comment', 'CMT_ORPHAN', 'comment', 'VID_DOES_NOT_EXIST',"
+            " 'UCqrNqg3UgVoD3Sa-F_TxuSA', now(), '', now(), 'run_20260819T053057Z')"
+        )
+        assert cur.rowcount == 1
+        conn.rollback()
+
+
+def test_the_contract_does_not_claim_a_foreign_key_for_orphan_comments():
+    assert "`orphan_comments` 는 DB 가 지지 않는다" in FORMATS.read_text(encoding="utf-8")
+
+
+def test_the_count_rule_is_a_sentence_in_the_formats_contract():
+    """규칙이 코드에만 있으면 다음 사람은 "빠뜨린 것" 과 구분하지 못한다."""
+    assert "선언한 행수와 반입분을 대조한다" in FORMATS.read_text(encoding="utf-8")
+
+
 def test_a_manifest_whose_rules_differ_is_refused(tmp_path: Path):
     manifest = json.loads((FIXTURE / "manifest.json").read_text(encoding="utf-8"))
     manifest["rules"] = list(manifest["rules"])[:-1]

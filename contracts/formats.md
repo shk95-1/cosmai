@@ -54,7 +54,9 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 ## 코퍼스 스냅샷 (→ `needs.corpus_snapshot` / `corpus_document` / `corpus_mention`, 포크 #4)
 한 줄 = 한 문서다. 영상과 댓글이 같은 표에 산다(`content_type` 이 가른다). 원본은 ydc 인계 CSV 세 장
 (`archive/yt-handoff/`, document 261,317 · mention 105,358 · channel 43행)이고, **그 자리는 읽기 전용**
-(`STATE.md` §3)이라 적재기가 경로를 인자로 받는다(`python -m db.corpus load <dir>`).
+(`STATE.md` §3)이라 적재기가 경로를 인자로 받는다(`python -m db.corpus load <dir>`). 슬라이스에도
+매니페스트 사본이 있었지만(`analysis/slices/ydc/common/manifest.json`) 줄바꿈만 다른 같은 JSON 이라
+폐기했다 — 적재기가 읽는 것은 언제나 인자로 받은 디렉터리의 것이다(포크 #37).
 
 **이 행들은 2026-08-19 의 관측이지 "지금의 유튜브"가 아니다.** 재수집으로 다시 만들 수 없다 — 댓글은
 계속 쌓이고 조회수·좋아요는 `collected_at` 시점의 값이다. 그래서 관측 판본(`snapshot_id`)이 유일키의
@@ -87,6 +89,29 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 원 규칙과 같다**는 대조다. 이 11줄은 `db/corpus/contract.py` 에 상수로 서 있고, 적재기는 읽어 들인
 매니페스트가 그것과 다르면 반입을 거절한다 — 다른 규칙으로 만들어진 코퍼스가 같은 표에 섞이면 그
 표의 모든 비율이 오류 없이 달라진다.
+
+### 매니페스트가 선언한 행수 (`manifest.table_counts` · `documents_by_content_type`)
+적재기는 **선언한 행수와 반입분을 대조한다**(`db/corpus.load` → `contract.check_counts`) — 다르면 켜기
+전에 거절한다. 규칙·한계와 달리 이 값은 판본마다 달라서 계약이 수를 지지 않고 대조한다는 규칙만
+진다. 잘려 들어온 CSV 는 행이 **적을 뿐** 오류가 없고, 그러면 이 스냅샷의 모든 비율이 조용히 달라진다
+— `reproduces` 는 선크림 한 주제만 다시 세므로 그 바깥이 잘린 것을 잡지 못한다. 2026-08-19 판본의 값은
+document 261,317 · mention 105,358 · channel 43 이고 문서 구성은 `video_long` 7,085 · `video_short`
+6,888 · `video_unknown` 6 · `comment` 247,338 이다.
+
+대조가 어긋나면 **행은 남는다.** 문서 26만 행을 다 읽은 뒤에야 구성이 드러나므로 거절이 반입 뒤에
+선다 — 다만 그 행들은 자기 `snapshot_id` 아래에 있고 **켜지지 않으므로** 분석은 그것을 읽지 않는다.
+출구는 지우는 것이 아니라 원본을 고쳐 **같은 `snapshot_id` 로 다시 부르는 것**이다(모든 INSERT 가
+`ON CONFLICT DO NOTHING` 이라 빠진 자리만 메운다). `DROP` 은 매번 승인이라 출구로 쓰지 않는다.
+
+`input_counts`(입력 영상 13,979 · 댓글 247,338 · 중복 문서 0 · 고아 댓글 0 · 중복 댓글 본문 237)는
+대부분 **보류**다(포크 #37): ydc `to_common_schema.py` 가 변환 **이전**에 센 값이라 반입분 위에서 다시
+셀 수 없다. 두 칸만 여기서 선다 — 입력 행수의 합(13,979 + 247,338)이 위 document 행수이고,
+`duplicate_docs = 0` 은 새 판본에서 **읽은 행수와 들어간 행수가 같은지**로 증명한다
+(`db/corpus.load` → `contract.check_unique`; `ON CONFLICT DO NOTHING` 이 중복을 조용히 버리므로 세지
+않으면 잘려 들어온 파일과 구분되지 않는다). 나머지는 그대로 보류이고, 그중
+**`orphan_comments` 는 DB 가 지지 않는다** — 댓글의 부모는 `corpus_document.parent_item_id`(023) 이고
+거기엔 FK 가 없다(부분 인덱스뿐이다). `corpus_mention` 의 FK 가 지는 것은 고아 **언급**이지 고아
+**댓글**이 아니다.
 
 ### text 의 뜻 (`manifest.text_rule`, 그대로)
 > 영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.
