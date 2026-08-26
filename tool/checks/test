@@ -54,9 +54,16 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     # those up here would silently turn test_analyze_all.py's "link fails, so the CLI exits 1" green
     # for the wrong reason. The additive files are the ones that named jobs (#101 started_at/
     # elapsed_ms, #102 dataset); production already has both.
+    #
+    # #144 adds two more for the same reason: db/views/{mention,collection}_lineage.sql bind
+    # tubedepth.comments (the source text behind a youtube mention) and tubedepth.artifacts (the
+    # fetch that carried it). Still table-by-table, not the whole dump, so `analyze link`'s four
+    # other tubedepth tables stay absent and test_analyze_all.py keeps failing for its own reason.
     { echo 'CREATE SCHEMA IF NOT EXISTS tubedepth;'
-      sed -n '/^CREATE TABLE tubedepth\.jobs (/,/^);$/p' contracts/ddl/current/app.tubedepth.sql
-      cat contracts/ddl/tubedepth/*_jobs_*.sql
+      for t in jobs comments artifacts; do
+          sed -n "/^CREATE TABLE tubedepth\.$t (/,/^);\$/p" contracts/ddl/current/app.tubedepth.sql
+      done
+      cat contracts/ddl/tubedepth/*_jobs_*.sql contracts/ddl/tubedepth/*_comments_*.sql
     } | docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1
     # Run twice: production and the test harness both re-run this on every deploy, so it must be
     # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version).

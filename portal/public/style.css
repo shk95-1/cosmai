@@ -172,3 +172,15 @@ th.num, td.num { text-align: right; }
 .map-stripe.sev-idle { fill: var(--text-muted); }
 .map-stripe.sev-ok { fill: var(--diverging-pos); }
 .map-stripe.sev-muted { fill: var(--text-muted); fill-opacity: 0.4; }
+
+/* ---- 계보 드릴다운(index.html, #144) ---------------------------------------
+   새 색 토큰도 새 관용구도 만들지 않는다: 배너·배지·표는 관제 화면(#139)의 것 그대로이고,
+   고른 줄의 왼쪽 띠는 관제 표·구조 지도가 쓰는 것과 같은 장치다(#143). */
+#drill { border-top: 2px solid var(--border); }
+/* 누를 수 있는 표만 손 모양이 된다 — 못 내려가는 표에서 커서가 바뀌면 눌러도 아무 일이 없다. */
+.drillable tbody tr { cursor: pointer; }
+.drillable tbody tr:hover { background: var(--surface-1); }
+.drillable tbody tr.picked { background: var(--surface-1); box-shadow: inset 3px 0 0 var(--diverging-pos); }
+/* 발췌는 본문이 아니다 — 120자에서 잘린 조각이라 본문과 같은 무게로 두면 전문처럼 읽힌다. */
+.excerpt { color: var(--text-secondary); font-variant-numeric: normal; }
+.excerpt .cut { color: var(--text-muted); }
