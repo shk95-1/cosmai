@@ -377,8 +377,13 @@ def _run_trend(args: argparse.Namespace) -> int:
                 # 카드만 갈래가 다르다 -- 산출이 표가 아니라 stdout 의 마크다운이고 위반 줄이 없다.
                 made = cards_collect(conn, args.quarter)
                 print(cards_report(made), end="")
-                print(made.note)
-                # 카드 0건은 위반이 아니라 결과 없음이다 (`retrieval search` 와 같은 자리).
+                # note 는 stderr 다 -- stdout 이 곧 마크다운 산출물이라, 리다이렉트하면 `.md` 안에
+                # `trend cards run=…` 한 줄이 남는다.
+                print(made.note, file=sys.stderr)
+                for violation in made.violations:
+                    print(f"  {violation}", file=sys.stderr)
+                # **카드 0건은 1 이 아니다** -- 규칙이 다 돌고 나온 답이다. 1 은 규칙에 걸렸는데 근거
+                # 원문이 없어 카드로 서지 못한 셀이 있을 때뿐이다 (#41 이 §민감도 에서 못 박은 자리).
                 return 0 if made.status == "ok" else 1
             outcome = acts[args.action](conn)
     # 명부도 스냅샷도 주제 사전도 지표·판정 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운

@@ -191,11 +191,33 @@ def test_one_where_on_the_view_reaches_the_quote_from_a_judged_cell(judged: str)
 
 def test_the_candidate_query_takes_the_partial_index_the_corpus_declares(judged: str):
     """`source = 'youtube_comment'` 하나만 걸면 023 의 부분 인덱스를 못 타고 26만 행을 훑는다
-    (#5 운영 실측: 30초 statement_timeout 에 죽는다). 두 술어가 나란히 서 있어야 한다."""
+    (#5 운영 실측: 30초 statement_timeout 에 죽는다). 두 술어가 나란히 서 있어야 한다.
+
+    문자열만 보지 않고 **계획을 묻는다** -- #5 가 잡은 것은 술어의 모양이 아니라 운영에서의 timeout 이고,
+    술어가 그대로여도 인덱스가 사라지면(023 을 고치면) 이 테스트만 초록으로 남는다. 표본 크기에서도
+    계획이 그 인덱스를 고르는지는 아래가 확인한다. 전량(261,317문서)에서도 같은 인덱스를 타고 178ms 다
+    (2026-08-26, 계약 §근거 "전량 실측").
+    """
     from analysis.evidence import pipeline
+    from analysis.trend.pipeline import PANEL_ROLE, TOPIC_FILTER
 
     assert "c.content_type = 'comment'" in pipeline.CANDIDATES
     assert "c.source = 'youtube_comment'" in pipeline.CANDIDATES
+    with connect(judged) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "EXPLAIN " + pipeline.CANDIDATES,
+                {
+                    "snapshot": 1,
+                    "panel_version": 1,
+                    "panel_role": PANEL_ROLE,
+                    "topic_filter": TOPIC_FILTER,
+                },
+            )
+            plan = "\n".join(line for (line,) in cur.fetchall())
+        conn.commit()
+    assert "parent_item_id" in plan, plan
+    assert "Seq Scan on corpus_document" not in plan, plan
 
 
 def test_the_population_is_the_one_the_metrics_were_counted_on():
@@ -238,11 +260,41 @@ def test_the_cli_writes_the_evidence_and_then_renders_the_cards(judged: str, cap
     assert "trend evidence run=" in capsys.readouterr().out
     # 2026Q2 는 이 표본에서 규칙에 걸리는 셀이 있는 분기다 (골든이 그 값을 진다).
     assert main(["trend", "cards", "--quarter", "2026Q2", "--url", judged]) == 0
-    rendered = capsys.readouterr().out
-    assert "# R&D Opportunity Card — 2026Q2" in rendered
-    assert "**소비자 발화 (좋아요 상위)**" in rendered
-    # 규칙에 아무것도 안 걸리는 분기는 위반이 아니라 결과 없음이다.
-    assert main(["trend", "cards", "--quarter", "2024Q1", "--url", judged]) == 1
+    printed = capsys.readouterr()
+    assert "# R&D Opportunity Card — 2026Q2" in printed.out
+    assert "**소비자 발화 (좋아요 상위)**" in printed.out
+    # stdout 은 마크다운뿐이다 -- 리다이렉트한 `.md` 안에 note 가 남으면 그 파일은 그대로 문서가 아니다.
+    assert "trend cards run=" not in printed.out
+    assert "trend cards run=" in printed.err
+    # **카드 0건은 실패가 아니다.** 규칙이 다 돌고 나온 답이고, #41 이 §민감도 에서 못 박은 자리와 같다.
+    assert main(["trend", "cards", "--quarter", "2024Q1", "--url", judged]) == 0
+    assert "cards=0" in capsys.readouterr().err
+
+
+def test_a_ruled_cell_with_no_quote_left_is_the_one_partial_the_cards_have(judged: str, capsys):
+    """잘린 산출은 하나뿐이다 -- 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 셀."""
+    with connect(judged) as conn:
+        judge_run(conn)
+        run(conn)
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM topic_quarter_evidence WHERE quarter = %s", ("2026Q2",))
+        conn.commit()
+    assert main(["trend", "cards", "--quarter", "2026Q2", "--url", judged]) == 1
+    printed = capsys.readouterr()
+    assert "unquoted=" in printed.err and "unquoted_cell 2026Q2" in printed.err
+    # 그래도 stdout 은 여전히 마크다운이다(카드 0장짜리 문서).
+    assert printed.out.startswith("# R&D Opportunity Card")
+
+
+def test_a_quarter_outside_the_grid_says_so_instead_of_sending_you_back_to_judge(judged: str, capsys):
+    """judge 는 이미 돌았고 그 분기에 모집단 영상이 없을 뿐이다 -- 헛걸음을 시키지 않는다."""
+    with connect(judged) as conn:
+        judge_run(conn)
+        run(conn)
+    assert main(["trend", "cards", "--quarter", "2019Q1", "--url", judged]) == 2
+    said = capsys.readouterr().out
+    assert "not in this run's grid" in said and "2026Q2" in said
+    assert "cosmai trend judge" not in said
 
 
 def test_the_cards_are_blocked_before_the_judgement_exists(judged: str, capsys):

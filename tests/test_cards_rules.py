@@ -121,9 +121,27 @@ def test_the_strength_of_a_product_gap_card_is_the_gap_not_the_score():
 
 
 def test_a_card_needs_a_quote_or_it_is_not_a_card():
-    """설계 원칙 3 — 근거 원문이 없으면 만들지 않는다."""
+    """설계 원칙 3 — 근거 원문이 없으면 만들지 않는다. 다만 조용히 넘기지는 않는다."""
     made = cards.build([facts("채널 확산", "근거 부족", gap=19.48)], quotes={}, alias_rank={})
-    assert made == []
+    assert made.cards == ()
+    # 규칙이 골라 낸 셀이 산출에서 빠진 것이라, 그 사실이 종료 코드까지 간다 (계약 §근거·카드).
+    assert made.unquoted == (("자극_눈시림", "2026Q2"),)
+
+
+def test_a_cell_no_rule_caught_is_not_an_unquoted_cell():
+    """ "규칙에 걸린 셀이 없다"는 잘린 산출이 아니라 계산된 답이다 — 둘을 섞으면 종료 코드가 거짓말한다."""
+    made = cards.build([facts("판정 보류", "근거 부족", gap=0.4)], quotes={}, alias_rank={})
+    assert (made.cards, made.unquoted) == ((), ())
+
+
+def test_the_cap_on_quotes_is_the_one_the_evidence_rules_own():
+    """계약은 "그 수의 자리는 §근거 하나"라고 적는다 — 사본이 있으면 근거만 늘려도 카드는 셋이다."""
+    import inspect
+
+    from analysis.evidence import TOP_PER_CELL
+
+    assert cards.TOP_PER_CELL is TOP_PER_CELL
+    assert inspect.signature(cards.build).parameters["top"].default is TOP_PER_CELL
 
 
 def test_one_type_gets_one_card_and_the_strongest_wins():
@@ -136,7 +154,7 @@ def test_one_type_gets_one_card_and_the_strongest_wins():
         quotes={("자극_눈시림", "2026Q2"): [quote], ("백탁", "2026Q2"): [quote]},
         alias_rank={},
     )
-    assert [(card.topic_key, card.card_type) for card in made] == [("백탁", "제품 공백 기회")]
+    assert [(card.topic_key, card.card_type) for card in made.cards] == [("백탁", "제품 공백 기회")]
 
 
 def test_the_quote_order_is_alias_specificity_then_likes():

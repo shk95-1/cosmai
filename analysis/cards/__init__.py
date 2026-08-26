@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
+from analysis.evidence import TOP_PER_CELL
 from analysis.judge import DIFFUSING, SPIKE, STICKY, SURGE, UNJUDGED
 from analysis.types import TopicQuarterJudgementRow
 
@@ -49,6 +50,8 @@ GENERIC_ALIAS: Mapping[str, frozenset[str]] = {
     "지속력_워터프루프": frozenset({"지속"}),
 }
 UNDERCOUNTED = "최근 분기는 댓글이 계속 쌓이므로 구조적으로 과소 집계된다"
+# 인용 한 건의 표시 길이. 카드 한 장이 화면 하나에 들어가야 판단의 단위가 된다.
+QUOTE_CHARS = 220
 SINGLE_SOURCE = "단일 소스 판정 — 플랫폼 간 교차 확인 없음"
 
 
@@ -78,6 +81,18 @@ class CellFacts:
 
 
 @dataclass(frozen=True)
+class Deck:
+    """한 분기의 카드 묶음과, 규칙에 걸렸는데 근거 원문이 없어 서지 못한 셀.
+
+    둘을 갈라 내는 것은 종료 코드 때문이다 -- "규칙에 걸린 셀이 없다"는 규칙이 다 돌고 나온 정상적인
+    답이고, "걸렸는데 근거가 없다"는 잘린 산출이다 (계약 §기회 카드).
+    """
+
+    cards: tuple[Card, ...]
+    unquoted: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class Card:
     topic_key: str
     quarter: str
@@ -91,7 +106,7 @@ class Card:
     video_type: str = ""
     comment_composition_pct: float = 0.0
     video_composition_pct: float = 0.0
-    gap_pp: float | None = None
+    gap_pp: float = 0.0  # 언제나 값이다 -- 한쪽 source 에 행이 없으면 0 으로 읽는다 (`_gap`)
     velocity_yoy: float | None = None
     evidence_strength: float | None = None
     mentions: int | None = None
@@ -189,10 +204,11 @@ def build(
     *,
     quotes: Mapping[tuple[str, str], Sequence[Quote]],
     alias_rank: Mapping[str, Mapping[str, int]],
-    top: int = 3,
-) -> list[Card]:
+    top: int = TOP_PER_CELL,
+) -> Deck:
     """규칙에 걸린 셀마다 카드 하나, 그다음 유형마다 가장 센 것 하나만 남긴다."""
     made: list[Card] = []
+    unquoted: list[tuple[str, str]] = []
     for facts in cells:
         got = classify(facts)
         if not got:
@@ -203,7 +219,10 @@ def build(
             key=lambda quote: quote_order(facts.topic_key, quote, alias_rank),
         )[:top]
         if not picked:
-            continue  # 근거 원문이 없으면 카드로 만들지 않는다 (설계 원칙 3)
+            # 근거 원문이 없으면 카드로 만들지 않는다(설계 원칙 3). 조용히 넘기지는 않는다 -- 규칙이
+            # 골라 낸 셀이 산출에서 빠진 것이라, 그 사실이 종료 코드까지 간다.
+            unquoted.append((facts.topic_key, facts.quarter))
+            continue
         score = next(
             (
                 float(row.opportunity_score)
@@ -241,7 +260,7 @@ def build(
             continue
         seen.add(card.card_type)
         picked_cards.append(card)
-    return picked_cards
+    return Deck(tuple(picked_cards), tuple(sorted(unquoted)))
 
 
 def render(made: Sequence[Card], quarter: str) -> str:
@@ -255,6 +274,8 @@ def render(made: Sequence[Card], quarter: str) -> str:
     ]
     for i, card in enumerate(made, 1):
         mentions = card.mentions if card.mentions is not None else "—"
+        # 0.0 은 "값이 없다"가 아니라 "근거가 바닥이다"라는 다른 말이다.
+        strength_of = card.evidence_strength if card.evidence_strength is not None else "—"
         out += [
             f"## {i}. {card.topic_key} — {card.card_type}",
             "",
@@ -267,13 +288,14 @@ def render(made: Sequence[Card], quarter: str) -> str:
             f"| 구성비 | 댓글 {card.comment_composition_pct}% · 영상 {card.video_composition_pct}% |",
             f"| 갭(댓글−영상) | {card.gap_pp:+.2f}%p |",
             f"| velocity(YoY) | {card.velocity_yoy if card.velocity_yoy is not None else '—'} |",
-            f"| 근거 강도 / 언급 | {card.evidence_strength or '—'} / {mentions} |",
+            f"| 근거 강도 / 언급 | {strength_of} / {mentions} |",
             "",
             "**소비자 발화 (좋아요 상위)**",
             "",
         ]
         for quote in card.quotes:
-            body = " ".join((quote.text or "").split())[:220]
+            whole = " ".join((quote.text or "").split())
+            body = whole if len(whole) <= QUOTE_CHARS else whole[:QUOTE_CHARS] + "…"
             out += [
                 f"> {body}",
                 "",

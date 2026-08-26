@@ -16,7 +16,7 @@ from typing import Any, LiteralString
 
 import psycopg
 
-from analysis.cards import Card, CellFacts, Quote, alias_rank, build, render
+from analysis.cards import Card, CellFacts, Deck, Quote, alias_rank, build, render
 from analysis.evidence.pipeline import FIND_RUN, NoEvidence
 from analysis.retrieval import topics as topic_registry
 from analysis.trend.pipeline import COMMENT, PANEL_ROLE, SCOPE, VIDEO, note_of
@@ -39,6 +39,12 @@ SELECT j.topic_key, j.source, j.trend_type, j.judged, j.evidence_strength, j.sin
  WHERE j.run_id = %(run_id)s AND j.scope = %(scope)s AND j.panel_version = %(panel_version)s
    AND j.panel_role = %(panel_role)s AND j.quarter = %(quarter)s
 """
+# 격자에 있는 분기. 없는 분기를 물었을 때 "judge 를 돌려라"가 아니라 있는 분기를 말해 주기 위한 것이다.
+QUARTERS: LiteralString = (
+    "SELECT DISTINCT quarter FROM topic_quarter_judgement "
+    "WHERE run_id = %(run_id)s AND scope = %(scope)s AND panel_version = %(panel_version)s "
+    "AND panel_role = %(panel_role)s"
+)
 # 셀에서 근거 원문까지 한 줄 (db/views/topic_quarter_evidence_quote.sql).
 QUOTES: LiteralString = """
 SELECT topic_key, rank, like_count, matched_term, text, parent_video_url
@@ -54,16 +60,32 @@ class CardOutcome:
     run_id: int
     quarter: str
     cards: list[Card] = field(default_factory=list)
+    # 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 (주제, 분기).
+    unquoted: tuple[tuple[str, str], ...] = ()
 
     @property
     def status(self) -> str:
-        # 카드 0건은 위반이 아니라 결과 없음이다 -- `retrieval search` 의 같은 자리와 같은 뜻이다.
-        return "ok" if self.cards else "partial"
+        """**카드 0건은 1 이 아니다.** 그것은 규칙이 다 돌고 나온 정상적으로 계산된 답이고(이 표본에서도
+        11분기 중 8분기가 0장이다), 이 파일 맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 --
+        #41 이 `sensitivity` 에서 못 박은 그 자리와 같다 (`contracts/entrypoints.md` §민감도).
+
+        잘린 산출은 하나뿐이다: 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 셀.
+        """
+        return "ok" if not self.unquoted else "partial"
 
     @property
     def note(self) -> str:
         kinds = " ".join(f"{card.topic_key}={card.card_type}" for card in self.cards)
-        return f"trend cards run={self.run_id} quarter={self.quarter} cards={len(self.cards)} {kinds}".strip()
+        tail = f" unquoted={len(self.unquoted)}" if self.unquoted else ""
+        return (
+            f"trend cards run={self.run_id} quarter={self.quarter} "
+            f"cards={len(self.cards)} {kinds}{tail}".rstrip()
+        )
+
+    @property
+    def violations(self) -> list[str]:
+        """카드는 표를 만들지 않으므로 되물을 뷰가 없다. 잘린 자리를 같은 어휘로 싣는다."""
+        return [f"unquoted_cell {quarter} topic={topic}" for topic, quarter in self.unquoted]
 
 
 def _judgement(row: tuple, topic: str, quarter: str, scope: str, run_id: int, version: int, role: str):
@@ -122,11 +144,21 @@ def collect(
         rows = cur.fetchall()
         cur.execute(QUOTES, where)
         quoted = cur.fetchall()
+        cur.execute(QUARTERS, {k: v for k, v in where.items() if k != "quarter"})
+        known_quarters = cur.fetchall()
         ranks = alias_rank(topic_registry.load(conn).entries)
     conn.commit()
 
     if not rows:
-        raise NoEvidence(f"run {run_id} has no judgement for {quarter}; run `cosmai trend judge`")
+        # 이 분기가 격자에 없다는 뜻일 수도 있다 -- judge 는 이미 돌았는데 그 분기에 모집단 영상이 없는
+        # 것이 이 표본에서 실제로 일어난다(2025Q1). 두 갈래를 한 문장으로 말하면 헛걸음을 시킨다.
+        cur_quarters = sorted(quarter for (quarter,) in known_quarters)
+        if cur_quarters:
+            raise NoEvidence(
+                f"run {run_id} has no judged cell for {quarter}; that quarter is not in this run's "
+                f"grid (it has {', '.join(cur_quarters)})"
+            )
+        raise NoEvidence(f"run {run_id} has no topic_quarter_judgement row; run `cosmai trend judge`")
 
     by_topic: dict[str, dict[str, tuple]] = {}
     for row in rows:
@@ -164,7 +196,8 @@ def collect(
                 parent_video_url=url,
             )
         )
-    return CardOutcome(run_id, quarter, build(facts, quotes=quotes, alias_rank=ranks))
+    deck: Deck = build(facts, quotes=quotes, alias_rank=ranks)
+    return CardOutcome(run_id, quarter, list(deck.cards), deck.unquoted)
 
 
 def report(outcome: CardOutcome) -> str:
