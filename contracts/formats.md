@@ -54,7 +54,9 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 ## 코퍼스 스냅샷 (→ `needs.corpus_snapshot` / `corpus_document` / `corpus_mention`, 포크 #4)
 한 줄 = 한 문서다. 영상과 댓글이 같은 표에 산다(`content_type` 이 가른다). 원본은 ydc 인계 CSV 세 장
 (`archive/yt-handoff/`, document 261,317 · mention 105,358 · channel 43행)이고, **그 자리는 읽기 전용**
-(`STATE.md` §3)이라 적재기가 경로를 인자로 받는다(`python -m db.corpus load <dir>`).
+(`STATE.md` §3)이라 적재기가 경로를 인자로 받는다(`python -m db.corpus load <dir>`). 슬라이스에도
+매니페스트 사본이 있었지만(`analysis/slices/ydc/common/manifest.json`) 줄바꿈만 다른 같은 JSON 이라
+폐기했다 — 적재기가 읽는 것은 언제나 인자로 받은 디렉터리의 것이다(포크 #37).
 
 **이 행들은 2026-08-19 의 관측이지 "지금의 유튜브"가 아니다.** 재수집으로 다시 만들 수 없다 — 댓글은
 계속 쌓이고 조회수·좋아요는 `collected_at` 시점의 값이다. 그래서 관측 판본(`snapshot_id`)이 유일키의
