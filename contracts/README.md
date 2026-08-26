@@ -11,7 +11,7 @@
 | `ddl/needs/*.sql` | (위와 같은 디렉터리) | 적용 경로는 `db/migrate.sh` 하나 (운영·테스트 공용); 적용 여부는 원장 `needs.schema_migration`에 기록 |
 | `entrypoints.md` | CLI 진입점·종료 코드·run/fetch_log 공통 뷰 | CLI `--help` 스냅샷 + 뷰 존재 테스트 |
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입·수식, 평가 하네스가 넘어야 할 기준선 | `tests/test_contract_types.py` 가 `analysis/types.py` 와 대조 · `eval <task>` 가 기준선과 비교 |
-| `formats.md` | 사전·평가셋 CSV/테이블 포맷 | 적재 스크립트가 검증 |
+| `formats.md` | 사전·평가셋 CSV/테이블 포맷 · §카테고리 표기(A21) 가 `category` 의 정본을 못박는다 | 적재 스크립트가 검증 · `tests/test_category_canonical.py` 가 §카테고리 표기의 python 블록을 `analysis/units.py` 와 대조 |
 | `secrets.md` | secret 파일 경로와 키 이름 (값 없음) | 기동 시 키 존재 검사 |
 | `versioning.md` | `*_version` 컬럼 규칙 | 코드 리뷰 |
 | `../db/grants/needs_runtime_reader.sql` | 분석이 읽는 원천 테이블 12개의 SELECT 권한 | `tests/test_grants_reader.py` 가 `ddl/current` 와 대조 |

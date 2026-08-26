@@ -90,5 +90,6 @@ def test_low_reviews_are_complete_when_a_three_star_turns_up_in_the_ascending_sa
         )
     }
     assert (rows["p"].low_complete, rows["q"].low_complete) == (False, True)
-    assert (rows["p"].category, rows["q"].category) == ("선블록", None)
+    # 경로를 자르지 않는다 — leaf 는 metrics_need.scope 와 만나지 못한다 (formats.md §카테고리 표기).
+    assert (rows["p"].category, rows["q"].category) == ("화장품 > 선케어 > 선블록", None)
     assert (rows["p"].low_collected, rows["p"].site_review_count, rows["p"].site_low_est) == (150, 1000, 50)
