@@ -70,6 +70,14 @@ NULL 로 채우면 표는 뜨는데 볼 것이 안 보인다. 근거 셋(넷째�
 - `jobs.kind`(`video.metadata` 계열)가 위 §수집의 youtube dataset 어휘(`watch|work|flatten|prune`)와
   다르다 — `dataset` 컬럼에 그대로 넣으면 다른 두 팔과 다른 어휘가 한 컬럼에 섞인다.
 
+#102: 셋째 근거는 `tubedepth.jobs.dataset`(`contracts/ddl/tubedepth/003_jobs_dataset.sql`, 추가만·
+nullable)으로 원천이 생겼다 — `queue.enqueue`가 새로 넣는 모든 행에 그 행을 만든 `cosmai collect
+youtube --dataset` 동사(`watch|work|flatten|prune`)를 적고, `watch`가 만든 listing job의 후속
+(`follow_up_kind`) job은 fan-out 시 원본 job의 `dataset`을 그대로 물려받는다(둘 다 결국 `watch`가
+시작한 것이므로). `kind → dataset` 역방향 매핑은 1:N이라 성립하지 않는다(`watch` 한 동사가 최대 7가지
+`kind`를 만든다) — 그래서 매핑표가 아니라 쓰기 시점에 적는 별도 컬럼으로 뒀다. 기존 행(백필 없음)은
+NULL. 이 뷰에 youtube 를 넣는 배선 자체는 여전히 #77 의 몫이다.
+
 `queued` 가 두 팔 다 NULL 인 것은 그래서다: commerce·naver 는 크론이 부르는 배치 워커라 큐가 없고,
 큐를 가진 유일한 수집기가 youtube 다. 컬럼을 지우지 않고 남겨 둔 것은 그 팔이 돌아올 자리이기 때문이다.
 
