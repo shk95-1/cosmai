@@ -69,15 +69,39 @@ fetch_repo() {
     query=$(query_for "$1")
     cursor=
     while :; do
-        if [ -z "$cursor" ]; then
-            page=$(gh api graphql -f query="$query") || fail "$1: gh api graphql failed"
-        else
-            page=$(gh api graphql -f query="$query" -F cursor="$cursor") || fail "$1: gh api graphql failed"
-        fi
-        # GraphQL reports a partial failure as HTTP 200 with `errors` and no `data`, which gh
-        # exits 0 on.
-        printf '%s' "$page" | jq -e '.data.repository.issues.nodes | type == "array"' >/dev/null 2>&1 \
-            || fail "$1: the API answered without data — $(printf '%s' "$page" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null)"
+        attempt=1
+        while :; do
+            if [ -z "$cursor" ]; then
+                page=$(gh api graphql -f query="$query") || fail "$1: gh api graphql failed"
+            else
+                page=$(gh api graphql -f query="$query" -F cursor="$cursor") || fail "$1: gh api graphql failed"
+            fi
+            # `errors` and `data` are not exclusive, and the partial answer is the dangerous one:
+            # GitHub reports a nested field that timed out or was throttled with HTTP 200, the outer
+            # arrays intact and the nesting emptied. That nesting IS the graph -- `subIssues` carries
+            # queue order, `assignees` the WIP gate, `blockedBy` the blockers -- so a page with
+            # errors is never a smaller truth, it is a queue with pieces silently missing. It cost a
+            # session once (cosmai#133): a channel read 0건 and the gate read WIP 0/2 while two
+            # workers were mid-flight. Any `errors` is fatal; only the retry below is allowed first.
+            errors=$(printf '%s' "$page" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null)
+            if [ -n "$errors" ]; then
+                # Throttling and timeouts are the usual cause and they pass; one backoff is worth
+                # more than a boot that has to be restarted by hand. Anything else dies at once.
+                case "$errors" in
+                    *imeout*|*imit*|*hrottl*|*navailable*|*'try again'*|*'secondary rate'*)
+                        if [ "$attempt" = 1 ]; then
+                            attempt=2
+                            sleep "${COSMAI_ISSUE_RETRY_SECONDS:-2}"
+                            continue
+                        fi
+                        ;;
+                esac
+                fail "$1: the API answered partially — $errors"
+            fi
+            printf '%s' "$page" | jq -e '.data.repository.issues.nodes | type == "array"' >/dev/null 2>&1 \
+                || fail "$1: the API answered without data"
+            break
+        done
         printf '%s\n' "$page" >> "$2"
         printf '%s' "$page" | jq -e '.data.repository.issues.pageInfo.hasNextPage == true' >/dev/null || break
         cursor=$(printf '%s' "$page" | jq -r '.data.repository.issues.pageInfo.endCursor')

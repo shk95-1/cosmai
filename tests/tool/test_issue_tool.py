@@ -79,6 +79,28 @@ def page(repo: str, issues: list[dict], labels: list[str] | None = None) -> dict
     }
 
 
+def partial_page(repo: str, issues: list[dict], labels: list[str] | None = None) -> dict:
+    """The same page after the nested fields timed out: arrays present, contents gone.
+
+    This is what makes the failure quiet. `issues.nodes` is still a list of issues, so the
+    repository looks answered; it is `subIssues`, `assignees` and `blockedBy` that came back
+    empty, and those are exactly what the queue order, the WIP gate and the blockers are read
+    from. The server says so in `errors` -- the only place the loss is visible.
+    """
+    hollowed = []
+    for source in issues:
+        item = dict(source)
+        item["assignees"] = {"nodes": []}
+        item["subIssues"] = {"nodes": []}
+        item["blockedBy"] = {"pageInfo": {"hasNextPage": False}, "nodes": []}
+        hollowed.append(item)
+    answer = page(repo, hollowed, labels)
+    answer["errors"] = [
+        {"message": "Something went wrong while executing your query.", "type": "SERVICE_UNAVAILABLE"}
+    ]
+    return answer
+
+
 FAKE_GH = """#!/bin/sh
 # The fork pattern is tested first because "cosmai" is a substring of "cosmai-import-ydc":
 # the looser case would answer for both repos and the cross-repo tests would prove nothing.
@@ -91,6 +113,13 @@ for arg in "$@"; do
   if [ "$FAKE_GH_FAIL" = "$which" ]; then echo "fake gh: the API said no" >&2; exit 1; fi
   if [ "$FAKE_GH_ERRORS" = "$which" ]; then
     echo '{"errors":[{"message":"Although you appear to have the correct authorization"}]}'
+    exit 0
+  fi
+  # A partial failure: `data` arrives, but the expensive nested fields timed out and the
+  # server said so in `errors`. The nodes are still arrays, so a guard that only asks
+  # "did data arrive" reads this as the truth.
+  if [ "$FAKE_GH_PARTIAL" = "$which" ]; then
+    cat "$FIXTURES/$which.partial.json"
     exit 0
   fi
   cat "$FIXTURES/$which.json"
@@ -123,6 +152,14 @@ def run(tmp_path: Path):
         (tmp_path / "fork.json").write_text(
             json.dumps(page(FORK, fork or [], fixture_kwargs.get("fork_labels"))), encoding="utf-8"
         )
+        (tmp_path / "upstream.partial.json").write_text(
+            json.dumps(partial_page(UPSTREAM, upstream, fixture_kwargs.get("upstream_labels"))),
+            encoding="utf-8",
+        )
+        (tmp_path / "fork.partial.json").write_text(
+            json.dumps(partial_page(FORK, fork or [], fixture_kwargs.get("fork_labels"))),
+            encoding="utf-8",
+        )
         env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -130,6 +167,7 @@ def run(tmp_path: Path):
             "COSMAI_ISSUE_REPOS": f"{UPSTREAM} {FORK}",
             "FAKE_GH_FAIL": fixture_kwargs.get("gh_fails_on", ""),
             "FAKE_GH_ERRORS": fixture_kwargs.get("gh_errors_on", ""),
+            "FAKE_GH_PARTIAL": fixture_kwargs.get("gh_partial_on", ""),
         }
         return subprocess.run(
             [str(ISSUE), *args],
@@ -489,6 +527,47 @@ def test_an_errors_response_is_not_read_as_an_empty_repo(run):
     assert done.returncode != 0, done.stdout
     assert done.stdout.strip() == ""
     assert UPSTREAM in done.stderr, done.stderr
+
+
+def test_a_partial_response_is_not_read_as_the_whole_graph(run):
+    # HTTP 200 with `data` AND `errors`: the nodes are arrays, so "did data arrive" says yes.
+    # What is missing is the nesting, and the queue is built out of the nesting.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        gh_partial_on="upstream",
+    )
+    assert done.returncode != 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+    assert UPSTREAM in done.stderr, done.stderr
+
+
+def test_a_partial_response_does_not_empty_the_wip_gate(run):
+    # The sharpest loss: `assignees` comes back empty, so two issues someone is already working
+    # read as startable and the "새 착수 금지" gate never fires. Dying is the only safe answer.
+    done = run(
+        "ready",
+        upstream=[
+            epic(10, "tool", subs=(11, 12)),
+            issue(11, "하나", labels=("ch:tool",), parent=10, assignees=("shk95",)),
+            issue(12, "둘", labels=("ch:tool",), parent=10, assignees=("shk95",)),
+        ],
+        gh_partial_on="upstream",
+    )
+    assert done.returncode != 0, done.stdout
+    assert "WIP" not in done.stdout, done.stdout
+
+
+def test_a_partial_response_on_the_fork_names_the_fork(run):
+    # Two repos share one graph; the message has to say which half was lost.
+    done = run(
+        "lint",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        fork=[epic(20, "population", subs=(21,)), issue(21, "포크", labels=("ch:population",), parent=20)],
+        gh_partial_on="fork",
+    )
+    assert done.returncode != 0, done.stdout
+    assert FORK in done.stderr, done.stderr
 
 
 @pytest.fixture
