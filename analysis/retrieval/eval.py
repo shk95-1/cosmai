@@ -29,7 +29,19 @@ import psycopg
 from analysis.retrieval import bm25, topics
 
 K = 10
-FIELDS = ("mode", "engine", "topic_id", "query", "gold_size", "retrieved", "p_at_k", "mrr", "hit", "note")
+FIELDS = (
+    "mode",
+    "engine",
+    "topic_id",
+    "query",
+    "gold_size",
+    "retrieved",
+    "p_at_k",
+    "mrr",
+    "hit",
+    "note",
+    "store",
+)
 MODES = ("literal", "heldout")
 ENGINES = ("bm25", "vector", "hybrid")
 
@@ -65,6 +77,7 @@ class Row:
     mrr: float
     hit: bool
     note: str = ""  # 이 점수가 어느 코퍼스 위에서 나왔는지. 질의마다 같은 값이라 CSV 어느 줄을 봐도 읽힌다
+    store: str = ""  # 어느 벡터 저장소로 쟀는지. 어긋나지 않아도 실린다 -- note 와 축이 다르다 (#49)
 
 
 def queries(mode: str, dictionary: topics.Topics | None = None) -> list[tuple[str, str]]:
@@ -181,14 +194,16 @@ def run(
 
     # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
     vector_store = encoder = None
-    coverage = ""
+    coverage = stamp = ""
     if engine != "bm25":
         from analysis.retrieval import embed, vectors
 
         vector_store = vectors.load(store or vectors.DEFAULT_STORE)
-        # 저장소를 연 쪽이 커버리지를 묻는다. 채점표에 실어야 "어느 코퍼스 위의 점수인가"가 읽힌다 --
-        # 어긋나도 점수는 멀쩡한 숫자로 나오므로 수치만 봐서는 알 수 없다.
+        # 저장소를 연 쪽이 판본과 커버리지를 함께 묻는다. 채점표에 실어야 "어느 코퍼스 위의 점수인가"가
+        # 읽힌다 -- 어긋나도 점수는 멀쩡한 숫자로 나오므로 수치만 봐서는 알 수 없다.
         coverage = coverage_note(conn, vector_store) or ""
+        # 판본은 어긋남과 축이 다르다: 경고에 얹으면 **정상일 때** 어느 저장소로 쟀는지가 안 남는다 (#49).
+        stamp = vector_store.stamp
         encoder = embed.load_encoder(vector_store.model)
 
     rows: list[Row] = []
@@ -215,7 +230,7 @@ def run(
         )
         ranked = to_docs([c for c, _ in hits], k)
         p, mrr, hit = score(ranked, gold)
-        rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit, coverage))
+        rows.append(Row(mode, engine, topic_id, query, len(gold), len(ranked), p, mrr, hit, coverage, stamp))
     return rows
 
 
@@ -227,7 +242,10 @@ def summary(rows: list[Row]) -> str:
     p = sum(r.p_at_k for r in rows) / n
     mrr = sum(r.mrr for r in rows) / n
     hit = sum(1 for r in rows if r.hit) / n
-    line = f"질의 {n}개 · P@{K} {p:.3f} · MRR@{K} {mrr:.3f} · Hit@{K} {hit:.0%}"
-    # 커버리지 경고는 CSV 를 안 열어도 보여야 한다 -- 요약만 읽고 표에 옮겨 적는 것이 실제 용법이다.
-    note = next((r.note for r in rows if r.note), "")
-    return f"{line}\n{note}" if note else line
+    lines = [f"질의 {n}개 · P@{K} {p:.3f} · MRR@{K} {mrr:.3f} · Hit@{K} {hit:.0%}"]
+    # 판본과 커버리지 경고는 CSV 를 안 열어도 보여야 한다 -- 요약만 읽고 표에 옮겨 적는 것이 실제 용법이다.
+    if stamp := next((r.store for r in rows if r.store), ""):
+        lines.append(f"저장소 {stamp}")
+    if note := next((r.note for r in rows if r.note), ""):
+        lines.append(note)
+    return "\n".join(lines)
