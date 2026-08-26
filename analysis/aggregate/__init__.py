@@ -79,6 +79,20 @@ class RuleAggregator:
             return self._canonical.get(need_key, need_key) if rollup else need_key
 
         out = self._rows(scope, "", rows, denoms, key)
+        # 월 축 (#129): 같은 카테고리 합을 그 달의 언급만으로 다시 잰다. 분모는 넘기지 않는다 —
+        # product_denominator 는 captured_at 스냅샷이라 '그 달의 분모' 라는 것이 없고, 전체 기간 분모를
+        # 월 분자에 나누면 거짓 비율이 된다. denoms=[] 가 low_*·denom_*·population_share_pct 를 이미
+        # 있는 `if denoms` 분기로 NULL 에 떨군다. 제품 축까지 월별로 곱하지는 않는다 — 행 수의 자릿수가
+        # 달라지고 그 페이로드를 화면이 감당하는지 아직 재지 않았다.
+        by_month: dict[str, list[NeedMentionRow]] = {}
+        for mention in rows:
+            # month 가 빈 언급은 월 행이 아니라 전체 기간 행과 PK 가 겹쳐, upsert 가 합 행을 그
+            # 달치로 덮어쓴다. month_of() 는 NOT NULL 인 observed_at 에서 나오므로 지금은 없는
+            # 경우지만, 그때는 행이 사라지는 것이 아니라 틀린 값이 남는다.
+            if mention.month:
+                by_month.setdefault(mention.month, []).append(mention)
+        for month, group in by_month.items():
+            out += self._rows(scope, "", group, [], key, month=month)
         # 제품 축 (#41): 같은 식을 그 제품만으로 좁힌 모집단에 다시 적용한다. 카테고리 합 행은
         # product_ref='' 로 남으므로 PK (run_id, scope, need_key, month, product_ref) 가 겹치지 않는다.
         groups: dict[str, list[NeedMentionRow]] = {}
@@ -95,8 +109,9 @@ class RuleAggregator:
             keys = {(m.site, m.source_product_key) for m in group}
             mine = [d for k in keys if k in by_key for d in by_key[k]]
             out += self._rows(scope, product, group, mine, key)
-        # product_ref 까지 세 번째 키로 둔다 — 같은 (neg, need_key) 에 제품 축 행이 여럿 걸린다.
-        out.sort(key=lambda r: (-r.neg, r.need_key, r.product_ref))
+        # month·product_ref 까지 뒤 키로 둔다 — 같은 (neg, need_key) 에 두 축의 행이 여럿 걸리고,
+        # 그 자리를 삽입 순서에 맡기면 같은 입력이 run 마다 다른 순서로 쓰인다.
+        out.sort(key=lambda r: (-r.neg, r.need_key, r.month, r.product_ref))
         return out
 
     def _rows(
@@ -106,10 +121,27 @@ class RuleAggregator:
         rows: Sequence[NeedMentionRow],
         denoms: Sequence[DenominatorRow],
         key: Callable[[str], str],
+        month: str = "",
     ) -> list[MetricsNeedRow]:
-        """한 모집단(카테고리 전체 또는 제품 하나)의 need_key 별 행. 총계는 그 모집단 안에서 잰다."""
+        """한 모집단(카테고리 전체·제품 하나·한 달)의 need_key 별 행. 총계는 그 모집단 안에서 잰다."""
+        # #129: 월 행의 persist_* 는 0 이 아니라 NULL 이다. 한 달짜리 모집단에서 persist_months 는
+        # 늘 1 이라 뜻이 없는데, 0 으로 눕히면 "그 달에 나타나지 않았다"는 없는 사실이 화면에 선다.
+        whole_period = not month
         reviews = [m for m in rows if m.src == REVIEW]
         comments = [m for m in rows if m.src == COMMENT]
+        # #129: 상대시간("n년 전")에서 역산한 댓글은 수집 기준월 한 칸에 뭉친다 — 운영 실측 16,621건이
+        # 예외 없이 <연도>-08 이었다. 그 달의 yt_* 를 그대로 세면 없는 계절 패턴("매년 8월 스파이크")이
+        # 서고, 걸러 내고 0 을 남기면 "그 달에 유튜브 불만이 없었다"는 없는 침묵이 그 자리를 대신한다.
+        # 그래서 월 행은 달을 믿을 수 있는 댓글만 세되, 못 믿을 댓글이 하나라도 섞인 달은 얼마나 빠졌는지
+        # 알 수 없으므로 결측이다 — 모르는 수는 수가 아니다. 판정은 need_key 별이 아니라 그 달의 댓글
+        # 전체로 한다: 못 믿을 값은 그 need_key 의 성질이 아니라 그 달 칸의 성질이다.
+        # 리뷰(neg/pos)는 거르지 않는다 — written_at 이 NULL 인 리뷰의 폴백은 'day' 해상도라 달은
+        # 언제나 맞고, 그 폴백조차 운영 실측 0건이다 (contracts/formats.md · _wish_row 의 같은 선례).
+        datable = comments if whole_period else [m for m in comments if m.observed_at_resolution == "month"]
+        # 전체 기간 행은 지금처럼 전 댓글을 센다. 그래서 월 행 yt_* 의 합은 전체 기간 행의 yt_* 보다
+        # 작거나 NULL 일 수 있다 — 결함이 아니라 의도다. #129 의 완료 기준은 neg 합에 대한 것이지
+        # yt_* 에 대한 것이 아니다. "합이 안 맞는다"고 되돌리기 전에 위 문단을 읽어라.
+        yt_known = len(datable) == len(comments)
         months_total = len({m.month for m in reviews})
         # B6: 언급 0건 제품은 분모에만 있다. 분모가 없을 때만 언급에서 제품 모집단을 복원한다.
         products_total = (
@@ -156,14 +188,15 @@ class RuleAggregator:
                     run_id=0,  # 순수 함수는 run 을 모른다 — 기록하는 쪽이 채운다.
                     scope=scope,
                     need_key=need_key,
+                    month=month,
                     product_ref=product_ref,
                     neg=len(neg),
                     pos=len(pos),
-                    yt_neg=sum(1 for m in comments if key(m.need_key) == need_key and m.polarity == NEGATIVE)
-                    if comments
+                    yt_neg=sum(1 for m in datable if key(m.need_key) == need_key and m.polarity == NEGATIVE)
+                    if datable and yt_known
                     else None,
-                    yt_pos=sum(1 for m in comments if key(m.need_key) == need_key and m.polarity == POSITIVE)
-                    if comments
+                    yt_pos=sum(1 for m in datable if key(m.need_key) == need_key and m.polarity == POSITIVE)
+                    if datable and yt_known
                     else None,
                     unresolved=_ratio(len(neg), len(neg) + len(pos)),
                     low_share=low_share,
@@ -180,10 +213,12 @@ class RuleAggregator:
                         sum(1 for m in neg if m.strength is not None and m.strength >= LOW_STRENGTH),
                         len(neg),
                     ),
-                    persist_months=len({m.month for m in neg}),
-                    persist_months_total=months_total or None,
-                    persist_products=len({_product(m) for m in neg if _product(m)}),
-                    persist_products_total=products_total,
+                    persist_months=len({m.month for m in neg}) if whole_period else None,
+                    persist_months_total=(months_total or None) if whole_period else None,
+                    persist_products=(
+                        len({_product(m) for m in neg if _product(m)}) if whole_period else None
+                    ),
+                    persist_products_total=products_total if whole_period else None,
                     aspect_scope=scopes[-1] if scopes else None,
                 )
             )
