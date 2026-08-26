@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, LiteralString
@@ -47,41 +47,66 @@ class QueryStopwords:
     version: int | None = None
 
     def keep(self, tokens: list[str]) -> list[str]:
-        raise NotImplementedError
+        """남길 토큰. **전부 불용어면 하나도 지우지 않는다** -- 토큰 0개는 결과 0건이고, 그것은
+        필러가 낀 순위보다 나쁘다."""
+        kept = [token for token in tokens if token not in self.words]
+        return kept or tokens
 
     def dropped(self, tokens: Iterable[str]) -> list[str]:
-        raise NotImplementedError
+        """뺀 토큰. 사람에게 보여주는 용도라 순서를 지키고 중복을 접는다."""
+        seen = dict.fromkeys(token for token in tokens if token in self.words)
+        return list(seen)
 
 
 NONE = QueryStopwords(frozenset())
 
 
 def from_rows(rows: Iterable[tuple[str, int]]) -> QueryStopwords:
-    raise NotImplementedError
+    """(surface, version) 행들을 목록 하나로. 행이 없으면 `NONE` 이다 -- 빈 목록과 없는 목록은
+    검색에 같은 뜻이라 둘을 가르는 상태를 만들지 않는다."""
+    materialised = list(rows)
+    if not materialised:
+        return NONE
+    return QueryStopwords(
+        words=frozenset(surface for surface, _version in materialised),
+        version=max(version for _surface, version in materialised),
+    )
 
 
 def load(conn: Any, *, version: int | None = None) -> QueryStopwords:
-    raise NotImplementedError
+    """활성 버전(또는 지정한 버전)의 질의 불용어. 읽고 나서 커밋한다 -- 뒤이어 형태소 분석이 붙는다."""
+    with conn.cursor() as cur:
+        if version is None:
+            cur.execute(ACTIVE_SQL, (KIND, AXIS))
+        else:
+            cur.execute(VERSION_SQL, (version, KIND, AXIS))
+        rows = cur.fetchall()
+    conn.commit()
+    return from_rows((row[0], row[1]) for row in rows)
 
 
+# `topics` 와 달리 변경 통지(`on_change`)가 없다 -- 이 목록에서 파생되는 캐시가 하나도 없기 때문이고,
+# 그것이 색인 캐시가 이 목록을 안 무는 이유와 같다(질의 축은 색인을 만들지 않는다).
 _active: QueryStopwords | None = None
-_listeners: list[Callable[[QueryStopwords], None]] = []
-
-
-def on_change(listener: Callable[[QueryStopwords], None]) -> None:
-    _listeners.append(listener)
 
 
 def use(words: QueryStopwords) -> QueryStopwords:
-    raise NotImplementedError
+    """이 목록을 프로세스의 활성 목록으로 세운다. 주제 사전과 같은 이유로 전역이다 --
+    `bm25.tokenize_query` 아래로 커넥션을 들고 다닐 자리가 없다(`topics` 의 주석)."""
+    global _active
+    _active = words
+    return words
 
 
 def forget() -> None:
-    raise NotImplementedError
+    global _active
+    _active = None
 
 
 def active() -> QueryStopwords:
-    raise NotImplementedError
+    """세우지 않은 것과 활성 버전이 없는 것은 **같은 상태**다 -- 둘 다 필터 없는 검색이고, 그것이
+    이 목록 이전의 검색이다. 그래서 주제 사전과 달리 여기서 멈추지 않는다."""
+    return _active if _active is not None else NONE
 
 
 def use_active(conn: Any) -> QueryStopwords:
@@ -89,4 +114,14 @@ def use_active(conn: Any) -> QueryStopwords:
 
 
 def query_note(query: str) -> str | None:
-    raise NotImplementedError
+    """이 질의에서 뭘 뺐는지. 뺀 것이 없으면 None -- `pipeline.coverage_note` 와 같은 모양이고,
+    같은 이유로 stderr 로 나가며 종료 코드를 바꾸지 않는다(멈춰야 할 일이 아니다)."""
+    from analysis.retrieval.bm25 import tokenize
+
+    words = active()
+    tokens = tokenize(query)
+    dropped = words.dropped(tokens)
+    if not dropped or words.keep(tokens) == tokens:
+        return None
+    at = f"v{words.version}" if words.version is not None else "없음"
+    return f"질의 불용어({at})로 뺀 토큰: {dropped} -- 색인은 그대로다"
