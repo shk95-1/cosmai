@@ -4,6 +4,10 @@
 얹으면 **이미 있는 행의 뜻이 바뀌므로** 별도 표에 뒀고(이슈 #3 결정 2), 그 결정이 지켜지는 자리는
 둘이다: 월 표의 모양과, 집계기가 같은 입력에서 내는 행. 둘 다 여기서 얼린다 -- 뜻이 바뀌는 변경은
 오류를 내지 않고, 숫자만 조용히 다른 것이 된다.
+
+2026-08-27 upstream 머지(포크 #36)로 이 얼림을 다시 떴다. 집계기가 축을 둘 더 내게 됐기 때문이다 --
+제품 축(upstream #41)과 월 축(upstream #129). **먼저 있던 전체 기간 카테고리 합 두 행은 한 자리도
+움직이지 않았고**(그것이 이 파일이 지키는 문장이다), 새 축의 일곱 행이 그 위에 얹혔다.
 """
 
 from __future__ import annotations
@@ -254,9 +258,10 @@ WISHES = (
     _wish("b", ref="v/c3", fmt="영상", like=5),
 )
 
-# 2026-08-26 실측(RuleAggregator rule-v1.0). 월에서 나오는 값이 전부 들어 있다: persist_months·
-# months_present·first_month/last_month. 한 자리라도 움직이면 월 산출이 달라진 것이다.
+# 2026-08-27 실측(RuleAggregator rule-v1.0, upstream 머지 뒤). 월에서 나오는 값이 전부 들어 있다:
+# persist_months·months_present·first_month/last_month. 한 자리라도 움직이면 월 산출이 달라진 것이다.
 FROZEN_NEED_ROWS = (
+    # 전체 기간 카테고리 합 — 2026-08-26 의 얼림 그대로다.
     MetricsNeedRow(
         run_id=0, scope="선블록", need_key="밀림", month="", product_ref="", neg=1, pos=1, yt_neg=1,
         yt_pos=0, unresolved=0.5, unresolved_new=None, low_share=0.0, population_share_pct=0.0,
@@ -264,12 +269,69 @@ FROZEN_NEED_ROWS = (
         strength_low_rating_ratio=1.0, persist_months=1, persist_months_total=2, persist_products=1,
         persist_products_total=2, aspect_scope="generic",
     ),
+    # 제품 축 (upstream #41). source_product_key 가 'a'·'b' 라 oy:a·oy:b 분모와 안 맞물려 분모 칸이
+    # NULL 이다 -- 이 픽스처의 성질이지 제품 축의 규칙이 아니다.
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="밀림", month="", product_ref="oy:a", neg=1, pos=1,
+        yt_neg=None, yt_pos=None, unresolved=0.5, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=0.8, strength_low_rating_ratio=1.0, persist_months=1, persist_months_total=2,
+        persist_products=1, persist_products_total=1, aspect_scope="generic",
+    ),
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="밀림", month="", product_ref="v", neg=0, pos=0, yt_neg=1,
+        yt_pos=0, unresolved=None, unresolved_new=None, low_share=None, population_share_pct=None,
+        low_mentioning=None, denom_low=None, denom_site=None, strength_mean=None,
+        strength_low_rating_ratio=None, persist_months=0, persist_months_total=None,
+        persist_products=0, persist_products_total=None, aspect_scope="generic",
+    ),
+    # 월 축 (upstream #129) -- 분모를 넘기지 않으므로 비율 칸이 전부 NULL 이다.
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="밀림", month="2026-01", product_ref="", neg=1, pos=0,
+        yt_neg=None, yt_pos=None, unresolved=1.0, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=0.8, strength_low_rating_ratio=1.0, persist_months=None,
+        persist_months_total=None, persist_products=None, persist_products_total=None,
+        aspect_scope="generic",
+    ),
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="밀림", month="2026-02", product_ref="", neg=0, pos=1,
+        yt_neg=None, yt_pos=None, unresolved=0.0, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=None, strength_low_rating_ratio=None, persist_months=None,
+        persist_months_total=None, persist_products=None, persist_products_total=None,
+        aspect_scope="generic",
+    ),
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="밀림", month="2026-03", product_ref="", neg=0, pos=0,
+        yt_neg=1, yt_pos=0, unresolved=None, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=None, strength_low_rating_ratio=None, persist_months=None,
+        persist_months_total=None, persist_products=None, persist_products_total=None,
+        aspect_scope="generic",
+    ),
+    # 전체 기간 카테고리 합 — 2026-08-26 의 얼림 그대로다.
     MetricsNeedRow(
         run_id=0, scope="선블록", need_key="백탁", month="", product_ref="", neg=1, pos=0, yt_neg=0,
         yt_pos=0, unresolved=1.0, unresolved_new=None, low_share=0.0, population_share_pct=0.0,
         low_mentioning=0, denom_low=20, denom_site=2000, strength_mean=0.6,
         strength_low_rating_ratio=1.0, persist_months=1, persist_months_total=2, persist_products=1,
         persist_products_total=2, aspect_scope="generic",
+    ),
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="백탁", month="", product_ref="oy:b", neg=1, pos=0,
+        yt_neg=None, yt_pos=None, unresolved=1.0, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=0.6, strength_low_rating_ratio=1.0, persist_months=1, persist_months_total=1,
+        persist_products=1, persist_products_total=1, aspect_scope="generic",
+    ),
+    MetricsNeedRow(
+        run_id=0, scope="선블록", need_key="백탁", month="2026-02", product_ref="", neg=1, pos=0,
+        yt_neg=None, yt_pos=None, unresolved=1.0, unresolved_new=None, low_share=None,
+        population_share_pct=None, low_mentioning=None, denom_low=None, denom_site=None,
+        strength_mean=0.6, strength_low_rating_ratio=1.0, persist_months=None,
+        persist_months_total=None, persist_products=None, persist_products_total=None,
+        aspect_scope="generic",
     ),
 )  # fmt: skip
 FROZEN_WISH_ROWS = (
@@ -317,6 +379,22 @@ def _sorted_wish(rows: Sequence[MetricsWishRow]) -> tuple[MetricsWishRow, ...]:
 def test_the_month_aggregation_produces_the_frozen_rows():
     rows = RuleAggregator().need_metrics(MENTIONS, DENOMINATORS, "선블록")
     assert _sorted_need(rows) == FROZEN_NEED_ROWS
+
+
+def test_a_month_row_never_carries_a_denominator():
+    """upstream #129 의 규칙이 이 파일의 문장과 같은 것을 말한다 — `product_denominator` 는
+    `captured_at` 스냅샷이라 '그 달의 분모' 라는 것이 없으므로, 월 행의 비율 칸은 0 이 아니라
+    NULL 이다. 분기 표(022)가 분모를 행 안에 들고 있는 이유도 같다."""
+    rows = RuleAggregator().need_metrics(MENTIONS, DENOMINATORS, "선블록")
+    months = [r for r in rows if r.month]
+    assert months, "월 행이 하나도 없으면 이 검사는 아무것도 안 본다"
+    for row in months:
+        assert (row.low_share, row.denom_low, row.denom_site, row.population_share_pct) == (
+            None,
+            None,
+            None,
+            None,
+        )
 
 
 def test_the_wish_aggregation_produces_the_frozen_rows():
