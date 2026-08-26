@@ -49,9 +49,14 @@ WITH runs AS (
 last_run AS (
     SELECT DISTINCT ON (stage_key) * FROM runs ORDER BY stage_key, at DESC NULLS LAST
 ),
-last_ok AS (
+-- "돌았나" 이지 "깨끗하게 돌았나" 가 아니다. partial 은 돌았고 대부분을 걷은 run 이라 여기 든다 --
+-- 얼마나 잘 끝났는지는 last_run_status 가 나란히 말하고, 그것이 두 컬럼을 안 접는 이유다(#154).
+-- 넣지 않는 것: yielded(소스 락에 전부 밀려 물러나 아무것도 안 걷었다, #78) · failed · blocked.
+-- 이 선을 잘못 그으면 매일 정시에 돌지만 늘 partial 인 단계가 이틀 뒤 stalled 로 굳어 영원히
+-- 빨갛다 -- #138 이 never 를 배너에서 뺀 것과 같은 실패 모드다.
+last_ran AS (
     SELECT DISTINCT ON (stage_key) stage_key, at
-    FROM runs WHERE status = 'ok' ORDER BY stage_key, at DESC NULLS LAST
+    FROM runs WHERE status IN ('ok', 'partial') ORDER BY stage_key, at DESC NULLS LAST
 )
 SELECT
     s.stage_key,
@@ -75,6 +80,6 @@ SELECT
     r.requests, r.ok, r.blocked, r.failed, r.p90_ms
 FROM needs.pipeline_stage s
 LEFT JOIN last_run r USING (stage_key)
-LEFT JOIN last_ok  o USING (stage_key);
+LEFT JOIN last_ran o USING (stage_key);
 
 GRANT SELECT ON needs.pipeline_health TO needs_runtime;
