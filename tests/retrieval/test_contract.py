@@ -171,9 +171,9 @@ def test_the_baseline_splits_what_it_could_retrace_from_what_it_could_not():
     text = INTERFACES.read_text(encoding="utf-8")
     # 줄바꿈은 서식이라 문장을 끊어 읽지 않는다 -- 재래핑 한 번에 빨개지면 아무도 안 고친다.
     flat = " ".join(text.split())
-    assert "fingerprint=4afd3b25522a4d26" in flat  # 얼어붙은 사본이 낸 값, 아래 테스트가 다시 잰다
-    assert "**되짚은 것 — 사전의 내용.**" in flat
-    assert "**되짚을 수 없는 것 — 번호표와 지문.**" in flat
+    assert "fingerprint=5a0cae76311e1408" in flat  # 옛 적재 원본과 남아 있는 DB v2 가 함께 대는 값
+    assert "**되짚은 것 — 사전의 내용과 지문.**" in flat
+    assert "**되짚을 수 없는 것 — 번호표.**" in flat
     # v1 행이 없다는 사실이 지워지면 그 번호표가 다시 근거처럼 읽힌다.
     assert "v1 행이 없다" in flat
 

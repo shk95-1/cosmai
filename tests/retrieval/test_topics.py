@@ -17,7 +17,7 @@ from analysis.retrieval import eval as retrieval_eval
 from cosmai.cli import main
 from tests.retrieval import frozen_topics
 from tests.retrieval.conftest import csv_topics, install_topics
-from tests.retrieval.test_lexicon_v3 import expected_entries
+from tests.retrieval.test_lexicon_v3 import LISTED, expected_entries
 
 # 상수판과 맞대는 텍스트. 별칭 전부 + 슬라이스 demo() 가 붙들던 경계(coupang 오탐·조사·활용형)다.
 CORPUS = [
@@ -214,9 +214,25 @@ def test_the_stamp_names_the_ruleset_the_version_and_the_content():
     assert "version=미적재" in csv_topics(None).stamp
 
 
-def test_the_frozen_v1_copy_is_the_dictionary_the_six_baseline_lines_stand_on():
-    """`contracts/interfaces.md` §검색 실측 이 인용하는 판본 문자열의 거처. 이 사본이 움직이면 그
-    여섯 줄이 어느 사전 위의 값인지 말하는 근거가 함께 움직인다 (포크 #62)."""
+def _pre_v3_loading_source() -> topics.Topics:
+    """현행 적재 원본에서 #56 원장의 일곱 행만 거둬 그 직전 적재 원본을 재구성한다."""
+    entries = []
+    for current in csv_topics().entries:
+        entry = {key: list(value) if isinstance(value, list) else value for key, value in current.items()}
+        for row in LISTED:
+            if row.place == entry["topic"]:
+                entry[row.kind].remove(row.term)
+        entries.append(entry)
+    return topics.Topics(entries=tuple(entries), version=1, fingerprint=topics._fingerprint(entries))
+
+
+def test_the_pre_v3_loading_source_retraces_the_baseline_content_fingerprint():
+    """옛 DB v1 행은 없어도 그 적재 원본의 내용 지문은 남은 DB v2 와 같은 값으로 되짚힌다.
+    얼어붙은 사본은 mfds_inci 순서 하나가 다른 프록시라 그 사본의 지문을 기준선에 쓰면 안 된다."""
+    retraced = _pre_v3_loading_source()
+    assert retraced.stamp == (
+        "ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 · fingerprint=5a0cae76311e1408"
+    )
     frozen = topics.Topics(
         entries=tuple(frozen_topics.TOPICS),
         version=1,
@@ -225,6 +241,7 @@ def test_the_frozen_v1_copy_is_the_dictionary_the_six_baseline_lines_stand_on():
     assert frozen.stamp == (
         "ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 · fingerprint=4afd3b25522a4d26"
     )
+    assert topics.differences(retraced, frozen) == ["≈ 유기자차.mfds_inci: 순서만 다르다"]
 
 
 def test_the_difference_between_two_dictionaries_names_the_axis_it_is_on():

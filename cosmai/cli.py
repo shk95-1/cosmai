@@ -571,7 +571,7 @@ def _run_lexicon(args: argparse.Namespace) -> int:
             else:
                 d = diff(cur, args.kind, args.version, against)
         # 잘못된 CSV 도 CHECK 위반도 blocked 다 — 트레이스백은 종료 코드 1 이 되어 규약을 깬다.
-        except (ValueError, LookupError, psycopg.Error) as refused:
+        except (OSError, ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
     print(f"{d.kind} {d.version} vs {d.against}: +{len(d.added)} -{len(d.removed)} ~{len(d.changed)}")

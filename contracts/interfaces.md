@@ -1231,29 +1231,31 @@ literal 모드와 같지만 코퍼스가 다르다 — 전 소스 381,950청크�
   고친 자리가 그것이다), 여기 적은 것은 매니페스트의 `count` 가 표 머리의 청크 수와 같다는 대조로 이은
   것이다. 다시 재는 값부터는 `store` 열이 행마다 스스로 적으므로 이 대조가 필요 없다.
 - **이 여섯 줄이 선 주제 사전 판본**(포크 #62). 레포가 그 사전을 얼려 두었다 —
-  `tests/retrieval/frozen_topics.py`(이식 직전 사본, 2026-08-26 얼림). 그 사본의 판본 문자열은
-  `ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 · fingerprint=4afd3b25522a4d26` 이고
-  (`tests/retrieval/test_topics.py` 가 붙든다), 평가 행이 오늘 CSV `dictionary` 열에 싣는 것과 **같은
-  모양**이다(`entrypoints.md` §검색). 이 판본도 **행이 스스로 적은 것이 아니다** — 그때의 원값 CSV 여섯
-  벌에는 사전 열이 없었다. 다만 **이 다섯 칸이 다 같은 무게는 아니라** 아래 둘로 갈라 적는다.
-- **되짚은 것 — 사전의 내용.** 그 내용은 레포 안에서 오늘까지 이어지고, 이음매마다 다시 재는 길이 있다.
-  ① 얼어붙은 사본 = 적재 원본 CSV − 포크 #56 의 별칭 일곱 (`tests/retrieval/test_topics.py` 의
-  `_same_dictionary`). ② 적재 원본 CSV = 운영 활성 v3 — 주제·별칭·순서까지 **차이 0**
-  (`tool/show-lexicon-stamp --csv analysis/retrieval/dict/topics_v1.csv --against 3`, 실측 2026-08-27;
-  행 단위로는 `cosmai lexicon diff --kind aspect --csv analysis/retrieval/dict/topics_v1.csv`).
-  ③ 운영 v3 = 운영 v2 + 그 일곱, **그 밖의 차이 없음**(`tool/show-lexicon-stamp --version 3 --against 2`).
+  그때 DB v1 에 넣은 적재 원본(`git show de2ee06:analysis/retrieval/dict/topics_v1.csv`)으로 되짚은
+  판본 문자열은 `ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 ·
+  fingerprint=5a0cae76311e1408` 이다. 평가 행이 오늘 CSV `dictionary` 열에 싣는 것과 **같은 모양**이다
+  (`entrypoints.md` §검색). 이 판본도 **행이 스스로 적은 것이 아니다** — 그때의 원값 CSV 여섯 벌에는
+  사전 열이 없었다. 다만 **이 다섯 칸이 다 같은 무게는 아니라** 아래 둘로 갈라 적는다.
+- **되짚은 것 — 사전의 내용과 지문.** 옛 적재 원본을 `tool/show-lexicon-stamp --csv <옛 CSV>
+  --against 2` 로 운영의 남아 있는 v2 와 맞대면 양쪽이 `fingerprint=5a0cae76311e1408` 이고 **차이
+  없다**(운영 DB 읽기 전용 실측 2026-08-27). 레포의 `tests/retrieval/frozen_topics.py` 는 평가 이식
+  직전의 **프록시 사본**이다. 그 사본은 `유기자차.mfds_inci` 의 순서 하나가 적재 원본과 달라
+  `fingerprint=4afd3b25522a4d26` 을 내지만, 그 열은 매칭도 질의도 읽지 않는다. 두 사전이 그 순서
+  하나에서만 갈린다는 것은 `tests/retrieval/test_topics.py` 가 기계로 되묻는다.
+
+  내용은 그 뒤로도 이어진다. ① 옛 적재 원본 = 운영 v2 — 위 대조에서 차이 0. ② 현재 적재 원본 =
+  운영 활성 v3 — 주제·별칭·순서까지 **차이 0**(`tool/show-lexicon-stamp --csv
+  analysis/retrieval/dict/topics_v1.csv --against 3`; 행 단위로는 `cosmai lexicon diff --kind aspect
+  --csv analysis/retrieval/dict/topics_v1.csv`). ③ 운영 v3 = 운영 v2 + 포크 #56 의 별칭 일곱,
+  **그 밖의 차이 없음**(`tool/show-lexicon-stamp --version 3 --against 2`).
   그래서 "오늘 켜진 사전이 저 여섯 줄의 사전에서 무엇이 늘어난 것인가"는 세 명령으로 답이 나온다:
   `촉촉함_건조함` +`속건조` · `톤업_메이크업베이스` +`파데프리` · `선크림` +`썬쿠션`·`썬스틱`·`선에센스`·
   `선스프레이`·`sunscreen`. 그 델타가 질의를 61/60 → 63/62 로 늘린다.
-- **되짚을 수 없는 것 — 번호표와 지문.** `needs.aspect_lexicon` 의 `ruleset='retrieval-topic'` 에 **v1 행이
+- **되짚을 수 없는 것 — 번호표.** `needs.aspect_lexicon` 의 `ruleset='retrieval-topic'` 에 **v1 행이
   없다**: 남아 있는 것은 v2 94행(꺼짐)과 v3 101행(켜짐)뿐이다(운영 DB 읽기 전용 실측 2026-08-27 ·
   `tool/show-lexicon-stamp` · v2 `fingerprint=5a0cae76311e1408` · v3 `ae48f7cfb70a60f7`). 그러므로
-  **`version=1` 은 그때의 계약과 포크 #8 의 초록이 남긴 기록이지 DB 가 대는 근거가 아니다.** 지문도
-  마찬가지다 — 얼어붙은 사본의 `4afd3b25522a4d26` 은 DB 의 어느 버전도 낸 적이 없는 값이다: 사본과 적재
-  원본은 `유기자차` 의 `mfds_inci` **순서**가 다르고(`_same_dictionary` 가 그 칸만 집합으로 맞대는 이유가
-  그것이다) `_fingerprint` 는 그 순서를 문다. 그 열은 `match_topics` 도 질의도 읽지 않으므로 여섯 줄을
-  움직일 수 없지만, **지문 한 칸으로 "같은 사전"을 증명하는 길은 그래서 막혀 있다** — 같음의 근거는
-  지문이 아니라 위 ①~③ 의 칸별 대조다.
+  **`version=1` 은 그때의 계약과 포크 #8 의 초록이 남긴 기록이지 DB 가 대는 근거가 아니다.** 내용과
+  지문은 남아 있는 v2 로 되짚었지만, 그 내용에 번호 1을 붙여 실제로 활성화했던 DB 행은 사라졌다.
 - 다시 재는 값부터는 `dictionary` 열이 행마다 스스로 적으므로 이 되짚기가 필요 없다. **이 표를 다시 재는
   것은 이 이슈가 하지 않았다** — 여섯 줄은 그대로 v1 판본의 기록이고, 재측정은 그때 `dictionary`·`store`
   두 열을 함께 실은 원값 위에 선다.

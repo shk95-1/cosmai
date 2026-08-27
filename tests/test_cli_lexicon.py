@@ -103,6 +103,12 @@ def test_a_csv_whose_kind_column_disagrees_is_refused(seeded: str, tmp_path: Pat
     assert "carries kind(s) brand, not ingredient" in capsys.readouterr().out
 
 
+def test_an_unreadable_diff_csv_is_blocked_not_failed(seeded: str, tmp_path: Path, capsys):
+    missing = tmp_path / "없는.csv"
+    assert main(["lexicon", "diff", "--kind", "aspect", "--csv", str(missing), "--url", seeded]) == 2
+    assert "No such file or directory" in capsys.readouterr().out
+
+
 def test_reloading_version_1_leaves_the_seeded_dictionary_alone(seeded: str, tmp_path: Path, capsys):
     csv = _csv(tmp_path, "brand_v1.csv", BRAND_V1_AGAIN)
     assert main(["lexicon", "load", "--kind", "brand", "--version", "1", csv, "--url", seeded]) == 0
