@@ -7,7 +7,7 @@
 -- 코디네이터 세션이 한 명령씩 한다 -- 구 스택 권한이라 STATE.md §3 의 매번 승인이다.
 --
 -- 적용 전후 대조: db/grants/postgrest_anon_check.sql (읽기 전용). 적용 후 anon 이 보는 것은
--- needs 9 + trend_radar 9 + tubedepth 3 = 21 개여야 한다.
+-- needs 11 + trend_radar 9 + tubedepth 3 = 23 개여야 한다 (needs 는 이 파일이 건드리지 않는다).
 --
 -- 슈퍼유저(platform)가 실행한다: REVOKE 대상 권한을 준 것이 trend_radar_owner 와
 -- tubedepth_owner 이고, 지우는 DEFAULT PRIVILEGES 는 tubedepth_owner 소유다.

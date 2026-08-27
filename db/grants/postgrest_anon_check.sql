@@ -25,12 +25,13 @@ WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
   AND has_table_privilege('postgrest_anon', c.oid, 'SELECT')
 ORDER BY 1, 2;
 
--- 2) 스키마별 개수. 적용 후 목표는 needs 9 · trend_radar 9 · tubedepth 3 = 21 이다
---    (적용 전 실측 2026-08-27: needs 9 · trend_radar 13 · tubedepth 12 = 34).
+-- 2) 스키마별 개수. 적용 후 목표는 needs 11 · trend_radar 9 · tubedepth 3 = 23 이다
+--    (적용 전 실측 2026-08-27: needs 11 · trend_radar 13 · tubedepth 12 = 36).
+--    needs 는 좁히기가 건드리지 않아 전후가 같다 -- #144 의 계보 뷰 둘을 포함해 11 이다.
 SELECT n.nspname AS schema,
        count(*) AS visible,
-       CASE n.nspname WHEN 'needs' THEN 9 WHEN 'trend_radar' THEN 9 WHEN 'tubedepth' THEN 3 END AS target_after,
-       CASE n.nspname WHEN 'needs' THEN 9 WHEN 'trend_radar' THEN 13 WHEN 'tubedepth' THEN 12 END AS measured_before
+       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 9 WHEN 'tubedepth' THEN 3 END AS target_after,
+       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 13 WHEN 'tubedepth' THEN 12 END AS measured_before
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')

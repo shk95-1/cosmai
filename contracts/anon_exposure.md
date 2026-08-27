@@ -13,8 +13,11 @@
 
 | | 관계 수 | 근거 |
 |---|---|---|
-| 적용 전 (현행, 2026-08-27 실측) | 34 = needs 9 + trend_radar 13 + tubedepth 12 | `has_table_privilege` 전수 + 세 스키마 라이브 OpenAPI |
-| 적용 후 (목표) | 21 = needs 9 + trend_radar 9 + tubedepth 3 | `db/grants/postgrest_anon_old_stack.sql` |
+| 적용 전 (현행, 2026-08-27 실측) | 36 = needs 11 + trend_radar 13 + tubedepth 12 | `has_table_privilege` 전수 + 세 스키마 라이브 OpenAPI |
+| 적용 후 (목표) | 23 = needs 11 + trend_radar 9 + tubedepth 3 | `db/grants/postgrest_anon_old_stack.sql` |
+
+`needs` 가 9 에서 11 이 된 것은 `#144`(계보 드릴다운)가 이 브랜치가 갈라진 뒤 머지되며
+(`558a699`) 뷰 둘을 anon 에 연 것이다 — 좁히기와 무관한 정당한 추가다.
 
 ## 문이 셋이다
 
@@ -49,18 +52,29 @@
 
 ## needs
 
-9개. 변화 없다 — 좁히기가 이 스키마를 건드리지 않는다. 이 레포가 GRANT 하고 테스트가 실제 DB의
-`has_table_privilege` 와 대조한다.
+11개. 좁히기는 이 스키마를 건드리지 않는다 — 적용 전후가 같다. 이 레포가 GRANT 하고 테스트가
+실제 DB 의 `has_table_privilege` 와 대조한다.
 
 `needs.metrics_need` · `needs.metrics_wish` · `needs.product_ref` · `needs.analysis_run` ·
 `needs.entity_lexicon` · `needs.aspect_lexicon` · `needs.pipeline_stage` · `needs.pipeline_edge` ·
-`needs.pipeline_health`(뷰)
+`needs.pipeline_health`(뷰) · `needs.mention_lineage`(뷰) · `needs.collection_lineage`(뷰)
+
+뒤의 둘은 `#144` 계보 드릴다운이 연다(`db/views/mention_lineage.sql:149` ·
+`collection_lineage.sql:191`). 포털이 지표 한 칸에서 언급으로, 언급에서 수집분으로 내려갈 때
+부른다(`portal/public/app.js:351,441`).
+
+**`mention_lineage` 는 원문을 내지 않는다 — 120자 발췌만 낸다**(`sentence_excerpt` ·
+`doc_excerpt`, 뷰 파일 125·132행; 전문 길이를 나란히 두어 잘렸다는 사실이 숨지 않는다).
+원문 컬럼은 이름조차 나가지 않는다. 사용자 결정 2026-08-27. 그 자르기의 이유는 **이 뷰가
+원문 전달 경로가 되지 않게** 하는 것이지 anon 이 리뷰 본문을 못 본다는 것이 아니다 — 그 선은
+`trend_radar.review` 쪽에 이미 없고, 그것을 다루는 것이 이 문서와 `#168` 이다.
 
 닫혀 있는 것 중 이름이 걸린 둘: `need_mention` · `labeled_set` — 수집 원문 문장을 들고 있어
 화이트리스트 밖이다. `corpus_*` · `*_mention` · `retrieval_chunk` · `topic_quarter_*` 도 같다.
 
-포털이 실제로 부르는 것은 7개다(`portal/public/app.js:282-287`, `map-app.js:127-129`,
-`ops-app.js:92`). `entity_lexicon` · `aspect_lexicon` 은 열려 있으나 부르는 화면이 없다.
+`entity_lexicon` · `aspect_lexicon` 은 **열려 있으나 부르는 화면이 없다**(`#168` 조사
+2026-08-27: `portal/` 전체에 참조 0건). 규칙 사전이라 민감도는 낮고 이번 결정 범위 밖이라
+그대로 둔다 — 좁힐지는 별건이다.
 
 ## trend_radar 적용 전
 
