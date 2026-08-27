@@ -24,7 +24,7 @@ def csv_rows(path=topics.DICTIONARY_CSV) -> list[tuple[object, ...]]:
     return _csv_rows("aspect", str(path))
 
 
-def csv_topics(version: int = 1) -> topics.Topics:
+def csv_topics(version: int | None = 1) -> topics.Topics:
     from db.lexicon import ASPECT_COLUMNS
 
     aspect, pattern, extra = (ASPECT_COLUMNS.index(c) for c in ("aspect", "pattern", "extra"))

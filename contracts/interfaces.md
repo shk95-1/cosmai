@@ -1392,7 +1392,8 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
   단어이자 확장 목록에 들어온다 — 질의도 61/60 에서 **63/62** 로 는다. 그래서 v3 를 켠 뒤 이 표는 **다시
   재기 전까지 v1 판본의 기록**이고, 다음 재측정이 어느 델타 위의 값인지는 `tests/retrieval/test_topics.py`
   가 붙드는 "얼어붙은 v1 + #56 원장" 등식이 말한다. 표의 모양(mode×engine 여섯 줄·채택 조건)은 그대로다.
-- 이 숫자를 만든 주제 사전은 **`needs.aspect_lexicon` 의 활성 버전**(`ruleset='retrieval-topic'`, v1)이다.
+- 이 숫자를 만든 주제 사전은 **`needs.aspect_lexicon` 의 활성 버전**(`ruleset='retrieval-topic'`, v1 —
+  그 **번호표는 DB 로 확인할 수 없다**, 아래 세 줄)이다.
   포크 #8 이 원천을 `analysis/retrieval/topics.py` 의 상수에서 그리로 옮겼고, 옮긴 사전이 상수판과 **같은
   15개 주제·같은 별칭·같은 `match_topics` 결과**라는 것을 `tests/retrieval/test_topics.py` 가 얼어붙은 사본
   (`tests/retrieval/frozen_topics.py`)과 맞대어 붙든다 — 그 동등성이 **선언된 델타 없이** 깨지면 이 표는
@@ -1418,6 +1419,35 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 - 이 판본은 **행이 스스로 적은 것이 아니다** — 그때의 원값 CSV 여섯 벌에는 판본 열이 아예 없었고(포크 #49 가
   고친 자리가 그것이다), 여기 적은 것은 매니페스트의 `count` 가 표 머리의 청크 수와 같다는 대조로 이은
   것이다. 다시 재는 값부터는 `store` 열이 행마다 스스로 적으므로 이 대조가 필요 없다.
+- **이 여섯 줄이 선 주제 사전 판본**(포크 #62). 레포가 그 사전을 얼려 두었다 —
+  그때 DB v1 에 넣은 적재 원본(`git show de2ee06:analysis/retrieval/dict/topics_v1.csv`)으로 되짚은
+  판본 문자열은 `ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 ·
+  fingerprint=5a0cae76311e1408` 이다. 평가 행이 오늘 CSV `dictionary` 열에 싣는 것과 **같은 모양**이다
+  (`entrypoints.md` §검색). 이 판본도 **행이 스스로 적은 것이 아니다** — 그때의 원값 CSV 여섯 벌에는
+  사전 열이 없었다. 다만 **이 다섯 칸이 다 같은 무게는 아니라** 아래 둘로 갈라 적는다.
+- **되짚은 것 — 사전의 내용과 지문.** 옛 적재 원본을 `tool/show-lexicon-stamp --csv <옛 CSV>
+  --against 2` 로 운영의 남아 있는 v2 와 맞대면 양쪽이 `fingerprint=5a0cae76311e1408` 이고 **차이
+  없다**(운영 DB 읽기 전용 실측 2026-08-27). 레포의 `tests/retrieval/frozen_topics.py` 는 평가 이식
+  직전의 **프록시 사본**이다. 그 사본은 `유기자차.mfds_inci` 의 순서 하나가 적재 원본과 달라
+  `fingerprint=4afd3b25522a4d26` 을 내지만, 그 열은 매칭도 질의도 읽지 않는다. 두 사전이 그 순서
+  하나에서만 갈린다는 것은 `tests/retrieval/test_topics.py` 가 기계로 되묻는다.
+
+  내용은 그 뒤로도 이어진다. ① 옛 적재 원본 = 운영 v2 — 위 대조에서 차이 0. ② 현재 적재 원본 =
+  운영 활성 v3 — 주제·별칭·순서까지 **차이 0**(`tool/show-lexicon-stamp --csv
+  analysis/retrieval/dict/topics_v1.csv --against 3`; 행 단위로는 `cosmai lexicon diff --kind aspect
+  --csv analysis/retrieval/dict/topics_v1.csv`). ③ 운영 v3 = 운영 v2 + 포크 #56 의 별칭 일곱,
+  **그 밖의 차이 없음**(`tool/show-lexicon-stamp --version 3 --against 2`).
+  그래서 "오늘 켜진 사전이 저 여섯 줄의 사전에서 무엇이 늘어난 것인가"는 세 명령으로 답이 나온다:
+  `촉촉함_건조함` +`속건조` · `톤업_메이크업베이스` +`파데프리` · `선크림` +`썬쿠션`·`썬스틱`·`선에센스`·
+  `선스프레이`·`sunscreen`. 그 델타가 질의를 61/60 → 63/62 로 늘린다.
+- **되짚을 수 없는 것 — 번호표.** `needs.aspect_lexicon` 의 `ruleset='retrieval-topic'` 에 **v1 행이
+  없다**: 남아 있는 것은 v2 94행(꺼짐)과 v3 101행(켜짐)뿐이다(운영 DB 읽기 전용 실측 2026-08-27 ·
+  `tool/show-lexicon-stamp` · v2 `fingerprint=5a0cae76311e1408` · v3 `ae48f7cfb70a60f7`). 그러므로
+  **`version=1` 은 그때의 계약과 포크 #8 의 초록이 남긴 기록이지 DB 가 대는 근거가 아니다.** 내용과
+  지문은 남아 있는 v2 로 되짚었지만, 그 내용에 번호 1을 붙여 실제로 활성화했던 DB 행은 사라졌다.
+- 다시 재는 값부터는 `dictionary` 열이 행마다 스스로 적으므로 이 되짚기가 필요 없다. **이 표를 다시 재는
+  것은 이 이슈가 하지 않았다** — 여섯 줄은 그대로 v1 판본의 기록이고, 재측정은 그때 `dictionary`·`store`
+  두 열을 함께 실은 원값 위에 선다.
 
 ## 벡터 하한선 (두지 않는다 — 분포가 갈리지 않는다, 포크 #48)
 `analysis/retrieval/vectors.py` 의 `search` 에는 유사도 하한선이 없다 — 코사인으로 정렬해 상위 k 를 그대로
@@ -1467,12 +1497,13 @@ chunked_at_max=키없음`, 활성 주제 사전 v2):
 - 이 표는 §검색 실측 과 **같은 저장소·같은 질의 목록** 위에 서 있다. 다만 **나란히 읽는 수는 아니다** —
   저쪽은 P@10 이고 이쪽은 코사인이라 축이 다르다. 사전도 같은 판본이 아니다: 저 표는 활성 v1 위의
   값이라 적혀 있고 이 표는 v2 위의 값인데, `needs.aspect_lexicon` 에 `ruleset='retrieval-topic'` 의 v1 행이
-  더는 없어 두 판본을 직접 맞댈 수 없다(2026-08-27). 맞댈 수 있는 것은 적재 원본
-  `analysis/retrieval/dict/topics_v1.csv` 이고, **그 CSV 와 활성 v2 가 내는 literal 질의 61개는 같다**
-  (실측 2026-08-27 · 다시 재는 길은 `tool/measure-vector-floor` 의 `csv_queries` 칸이다 — 두 부분 다
-  매번 낸다. `cosmai lexicon diff` 는 이 자리에 못 쓴다: **DB 버전끼리만** 비교하므로 CSV 와 맞대지
-  못하고, 맞댈 상대인 v1 행이 없다). 그 v1 행이 사라진 것은 이 이슈가 만든 문제가 아니라 여기서 처음
-  글로 남긴 자리다 — 포크 #62 가 진다.
+  더는 없어 두 판본을 **DB 안에서** 직접 맞댈 수 없다(2026-08-27 · 오늘 활성은 v2 도 아니라 v3 다).
+  포크 #62 가 그 자리를 이었다: 되짚은 것(사전의 내용)과 되짚을 수 없는 것(번호표와 지문)을 갈라
+  §검색 실측 이 적고, CSV 를 DB 버전과 맞대는 길이 둘 섰다 — 행 단위는 `cosmai lexicon diff --kind aspect
+  --csv <path>`, 컴파일된 사전 단위는 `tool/show-lexicon-stamp --csv <path> --against <n>` 이다.
+  다만 **이 표의 표본(61개)은 다시 확인해 주지 않는다**: 그때의 대조는 "활성 v2 의 literal 질의 61개가
+  그 시점의 적재 원본 CSV 와 같다"였는데, 그 뒤 적재 원본이 v3 내용이 되고 활성도 v3 가 되어
+  `tool/measure-vector-floor` 의 `csv_queries` 칸은 이제 **오늘의** 두 짝(63개)을 맞댄다.
 - **그래서 `vectors.search` 에 하한선을 두지 않는다.** 넣는 날 `tests/retrieval/test_vector_floor.py` 의
   `test_search_fills_top_k_however_far_the_query_is` 가 빨개지고, 그때 이 절을 함께 고쳐야 한다.
 

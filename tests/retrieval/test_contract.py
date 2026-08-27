@@ -155,6 +155,31 @@ def test_the_scorecard_column_the_contract_names_is_a_column():
     assert {"store", "note"} <= set(retrieval_eval.FIELDS)
 
 
+def test_the_scorecard_carries_the_dictionary_column_on_every_engine():
+    """사전 판본은 `store` 와 축이 다르다 -- 저장소는 vector·hybrid 만 열지만 정답도 질의도 사전이
+    만드므로 bm25 행도 사전 위에 서 있다 (#62)."""
+    from analysis.retrieval import eval as retrieval_eval
+
+    section = "\n".join(_search_section())
+    assert "CSV `dictionary` 열" in section
+    assert {"store", "note", "dictionary"} <= set(retrieval_eval.FIELDS)
+
+
+def test_the_baseline_splits_what_it_could_retrace_from_what_it_could_not():
+    """되짚은 것과 못 되짚은 것을 한 낱말로 뭉치면 다음 사람은 번호표 `v1` 을 DB 가 대는 근거로
+    읽는다 -- 그 근거는 없다 (#62, #49 가 벡터 축에서 한 것과 같은 가름)."""
+    text = INTERFACES.read_text(encoding="utf-8")
+    # 줄바꿈은 서식이라 문장을 끊어 읽지 않는다 -- 재래핑 한 번에 빨개지면 아무도 안 고친다.
+    flat = " ".join(text.split())
+    assert (
+        "version=1 · topics=15 · aliases=73 · fingerprint=5a0cae76311e1408" in flat
+    )  # 옛 적재 원본과 남아 있는 DB v2 가 함께 대는 값
+    assert "**되짚은 것 — 사전의 내용과 지문.**" in flat
+    assert "**되짚을 수 없는 것 — 번호표.**" in flat
+    # v1 행이 없다는 사실이 지워지면 그 번호표가 다시 근거처럼 읽힌다.
+    assert "v1 행이 없다" in flat
+
+
 def test_the_baseline_names_the_store_the_vector_lines_stand_on():
     """판본을 안 적으면 다음 재측정이 어느 저장소와의 델타인지 말할 수 없다 -- ydc 가 "1차 → 2차" 로
     라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 자리다(#49)."""

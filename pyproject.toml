@@ -72,6 +72,7 @@ extend-include = [
     "tool/measure-query-routing",
     "tool/measure-vector-floor",
     "tool/show-vector-stamp",
+    "tool/show-lexicon-stamp",
     "tool/compare-ydc-crosscheck",
     "tool/compare-ydc-holdout",
     "tool/measure-crosscheck-keys",

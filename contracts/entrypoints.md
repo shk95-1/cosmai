@@ -173,8 +173,18 @@ profile 뒤라 안 돈다. 선언과 크론탭의 어긋남은 `tests/test_pipel
 cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
   stage ∈ {link, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
-cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
+cosmai lexicon {load, activate} --kind <kind> --version <n>
+cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--against <n>]
 ```
+- **`lexicon diff` 는 적재 원본 CSV 를 DB 버전과 맞댈 수 있다**(포크 #62, `--csv`). 그전까지 이 명령은
+  **DB 버전끼리만** 비교했고 `--version` 이 필수였다 — 그래서 "레포의 CSV 가 지금 켜져 있는 사전인가"를
+  물을 길이 레포 안에 없었다(그 물음이 실제로 필요해진 자리는 `interfaces.md` §검색 실측 의 판본 되짚기다).
+  CSV 쪽은 `lexicon load` 가 타는 **그 변환**(`cosmai.cli._csv_rows`)을 그대로 타고, 양쪽 키·값은 **같은 SQL
+  식**으로 만든다 — 한쪽을 파이썬으로 다시 렌더하면 `extra` jsonb 의 키 순서 하나로 전 행이 "바뀜"이 된다.
+  `--against` 없으면 활성 버전이 상대다. **aspect 는 CSV 가 말하는 룰셋으로 좁혀 맞댄다**: 한 aspect 버전에는
+  룰셋이 여럿 살고(`formats.md` §aspect 사전의 ruleset) CSV 는 그중 하나의 적재 원본이라, 안 좁히면 다른
+  룰셋 전부가 "지워짐"으로 나온다. `--version` 과 `--csv` 를 함께 주면 blocked(2) — 어느 쪽이 그 판본인지
+  둘이 말하면 답이 둘이다. 종료 코드는 **갈렸다고 바뀌지 않는다**(0 = 답이 계산됐다).
 - T14: `extract` 는 단독 stage 가 아니다 — 후보만 만들고 아무 행도 쓰지 않아 멱등을 관측할 수 없다. 추출은 `polarity` 안에서 돈다(`Extractor` 프로토콜은 그대로).
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
@@ -406,6 +416,15 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   **판본 없는 행은 나올 수 없다**: 저장소를 못 열면 그 실행이 통째로 blocked(2)이고, `model` 이 빈
   저장소는 `load` 가 거절한다(위 blocked 항목). bm25 행은 비어 있다 — 저장소를 열지 않으니 지어낼 판본이
   없다. 이 열은 종료 코드를 바꾸지 않는다.
+- **평가 행은 주제 사전 판본도 스스로 적는다** (포크 #62). `eval` 은 그 실행이 실제로 읽은 활성 사전의
+  `ruleset`·`version`·주제 수·별칭 수·**내용 지문**을 CSV `dictionary` 열과 stdout 요약 한 줄에 싣는다.
+  바로 위 저장소 판본과 **축이 다르고, 채우는 행의 집합도 다르다**: `store` 는 저장소를 여는 vector·hybrid
+  에만 있지만 `dictionary` 는 **세 엔진 전부**에 있다 — 정답(`match_topics`)도 질의(주제 별칭)도 사전이
+  만들므로 저장소를 안 여는 bm25 행도 사전 위에 서 있다. 번호표만 싣지 않는 이유는 **켜져 있는 버전에 행을
+  더할 수 있어서**다(같은 이유로 `pipeline.index_signature` 도 번호와 지문을 함께 문다). 별칭 수는 `ko`+`latin`
+  만 센다 — `mfds_inci` 는 매칭에도 질의에도 쓰이지 않아 함께 세면 한 낱말이 두 축을 말한다.
+  **판본 없는 행은 나올 수 없다**: 활성 사전이 없으면 그 실행이 통째로 blocked(2)다(위 blocked 항목).
+  이 열은 종료 코드를 바꾸지 않는다. 판본을 다시 찍는 길은 `tool/show-lexicon-stamp` 다.
 - **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
   BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + Kiwi
   사전 두 벌의 해시 + **활성 주제 사전의 버전과 내용 지문**). 주제 사전이 파일이 아니게 된 뒤로 파일 해시만

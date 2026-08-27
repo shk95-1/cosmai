@@ -53,12 +53,32 @@ class Topics:
     """사전 한 벌. `entries` 는 적재 순서를 지킨다 -- `match_topics` 가 그 순서로 답한다."""
 
     entries: tuple[dict, ...]
-    version: int
+    version: int | None  # 적재가 주는 번호표. 적재 원본 CSV 한 벌에는 아직 없다 (포크 #62)
     fingerprint: str
     _latin: dict[str, re.Pattern[str] | None] = field(default_factory=dict, repr=False)
 
     def latin(self, topic: str) -> re.Pattern[str] | None:
         return self._latin.get(topic)
+
+    @property
+    def aliases(self) -> int:
+        """질의와 매칭이 실제로 보는 표기 수. `mfds_inci` 는 세지 않는다 -- 그 계열은 매칭에도 질의에도
+        쓰이지 않아(위 KINDS) 함께 세면 축이 다른 두 수가 한 낱말이 된다."""
+        return sum(len(entry["ko"]) + len(entry["latin"]) for entry in self.entries)
+
+    @property
+    def stamp(self) -> str:
+        """이 사전이 어느 판본인지 한 줄 (포크 #62). `vectors.VectorStore.stamp` 와 같은 자리다 --
+        평가 행이 저장소 판본을 스스로 적듯 사전 판본도 스스로 적는다.
+
+        번호표만으로는 판본이 아니다: 켜져 있는 버전에 행을 더할 수 있어 번호가 그대로 남는다
+        (`pipeline.index_signature` 가 지문을 함께 무는 이유와 같다). 그래서 지문이 같이 간다.
+        """
+        label = "미적재" if self.version is None else self.version
+        return (
+            f"ruleset={RULESET} · version={label} · topics={len(self.entries)}"
+            f" · aliases={self.aliases} · fingerprint={self.fingerprint}"
+        )
 
 
 def latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
@@ -110,7 +130,7 @@ def _fingerprint(entries: Iterable[Mapping[str, Any]]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-def from_rows(rows: Iterable[tuple[str, str, Mapping[str, Any] | None]], version: int) -> Topics:
+def from_rows(rows: Iterable[tuple[str, str, Mapping[str, Any] | None]], version: int | None) -> Topics:
     """(aspect, pattern, extra) 행들을 사전 한 벌로. DB 와 적재 CSV 가 같은 함수를 탄다."""
     entries: dict[str, dict] = {}
     for aspect, pattern, extra in rows:
@@ -154,6 +174,40 @@ def from_rows(rows: Iterable[tuple[str, str, Mapping[str, Any] | None]], version
         fingerprint=_fingerprint(ordered),
         _latin={e["topic"]: latin_pattern(e["latin"]) for e in ordered},
     )
+
+
+COMPARED = ("topic_type", "trend_use", "ko", "latin", "mfds_inci", "note")
+
+
+def differences(left: Topics, right: Topics) -> list[str]:
+    """두 사전이 **어느 축에서** 갈리는가. 한 줄 = 주제 하나의 칸 하나다 (포크 #62).
+
+    지문은 갈렸다는 것만 말하고 어디가 갈렸는지는 말하지 않는다. `cosmai lexicon diff` 도 답하지
+    못한다 -- 그쪽은 행 단위라 한 주제의 별칭 순서가 바뀌면 행 여럿이 통째로 바뀐 것으로 보인다.
+    여기서 갈리는 것은 컴파일된 사전이고, **순서만 다른 칸은 그렇게 적는다**: `mfds_inci` 처럼
+    매칭이 보지 않는 칸의 순서도 `_fingerprint` 는 문다(그것이 규칙이다 -- 위 주석) 그래서 판본이
+    갈린 것처럼 보이는데, 점수는 그 칸으로 움직일 수 없다.
+    """
+    ours = {entry["topic"]: entry for entry in left.entries}
+    theirs = {entry["topic"]: entry for entry in right.entries}
+    out = [f"+ 주제 {topic}" for topic in ours if topic not in theirs]
+    out += [f"- 주제 {topic}" for topic in theirs if topic not in ours]
+    if set(ours) == set(theirs) and list(ours) != list(theirs):
+        # 항목 순서가 곧 지문의 입력 순서다(`_fingerprint`). 내용이 같아도 지문은 갈린다.
+        out.append("≈ 주제 순서만 다르다")
+    for topic, entry in ours.items():
+        other = theirs.get(topic)
+        if other is None:
+            continue
+        for key in COMPARED:
+            mine, yours = entry[key], other[key]
+            if mine == yours:
+                continue
+            if isinstance(mine, list) and sorted(mine) == sorted(yours):
+                out.append(f"≈ {topic}.{key}: 순서만 다르다")
+            else:
+                out.append(f"~ {topic}.{key}: {mine!r} vs {yours!r}")
+    return out
 
 
 def load(conn: Any, *, version: int | None = None) -> Topics:
