@@ -3,8 +3,12 @@
 // 그래서 이 파일에는 테스트가 없다(data-portal/public/app.js 와 같은 분리).
 import {
   buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
-  PAGE_SIZE, nextPageOffset, NEED_QUERIES,
+  PAGE_SIZE, nextPageOffset, parseContentRange, NEED_QUERIES, LINEAGE_QUERIES,
 } from './query.js';
+import {
+  reproducible, rewritersAfter, needCellFilters, wishCellFilters, documentFilters,
+  groupByDocument, describeMatch,
+} from './lineage.js';
 import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
@@ -64,6 +68,9 @@ async function apiAll(basePath, { select, order, filters }) {
 const state = {
   need: [], needProducts: [], needMonths: [], wish: [], productNames: new Map(),
   needRunId: null, wishRunId: null,
+  // 계보(#144)가 읽는 것: 재현 가능 여부는 analysis_run 만으로 계산되고 anon 이 그 표를 이미
+  // 읽는다 -- 부팅에서 받은 이 행들이 그대로 근거라 뷰를 하나 더 두지 않았다.
+  runs: [],
 };
 
 // ---- 탭 --------------------------------------------------------------
@@ -94,8 +101,9 @@ function renderNeedScreen(scope) {
 
 // 표 하나를 그린다. 셀은 formatCell 을 거쳐 원시 float 이 그대로 나오지 않게 하고(#122),
 // 숫자 셀만 우측 정렬해 자리수가 눈에 맞는다. 내려받는 CSV 는 원시값이 정본이라 손대지 않는다.
-function fillTable(host, cols, rows, onSort) {
+function fillTable(host, cols, rows, onSort, onPick) {
   const table = document.createElement('table');
+  if (onPick) table.classList.add('drillable');
   const thead = table.createTHead().insertRow();
   for (const c of cols) {
     const th = document.createElement('th');
@@ -107,6 +115,8 @@ function fillTable(host, cols, rows, onSort) {
   const tbody = table.createTBody();
   for (const r of rows) {
     const tr = tbody.insertRow();
+    // 고른 줄을 표시해 두지 않으면 아래 계보 절이 어느 칸의 것인지 화면에서 사라진다.
+    if (onPick) tr.onclick = () => { markPicked(tbody, tr); onPick(r); };
     for (const c of cols) {
       const td = tr.insertCell();
       td.textContent = formatCell(c, r[c]);
@@ -116,9 +126,15 @@ function fillTable(host, cols, rows, onSort) {
   host.replaceChildren(table);
 }
 
+function markPicked(tbody, tr) {
+  for (const other of tbody.rows) other.classList.remove('picked');
+  tr.classList.add('picked');
+}
+
 function renderNeedTable(rows) {
   const cols = ['need_key', 'neg', 'pos', 'unresolved', 'population_share_pct'];
-  fillTable($('need-table'), cols, rows, (c) => renderNeedTable(sortRows(rows, c, 'desc')));
+  fillTable($('need-table'), cols, rows, (c) => renderNeedTable(sortRows(rows, c, 'desc')),
+    (r) => openDrill(r, 'need'));
   $('need-table')._rows = rows; // CSV 버튼이 마지막으로 그려진 정렬을 그대로 받는다
 }
 
@@ -138,7 +154,15 @@ function renderWishScreen(scope) {
   $('wish-chart-format').innerHTML = renderTopBars(topByDimension(rows, 'format'), { empty: 'format 값이 없음' });
   $('wish-chart-attribute').innerHTML = renderTopBars(topByDimension(rows, 'attribute'), { empty: 'attribute 값이 없음' });
   $('wish-chart-brand').innerHTML = renderTopBars(topByDimension(rows, 'brand'), { empty: 'brand 값이 없음' });
+  // 판은 축별 상위 근사이지만 계보는 metrics_wish 의 한 칸에서 내려간다 — 그 칸을 고를 자리가
+  // 화면에 하나는 있어야 한다(#144). 순서는 mentions 이고 상한은 판과 같은 이유로 둔다.
+  fillTable($('wish-table'), ['format', 'attribute', 'brand', 'mentions'],
+    sortRows(rows, 'mentions', 'desc').slice(0, WISH_CELL_LIMIT), undefined,
+    (r) => openDrill(r, 'wish'));
 }
+
+// 위시 칸 표의 상한. 전부 그리면 marginal 조합이 수백 줄이라 판이 화면 밖으로 밀린다.
+const WISH_CELL_LIMIT = 30;
 
 // ---- 화면 3: 제품별 미해결 ----------------------------------------------
 
@@ -156,7 +180,8 @@ function renderProductScreen() {
     fmt: (v) => v.toFixed(2), width: CHART_W_WIDE, labelW: PRODUCT_LABEL_W, empty: '제품 축 행이 없음',
   });
   // ref 칼럼은 남긴다 — 링커가 못 붙인 행은 이름이 없어 ref 가 유일한 식별자다.
-  fillTable($('product-table'), ['product', 'product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'], rows);
+  fillTable($('product-table'), ['product', 'product_ref', 'scope', 'need_key', 'neg', 'pos', 'unresolved'],
+    rows, undefined, (r) => openDrill(r, 'need'));
 }
 
 // ---- 화면 4: 니즈의 성격 ------------------------------------------------
@@ -226,7 +251,8 @@ function renderMonthScreen() {
   });
   // 표는 상한 0(전부) — 판에서 밀린 달을 볼 자리가 화면에 하나는 있어야 한다.
   fillTable($('month-table'), ['month', 'neg', 'pos', 'unresolved', 'yt_neg', 'yt_pos'],
-    monthRows(state.needMonths, state.needRunId, scope, needKey, 0));
+    monthRows(state.needMonths, state.needRunId, scope, needKey, 0), undefined,
+    (r) => openDrill(r, 'need'));
 }
 
 // 한 줄 요약은 그대로 보이고 versions·note 전문은 <details> 로 접는다 — 펴 두면
@@ -244,6 +270,182 @@ function showCaption(needRun, wishRun) {
   body.textContent = detail;
   box.append(head, body);
   $('run-caption').append(box);
+}
+
+// ---- 계보: 지표 한 칸에서 수집분까지 (#144) ------------------------------
+
+// 판단은 전부 lineage.js 의 순수 함수다 — 여기는 그것을 DOM 과 fetch 에 엮는다.
+// 한 칸의 언급이 수천 건인 것이 예사라 한 쪽씩 받는다. 다 받으면 화면이 굳고, 잘라 놓고 아무 말
+// 없이 두면 목록 길이가 칸의 숫자를 반박하는 것처럼 보이므로 전체 개수를 나란히 적는다.
+// PGRST_DB_MAX_ROWS 가 1000 이라 이 값은 그 아래여야 한다(#81).
+const DRILL_PAGE = 200;
+
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// 지금 펼쳐 둔 칸. 더 보기가 같은 필터로 이어 읽어야 하므로 질의가 여기 남는다.
+const drill = { filters: null, offset: 0, total: null, rows: [] };
+
+function cellTitle(cell, kind) {
+  if (kind === 'wish') {
+    const axes = [cell.format, cell.attribute, cell.brand].filter(Boolean).join(' · ');
+    return `${cell.scope} · ${axes || '(축 없음)'} — run #${cell.run_id}`;
+  }
+  const parts = [cell.scope, cell.need_key];
+  if (cell.month) parts.push(cell.month);
+  if (cell.product_ref) parts.push(cell.product_ref);
+  return `${parts.join(' · ')} — run #${cell.run_id}`;
+}
+
+// 발췌는 본문이 아니다. 잘렸다는 사실을 적지 않으면 120자짜리 조각이 전문처럼 읽힌다.
+function excerptHtml(text, chars) {
+  if (!text) return '<span class="empty-note">—</span>';
+  const cut = chars > text.length ? ` <span class="cut">…(전문 ${chars}자)</span>` : '';
+  return `<span class="excerpt">${escapeHtml(text)}</span>${cut}`;
+}
+
+const MENTION_HEAD = '<tr><th>추출된 문장 (120자 발췌)</th><th>극성</th><th>달</th><th>출처</th>'
+  + '<th>원문 (120자 발췌)</th><th>원문 시각</th></tr>';
+
+function mentionRowHtml(m) {
+  // need 는 불만/만족, wish 는 그 축이 없고 좋아요가 그 자리다 — 없는 값을 채우지 않는다.
+  const mark = m.polarity
+    ? `<span class="badge">${escapeHtml(m.polarity)}</span>`
+    : (m.like_count === null || m.like_count === undefined ? '—' : `♡ ${escapeHtml(m.like_count)}`);
+  return `<tr>
+    <td>${excerptHtml(m.sentence_excerpt, m.sentence_chars)}</td>
+    <td>${mark}</td>
+    <td>${escapeHtml(m.month)}</td>
+    <td>${escapeHtml([m.site, m.src].filter(Boolean).join(' · '))}</td>
+    <td>${m.doc_found ? excerptHtml(m.doc_excerpt, m.doc_chars) : '<span class="empty-note">원문에 닿지 못함</span>'}</td>
+    <td>${escapeHtml(m.doc_at ?? '—')}</td>
+  </tr>`;
+}
+
+function renderMentions() {
+  const host = $('drill-mentions');
+  if (drill.rows.length === 0) {
+    host.innerHTML = '<p class="empty-note">이 칸의 언급을 찾지 못했습니다 — 그 사이 모집단'
+      + '(extractor_version)이 바뀌었을 수 있습니다.</p>';
+    $('drill-more').hidden = true;
+    return;
+  }
+  host.innerHTML = `<p class="caption">${drill.rows.length} / ${drill.total ?? '?'} 건 — 한 줄을 누르면`
+    + ' 그것을 걷은 수집분으로 내려갑니다.</p>'
+    + `<table class="drillable"><thead>${MENTION_HEAD}</thead>`
+    + `<tbody>${drill.rows.map(mentionRowHtml).join('')}</tbody></table>`;
+  const tbody = host.querySelector('tbody');
+  [...tbody.rows].forEach((tr, i) => {
+    tr.onclick = () => { markPicked(tbody, tr); openCollection(drill.rows[i]); };
+  });
+  // nextPageOffset 은 PAGE_SIZE(1000) 로 마지막 쪽을 가리므로 여기서는 쓰지 않는다 — 이 화면의
+  // 쪽 크기는 그보다 작아서, 그 함수는 첫 쪽에서 언제나 "끝" 이라고 답한다.
+  $('drill-more').hidden = drill.total === null || drill.rows.length >= drill.total;
+}
+
+async function loadMoreMentions() {
+  showError('');
+  try {
+    const q = buildQuery({
+      ...LINEAGE_QUERIES.mention, filters: drill.filters, limit: DRILL_PAGE, offset: drill.offset,
+    });
+    const page = await apiPage(`/mention_lineage?${q}`);
+    drill.rows.push(...page.rows);
+    drill.offset += page.rows.length;
+    const total = parseContentRange(page.range);
+    if (total !== null) drill.total = total;
+    renderMentions();
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+async function openDrill(cell, kind) {
+  $('drill').classList.remove('hidden');
+  $('drill-title').textContent = `계보 — ${cellTitle(cell, kind)}`;
+  $('drill-collection').replaceChildren();
+  $('drill-more').hidden = true;
+
+  // 되짚기가 성립하지 않는 칸(contracts/versioning.md 재현 규칙). 목록을 보이지 않는 것이 이
+  // 자리의 답이다 — 조용히 틀린 목록을 보이는 것이 안 보이는 것보다 나쁘다.
+  if (!reproducible(state.runs, cell.run_id)) {
+    const after = rewritersAfter(state.runs, cell.run_id).map((r) => `#${r.run_id} ${r.note || ''}`.trim());
+    $('drill-note').innerHTML = '<p class="banner banner-bad">이 run 뒤에 언급을 다시 쓴 실행이 있다</p>'
+      + `<p class="caption">${escapeHtml(after.join(' · ')) || '이 run 을 analysis_run 에서 찾지 못했습니다.'}</p>`
+      + '<p class="caption">그 실행이 (src, month) 단위로 언급을 지우고 다시 넣어, 이 칸이 센 모집단은'
+      + ' 지금 남아 있지 않습니다 — 시간창도 워터마크도 남지 않아 복원되지 않습니다. 최신 run 의'
+      + ' 같은 칸에서 내려가세요.</p>';
+    $('drill-mentions').replaceChildren();
+    return;
+  }
+  $('drill-note').innerHTML = '';
+
+  const run = state.runs.find((r) => r.run_id === cell.run_id) || null;
+  const filters = kind === 'wish' ? wishCellFilters(cell, run) : needCellFilters(cell, run);
+  if (filters.length === 0) {
+    $('drill-mentions').innerHTML = '<p class="empty-note">이 run 은 모집단(versions.extractor)을'
+      + ' 기록하지 않아 어느 언급을 셌는지 고를 수 없습니다.</p>';
+    return;
+  }
+  drill.filters = filters;
+  drill.offset = 0;
+  drill.total = null;
+  drill.rows = [];
+  $('drill-mentions').innerHTML = '<p class="caption">불러오는 중…</p>';
+  await loadMoreMentions();
+}
+
+const COLLECTION_HEAD = '<tr><th>후보</th><th>수집분</th><th>수집 시각</th><th>상태</th><th>범위</th>'
+  + '<th>요청 근거</th></tr>';
+
+function collectionRowHtml(r) {
+  // commerce 는 fetch_log 집계가, youtube 는 판의 크기가 그 자리를 진다 — 두 갈래의 근거가
+  // 다른 표라서, 없는 쪽을 0 으로 채우면 "요청이 0건이었다" 로 읽힌다.
+  const evidence = r.requests !== null && r.requests !== undefined
+    ? `${r.requests} req · ${r.ok ?? 0} ok`
+    : (r.bytes !== null && r.bytes !== undefined ? `${r.bytes} bytes` : '—');
+  return `<tr>
+    <td>${escapeHtml(r.candidate_rank ?? '—')}</td>
+    <td title="${escapeHtml(r.sample_url ?? '')}">${escapeHtml(r.collection_id ?? '—')}</td>
+    <td>${escapeHtml(r.collected_at ?? '—')}</td>
+    <td><span class="badge">${escapeHtml(r.status ?? '—')}</span></td>
+    <td>${escapeHtml(r.scope_note ?? '—')}</td>
+    <td class="num">${escapeHtml(evidence)}</td>
+  </tr>`;
+}
+
+function groupHtml(g) {
+  const head = `<p class="caption">${escapeHtml([g.site, g.doc_parent, g.doc_key].filter(Boolean).join(' / '))}`
+    + ` — ${escapeHtml(describeMatch(g.match, g.candidate_count))}</p>`;
+  // 미상은 행이 없는 것이 아니라 수집분이 없는 것이다. 숨기면 "못 닿았다" 와 "그 문서가 없다" 가
+  // 화면에서 같아 보인다(사용자 결정 2026-08-27).
+  if (g.match === 'unknown') {
+    return head + '<p class="empty-note">이 문서를 걷은 수집분을 짚을 수 없습니다 — trend_radar.review'
+      + ' 에는 run_id 가 없고 이어 주는 것은 captured_at 뿐인데, 그 시각에 맞는 run 행이 없습니다.</p>';
+  }
+  return head + `<table><thead>${COLLECTION_HEAD}</thead>`
+    + `<tbody>${g.rows.map(collectionRowHtml).join('')}</tbody></table>`;
+}
+
+async function openCollection(mention) {
+  const host = $('drill-collection');
+  const filters = documentFilters(mention);
+  if (filters.length === 0) {
+    host.innerHTML = '<h3>수집분</h3><p class="empty-note">이 갈래는 원문 표가 없어 수집분까지'
+      + ' 내려가지 못합니다 — 자막·블로그, 그리고 사이트를 모르는 위시 리뷰입니다.</p>';
+    return;
+  }
+  host.innerHTML = '<h3>수집분</h3><p class="caption">불러오는 중…</p>';
+  showError('');
+  try {
+    // 한 문서의 후보는 리뷰가 최대 5, 댓글이 판 몇 개다 — 한 쪽에 들어오므로 그냥 다 받는다.
+    const rows = await apiAll('/collection_lineage', { ...LINEAGE_QUERIES.collection, filters });
+    const groups = groupByDocument(rows);
+    host.innerHTML = '<h3>수집분</h3>' + (groups.length === 0
+      ? '<p class="empty-note">이 문서의 행이 없습니다 — 원문이 그 사이 지워졌을 수 있습니다.</p>'
+      : groups.map(groupHtml).join(''));
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 // ---- 내려받기 -----------------------------------------------------------
@@ -291,6 +493,7 @@ async function boot() {
     state.needMonths = needMonths;
     state.wish = wish;
     state.productNames = productNameIndex(productRefs);
+    state.runs = runs;
     const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
     state.needRunId = needRunId;
     state.wishRunId = wishRunId;
@@ -334,4 +537,5 @@ async function boot() {
 }
 
 $('need-csv').onclick = downloadNeedCsv;
+$('drill-more').onclick = loadMoreMentions;
 boot();

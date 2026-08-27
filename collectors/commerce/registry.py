@@ -11,7 +11,7 @@ from collectors.commerce.contract import Source
 
 SOURCES: dict[str, type[Source]] = {}
 
-_REQUIRED_ATTRS = ("key", "policy", "datasets")
+_REQUIRED_ATTRS = ("key", "policy", "datasets", "review_body_datasets")
 _REQUIRED_METHODS = ("seeds", "parse")
 
 
@@ -23,6 +23,14 @@ def register[T: type](cls: T) -> T:
     key = cls.key  # pyright: ignore[reportAttributeAccessIssue]
     if not cls.datasets:  # pyright: ignore[reportAttributeAccessIssue]
         raise ValueError(f"{cls.__name__} declares no datasets, so it would collect nothing")
+    # An empty `review_body_datasets` is a real answer (hwahae collects rankings only), so the check
+    # is containment, not emptiness -- a dataset that is not collected cannot write anything.
+    stray = cls.review_body_datasets - cls.datasets  # pyright: ignore[reportAttributeAccessIssue]
+    if stray:
+        raise ValueError(
+            f"{cls.__name__} says {sorted(d.value for d in stray)} write review bodies, "
+            "but it does not collect them"
+        )
     if key in SOURCES:
         raise ValueError(f"two sources claim the key {key!r}: {SOURCES[key].__name__} and {cls.__name__}")
 
