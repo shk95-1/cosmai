@@ -233,7 +233,7 @@ options:
 
 $ cosmai lexicon diff --help
 usage: cosmai lexicon diff [-h] --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
-                           --version VERSION [--url URL] [--against AGAINST]
+                           [--version VERSION] [--url URL] [--against AGAINST] [--csv CSV]
 
 options:
   -h, --help            show this help message and exit
@@ -242,6 +242,7 @@ options:
   --version VERSION     The dictionary version to act on.
   --url URL             SQLAlchemy URL; default is needs_runtime.
   --against AGAINST     Version to compare with (default: active).
+  --csv CSV             Compare this load CSV with a version instead of two versions.
 
 $ cosmai lexicon activate --help
 usage: cosmai lexicon activate [-h]
