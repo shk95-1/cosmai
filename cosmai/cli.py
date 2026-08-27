@@ -143,6 +143,12 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     )
     cross.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
+    # 홀드아웃도 아무것도 쓰지 않는다 -- 두 팔을 가르는 경계가 청크 색인이라 돌 때마다 움직인다.
+    hold = actions.add_parser(
+        "holdout", help="Ask whether never-seen commerce reviews reproduce the existing ratios."
+    )
+    hold.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
     # 카드는 아무것도 쓰지 않는다. 저장된 세 표를 읽어 마크다운을 stdout 으로 낸다.
     cards = actions.add_parser("cards", help="Render the quarter's opportunity cards to stdout.")
     cards.add_argument("--quarter", required=True, help="예: 2026Q2. 카드는 분기 단위의 물음이다.")
@@ -377,6 +383,9 @@ def _run_trend(args: argparse.Namespace) -> int:
     from analysis.crosscheck.pipeline import run as crosscheck_run
     from analysis.evidence.pipeline import NoEvidence
     from analysis.evidence.pipeline import run as evidence_run
+    from analysis.holdout.pipeline import NoHoldout
+    from analysis.holdout.pipeline import Outcome as HoldOutcome
+    from analysis.holdout.pipeline import run as holdout_run
     from analysis.judge.pipeline import NoJudgement
     from analysis.judge.pipeline import run as judge_run
     from analysis.retrieval.topics import NoDictionary
@@ -397,6 +406,7 @@ def _run_trend(args: argparse.Namespace) -> int:
         "evidence": evidence_run,
         "sensitivity": sensitivity_run,
         "crosscheck": crosscheck_run,
+        "holdout": holdout_run,
     }
     try:
         with conn:
@@ -421,15 +431,16 @@ def _run_trend(args: argparse.Namespace) -> int:
     # 내고, 문서가 0인 계열은 행을 만들지 않는다). 그 둘을 잡을 조건은 #40 이 적어 둔 그대로 **다른
     # 생산자가 metrics_topic_quarter 에 쓰는 날**이다.
     except (
-        NoPopulation, NoJudgement, NoEvidence, NoBaseline, NoCrosscheck, TopicAxisDrift, NoDictionary,
-        ShortHistory,
+        NoPopulation, NoJudgement, NoEvidence, NoBaseline, NoCrosscheck, NoHoldout, TopicAxisDrift,
+        NoDictionary, ShortHistory,
     ) as blocked:  # fmt: skip
         print(blocked)
         return 2
     print(outcome.note)
-    # 답이 표가 아니라 문장인 것은 `sensitivity`·`crosscheck` 둘이다 -- 나머지 셋은 note 와 위반 줄이 전부다.
+    # 답이 표가 아니라 문장인 것은 `sensitivity`·`crosscheck`·`holdout` 셋이다 -- 나머지 셋은 note 와
+    # 위반 줄이 전부다.
     # getattr 이 아니라 isinstance 인 것은 타입 체커가 그 갈래를 지게 하려는 것이다.
-    if isinstance(outcome, Outcome | CrossOutcome):
+    if isinstance(outcome, Outcome | CrossOutcome | HoldOutcome):
         for line in outcome.lines:
             print(line)
     for violation in outcome.violations:

@@ -74,6 +74,7 @@ extend-include = [
     "tool/show-vector-stamp",
     "tool/show-lexicon-stamp",
     "tool/compare-ydc-crosscheck",
+    "tool/compare-ydc-holdout",
     "tool/measure-crosscheck-keys",
     "tool/measure-lexicon-candidates",
 ]
