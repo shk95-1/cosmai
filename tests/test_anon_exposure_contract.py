@@ -72,6 +72,30 @@ def _anon_can_read(conn: Connection, schema: str) -> set[str]:
     return {r[0] for r in rows}
 
 
+def test_anon_can_use_the_schema_it_is_granted_tables_in(conn: Connection) -> None:
+    """SELECT 만 재면 이 구멍이 안 보인다: has_table_privilege 는 스키마 권한과 무관하게 t 를 내는데,
+    USAGE 가 없으면 PostgREST 는 401 이고 그 스키마는 0개와 같다. 2026-08-27 적용 직후 trend_radar
+    9개가 전부 401 이었던 자리다 -- anon 이 USAGE 도 trend_radar_reader 멤버십으로 물려받고 있었다."""
+    usable = conn.execute(
+        text("SELECT has_schema_privilege('postgrest_anon', 'needs', 'USAGE')")
+    ).scalar_one()
+    assert usable, "postgrest_anon 이 needs 에 USAGE 가 없다 -- 표가 몇 개든 API 는 401 이다"
+
+
+def test_the_narrowing_regrants_schema_usage_where_membership_carried_it() -> None:
+    """trend_radar 의 nspacl 은 trend_radar_reader=U 이고 postgrest_anon 항목이 없다(운영 실측
+    2026-08-27). 멤버십 REVOKE 가 USAGE 를 함께 가져가므로 좁히기가 그것을 다시 줘야 한다.
+    tubedepth 는 nspacl 에 postgrest_anon=U 가 직접 있어 필요 없다 -- 주면 오늘 없던 부여가 는다."""
+    body = re.sub(r"--[^\n]*", "", NARROWING.read_text(encoding="utf-8"))
+    granted = {
+        m.group(1).lower()
+        for m in re.finditer(
+            r"GRANT\s+USAGE\s+ON\s+SCHEMA\s+(\w+)\s+TO\s+postgrest_anon", body, re.IGNORECASE
+        )
+    }
+    assert granted == {"trend_radar"}, sorted(granted)
+
+
 def test_the_needs_section_matches_what_the_database_actually_grants(conn: Connection) -> None:
     actual = _anon_can_read(conn, "needs")
     listed = _listed("needs", "needs")
@@ -123,6 +147,8 @@ def test_the_contract_names_the_two_paths_that_open_the_old_stack() -> None:
     assert "40-postgrest-tubedepth-grants.sh" in body
     # 비대칭을 적지 않으면 다음 사람이 trend_radar 쪽 기본권한도 지운다.
     assert "rolcanlogin=t" in body
+    # 표만 세고 USAGE 를 빠뜨린 것이 적용을 한 번 깨뜨렸다 -- 계약이 그 둘을 함께 적어야 한다.
+    assert "USAGE" in body
 
 
 def test_the_check_query_stays_read_only() -> None:

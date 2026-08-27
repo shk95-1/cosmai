@@ -33,6 +33,29 @@
 적용 후 `postgrest_anon` 은 `trend_radar_reader` 를 포함해 **어떤 롤에도 속하지 않고**, 세 스키마
 전부에서 표를 이름으로만 받는다.
 
+### 보이려면 둘이 다 있어야 한다: SELECT 와 USAGE
+
+"anon 이 무엇을 보는가"는 표의 `SELECT` 만으로 성립하지 않는다. 스키마 `USAGE` 가 없으면
+PostgREST 는 **401** 을 내고, 그 스키마는 표를 몇 개 GRANT 했든 0개와 같다. `has_table_privilege`
+는 스키마 권한과 무관하게 `t` 를 내므로 **표를 세는 것만으로는 이 구멍이 안 보인다.**
+
+anon 이 USAGE 를 얻는 경로도 스키마마다 달랐다(`pg_namespace.nspacl` 실측 2026-08-27):
+
+| 스키마 | USAGE 경로 | 멤버십을 끊으면 |
+|---|---|---|
+| `needs` | `postgrest_anon=U/needs_owner` — 직접 | 그대로 |
+| `tubedepth` | `postgrest_anon=U/tubedepth_owner` — 직접 | 그대로 |
+| `trend_radar` | `trend_radar_reader=U/trend_radar_owner` — **멤버십으로 상속** | **함께 사라진다** |
+
+그래서 좁히기는 `trend_radar` 에만 `GRANT USAGE ON SCHEMA … TO postgrest_anon` 을 다시 준다.
+2026-08-27 적용 직후 이 한 줄이 없어 `trend_radar` 9개가 전부 401 이었다 — 표 개수(절 2)는
+목표대로 `9` 를 찍고 있었는데도. `db/grants/postgrest_anon_check.sql` 절 6 이 그 뒤로 USAGE 를
+따로 재고, 세 스키마 모두 `usable = t` 여야 한다.
+
+`trend_radar` 만 무언가를 되돌려 줘야 하는 이유는 아래 DEFAULT PRIVILEGES 절과 **같은 비대칭**
+이다: 이 스키마의 권한은 `trend_radar_reader` 라는 롤에 걸려 있고 anon 은 그 롤의 손님이었다.
+`tubedepth` 는 처음부터 anon 앞으로 걸려 있었다.
+
 ### DEFAULT PRIVILEGES 는 두 스키마를 다르게 다룬다 (사용자 결정 2)
 
 같은 표류인데 **수혜자가 다르기 때문에** 처방이 반대다. `pg_default_acl` 실측:
@@ -93,7 +116,8 @@ PostgREST 를 거쳐 이 스키마를 부르는 화면은 없다. `trend-radar-d
 
 ## trend_radar 적용 후
 
-9개. 집계된 사실만 남는다.
+9개. 집계된 사실만 남는다. 이 스키마만 `GRANT USAGE ON SCHEMA` 를 함께 받는다 — 멤버십을 끊으면
+USAGE 도 같이 사라지기 때문이다(위 절).
 
 `trend_radar.product` · `trend_radar.rank_snapshot` · `trend_radar.price_point` ·
 `trend_radar.new_product` · `trend_radar.new_products_view` · `trend_radar.review_stats` ·

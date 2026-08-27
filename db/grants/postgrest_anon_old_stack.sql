@@ -29,6 +29,16 @@ REVOKE trend_radar_reader FROM postgrest_anon;
 --   바꾸지 않으면서 표류만 멈춘다"였지 미래의 대시보드 접근을 좁히는 것이 아니었다.
 --   tubedepth 쪽(아래 2절)은 기본권한이 postgrest_anon 에게 **직접** 걸려 있어 사정이 다르다.
 
+-- 스키마 USAGE 를 **여기서 다시 준다.** anon 은 이것도 멤버십으로 물려받고 있었다:
+-- trend_radar 의 nspacl 은 `trend_radar_reader=U/trend_radar_owner` 이고 postgrest_anon 항목이
+-- 없다. 그래서 위 REVOKE 한 줄이 SELECT 와 함께 USAGE 도 가져간다 -- 표를 이름으로 되돌려 줘도
+-- PostgREST 는 401 을 낸다(운영 실측 2026-08-27, 적용 직후 trend_radar 9개 전부 401).
+-- tubedepth·needs 는 필요 없다: 둘 다 nspacl 에 `postgrest_anon=U` 가 직접 있어 아래 2절의
+-- REVOKE 가 USAGE 를 건드리지 않는다. DEFAULT PRIVILEGES 와 **같은 비대칭**이다 -- 이 파일이
+-- trend_radar 에서만 무언가를 되돌려 주는 이유가 매번 그것 하나다.
+-- 이미 있어도 무해하다(GRANT 는 멱등).
+GRANT USAGE ON SCHEMA trend_radar TO postgrest_anon;
+
 -- 멤버십 대신 표를 이름으로 준다. 앞으로 이 스키마에서 anon 이 보는 것은 이 아홉 줄뿐이고,
 -- 새 표를 열려면 여기 한 줄을 더해야 한다.
 GRANT SELECT ON
@@ -73,23 +83,28 @@ GRANT SELECT ON
 -- flatten_progress 는 수집기 내부 상태, alembic_version 은 마이그레이션 원장이다.
 -- api_keys 는 전부터 REVOKE 되어 있었고 여기서도 열지 않는다.
 
--- USAGE 는 두 스키마 모두 남긴다: 표가 하나도 없으면 PostgREST 가 빈 OpenAPI 를 내고,
--- 위 목록을 넓히는 날 스키마 권한부터 다시 챙겨야 한다. 0.0.0.0 바인드는 이 파일이 다루지
--- 않는다 -- 사용자 결정 3(2026-08-27)으로 따로 다룬다.
+-- USAGE 는 세 스키마 모두 anon 에게 남는다 -- 다만 얻는 경로가 다르다: needs·tubedepth 는
+-- 원래부터 nspacl 에 직접 있고, trend_radar 만 1절이 다시 준다(멤버십과 함께 사라지므로).
+-- "무엇이 보이는가"는 SELECT 와 USAGE 가 **둘 다** 있어야 성립한다: 표를 아무리 GRANT 해도
+-- USAGE 가 없으면 그 스키마는 0개와 같다. postgrest_anon_check.sql 절 6 이 그것을 따로 잰다.
+-- 0.0.0.0 바인드는 이 파일이 다루지 않는다 -- 사용자 결정 3(2026-08-27)으로 따로 다룬다.
 
 NOTIFY pgrst, 'reload schema';
 
 -- ---------------------------------------------------------------------------
 -- 되돌리기 -- 2026-08-27 실측 상태를 그대로 복원한다. 슈퍼유저로 위에서 아래로.
--- 여섯 줄이다. 초안 머리말은 다섯이라 적었는데 틀렸다: 안 B 가 trend_radar 에 없던 직접
--- GRANT 아홉을 새로 만들므로, 멤버십을 되붙이기 전에 그것부터 걷어야 ACL 이 같아진다.
+-- 일곱 줄이다. 규칙은 relacl·nspacl 을 오늘과 **같은 모양**으로 되돌리는 것이지 유효 권한만
+-- 맞추는 것이 아니다 -- 그래서 안 B 가 새로 만든 직접 부여(표 아홉 + 스키마 USAGE 하나)는
+-- 멤버십을 되붙이기 전에 걷는다. 멤버십이 그 둘을 다시 물려주기 때문이다.
 -- trend_radar 의 DEFAULT PRIVILEGES 는 애초에 건드리지 않으므로 되돌릴 줄도 없다(1절 주석).
--- tubedepth 쪽은 ON ALL TABLES 가 12개를 다시 덮으므로 별도 REVOKE 가 필요 없다.
+-- tubedepth 쪽은 ON ALL TABLES 가 12개를 다시 덮으므로 별도 REVOKE 가 필요 없고, USAGE 는
+-- 이 파일이 준 적이 없어 되돌릴 것도 없다.
 -- ---------------------------------------------------------------------------
 --   REVOKE SELECT ON trend_radar.product, trend_radar.rank_snapshot, trend_radar.price_point,
 --       trend_radar.new_product, trend_radar.new_products_view, trend_radar.review_stats,
 --       trend_radar.review_topic, trend_radar.review_answer, trend_radar.review_summary
 --       FROM postgrest_anon;
+--   REVOKE USAGE ON SCHEMA trend_radar FROM postgrest_anon;
 --   GRANT trend_radar_reader TO postgrest_anon;
 --   GRANT SELECT ON ALL TABLES IN SCHEMA tubedepth TO postgrest_anon;
 --   REVOKE ALL ON TABLE tubedepth.api_keys FROM postgrest_anon;

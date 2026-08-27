@@ -28,6 +28,8 @@ ORDER BY 1, 2;
 -- 2) 스키마별 개수. 적용 후 목표는 needs 11 · trend_radar 9 · tubedepth 3 = 23 이다
 --    (적용 전 실측 2026-08-27: needs 11 · trend_radar 13 · tubedepth 12 = 36).
 --    needs 는 좁히기가 건드리지 않아 전후가 같다 -- #144 의 계보 뷰 둘을 포함해 11 이다.
+--    **이 개수는 USAGE 를 모른다.** has_table_privilege 는 스키마 권한과 무관하게 t 를 내므로,
+--    USAGE 가 없으면 여기서 23 이 맞아떨어져도 API 는 전부 401 이다. 절 6 을 함께 봐야 한다.
 SELECT n.nspname AS schema,
        count(*) AS visible,
        CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 9 WHEN 'tubedepth' THEN 3 END AS target_after,
@@ -70,4 +72,16 @@ ORDER BY 1, 2;
 -- 5) 멤버십. 적용 후 postgrest_anon 은 자기 자신 말고 어떤 롤에도 속하지 않아야 한다.
 SELECT rolname AS postgrest_anon_is_member_of
 FROM pg_roles WHERE pg_has_role('postgrest_anon', oid, 'USAGE') AND rolname <> 'postgrest_anon'
+ORDER BY 1;
+
+-- 6) 스키마 USAGE. **세 스키마 모두 usable 이 t 여야 한다** -- 적용 전에도, 후에도.
+--    표를 아무리 GRANT 해도 USAGE 가 없으면 그 스키마는 0개와 같다(PostgREST 는 401).
+--    이것을 안 재서 2026-08-27 적용 직후 trend_radar 9개가 전부 401 이었다: anon 은 USAGE 도
+--    trend_radar_reader 멤버십으로 물려받고 있었고, 멤버십을 끊자 SELECT 와 함께 사라졌다.
+--    direct 열이 갈라 준다 -- trend_radar 만 f 에서 t 로 바뀌어야 하는 칸이다.
+SELECT n.nspname AS schema,
+       has_schema_privilege('postgrest_anon', n.nspname, 'USAGE') AS usable,
+       coalesce(array_to_string(n.nspacl, ' ') ~ 'postgrest_anon=[^/]*U', false) AS direct
+FROM pg_namespace n
+WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
 ORDER BY 1;
