@@ -51,6 +51,12 @@ def _granted_by_narrowing(schema: str) -> set[str]:
     return names
 
 
+def _removed_by_narrowing(heading: str) -> set[str]:
+    paragraphs = [p for p in _section(heading).split("\n\n") if "좁히기가 닫은" in p]
+    assert len(paragraphs) == 1, f"계약의 {heading} 절에서 좁히기가 닫은 목록을 하나 찾지 못했다"
+    return set(re.findall(r"`([a-z_]+)`", paragraphs[0]))
+
+
 @pytest.fixture
 def conn() -> Iterator[Connection]:
     url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
@@ -104,16 +110,15 @@ def test_the_needs_section_matches_what_the_database_actually_grants(conn: Conne
 
 
 @pytest.mark.parametrize("schema", ["trend_radar", "tubedepth"])
-def test_the_after_sections_match_the_narrowing_sql(schema: str) -> None:
-    assert _listed(f"{schema} 적용 후", schema) == _granted_by_narrowing(schema)
+def test_the_current_sections_match_the_narrowing_sql(schema: str) -> None:
+    assert _listed(schema, schema) == _granted_by_narrowing(schema)
 
 
 @pytest.mark.parametrize("schema", ["trend_radar", "tubedepth"])
-def test_the_narrowing_never_regrants_what_the_after_section_calls_removed(schema: str) -> None:
-    # 적용 전에는 있고 적용 후에는 없는 이름이 GRANT 줄에 다시 나오면 좁히기가 좁히지 않는다.
-    before = {n for n in re.findall(r"`([a-z_]+)`", _section(f"{schema} 적용 전"))}
-    removed = before - _listed(f"{schema} 적용 후", schema)
-    assert removed, "적용 전 절에서 이름을 하나도 못 읽었다 -- 계약의 모양이 바뀌었다"
+def test_the_narrowing_never_regrants_what_the_current_section_calls_removed(schema: str) -> None:
+    # 현행 절이 닫았다고 이름 붙인 관계가 GRANT 줄에 다시 나오면 좁히기가 좁히지 않는다.
+    removed = _removed_by_narrowing(schema)
+    assert removed, "좁히기가 닫은 관계를 하나도 못 읽었다 -- 계약의 모양이 바뀌었다"
     assert not (removed & _granted_by_narrowing(schema)), sorted(removed & _granted_by_narrowing(schema))
 
 
@@ -160,3 +165,12 @@ def test_the_check_query_stays_read_only() -> None:
     )
     hits = [m.group(0) for m in forbidden.finditer(body)]
     assert not hits, hits
+
+
+def test_the_check_query_covers_column_grants_and_public() -> None:
+    """표 권한만 세면 컬럼 GRANT 와 PUBLIC 이 여는 두 문은 보이지 않는다. #168 적용 뒤 실측에서
+    둘 다 0 이었고, 그 불변식을 재는 절 자체가 사라져도 단순 read-only 검사는 초록이라 따로 붙든다."""
+    body = CHECK_QUERY.read_text(encoding="utf-8")
+    assert "information_schema.column_privileges" in body
+    assert "NOT has_table_privilege" in body
+    assert re.search(r"a\.grantee\s*=\s*0", body)

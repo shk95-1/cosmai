@@ -1,5 +1,5 @@
 -- 읽기 전용. postgrest_anon 이 세 스키마에서 무엇을 보는지와 그것을 여는 경로를 찍는다.
--- postgrest_anon_old_stack.sql 적용 **전과 후에 각각** 돌려 두 출력을 비교하는 것이 쓰임새다.
+-- postgrest_anon_old_stack.sql 적용 뒤 현행이 계약과 같은지 되묻는 것이 쓰임새다.
 --
 --   docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' shared-postgres \
 --     psql -U platform -d app -X < db/grants/postgrest_anon_check.sql
@@ -25,15 +25,15 @@ WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
   AND has_table_privilege('postgrest_anon', c.oid, 'SELECT')
 ORDER BY 1, 2;
 
--- 2) 스키마별 개수. 적용 후 목표는 needs 11 · trend_radar 9 · tubedepth 3 = 23 이다
+-- 2) 스키마별 개수. 현행 기대는 needs 11 · trend_radar 9 · tubedepth 3 = 23 이다
 --    (적용 전 실측 2026-08-27: needs 11 · trend_radar 13 · tubedepth 12 = 36).
 --    needs 는 좁히기가 건드리지 않아 전후가 같다 -- #144 의 계보 뷰 둘을 포함해 11 이다.
 --    **이 개수는 USAGE 를 모른다.** has_table_privilege 는 스키마 권한과 무관하게 t 를 내므로,
 --    USAGE 가 없으면 여기서 23 이 맞아떨어져도 API 는 전부 401 이다. 절 6 을 함께 봐야 한다.
 SELECT n.nspname AS schema,
        count(*) AS visible,
-       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 9 WHEN 'tubedepth' THEN 3 END AS target_after,
-       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 13 WHEN 'tubedepth' THEN 12 END AS measured_before
+       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 9 WHEN 'tubedepth' THEN 3 END AS expected,
+       CASE n.nspname WHEN 'needs' THEN 11 WHEN 'trend_radar' THEN 13 WHEN 'tubedepth' THEN 12 END AS before_narrowing
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
@@ -41,7 +41,7 @@ WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
   AND has_table_privilege('postgrest_anon', c.oid, 'SELECT')
 GROUP BY 1 ORDER BY 1;
 
--- 3) 막기로 한 것이 정말 막혔는가. 적용 후 blocked 는 전부 t 여야 한다.
+-- 3) 막기로 한 것이 정말 막혔는가. 현행 blocked 는 전부 t 여야 한다.
 --    개수만 세면 다른 표가 대신 열려도 21 이 맞아떨어진다 -- 이름으로 물어야 한다.
 SELECT t AS must_be_blocked,
        NOT has_table_privilege('postgrest_anon', t, 'SELECT') AS blocked
@@ -54,7 +54,7 @@ FROM (VALUES
 WHERE to_regclass(t) IS NOT NULL
 ORDER BY 1;
 
--- 4) 미래 테이블이 자동으로 열리는 문. 적용 후 남아야 하는 것은 **trend_radar 한 행뿐**이다
+-- 4) 미래 테이블이 자동으로 열리는 문. 현행 남아야 하는 것은 **trend_radar 한 행뿐**이다
 --    (`trend_radar_reader=r`). 그 롤은 trend-radar-dashboard 가 직접 로그인하는 롤이라
 --    기본권한을 살려 두고, anon 은 멤버가 아니게 되어 거기 닿지 못한다. tubedepth 행은
 --    anon 에게 직접 걸려 있어 사라져야 한다 -- 적용 전 2행 -> 적용 후 1행.
@@ -69,7 +69,7 @@ WHERE d.defaclobjtype = 'r'
   AND array_to_string(d.defaclacl, ' ') ~ '(postgrest_anon|trend_radar_reader)='
 ORDER BY 1, 2;
 
--- 5) 멤버십. 적용 후 postgrest_anon 은 자기 자신 말고 어떤 롤에도 속하지 않아야 한다.
+-- 5) 멤버십. 현행 postgrest_anon 은 자기 자신 말고 어떤 롤에도 속하지 않아야 한다.
 SELECT rolname AS postgrest_anon_is_member_of
 FROM pg_roles WHERE pg_has_role('postgrest_anon', oid, 'USAGE') AND rolname <> 'postgrest_anon'
 ORDER BY 1;
@@ -85,3 +85,36 @@ SELECT n.nspname AS schema,
 FROM pg_namespace n
 WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
 ORDER BY 1;
+
+-- 7) 컬럼 층과 PUBLIC. 권한이 오는 **경로**가 셋이고(직접 GRANT · 롤 멤버십 · DEFAULT
+--    PRIVILEGES) 그것이 걸리는 **층**도 셋이다(스키마 · 표 · 컬럼). 위 절들은 앞의 두 층만
+--    재므로 컬럼 GRANT 하나가 표 권한 없이 열려 있으면 아무 절도 울지 않는다. PUBLIC 도 같다 --
+--    grantee 가 롤 이름이 아니라서 postgrest_anon 을 물어보는 어떤 질의에도 안 잡힌다.
+--    (#168 의 일반형: 권한을 재되 그 권한이 어느 경로로 어느 층에 오는지는 안 잰다.)
+
+-- 7a) 컬럼 단위 SELECT 의 총량. **기대값으로 박지 않는다** -- 표 권한이 줄면 이 숫자도 같이
+--     준다(2026-08-27 좁히기 후 실측 259). 불변식은 7b 다.
+SELECT count(*) AS column_level_select_rows
+FROM information_schema.column_privileges
+WHERE grantee = 'postgrest_anon' AND privilege_type = 'SELECT'
+  AND table_schema IN ('trend_radar', 'tubedepth', 'needs');
+
+-- 7b) 그중 **표 단위 SELECT 로 설명되지 않는 것. 0행이어야 한다.**
+--     information_schema.column_privileges 는 표 GRANT 의 그림자 행도 함께 내므로, 위 총량은
+--     대부분 그림자다. 표 권한 없이 컬럼만 열린 자리가 있다면 그것만 여기 남는다.
+SELECT table_schema, table_name, column_name
+FROM information_schema.column_privileges
+WHERE grantee = 'postgrest_anon' AND privilege_type = 'SELECT'
+  AND table_schema IN ('trend_radar', 'tubedepth', 'needs')
+  AND NOT has_table_privilege('postgrest_anon', format('%I.%I', table_schema, table_name)::regclass, 'SELECT')
+ORDER BY 1, 2, 3;
+
+-- 7c) PUBLIC 에 걸린 SELECT. **0행이어야 한다.** PUBLIC 은 aclexplode 에서 grantee = 0 이고,
+--     걸려 있으면 anon 뿐 아니라 이 database 에 붙는 모든 롤이 읽는다.
+SELECT n.nspname AS schema, c.relname AS relation
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace,
+     LATERAL aclexplode(c.relacl) a
+WHERE n.nspname IN ('trend_radar', 'tubedepth', 'needs')
+  AND a.grantee = 0 AND a.privilege_type = 'SELECT'
+ORDER BY 1, 2;
