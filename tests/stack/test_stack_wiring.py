@@ -305,22 +305,46 @@ def test_the_compose_file_declares_the_database_it_talks_to():
 
 def test_the_database_service_serves_the_cluster_that_is_already_on_disk():
     """The old fleet's container is gone but its data directory is not, and every row this repo has
-    is in it. Image tag, mount point and published port are the three that decide whether this
-    service opens that cluster or silently initdbs an empty one beside it."""
+    is in it. Image tag, mount point and published port are what aim the service at that cluster;
+    what makes a wrong aim loud instead of silent is the separate absence checked below."""
     body = SERVICES[DB_SERVICE]
     assert f"container_name: {DB_CONTAINER}" in body, f"{DB_SERVICE} is not named {DB_CONTAINER}"
     assert f"image: {DB_IMAGE}" in body, (
         f"the cluster on disk was written by {DB_IMAGE}; another major would refuse to start on it"
     )
-    assert re.search(rf"- \$\{{COSMAI_PG_DATA_DIR:-[^}}]+}}:{DB_DATA_IN_CONTAINER}\b", body), (
-        f"{DB_SERVICE} must bind the host data directory at {DB_DATA_IN_CONTAINER} through a "
-        "variable with a default -- the parent, so PGDATA's 18/docker below it is found"
+    assert re.search(rf"- \$\{{COSMAI_PG_DATA_DIR:\?[^}}]+}}:{DB_DATA_IN_CONTAINER}\b", body), (
+        f"{DB_SERVICE} must bind the host data directory at {DB_DATA_IN_CONTAINER} -- the parent, "
+        "so PGDATA's 18/docker below it is found -- through a variable with NO default: `name: "
+        "cosmai` and container_name are fixed, so a default that resolves per checkout lets an "
+        "`up` from a worktree recreate the production container over the wrong directory"
     )
     assert re.search(rf'- "{re.escape(DB_PUBLISHED)}"', body), (
         f"{DB_SERVICE} must publish {DB_PUBLISHED} -- db/runtime.py's host default is 5434"
     )
     assert "healthcheck:" in body and "pg_isready" in body, (
         f"{DB_SERVICE} needs a healthcheck; the depends_on conditions below wait on it"
+    )
+
+
+# The five the entrypoint reads before it decides whether to run initdb.
+INITDB_VARS = (
+    "POSTGRES_PASSWORD",
+    "POSTGRES_PASSWORD_FILE",
+    "POSTGRES_USER",
+    "POSTGRES_DB",
+    "POSTGRES_HOST_AUTH_METHOD",
+)
+
+
+@pytest.mark.parametrize("var", INITDB_VARS, ids=lambda v: v)
+def test_the_database_service_sets_nothing_initdb_would_need(var: str):
+    """The absence is the safety net, not the mount path. The cluster on disk is initialised, so
+    the entrypoint never asks for these and setting one changes nothing on a good day -- but it
+    turns a mistyped COSMAI_PG_DATA_DIR from `exit 1` into a brand-new empty cluster that
+    pg_isready reports healthy and all six schedulers then write into. contracts/secrets.md names
+    no POSTGRES_ key, so test_no_secret_key_is_given_a_value_in_the_repo does not cover them."""
+    assert var not in SERVICES[DB_SERVICE], (
+        f"{DB_SERVICE} names {var}; the cluster already exists and initdb must stay unreachable"
     )
 
 

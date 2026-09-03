@@ -1,7 +1,7 @@
 -- 읽기 전용. postgrest_anon 이 세 스키마에서 무엇을 보는지와 그것을 여는 경로를 찍는다.
 -- postgrest_anon_old_stack.sql 적용 뒤 현행이 계약과 같은지 되묻는 것이 쓰임새다.
 --
---   docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' shared-postgres \
+--   docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' cosmai-postgres \
 --     psql -U platform -d app -X < db/grants/postgrest_anon_check.sql
 --
 -- 읽기 전용 세션에서 돌아야 한다 -- 이 파일에 SELECT 아닌 것이 섞이면 거기서 죽는다.
