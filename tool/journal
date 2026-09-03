@@ -1,5 +1,14 @@
 #!/bin/sh
-# Appends one line to an issue's journal comment.
+# Appends one line to an issue's journal comment: the ledger for an ops issue whose steps change
+# state, and for a wave channel epic (AGENTS.md). One comment, first line `## 저널`, one line per
+# step, so a session that dies mid-way leaves behind which step it reached and on which commit.
+#
+# What it refuses is as much the point as what it writes. Both repositories are public (#15) and
+# an agent writing here has a machine path and whatever it just read in hand; a comment can be
+# edited afterwards but the edit history keeps the first version. So $HOME becomes ~, a leftover
+# absolute path or a secret-shaped token is refused, and none of that costs an API call.
+#
+# It never reads the secret file: the note is an argument, and this tool has no other input.
 
 set -e
 
@@ -10,8 +19,17 @@ require_command gh jq git
 usage() {
     cat >&2 <<'EOF'
 usage: tool/journal [-R owner/repo] <issue> <step> <예정|ok|fail> [note]
+
+  Appends "- <step> <state> <UTC> <short SHA> [note]" to the issue's `## 저널` comment,
+  creating that comment when the issue has none. -R defaults to this checkout's origin.
+  Refuses (exit 2) a note that still holds an absolute path or a secret-shaped token.
 EOF
     exit 64
+}
+
+refuse() {
+    printf '\033[31m✗ %s\033[0m\n' "$1" >&2
+    exit 2
 }
 
 repo=
@@ -23,5 +41,59 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ $# -ge 3 ] || usage
-exit 0
+[ $# -ge 3 ] && [ $# -le 4 ] || usage
+number=$1
+step=$2
+state=$3
+note=${4:-}
+
+case "$number" in ''|*[!0-9]*) usage ;; esac
+case "$state" in 예정|ok|fail) ;; *) usage ;; esac
+
+# Literal replacement, not sed: $HOME is a path and would otherwise be read as a regex.
+scrub() {
+    printf '%s' "$1" | awk -v home="$HOME" '
+        { while (home != "" && index($0, home) > 0) {
+              at = index($0, home)
+              $0 = substr($0, 1, at - 1) "~" substr($0, at + length(home))
+          }
+          print }'
+}
+step=$(scrub "$step")
+note=$(scrub "$note")
+written="$step $note"
+
+# Someone else's home, or a mount, survives the rewrite above and is still a machine path.
+# The prefix is split so that tool/checks/paths does not read this guard as the thing it guards.
+case "$written" in
+    *"/ho""me/"*|*/mnt/*) refuse "메모에 절대 경로가 있다 — 레포 상대 경로나 ~ 로 쓴다." ;;
+esac
+# 20 characters of unbroken [A-Za-z0-9+/=] is a key or a token, not prose: journals carry step
+# numbers, states, times and SHAs (AGENTS.md), so nothing legitimate here is that long.
+if printf '%s' "$written" | grep -Eq '[A-Za-z0-9+/=]{20,}'; then
+    refuse "메모에 secret 처럼 보이는 토큰이 있다 — 저널에는 단계·상태·시각·SHA 만 적는다."
+fi
+
+if [ -z "$repo" ]; then
+    origin=$(git remote get-url origin 2>/dev/null) || refuse "origin 이 없다 — -R owner/repo 로 레포를 지정한다."
+    repo=$(printf '%s' "$origin" | sed -e 's|^git@[^:]*:|| ; s|^[a-z+]*://[^/]*/||' -e 's|\.git$||')
+fi
+case "$repo" in */*) ;; *) refuse "레포 이름이 owner/repo 가 아니다: $repo" ;; esac
+
+line="- $step $state $(date -u +%Y-%m-%dT%H:%MZ) $(git rev-parse --short HEAD)"
+[ -z "$note" ] || line="$line $note"
+
+# --paginate can emit one array per page; -s add folds both shapes into one array.
+existing=$(gh api --paginate "repos/$repo/issues/$number/comments" \
+    | jq -s '[.[][]] | map(select((.body // "") | startswith("## 저널"))) | first // null')
+
+if [ "$existing" = null ]; then
+    body=$(printf '## 저널\n%s\n' "$line")
+    printf '%s' "$body" | jq -R -s '{body: .}' \
+        | gh api "repos/$repo/issues/$number/comments" --input - >/dev/null
+else
+    id=$(printf '%s' "$existing" | jq -r '.id')
+    printf '%s' "$existing" | jq --arg line "$line" '{body: ((.body | sub("\n*$"; "")) + "\n" + $line + "\n")}' \
+        | gh api -X PATCH "repos/$repo/issues/comments/$id" --input - >/dev/null
+fi
+printf '%s · %s\n' "$repo#$number" "$line"

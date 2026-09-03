@@ -35,6 +35,9 @@ usage: tool/issue <command>
   recheck [--json]          open issues to look at again, and why; exit 1 when there is one
   lint [--json]             rule violations; exit 1 when there is one
   audit                     drift report; exit 0
+
+Boot order is audit, then recheck, then ready (AGENTS.md). A step of an ops issue or of a
+wave epic is written with tool/journal, not here: this tool never writes.
 EOF
     exit 64
 }

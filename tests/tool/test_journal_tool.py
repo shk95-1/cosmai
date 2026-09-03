@@ -63,8 +63,9 @@ OTHER_COMMENT = {"id": 800, "body": "착수합니다. 워크트리는 tool-185.\
 
 
 def test_a_machine_path_in_the_note_is_refused_before_anything_is_written(run):
-    # 레포는 공개다(#15). 홈 경로가 든 코멘트는 지워도 이력에 남는다.
-    done = run("185", "2", "ok", "/ho" + "me/user1/github_prj 에서 돌렸다", comments=[JOURNAL_COMMENT])
+    # 레포는 공개다(#15). 홈 경로가 든 코멘트는 지워도 이력에 남는다. 이 홈은 이 세션의 $HOME 이
+    # 아니다 -- 자기 홈은 ~ 로 바뀌어 통과하므로, 거부를 재려면 남의 홈이어야 한다.
+    done = run("185", "2", "ok", "/ho" + "me/other/github_prj 에서 돌렸다", comments=[JOURNAL_COMMENT])
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert "경로" in done.stderr, done.stderr
     assert done.calls == "", done.calls
