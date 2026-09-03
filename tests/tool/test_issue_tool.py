@@ -692,7 +692,9 @@ def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
                 parent=10,
             ),
             issue(14, "옮겨간 경로", body=quoted, labels=("ch:tool",), parent=10),
-            issue(15, "목표가 닫혔다", labels=("ch:tool",), parent=10),
+            # updated before the closing it is pointed at by, so (e) still has something to say
+            # about it (C-3: an issue touched after the closing goes quiet instead).
+            issue(15, "목표가 닫혔다", labels=("ch:tool",), parent=10, updated_days_ago=5),
         ],
         upstream_closed=[
             closed(30, "[목표] 끝난 목표", "#15 로 이어진다\n", days_ago=2, labels=("goal",)),
@@ -701,14 +703,15 @@ def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
     )
     assert done.returncode == 1, done.stdout + done.stderr
     by_key = {row["key"]: row for row in json.loads(done.stdout)}
-    assert set(by_key) == {f"cosmai#{n}" for n in (11, 12, 13, 14, 15)}, sorted(by_key)
+    # cosmai#13 is not in the set at all: a "## 해제 조건" section with no date in it is (C-2) no
+    # longer treated as "no release condition" -- only (a)'s 14-day cycle watches it, and it has not
+    # been 14 days.
+    assert set(by_key) == {f"cosmai#{n}" for n in (11, 12, 14, 15)}, sorted(by_key)
     assert {r["code"] for r in by_key["cosmai#11"]["reasons"]} == {"a"}
     assert by_key["cosmai#11"]["reasons"][0]["checks"] == ["전제", "blockedBy", "해제 조건", "등급", "중복"]
     assert {r["code"] for r in by_key["cosmai#12"]["reasons"]} == {"b"}
     assert by_key["cosmai#12"]["reasons"][0]["checks"] == ["해제 조건"]
     assert day(-2) in by_key["cosmai#12"]["reasons"][0]["why"]
-    assert {r["code"] for r in by_key["cosmai#13"]["reasons"]} == {"c"}
-    assert by_key["cosmai#13"]["reasons"][0]["checks"] == ["blockedBy", "해제 조건"]
     assert {r["code"] for r in by_key["cosmai#14"]["reasons"]} == {"d"}
     assert "tool/nowhere.py" in by_key["cosmai#14"]["reasons"][0]["why"]
     # The path that is there must not be reported, or the reason becomes noise nobody reads.
@@ -800,3 +803,235 @@ def test_recheck_reads_the_last_date_in_the_release_section_not_any_date(run):
     assert [r["code"] for r in rows[0]["reasons"]] == ["b"], rows
     assert day(-2) in rows[0]["reasons"][0]["why"], rows
     assert day(-9) not in rows[0]["reasons"][0]["why"], rows
+
+
+@pytest.fixture
+def checkout_with_marker(tmp_path: Path) -> Path:
+    """A checkout whose only in-code marker points at #43, an issue that only the fork has."""
+    repo = tmp_path / "checkout-primary"
+    repo.mkdir()
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    (repo / "pipeline.py").write_text("# TO" + "DO(#43) 만지는 김에 고친다\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
+    return repo
+
+
+def test_a_fork_checkout_matches_todo_markers_against_the_forks_own_issues(
+    run, monkeypatch, checkout_with_marker: Path
+):
+    # #174: primary used to be hardcoded to the first of REPOS (upstream), so a fork checkout could
+    # never match its own TODO(#n) markers and audit stayed red on issues that were open and fine.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", FORK)
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(9,)),
+            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+        ],
+        fork=[
+            epic(20, "population", subs=(43,)),
+            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+        ],
+        cwd=checkout_with_marker,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "TO" + "DO(#43)" not in done.stdout, done.stdout
+    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
+    assert "cosmai-import-ydc#43" not in missing.split("\n\n")[0], done.stdout
+
+
+def test_an_upstream_checkout_keeps_matching_todo_markers_against_upstream(
+    run, monkeypatch, checkout_with_marker: Path
+):
+    # Same graph and checkout as above, but the override now names upstream: this is the behavior
+    # #174 must leave unchanged, so #43 (a fork-only issue) is still an unmatched marker and
+    # upstream's own #9 is still a marker-less when-touched issue -- the asymmetry the bug relied on.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(9,)),
+            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+        ],
+        fork=[
+            epic(20, "population", subs=(43,)),
+            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+        ],
+        cwd=checkout_with_marker,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "TO" + "DO(#43)" in done.stdout, done.stdout
+    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1].split("\n\n")[0]
+    assert "cosmai#9" in missing, done.stdout
+
+
+@pytest.fixture
+def checkout_with_upstream_remote(tmp_path: Path) -> Path:
+    """A fork-shaped checkout: a plain git repo with an `upstream` remote configured."""
+    repo = tmp_path / "checkout-upstream-remote"
+    repo.mkdir()
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    (repo / "seed.py").write_text("# seed\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
+    subprocess.run(
+        [*git, "remote", "add", "upstream", "https://example.invalid/upstream/repo.git"],
+        check=True,
+        capture_output=True,
+        env=clean,
+    )
+    return repo
+
+
+FAKE_FOREIGN_CLOSES = """#!/bin/sh
+printf '%s\\n' "#43 · 남의 커밋 · 닫은 커밋 abc1234"
+exit 1
+"""
+
+
+def test_audit_carries_the_foreign_closes_output_verbatim(
+    run, monkeypatch, tmp_path: Path, checkout_with_upstream_remote: Path
+):
+    # #174 (B): audit calls tool/checks/foreign-closes rather than reimplementing its judgment --
+    # this proves the call happens and the block is exactly what the script printed.
+    fake = tmp_path / "fake-foreign-closes"
+    fake.write_text(FAKE_FOREIGN_CLOSES, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        cwd=checkout_with_upstream_remote,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "#43 · 남의 커밋 · 닫은 커밋 abc1234" in done.stdout, done.stdout
+
+
+def test_audit_skips_foreign_closes_without_an_upstream_remote(run, checkout: Path):
+    # An upstream checkout has no `upstream` remote to compare against (there is nothing foreign
+    # relative to itself), so the section says it was skipped instead of erroring.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "상대 리모트 없음 — 건너뜀" in done.stdout, done.stdout
+
+
+def test_recheck_d_skips_a_path_with_a_parenthetical_note_right_after(run):
+    # #174 (C-1): a path the body already marks as not-yet-there or moved should not also be
+    # reported as "missing from the checkout" -- that would just restate the same note as a defect.
+    body = BODY + "\n`tool/nowhere.py`(예정) 가 아직 없다\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "주석 붙은 경로", body=body, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == "[]", done.stdout
+
+
+def test_recheck_d_skips_a_path_with_a_parenthetical_note_after_a_space(run):
+    # The space-before-paren shape ("`path` (포크)") is the other form #174 (C-1) names.
+    body = BODY + "\n`tool/nowhere.py` (포크) 로 옮겨갔다\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "주석 붙은 경로", body=body, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == "[]", done.stdout
+
+
+def test_recheck_d_still_flags_a_path_with_no_note(run):
+    body = BODY + "\n`tool/nowhere.py` 가 아직 없다\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "평범한 경로", body=body, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [r["code"] for r in rows[0]["reasons"]] == ["d"], rows
+    assert "tool/nowhere.py" in rows[0]["reasons"][0]["why"], rows
+
+
+def test_recheck_c_is_quiet_when_a_release_condition_section_exists_without_a_date(run):
+    # #174 (C-2): a "## 해제 조건" section with prose instead of a date already has (a)'s 14-day
+    # cycle watching it -- firing (c) too on every boot is what killed the signal.
+    body = BODY + "\n## 해제 조건\n소비자가 생기면\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "산문 조건", body=body, labels=("ch:tool", "deferred"), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == "[]", done.stdout
+
+
+def test_recheck_c_still_fires_without_a_release_condition_section_at_all(run):
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "조건 없음", labels=("ch:tool", "deferred"), parent=10),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [r["code"] for r in rows[0]["reasons"]] == ["c"], rows
+
+
+def test_recheck_e_is_quiet_once_the_pointed_at_issue_was_touched_after_the_closing(run):
+    # #174 (C-3): a recheck comment on the issue is an update to it, so it should turn (e) off for
+    # the rest of the 7-day window instead of repeating every boot (실측: #73·#89·#112·#124).
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "코멘트함", labels=("ch:tool",), parent=10, updated_days_ago=1),
+        ],
+        upstream_closed=[closed(30, "[목표] 끝난 목표", "#11 로 이어진다\n", days_ago=3, labels=("goal",))],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == "[]", done.stdout
+
+
+def test_recheck_e_still_fires_when_updated_before_the_closing(run):
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "안 만짐", labels=("ch:tool",), parent=10, updated_days_ago=5),
+        ],
+        upstream_closed=[closed(30, "[목표] 끝난 목표", "#11 로 이어진다\n", days_ago=3, labels=("goal",))],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [r["code"] for r in rows[0]["reasons"]] == ["e"], rows
+    assert "cosmai#30" in rows[0]["reasons"][0]["why"], rows
