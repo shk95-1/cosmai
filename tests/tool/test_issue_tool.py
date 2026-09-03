@@ -327,6 +327,22 @@ def test_a_resource_of_none_is_not_folded_into_the_held_summary(run):
     assert "wip" not in model and "limit" not in model and "gate" not in model, list(model)
 
 
+def test_a_capitalised_resource_of_none_is_not_folded_either(run):
+    # The first line of `ready` is what a worker checks before starting; a phantom resource there
+    # costs a wait on nothing, and a migrated body writing "None" is the likely spelling.
+    body = "## Channel / grade / size\nSize S · Resources: None\n"
+    done = run(
+        "ready",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "the ledger", body=body, labels=("ch:repo",), assignees=("shk95",)),
+        ],
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["held"]["resources"] == [], done.stdout
+
+
 def test_a_korean_resource_of_none_is_not_folded_either(run):
     # The window keeps reading the bodies that are still Korean; "none" has to be dropped in both.
     done = run(
@@ -780,6 +796,27 @@ def test_korean_in_an_issue_opened_after_the_effective_date_is_a_lint_error(run)
     assert len(flagged) == 2, done.stdout
     assert any(line.startswith("cosmai#11:") for line in flagged), done.stdout
     assert any(line.startswith("cosmai#12:") for line in flagged), done.stdout
+
+
+def test_halfwidth_jamo_is_korean_to_the_lint_rule_too(run):
+    # One rule, three enforcement sites: tool/checks/lang and the commit-msg hook both count these
+    # codepoints, so a lint that did not would make a green check stop being evidence.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11,
+                "halfwidth " + KO["halfwidth_jamo"],
+                body=BODY,
+                labels=("ch:tool",),
+                parent=10,
+                created_at=AFTER_THE_WINDOW,
+            ),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
 
 
 def test_korean_in_an_issue_opened_before_the_effective_date_is_not_a_lint_error(run):

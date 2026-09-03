@@ -10,5 +10,6 @@
   "goal_prefix": "[목표]",
   "decision_prefix": "[결정]",
   "rules_prefix": "[규약]",
-  "channel_prefix": "[채널]"
+  "channel_prefix": "[채널]",
+  "halfwidth_jamo": "ﾡﾢﾣ"
 }

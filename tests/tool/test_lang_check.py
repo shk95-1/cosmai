@@ -76,7 +76,11 @@ def test_an_allowlisted_path_passes(repo: Path):
 
 def test_a_test_fixture_directory_passes(repo: Path):
     # The migration-window tests feed the tools real Korean anchors; they have to live somewhere.
+    # Both depths: git gives `**` no empty match, so `tests/**/fixtures/` alone would miss the
+    # second of these and block the commit that added it.
     stage(repo, "tests/tool/fixtures/bodies.json", KOREAN)
+    stage(repo, "tests/fixtures/y.json", KOREAN)
+    stage(repo, "tests/golden/out.txt", KOREAN)
     done = run_check(repo)
     assert done.returncode == 0, done.stderr
 

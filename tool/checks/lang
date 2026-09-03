@@ -17,6 +17,8 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 
 # Korean that is content rather than operating surface stays. Each entry leaves as a later wave of
 # #192 removes its reason, so the list is here rather than spread across the tree.
+# A fixture directory is named twice because git's default pathspec matching gives `**` no empty
+# match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
 hits=$(git diff --cached -U0 --no-color -- . \
     ':!tool/checks/lang' \
     ':!tool/issue' \
@@ -26,6 +28,8 @@ hits=$(git diff --cached -U0 --no-color -- . \
     ':!db/seed/' \
     ':!analysis/**/*.csv' \
     ':!portal/public/' \
+    ':!tests/fixtures/**' \
+    ':!tests/golden*/**' \
     ':!tests/**/fixtures/**' \
     ':!tests/**/golden*/**' \
     | awk '/^\+\+\+ /{ f = substr($0, 7); next } /^\+[^+]/ { print f ": " substr($0, 2) }' \

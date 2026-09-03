@@ -269,7 +269,7 @@ def resource: (scale_lines | join("\n")
 def resource_tokens:
   resource | split("·")
   | map(capture("^[ \t]*(?<t>[^ \t(][^ \t(]*)").t | sub("[.,;:]+$"; ""))
-  | map(select(. != "none" and . != "없음" and . != "")) | unique;
+  | map(select((. | ascii_downcase) != "none" and . != "없음" and . != "")) | unique;
 def excluded_from_ready: (tagged("memo") or tagged("channel") or tagged("goal") or tagged("deferred"));
 def targets($user): map(select((excluded_from_ready | not) and ($user or (tagged("needs-user") | not))));
 def status_of:
@@ -288,7 +288,7 @@ def outside_fences:
       elif .inside then .
       else .out += [$line] end)
   | .out | join("\n");
-def hangul: test("[ᄀ-ᇿ㄰-㆏가-힣ꥠ-꥿]");
+def hangul: test("[ᄀ-ᇿ㄰-㆏가-힣ꥠ-꥿\uffa0-\uffdc]");
 def title_tag($en; $ko): (.title | startswith("[" + $en + "]") or startswith("[" + $ko + "]"));
 def ready_channels($all; $user):
   ($all | targets($user)) as $t
@@ -610,7 +610,7 @@ case "$cmd" in
             # Read, never fetched -- a boot command that reaches the network is a boot command that
             # hangs -- so a ref nobody has fetched is reported as unknown rather than as "up to date".
             if git rev-parse --verify -q upstream/main >/dev/null 2>&1; then
-                behind=$(git log --format=%h upstream/main --not HEAD -- db/ tool/checks/ contracts/ddl/ AGENTS.md)
+                behind=$(git log --format=%h upstream/main --not HEAD -- db/ tool/checks/ contracts/ddl/ AGENTS.md || true)
                 behind_count=$(printf '%s' "$behind" | grep -c . || true)
                 fork_behind=$(printf '%s' "$behind" | head -20)
                 [ "$behind_count" -le 20 ] \
