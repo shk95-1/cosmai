@@ -892,10 +892,17 @@ def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
     assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout
 
 
-def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
+@pytest.mark.parametrize("origin_is_fork", [False, True], ids=["upstream-checkout", "fork-checkout"])
+def test_recheck_names_each_reason_with_the_checklist_items_to_walk(
+    run, monkeypatch, fork_origin_checkout: Path, origin_is_fork: bool
+):
     # AGENTS.md's recheck rule is five questions (premise, blockedBy, release condition, grade,
     # duplicate). A bare list of issue numbers would leave the reader to guess which of the five
     # this row is about.
+    # #199: primary must come from this override, not from `git remote get-url origin` of whichever
+    # checkout the suite happens to run in -- parametrized over a fork-origin checkout to prove it.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    cwd = fork_origin_checkout if origin_is_fork else None
     quoted = BODY + "\n`tool/issue` is here and `tool/nowhere.py:12` is not\n"
     done = run(
         "recheck",
@@ -920,6 +927,7 @@ def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
             closed(30, "[goal] a finished goal", "leads to #15\n", days_ago=2, labels=("goal",)),
             closed(31, "[decision] an old decision", "leads to #11\n", days_ago=30, labels=("decision",)),
         ],
+        cwd=cwd,
     )
     assert done.returncode == 1, done.stdout + done.stderr
     by_key = {row["key"]: row for row in json.loads(done.stdout)}
@@ -1084,6 +1092,30 @@ def checkout_with_marker(tmp_path: Path) -> Path:
     (repo / "pipeline.py").write_text("# TO" + "DO(#43) fix it while you are in here\n", encoding="utf-8")
     subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
     subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
+    return repo
+
+
+@pytest.fixture
+def fork_origin_checkout(tmp_path: Path) -> Path:
+    """A checkout whose origin is the fork, carrying `tool/issue` tracked -- proves recheck's (d)
+    depends only on COSMAI_ISSUE_PRIMARY, never on which repo the checkout's origin names (#199).
+    """
+    repo = tmp_path / "checkout-fork-origin"
+    (repo / "tool").mkdir(parents=True)
+    (repo / "tool" / "issue").write_text("# stand-in for the real file\n", encoding="utf-8")
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
+    subprocess.run(
+        [*git, "remote", "add", "origin", "https://github.com/shk95/cosmai-import-ydc"],
+        check=True,
+        capture_output=True,
+        env=clean,
+    )
     return repo
 
 
@@ -1346,7 +1378,13 @@ def test_recheck_d_skips_a_path_with_a_parenthetical_note_after_a_space(run):
     assert done.stdout.strip() == "[]", done.stdout
 
 
-def test_recheck_d_still_flags_a_path_with_no_note(run):
+@pytest.mark.parametrize("origin_is_fork", [False, True], ids=["upstream-checkout", "fork-checkout"])
+def test_recheck_d_still_flags_a_path_with_no_note(
+    run, monkeypatch, fork_origin_checkout: Path, origin_is_fork: bool
+):
+    # #199: same origin-independence as the test above, for the plain case with no note.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    cwd = fork_origin_checkout if origin_is_fork else None
     body = BODY + "\n`tool/nowhere.py` is not here yet\n"
     done = run(
         "recheck",
@@ -1355,6 +1393,7 @@ def test_recheck_d_still_flags_a_path_with_no_note(run):
             epic(10, "tool", subs=(11,)),
             issue(11, "a plain path", body=body, labels=("ch:tool",), parent=10),
         ],
+        cwd=cwd,
     )
     assert done.returncode == 1, done.stdout + done.stderr
     rows = json.loads(done.stdout)

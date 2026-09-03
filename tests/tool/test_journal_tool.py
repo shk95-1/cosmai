@@ -63,6 +63,7 @@ def run(tmp_path: Path):
         home: str | None = None,
         reads: list[dict] | None = None,
         relist: list[dict] | None = None,
+        cwd: Path | None = None,
     ):
         (tmp_path / "comments.json").write_text(json.dumps(comments or []), encoding="utf-8")
         if relist is not None:
@@ -87,7 +88,12 @@ def run(tmp_path: Path):
         if home is not None:
             env["HOME"] = home
         done = subprocess.run(
-            [str(JOURNAL), *args], capture_output=True, text=True, cwd=str(REPO_ROOT), env=env, check=False
+            [str(JOURNAL), *args],
+            capture_output=True,
+            text=True,
+            cwd=str(cwd or REPO_ROOT),
+            env=env,
+            check=False,
         )
         done.calls = calls.read_text(encoding="utf-8") if calls.exists() else ""  # type: ignore[attr-defined]
         done.written = json.loads(written.read_text(encoding="utf-8")) if written.exists() else None  # type: ignore[attr-defined]
@@ -203,9 +209,40 @@ def test_the_korean_planned_state_is_accepted_and_written_in_english(run):
     assert KO["state_planned"] not in done.written["body"], done.written
 
 
-def test_the_repo_defaults_to_this_checkout_and_r_overrides_it(run):
-    assert "shk95-1/cosmai/issues/185" in run("185", "1", "planned").calls
-    other = run("-R", "shk95-1/cosmai-import-ydc", "38", "1", "planned").calls
+def _repo_with_origin(tmp_path: Path, origin: str) -> Path:
+    """A throwaway git repo whose `origin` names the given URL -- `tool/journal` derives the repo
+    from that remote, so a test proving it does so must never read the real checkout's own origin
+    (#199, isolation pattern from test_foreign_closes.py's `gitrepo`)."""
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    # `tool/journal` puts `git rev-parse --short HEAD` on the journal line, so the fixture needs a commit.
+    subprocess.run(
+        [*git, "commit", "-q", "--allow-empty", "-m", "chore: seed"],
+        check=True,
+        capture_output=True,
+        env=clean,
+    )
+    subprocess.run([*git, "remote", "add", "origin", origin], check=True, capture_output=True, env=clean)
+    return repo
+
+
+@pytest.mark.parametrize(
+    "origin, nwo",
+    [
+        ("https://github.com/shk95-1/cosmai", "shk95-1/cosmai"),
+        ("https://github.com/shk95/cosmai-import-ydc", "shk95/cosmai-import-ydc"),
+    ],
+    ids=["upstream-origin", "fork-origin"],
+)
+def test_the_repo_defaults_to_this_checkout_and_r_overrides_it(run, tmp_path: Path, origin: str, nwo: str):
+    checkout = _repo_with_origin(tmp_path, origin)
+    assert f"{nwo}/issues/185" in run("185", "1", "planned", cwd=checkout).calls
+    other = run("-R", "shk95-1/cosmai-import-ydc", "38", "1", "planned", cwd=checkout).calls
     assert "shk95-1/cosmai-import-ydc/issues/38" in other, other
 
 
