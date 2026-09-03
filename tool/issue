@@ -7,6 +7,12 @@
 # readable -- `gh issue list` shows neither sub-issue order nor blockedBy -- and a
 # boot that loses this tool degrades to `gh issue list -l ch:<x>`, which is worse
 # but cannot damage anything.
+#
+# audit and recheck test the checkout's own TODO(#n) markers and paths, so both pick a "primary" repo
+# from the checkout's `origin` remote rather than always the first of REPOS (#174) --
+# COSMAI_ISSUE_PRIMARY overrides that read. audit's foreign-closes section shells out to
+# tool/checks/foreign-closes against the checkout's `upstream` remote (COSMAI_FOREIGN_CLOSES
+# overrides which script), and is skipped when there is no such remote.
 
 set -e
 
@@ -18,6 +24,29 @@ require_command gh jq git
 
 # One graph, two repos: the fork's issues block upstream's (cosmai#55 <- fork#6).
 REPOS=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-ydc"}
+
+# The checked-out repo, not the first entry of REPOS, is what audit's TODO(#n)/path checks must test
+# against -- a fork checkout's TODO(#n) markers point at fork issues, not upstream's (#174).
+# COSMAI_ISSUE_PRIMARY stands in for `git remote get-url origin` so a test can fake a checkout that
+# has no real remote; it is read only when the override is unset. Matched by repo name alone --
+# REPOS' owner and origin's owner drift independently of one another, and every caller of
+# pick_primary keeps only ${primary##*/} anyway.
+pick_primary() {
+    origin=${COSMAI_ISSUE_PRIMARY:-$(git remote get-url origin 2>/dev/null || true)}
+    origin_repo=$(printf '%s' "$origin" | sed -E 's#\.git$##; s#.*/##')
+    for repo in $REPOS; do
+        if [ "${repo##*/}" = "$origin_repo" ]; then
+            printf '%s' "$repo"
+            return
+        fi
+    done
+    # Falls back to the old fixed choice rather than failing: a checkout whose origin is renamed
+    # or missing should not lose audit/recheck entirely, only the fork-vs-upstream distinction.
+    printf 'tool/issue: checkout origin repo (%s) matches no REPOS entry by name; defaulting to %s\n' \
+        "$origin_repo" "${REPOS%% *}" >&2
+    printf '%s' "${REPOS%% *}"
+}
+
 STALE_HOURS=24
 MEMO_DAYS=14
 RECHECK_DAYS=14
@@ -38,6 +67,10 @@ usage: tool/issue <command>
 
 Boot order is audit, then recheck, then ready (AGENTS.md). A step of an ops issue or of a
 wave epic is written with tool/journal, not here: this tool never writes.
+
+env:
+  COSMAI_ISSUE_PRIMARY   overrides the checkout's origin repo (tests only; default: git remote get-url origin)
+  COSMAI_FOREIGN_CLOSES  overrides the foreign-closes script audit's last section calls
 EOF
     exit 64
 }
@@ -299,9 +332,12 @@ def release_dates: [ (section_lines("해제 조건") // []) | join("\n") | scan(
 # Only backticked, slash-carrying tokens whose first segment is something the checkout actually has:
 # bodies are full of `owner/repo` and `ch:collectors/youtube`, and reporting those as missing files
 # would put every issue on the list, which is the same as having no list at all.
+# A path immediately followed by a parenthetical note ("`stack/x` (예정)", "`stack/x`(포크)") is a
+# path the body already marks as not-yet-there or gone; checking it would just restate the note.
 def body_paths:
-  [ .body | scan("`[^`\n]+`") ]
-  | map(.[1:-1] | sub(":[0-9]+$"; "") | sub("/$"; ""))
+  [ .body | scan("`([^`\n]+)`( ?\\()?") ]
+  | map(select((.[1] // "") == ""))
+  | map(.[0] | sub(":[0-9]+$"; "") | sub("/$"; ""))
   | map(select(test("^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)+$")))
   # A dotfile is normally untracked on purpose (stack/.env), so "not in the checkout" says nothing.
   | map(select((split("/") | last | startswith(".")) | not))
@@ -314,10 +350,13 @@ flat as $all
     | select(.closedAt != null and (days_since(.closedAt) <= $closed_days))
     | select((.labels | index("goal")) or (.labels | index("decision"))
              or (.title | startswith("[목표]")) or (.title | startswith("[결정]")))]) as $moved
+# Each edge carries the closing closedAt too, not just the key: (e) goes quiet once the pointed-at
+# issue was updated after that closing -- a recheck comment left there is how the signal turns off.
 | (reduce ($moved[] | . as $m
      | [.body | scan("[A-Za-z0-9._-]*#[0-9]+")]
      | map(if startswith("#") then ($m.short + .) else . end)
-     | unique[] | {ref: ., src: $m}) as $edge ({}; .[$edge.ref] += [$edge.src.key])) as $points_at
+     | unique[] | {ref: ., src: $m}) as $edge
+   ({}; .[$edge.ref] += [{key: $edge.src.key, closedAt: $edge.src.closedAt}])) as $points_at
 | [$all[] | select(tagged("memo") | not)
    | . as $i
    | (release_dates) as $dates
@@ -326,14 +365,17 @@ flat as $all
                checks: ["전제", "blockedBy", "해제 조건", "등급", "중복"]} else empty end),
         (if ($dates | length) > 0 and ($dates | max) < $today
          then {code: "b", why: ("해제 조건 " + ($dates | max) + " 이 지났다"), checks: ["해제 조건"]} else empty end),
-        (if tagged("deferred") and (open_blockers | length) == 0 and ($dates | length) == 0
-         then {code: "c", why: "deferred 인데 열린 blockedBy 가 없다", checks: ["blockedBy", "해제 조건"]} else empty end),
+        # A "## 해제 조건" section already gives (b) a date to watch, or -- with no date in it --
+        # leaves prose that only (a) 14-day cycle can judge; without the section there is nothing
+        # else watching this deferred issue, so only then does the missing-blocker gap need saying.
+        (if tagged("deferred") and (open_blockers | length) == 0 and (section("해제 조건") | not)
+         then {code: "c", why: "deferred 인데 열린 blockedBy 도 ## 해제 조건 절도 없다", checks: ["blockedBy", "해제 조건"]} else empty end),
         # Only the repo this checkout is: issues in the other repo quote files that live there
         # and not here, and reporting every one of them would drown the reasons that are real.
         ((if .short == $primary then (body_paths | map(select($tracked[.] != true))) else [] end) as $gone
          | if ($gone | length) > 0
            then {code: "d", why: ("본문의 " + ($gone | join(", ")) + " 가 체크아웃에 없다"), checks: ["전제"]} else empty end),
-        (($points_at[$i.key] // []) as $src
+        ((($points_at[$i.key] // []) | map(select(.closedAt > $i.updatedAt)) | map(.key)) as $src
          | if ($src | length) > 0
            then {code: "e", why: (($src | join(", ")) + " 이 최근 " + ($closed_days | tostring) + "일 안에 닫혔다"),
                  checks: ["전제", "등급", "중복"]} else empty end) ]) as $reasons
@@ -417,7 +459,8 @@ AUDIT='
     | . as $i | select([$todos[] | select(test("TODO\\(#" + ($i.number | tostring) + "\\)"))] | length == 0) | .key],
   merged_worktrees: [$worktrees[] | split("\t") | {path: .[0], branch: .[1]}
     | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
-  missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)]
+  missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)],
+  foreign_closes: $foreign_closes
 }
 '
 
@@ -433,6 +476,7 @@ block("채널별 대기열"; [.channels[] | "  " + .channel + " (" + .epic + ") 
 + block("열린 when-touched 이슈인데 코드에 표식이 없다"; [.when_touched_without_todo[] | "  " + .])
 + block("머지됐는데 남은 워크트리"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
 + block("두 레포에 없는 공통 라벨"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
++ block("닫혔는데 닫은 커밋이 남의 레포 것"; [.foreign_closes[] | "  " + .])
 | .[]
 '
 
@@ -472,7 +516,7 @@ case "$cmd" in
         # Reason (d) asks whether the checkout still has what the body quotes. Tracked paths only,
         # with every ancestor directory, so an untracked scratch file cannot answer for a path that
         # is really gone and so a quoted directory resolves.
-        primary=${REPOS%% *}
+        primary=$(pick_primary)
         tracked=$(git ls-files 2>/dev/null | awk '{ print; p = $0; while (sub("/[^/]*$", "", p)) print p }' \
             | sort -u | jq -R -s 'split("\n") | map(select(length > 0)) | map({(.): true}) | add // {}')
         # A file rather than --argjson: two pages of closed bodies overflow the argument list.
@@ -511,13 +555,23 @@ case "$cmd" in
         # worktree scan gives a different answer per checkout.
         todos=$(git grep -nE 'TODO\(#[0-9]+\)' main -- :/ 2>/dev/null || true)
         to_lines='split("\n") | map(select(length > 0))'
-        primary=${REPOS%% *}
+        primary=$(pick_primary)
+        # #175's own detector, called rather than reimplemented: judging "foreign" is one script's
+        # job. `upstream` is the fork-checkout remote name; on an upstream checkout it does not
+        # exist, so there is nothing to compare against and the section says so instead of erroring.
+        if git remote get-url upstream >/dev/null 2>&1; then
+            foreign_closes_cmd=${COSMAI_FOREIGN_CLOSES:-"$issue_tool_dir/checks/foreign-closes"}
+            foreign_closes=$("$foreign_closes_cmd" "$primary" upstream 2>&1 || true)
+        else
+            foreign_closes='(상대 리모트 없음 — 건너뜀)'
+        fi
         printf '%s' "$graph_json" | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
             --argjson memo_days "$MEMO_DAYS" \
             --arg primary "${primary##*/}" \
             --argjson merged "$(printf '%s' "$merged" | jq -R -s "$to_lines")" \
             --argjson worktrees "$(printf '%s' "$worktrees" | jq -R -s "$to_lines")" \
             --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
+            --argjson foreign_closes "$(printf '%s' "$foreign_closes" | jq -R -s "$to_lines")" \
             "$JQ_LIB $AUDIT | $RENDER_AUDIT"
         ;;
     *) usage ;;
