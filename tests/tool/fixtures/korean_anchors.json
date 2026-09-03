@@ -1,0 +1,15 @@
+{
+  "journal_head": "## 저널",
+  "state_planned": "예정",
+  "done_when": "## 완료 기준",
+  "release_condition": "## 해제 조건",
+  "when_to_fix": "## 언제 고치나",
+  "scale_heading": "## 채널·자리 / 등급 / 규모",
+  "scale_line": "규모 S · 자원: 없음",
+  "scale_line_resourced": "규모 M · 자원: ops(구 스택 정지 = 매번 승인) · 공유DB",
+  "goal_prefix": "[목표]",
+  "decision_prefix": "[결정]",
+  "rules_prefix": "[규약]",
+  "channel_prefix": "[채널]",
+  "halfwidth_jamo": "ﾡﾢﾣ"
+}
