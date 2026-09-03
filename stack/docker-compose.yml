@@ -1,10 +1,25 @@
 # 이 레포의 compose — 배선 전부는 여기 하나(README.md "stack/" 절). portal 하나였던 파일에 #10 §C
 # 절차 1 이 수집·분석 스케줄러를 더한다.
 #
-# **db-net 은 합류하되 소유하지 않는다.** 이 네트워크는 기존 fleet(compose 프로젝트 `shared-db`,
-# service/stack/docker-compose.yml)이 만들고 이름을 고정해 둔 것이고, 그 파일의 주석이 "이후 cosmai 가
-# external 로 합류할 때 이 이름을 쓴다"고 미리 적어 두었다. `external: true` 로 붙는 쪽이 그 약속이다 —
-# 여기서 소유권을 주장하면 이쪽 `docker compose down` 이 남의 네트워크를 지우게 된다.
+# **db-net and the database belong to this file now (#177).** Both were the `shared-db` project's:
+# it created the network, fixed its unprefixed name, and ran shared-postgres. That project died
+# with the old fleet on 2026-08-28 and its compose file is gone (#176), so nothing else declares
+# either any more. db-net is therefore declared below without `external: true`, which is what lets
+# `up` succeed on a host where the network does not exist; the `postgres` service opens the
+# cluster the dead container left on disk rather than making a new one.
+#
+# **`up` on the current host changes no attachment.** The live db-net carries
+# `com.docker.compose.network=db-net`, and that label -- not the project label -- is the only one
+# compose hard-checks, so the existing network is adopted with a warning ("a network with name
+# db-net exists but was not created for project cosmai") and nothing is detached, recreated or
+# reconnected by hand. The five old-stack containers on it, PostgREST above all (the portal calls
+# it from the browser until #179), stay where they are.
+#
+# **The hazard is `down`.** Compose refuses to remove a network carrying another project's label,
+# so today `down` here cannot touch db-net. The day db-net is ever removed and recreated by THIS
+# project it carries `project=cosmai`, and `down` will then try to delete the network those old
+# containers are still sitting on. Until #181 retires them, stop and start this stack with
+# `stop`/`up` -- never `down`.
 #
 # **스케줄러는 컨테이너당 크론탭 하나.** supercronic 에는 줄 단위 스위치가 없어서 운영자가 켜고 끌 수
 # 있는 최소 단위가 컨테이너다. 그래서 따로 멈춰야 하는 것끼리 나눈다: 외부 요청 예산을 쓰는 팔
@@ -49,10 +64,15 @@ x-cron: &cron
   # 여섯 다 같은 build 를 들고 있다: 태그가 같아 두 번째부터는 캐시 히트이고, 대신 프로필 뒤에 숨은
   # watch 컨테이너도 다른 서비스 없이 혼자 빌드하고 띄울 수 있다.
   restart: unless-stopped
+  # 데이터베이스가 같은 파일에 있게 되면서(#177) 스케줄러가 클러스터보다 먼저 뜰 수 있다. 그때의
+  # 첫 크론 줄은 크래시가 아니라 연결 거절로 끝난 run 이라 아무것도 재시도하지 않는다.
+  depends_on:
+    postgres:
+      condition: service_healthy
   environment:
     # contracts/entrypoints.md §DB 접속 노브. 망 안에서는 서비스명:5432 가 호스트의 127.0.0.1:5434 와
     # 같은 DB 다 — db/runtime.py 의 host_and_port() 가 세 자리에서 이 둘만 읽는다.
-    COSMAI_DB_HOST: shared-postgres
+    COSMAI_DB_HOST: postgres
     COSMAI_DB_PORT: "5432"
     # db/secrets.py 의 COSMAI_SECRET_FILE. 값이 아니라 위치다.
     COSMAI_SECRET_FILE: /run/cosmai/env
@@ -71,6 +91,52 @@ x-cron: &cron
     - db-net
 
 services:
+  # --- 데이터베이스 -------------------------------------------------------------------------------
+  # #177: the cluster every other service here reads and writes. No POSTGRES_USER/PASSWORD/DB is
+  # set, and none may be: the data directory below already holds an initialised cluster, so the
+  # entrypoint sets DATABASE_ALREADY_EXISTS and never reaches docker_verify_minimum_env -- the one
+  # place those variables are required (docker-entrypoint.sh, `if [ -z "$DATABASE_ALREADY_EXISTS" ]`
+  # in _main). initdb does not run again, the roles and their passwords are already in the cluster,
+  # and no secret value enters this file or stack/.env (contracts/secrets.md).
+  postgres:
+    image: postgres:18
+    # 디스크의 클러스터를 쓴 그 이미지다. 다른 메이저는 이 데이터 디렉터리 위에서 기동을 거부한다.
+    container_name: cosmai-postgres
+    restart: unless-stopped
+    volumes:
+      # PGDATA 의 부모를 붙인다 -- 죽은 컨테이너가 그렇게 붙였고, 이미지의 PGDATA 기본값
+      # /var/lib/postgresql/18/docker 가 그 아래에 그대로 있다. 자식을 직접 붙이면 같은 클러스터를
+      # 못 찾고 빈 것을 새로 만든다.
+      #
+      # 기본값이 없다 -- COSMAI_SECRET_FILE_HOST 와 같은 부류의 호스트 절대경로다. 이 파일의
+      # `name: cosmai` 와 container_name 은 고정이므로 어느 체크아웃에서 `up` 하든 겨냥하는 것은
+      # 같은 운영 컨테이너인데, 체크아웃마다 다른 자리로 풀리는 상대 기본값은 그 컨테이너를 엉뚱한
+      # 디렉터리 위에 다시 만든다. 그 경로는 entrypoint 의 docker_create_db_directories 가 이미
+      # root 소유로 만들어 놓은 뒤에야 기동이 실패한다.
+      - ${COSMAI_PG_DATA_DIR:?stack/env.example - absolute host path of the existing postgres data directory}:/var/lib/postgresql
+    ports:
+      # 호스트에서 도는 `uv run cosmai ...` 와 db/migrate.sh 가 보는 주소(db/runtime.py 의 기본값).
+      # 루프백에만 연다 -- 구 컨테이너가 열던 범위 그대로다.
+      - "127.0.0.1:5434:5432"
+    healthcheck:
+      # 아래 depends_on 이 기다리는 조건. 포트가 열리는 시각과 클러스터가 질의를 받는 시각은 다르다
+      # (기동 시 WAL 재생) -- 그 사이에 뜬 크론 컨테이너는 조용히 실패한 run 하나로 끝난다.
+      # **살아 있음만 잰다. 어느 클러스터인지는 못 잰다** -- 갓 만들어진 빈 클러스터에서도 이 명령은
+      # platform 롤도 app DB 도 없이 0 으로 끝난다. 초록을 "데이터가 거기 있다"로 읽으면 안 된다.
+      # 그것을 되묻는 자리는 tool/status 의 db 절(원장 버전 · app 크기 · 행 수)이다.
+      test: ["CMD-SHELL", "pg_isready -U platform -d app"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      db-net:
+        # transition alias, removed by #181: the old stack's PostgREST resolves this database as
+        # `shared-postgres` on this network and the portal still calls that PostgREST from the
+        # browser until #179.
+        aliases:
+          - shared-postgres
+
   # --- 수집 ---------------------------------------------------------------------------------------
   # 커머스 4사. 여섯 줄이 한 컨테이너인 이유는 하나의 요청 예산을 나눠 쓰기 때문이다: crontab.d 의
   # 간격 규칙(contracts/entrypoints.md §스케줄)은 이 줄들이 서로 겹치지 않는다는 전제 위에 있고,
@@ -101,7 +167,7 @@ services:
       # `<<:` replaces the anchor's environment: wholesale too (the same trap volumes: has below),
       # so every key the anchor set has to be repeated -- dropping one here is silent until whichever
       # knob it was turns out unset at 03:00.
-      COSMAI_DB_HOST: shared-postgres
+      COSMAI_DB_HOST: postgres
       COSMAI_DB_PORT: "5432"
       COSMAI_SECRET_FILE: /run/cosmai/env
       PYTHONUNBUFFERED: "1"
@@ -174,7 +240,7 @@ services:
     environment:
       # `<<:` 가 environment: 를 통째로 갈아 끼우므로 앵커의 다섯 키를 여기서 다시 적는다 --
       # collector-commerce 가 이미 밟은 함정이고, 하나를 빠뜨리면 08:00 에야 드러난다.
-      COSMAI_DB_HOST: shared-postgres
+      COSMAI_DB_HOST: postgres
       COSMAI_DB_PORT: "5432"
       COSMAI_SECRET_FILE: /run/cosmai/env
       PYTHONUNBUFFERED: "1"
@@ -194,6 +260,10 @@ services:
     build: ../portal
     image: cosmai-portal
     restart: unless-stopped
+    # 정적 파일만 내보내지만 그것이 부르는 API 뒤에 이 DB 가 있다 -- 스케줄러와 같은 순서로 뜬다.
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       # PostgREST 와 같은 노출 범위(로컬 네트워크) — 보여주는 것은 그 API 가
       # 이미 anon 에 연 데이터뿐이라 새로운 노출을 만들지 않는다.
@@ -208,5 +278,8 @@ volumes:
 
 networks:
   db-net:
+    # 접두사 없는 이름. 아직 이 망에 붙어 있는 구 스택 컨테이너들이 이 이름으로 찾고, compose 가
+    # 기존 망을 새로 만들지 않고 받아들이는 근거(com.docker.compose.network)도 이 이름이다.
+    # external 이 아니다 -- 만들던 프로젝트가 사라졌으므로(#176), external 이면 망이 없는 호스트에서
+    # `up` 이 실패하기만 한다. 그 대가로 생기는 `down` 의 위험은 이 파일 머리말에 적혀 있다.
     name: db-net
-    external: true

@@ -46,9 +46,15 @@ def _services(*profiles: str) -> set[str]:
         [*argv, "-f", str(COMPOSE), "config", "--services"],
         capture_output=True,
         text=True,
-        # The compose file requires this and gives it no default. /dev/null is a real path that no
-        # container is ever created from here -- `config` renders, it does not run.
-        env={"PATH": "/usr/bin:/bin", "HOME": "/tmp", "COSMAI_SECRET_FILE_HOST": "/dev/null"},
+        # The compose file requires both host paths and defaults neither (#177 took the default
+        # off the data directory). /dev/null is a real path that no container is ever created from
+        # here -- `config` renders, it does not run.
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/tmp",
+            "COSMAI_SECRET_FILE_HOST": "/dev/null",
+            "COSMAI_PG_DATA_DIR": "/dev/null",
+        },
         check=False,
     )
     assert done.returncode == 0, f"docker compose config failed:\n{done.stderr}"

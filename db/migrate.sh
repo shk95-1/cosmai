@@ -3,7 +3,7 @@
 # production and the test harness both use to create the needs schema.
 set -eu
 
-container=shared-postgres
+container=cosmai-postgres
 db=app
 superuser=platform
 
@@ -18,7 +18,7 @@ $container/$db through `docker exec`. Every path is repo-relative: run it from t
 
 Reads NEEDS_DB_MIGRATOR and NEEDS_DB_RUNTIME from $COSMAI_SECRET_FILE (default ~/.config/cosmai/env).
 
-  --container NAME   postgres container to `docker exec` into (default: shared-postgres)
+  --container NAME   postgres container to `docker exec` into (default: cosmai-postgres)
   --db NAME          database to apply to (default: app)
   --superuser NAME   role that owns the bootstrap step (default: platform)
 EOF
