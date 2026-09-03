@@ -25,9 +25,11 @@ run_check() {
   "$script" || fail "$2"
 }
 
-# Instant checks first: a machine path or an issue-less marker in a staged line (issue #60 rules).
+# Instant checks first: a machine path, an issue-less marker or a Korean line in a staged line
+# (issue #60 rules, #192 D12).
 run_check paths  "A staged line publishes a machine path."
 run_check todo   "A staged marker is not tied to an issue."
+run_check lang   "A staged line is in Korean."
 run_check format "Formatting is off. See tool/checks/format for the fix command."
 run_check lint   "Static analysis found problems."
 

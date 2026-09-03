@@ -1,0 +1,45 @@
+#!/bin/sh
+# contracts/ddl/needs/foreign.txt 의 항목 중 "정말 남의 것"만 골라 찍는다 (#75, cosmai#108).
+#
+# usage: tool/ddl-foreign-entries <foreign.txt> <declared-objects-file>
+#   declared-objects-file: 이 체크아웃이 선언하는 needs 객체, 한 줄에 하나.
+#     <table>           테이블 또는 뷰
+#     <table>.<column>  컬럼
+# stdout: 살아남은 항목, 한 줄에 하나 -- `table <name>` 또는 `column <table>.<column>`.
+#
+# 왜 목록을 그대로 쓰지 않고 거르는가: 같은 파일이 두 레포에서 뜻이 정반대다. upstream 에서는
+# 아홉 줄이 전부 포크가 운영에 올린 남의 객체지만, 포크 cosmai-import-ydc 체크아웃에는 020~025 와
+# db/views/ 가 있어 같은 아홉이 자기 선언이다. 그래서 판정을 목록이 아니라 체크아웃에 묻는다 --
+# 이 체크아웃이 선언하는 객체는 무시하고(제외하지 않고 그대로 대조한다) 나머지만 제외한다.
+#
+# 무시는 검사를 약하게 만들지 않는다. 제외란 "운영 덤프에서 빼고 기대치에서도 뺀다" 이므로 우리
+# 객체를 제외하면 그 드리프트가 영원히 안 보인다 -- 무시는 그 반대로, 기대치에 서 있는 객체를
+# 운영 덤프에도 남겨 여전히 맞대는 쪽이다. 둘 다 선언하면 드리프트를 둘 다 본다.
+# upstream 체크아웃에서는 선언 목록에 이 아홉이 하나도 없어 한 항목도 안 걸린다 -- 규칙이 생기기
+# 전과 같은 목록이 같은 순서로 나온다 (tests/tool/test_ddl_drift_foreign.py).
+set -e
+
+foreign=$1
+declared=$2
+[ -n "$foreign" ] && [ -n "$declared" ] || { echo "usage: $0 <foreign.txt> <declared-objects-file>" >&2; exit 2; }
+[ -f "$foreign" ] || { echo "ddl-foreign-entries: missing $foreign" >&2; exit 1; }
+[ -f "$declared" ] || { echo "ddl-foreign-entries: missing $declared" >&2; exit 1; }
+# 이 규칙의 실패 방향은 "덜 무시한다" = "더 제외한다" 쪽이라 조용하다: 선언 목록이 비면 아홉이
+# 전부 살아남아 전부 제외되고, 검사는 아무 말 없이 작아진 채로 초록을 찍는다. 빈 목록은 상태가
+# 아니라 고장이다 -- 자기 스키마를 하나도 선언하지 않는 체크아웃은 없다. 여기서 멈춘다.
+[ -s "$declared" ] || { echo "ddl-foreign-entries: empty declared-object list in $declared" >&2; exit 1; }
+
+for object in $(sed 's/#.*//' "$foreign" | awk 'NF {print $1}'); do
+    # 이 이름은 pg_dump 플래그와 ALTER TABLE 문에 그대로 박힌다. 평범한 식별자(또는
+    # 식별자.식별자)가 아니면 잘해야 오타다.
+    case $object in
+        *[!a-z0-9_.]* | *..* | .* | *.) echo "ddl-foreign-entries: bad entry in $foreign: $object" >&2; exit 1 ;;
+        *.*.*) echo "ddl-foreign-entries: bad entry in $foreign: $object" >&2; exit 1 ;;
+    esac
+    # grep -x: 접두사가 같은 이름(corpus_document 와 corpus_document_id)이 서로를 무시시키지 않게.
+    grep -qxF "$object" "$declared" && continue
+    case $object in
+        *.*) echo "column $object" ;;
+        *) echo "table $object" ;;
+    esac
+done
