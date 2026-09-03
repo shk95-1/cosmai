@@ -1,6 +1,6 @@
 ---
 name: reviewer-deep
-description: 등급 A 태스크 리뷰, 단계 말 전체 브랜치 리뷰, 계약 감사. 읽기 전용, 교차 태스크 통합 관점.
+description: Grade-A task review, end-of-stage whole-branch review, contract audit. Read-only, cross-task integration perspective.
 model: opus
 effort: high
 disallowedTools: Agent, Edit, Write, NotebookEdit

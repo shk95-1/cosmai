@@ -1,6 +1,6 @@
 ---
 name: impl-mechanical
-description: 값이 브리프에 전부 있는 기계적 구현(이식·CSV·설정·1–2파일 수정). 이슈 등급 B/C의 구현자.
+description: Mechanical implementation where the brief already holds every value (porting, CSV, configuration, a one- or two-file edit). The implementer for grade B/C issues.
 model: sonnet
 effort: medium
 disallowedTools: Agent

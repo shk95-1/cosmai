@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: 태스크 단위 스펙+품질 리뷰와 범위 재리뷰(등급 B, 그리고 A의 재리뷰). 읽기 전용.
+description: Per-task spec and quality review, and scoped re-review (grade B, plus the re-review of A). Read-only.
 model: sonnet
 effort: high
 disallowedTools: Agent, Edit, Write, NotebookEdit
