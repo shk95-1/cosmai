@@ -32,6 +32,18 @@ refuse() {
     exit 2
 }
 
+# A different exit code from a refusal: nothing about the line is wrong, the comment is simply
+# being written by somebody else right now, and the caller can just run this again.
+diverged() {
+    printf '\033[31m✗ %s\033[0m\n' "$1" >&2
+    exit 3
+}
+
+# How many times to re-read before giving up. The window between the last read and the PATCH cannot
+# be closed from here -- GitHub has no If-Match on a comment -- so this narrows it, it does not
+# remove it, and the line above is what the loser of a race sees.
+CAS_READS=3
+
 repo=
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -69,8 +81,12 @@ case "$written" in
     *"/ho""me/"*|*/mnt/*) refuse "메모에 절대 경로가 있다 — 레포 상대 경로나 ~ 로 쓴다." ;;
 esac
 # 20 characters of unbroken [A-Za-z0-9+/=] is a key or a token, not prose: journals carry step
-# numbers, states, times and SHAs (AGENTS.md), so nothing legitimate here is that long.
-if printf '%s' "$written" | grep -Eq '[A-Za-z0-9+/=]{20,}'; then
+# numbers, states, times and SHAs (AGENTS.md), so nothing legitimate here is that long -- except a
+# whole commit or blob SHA, which is exactly 40 or 64 lowercase hex digits and is the one long
+# token this file is for. Those are taken out before the run below is measured.
+unshaed=$(printf '%s' "$written" | sed -E \
+    's/(^|[^0-9a-zA-Z])[0-9a-f]{40}([^0-9a-zA-Z]|$)/\1SHA\2/g; s/(^|[^0-9a-zA-Z])[0-9a-f]{64}([^0-9a-zA-Z]|$)/\1SHA\2/g')
+if printf '%s' "$unshaed" | grep -Eq '[A-Za-z0-9+/=]{20,}'; then
     refuse "메모에 secret 처럼 보이는 토큰이 있다 — 저널에는 단계·상태·시각·SHA 만 적는다."
 fi
 
@@ -93,7 +109,21 @@ if [ "$existing" = null ]; then
         | gh api "repos/$repo/issues/$number/comments" --input - >/dev/null
 else
     id=$(printf '%s' "$existing" | jq -r '.id')
-    printf '%s' "$existing" | jq --arg line "$line" '{body: ((.body | sub("\n*$"; "")) + "\n" + $line + "\n")}' \
+    # The listing is a snapshot, and appending to a snapshot is how a line disappears: two workers
+    # run at once (AGENTS.md) and a wave epic's journal is written by both of them. So the comment
+    # is read again until two reads agree, and the line goes on top of that agreed body.
+    seen=$(printf '%s' "$existing" | jq -c '[.body, .updated_at]')
+    reads=0
+    while :; do
+        fresh=$(gh api "repos/$repo/issues/comments/$id")
+        reads=$((reads + 1))
+        current=$(printf '%s' "$fresh" | jq -c '[.body, .updated_at]')
+        [ "$current" != "$seen" ] || break
+        seen=$current
+        [ "$reads" -lt "$CAS_READS" ] \
+            || diverged "저널 코멘트가 읽을 때마다 바뀐다 — 다른 세션이 동시에 쓰고 있다. 잠시 뒤 다시 실행한다."
+    done
+    printf '%s' "$fresh" | jq --arg line "$line" '{body: ((.body | sub("\n*$"; "")) + "\n" + $line + "\n")}' \
         | gh api -X PATCH "repos/$repo/issues/comments/$id" --input - >/dev/null
 fi
 printf '%s · %s\n' "$repo#$number" "$line"
