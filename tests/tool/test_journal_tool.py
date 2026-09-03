@@ -3,6 +3,10 @@
 The refusals are the point of the file. A journal is a public comment on a public repository (#15),
 written by an agent mid-run, and the two things an agent has at hand are a machine path and whatever
 it just read out of the environment. Both are refused before `gh` is reached at all.
+
+The Korean anchors the tool still accepts (#192's migration window) are read from
+tests/tool/fixtures rather than written here: tool/checks/lang stops a Hangul literal from reaching
+a .py file, and the follow-up that drops the anchors drops the fixture with them.
 """
 
 from __future__ import annotations
@@ -16,6 +20,10 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JOURNAL = REPO_ROOT / "tool" / "journal"
+KO = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "korean_anchors.json").read_text(encoding="utf-8")
+)
+HEAD = "## Journal"
 
 FAKE_GH = """#!/bin/sh
 printf '%s\\n' "$*" >> "$CALLS"
@@ -30,7 +38,7 @@ case "$*" in
       n=$((n + 1)); printf '%s' "$n" > "$SEQ"
       [ -f "$FIXTURES/read$n.json" ] && cat "$FIXTURES/read$n.json" || cat "$FIXTURES/read-last.json" ;;
   # The comment listing, once per call: the second one is what the issue looks like after a POST,
-  # which is the only moment a second `## 저널` comment can be seen.
+  # which is the only moment a second journal comment can be seen.
   *)
       n=$(cat "$LSEQ" 2>/dev/null || echo 0)
       n=$((n + 1)); printf '%s' "$n" > "$LSEQ"
@@ -60,7 +68,8 @@ def run(tmp_path: Path):
         if relist is not None:
             (tmp_path / "list2.json").write_text(json.dumps(relist), encoding="utf-8")
         # Without `reads` the comment is not moving: every read answers with what the listing said.
-        listed = [c for c in (comments or []) if c["body"].startswith("## 저널")]
+        heads = (HEAD, KO["journal_head"])
+        listed = [c for c in (comments or []) if c["body"].startswith(heads)]
         for index, row in enumerate(reads or listed, start=1):
             (tmp_path / f"read{index}.json").write_text(json.dumps(row), encoding="utf-8")
         (tmp_path / "read-last.json").write_text(
@@ -89,7 +98,7 @@ def run(tmp_path: Path):
 
 JOURNAL_COMMENT = {
     "id": 900,
-    "body": "## 저널\n- 1 ok 2026-09-01T00:00Z abc1234\n",
+    "body": f"{HEAD}\n- 1 ok 2026-09-01T00:00Z abc1234\n",
     "created_at": "2026-09-01T00:00:00Z",
     "updated_at": "2026-09-01T00:00:00Z",
 }
@@ -103,52 +112,56 @@ def edited(*extra: str, at: str) -> dict:
     }
 
 
-OTHER_COMMENT = {"id": 800, "body": "착수합니다. 워크트리는 tool-185.\n"}
+OTHER_COMMENT = {"id": 800, "body": "Starting. Worktree tool-185.\n"}
 
 
 def test_a_machine_path_in_the_note_is_refused_before_anything_is_written(run):
-    # 레포는 공개다(#15). 홈 경로가 든 코멘트는 지워도 이력에 남는다. 이 홈은 이 세션의 $HOME 이
-    # 아니다 -- 자기 홈은 ~ 로 바뀌어 통과하므로, 거부를 재려면 남의 홈이어야 한다.
-    done = run("185", "2", "ok", "/ho" + "me/other/github_prj 에서 돌렸다", comments=[JOURNAL_COMMENT])
+    # The repositories are public (#15) and a deleted comment keeps its edit history. This home is
+    # not the session's own $HOME -- that one is rewritten to ~ and passes, so measuring the refusal
+    # needs somebody else's.
+    done = run("185", "2", "ok", "ran it under /ho" + "me/other/github_prj", comments=[JOURNAL_COMMENT])
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
-    assert "경로" in done.stderr, done.stderr
+    assert "path" in done.stderr, done.stderr
     assert done.calls == "", done.calls
     assert done.written is None
 
 
 def test_a_mount_path_is_refused_too(run):
-    done = run("185", "2", "ok", "/mnt/d/data 로 옮겼다", comments=[JOURNAL_COMMENT])
+    done = run("185", "2", "ok", "moved to /mnt/d/data", comments=[JOURNAL_COMMENT])
     assert done.returncode == 2, done.stderr
     assert done.calls == ""
 
 
 def test_a_secret_shaped_token_is_refused(run):
-    # 에이전트 정의가 secret 파일을 읽지 않게 막지만, 손에 든 값을 메모에 옮겨 적는 경로는 막지 않는다.
-    done = run("185", "3", "fail", "키 ABCDEFGHIJKLMNOPQRSTUV 로 실패", comments=[JOURNAL_COMMENT])
+    # The agent definition stops the secret file from being read; it does not stop a value already
+    # in hand from being copied into a note.
+    done = run("185", "3", "fail", "failed with key ABCDEFGHIJKLMNOPQRSTUV", comments=[JOURNAL_COMMENT])
     assert done.returncode == 2, (done.returncode, done.stdout, done.stderr)
     assert done.calls == ""
 
 
 def test_the_home_directory_is_rewritten_before_the_guard_runs(run, tmp_path: Path):
-    # ~ 로 쓰면 통과해야 한다 -- 안 그러면 규칙을 지킨 메모까지 거부당하고 도구를 안 쓰게 된다.
+    # A note written with ~ has to pass, or the rule-abiding note is refused and the tool stops
+    # being used.
     home = str(tmp_path / "somewhere")
-    done = run("185", "2", "ok", f"{home}/cosmai 에서 돌렸다", home=home, comments=[JOURNAL_COMMENT])
+    done = run("185", "2", "ok", f"ran it under {home}/cosmai", home=home, comments=[JOURNAL_COMMENT])
     assert done.returncode == 0, done.stderr
-    assert "~/cosmai 에서 돌렸다" in done.written["body"], done.written
+    assert "ran it under ~/cosmai" in done.written["body"], done.written
     assert home not in done.written["body"], done.written
 
 
 def test_a_line_is_appended_to_the_one_journal_comment(run):
-    done = run("185", "2", "ok", "재빌드 끝", comments=[OTHER_COMMENT, JOURNAL_COMMENT])
+    done = run("185", "2", "ok", "rebuild done", comments=[OTHER_COMMENT, JOURNAL_COMMENT])
     assert done.returncode == 0, done.stderr
     assert "-X PATCH" in done.calls and "issues/comments/900" in done.calls, done.calls
     body = done.written["body"]
-    assert body.startswith("## 저널\n"), body
+    assert body.startswith(f"{HEAD}\n"), body
     assert "- 1 ok 2026-09-01T00:00Z abc1234" in body, body
     last = body.strip().splitlines()[-1]
     assert last.startswith("- 2 ok "), last
-    assert last.endswith(" 재빌드 끝"), last
-    # 시각은 UTC, SHA 는 지금 HEAD -- 어느 판 위에서 한 단계인지가 저널의 전부다.
+    assert last.endswith(" rebuild done"), last
+    # The time is UTC and the SHA is the current HEAD -- which revision a step happened on is the
+    # whole of what a journal carries.
     head = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=REPO_ROOT, check=True
     ).stdout.strip()
@@ -157,16 +170,42 @@ def test_a_line_is_appended_to_the_one_journal_comment(run):
 
 
 def test_the_journal_comment_is_created_when_there_is_none(run):
-    done = run("185", "1", "예정", comments=[OTHER_COMMENT])
+    done = run("185", "1", "planned", comments=[OTHER_COMMENT])
     assert done.returncode == 0, done.stderr
     assert "-X PATCH" not in done.calls, done.calls
     assert "issues/185/comments" in done.calls, done.calls
-    assert done.written["body"].startswith("## 저널\n- 1 예정 "), done.written
+    assert done.written["body"].startswith(f"{HEAD}\n- 1 planned "), done.written
+
+
+def test_a_journal_written_in_korean_is_still_the_one_appended_to(run):
+    # #192's migration window: the journals already on the issues carry the Korean head, and a tool
+    # that stopped seeing them would open a second journal on every one of those issues.
+    legacy = {
+        "id": 900,
+        "body": f"{KO['journal_head']}\n- 1 ok 2026-09-01T00:00Z abc1234\n",
+        "created_at": "2026-09-01T00:00:00Z",
+        "updated_at": "2026-09-01T00:00:00Z",
+    }
+    done = run("185", "2", "ok", comments=[OTHER_COMMENT, legacy])
+    assert done.returncode == 0, done.stderr
+    assert "-X PATCH" in done.calls and "issues/comments/900" in done.calls, done.calls
+    body = done.written["body"]
+    assert body.startswith(KO["journal_head"]), body
+    assert body.strip().splitlines()[-1].startswith("- 2 ok "), body
+
+
+def test_the_korean_planned_state_is_accepted_and_written_in_english(run):
+    # The window accepts the old word; what it writes is the new one, so the journal stops growing
+    # in two languages while both are legal.
+    done = run("185", "1", KO["state_planned"], comments=[OTHER_COMMENT])
+    assert done.returncode == 0, done.stderr
+    assert done.written["body"].startswith(f"{HEAD}\n- 1 planned "), done.written
+    assert KO["state_planned"] not in done.written["body"], done.written
 
 
 def test_the_repo_defaults_to_this_checkout_and_r_overrides_it(run):
-    assert "shk95-1/cosmai/issues/185" in run("185", "1", "예정").calls
-    other = run("-R", "shk95-1/cosmai-import-ydc", "38", "1", "예정").calls
+    assert "shk95-1/cosmai/issues/185" in run("185", "1", "planned").calls
+    other = run("-R", "shk95-1/cosmai-import-ydc", "38", "1", "planned").calls
     assert "shk95-1/cosmai-import-ydc/issues/38" in other, other
 
 
@@ -177,27 +216,30 @@ def test_an_unknown_status_is_a_usage_error(run):
 
 
 def test_a_line_added_between_the_two_reads_is_not_lost(run):
-    # 워커는 동시에 여럿이고 wave 채널 에픽의 저널은 그중 둘이 같이 쓴다. GET 스냅숏에 이어붙여 PATCH 하면
-    # 그 사이에 들어온 남의 줄이 조용히 사라지고, 저널은 "어디까지 갔는지" 를 잃는다 -- 도구의 목적 자체다.
-    other = "- 4 ok 2026-09-03T05:00Z bbb2222 남의 단계"
+    # Workers run concurrently and a wave epic's journal is written by two of them. Appending to the
+    # GET snapshot silently drops whatever arrived in between, and the journal loses the one thing
+    # it is for: how far the work got.
+    other = "- 4 ok 2026-09-03T05:00Z bbb2222 their step"
     done = run(
         "185",
         "5",
         "ok",
-        "내 단계",
+        "my step",
         comments=[OTHER_COMMENT, JOURNAL_COMMENT],
         reads=[edited(other, at="2026-09-03T05:00:00Z"), edited(other, at="2026-09-03T05:00:00Z")],
     )
     assert done.returncode == 0, done.stderr
     body = done.written["body"]
     assert other in body, body
-    assert body.strip().splitlines()[-1].endswith(" 내 단계"), body
-    # 다시 읽고 그 위에 얹는다: 첫 스냅숏에 이어붙였다면 남의 줄이 없는 본문이 올라갔을 것이다.
+    assert body.strip().splitlines()[-1].endswith(" my step"), body
+    # Read again and write on top of that: appending to the first snapshot would have sent a body
+    # without their line in it.
     assert done.calls.count("issues/comments/900") >= 2, done.calls
 
 
 def test_a_comment_that_keeps_moving_is_refused_rather_than_overwritten(run):
-    # 계속 갈리면 이길 때까지 덮어쓰는 대신 그만둔다 -- 저널 한 줄보다 남의 줄이 더 중요하다.
+    # When it keeps diverging, stop rather than overwrite until you win -- somebody else's line
+    # matters more than one line of journal.
     done = run(
         "185",
         "5",
@@ -216,53 +258,55 @@ def test_a_comment_that_keeps_moving_is_refused_rather_than_overwritten(run):
     )
     assert done.returncode == 3, (done.returncode, done.stdout, done.stderr)
     assert done.written is None, done.written
-    assert "동시" in done.stderr or "바뀌" in done.stderr, done.stderr
+    assert "another session" in done.stderr, done.stderr
 
 
 def test_a_full_git_sha_in_the_note_is_not_a_secret(run):
-    # 저널은 SHA 를 적는 곳이다. 40자 커밋 SHA 가 secret 휴리스틱에 걸리면 규칙대로 쓴 메모가 거부된다.
+    # A journal is where SHAs are written. A 40-character commit SHA caught by the secret heuristic
+    # would refuse the note the rule asks for.
     sha = "0f863fa" + "0" * 33
-    done = run("185", "2", "ok", f"{sha} 위에서 돌렸다", comments=[JOURNAL_COMMENT])
+    done = run("185", "2", "ok", f"ran on {sha}", comments=[JOURNAL_COMMENT])
     assert done.returncode == 0, done.stderr
     assert sha in done.written["body"], done.written
 
 
 def test_two_first_lines_at_once_leave_one_journal_and_delete_the_duplicate(run):
-    # 두 워커가 wave 에픽의 저널 첫 줄을 거의 동시에 쓰면 둘 다 "저널 없음" 을 보고 각자 코멘트를 만든다.
-    # 그대로 두면 뒤진 코멘트는 한 줄만 가진 채 도구 시야 밖에 영원히 남는다.
+    # Two workers writing a wave epic's first journal line at nearly the same moment both see "no
+    # journal yet" and both create one. Left alone, the later comment keeps its single line outside
+    # every subsequent call's view.
     theirs = {
         "id": 700,
-        "body": "## 저널\n- 1 예정 2026-09-03T06:00Z aaa1111\n",
+        "body": f"{HEAD}\n- 1 planned 2026-09-03T06:00Z aaa1111\n",
         "created_at": "2026-09-03T06:00:01Z",
         "updated_at": "2026-09-03T06:00:01Z",
     }
-    mine = {"id": 2, "body": "## 저널\n- 1 예정 …\n", "created_at": "2026-09-03T06:00:02Z"}
+    mine = {"id": 2, "body": f"{HEAD}\n- 1 planned ...\n", "created_at": "2026-09-03T06:00:02Z"}
     done = run(
         "185",
         "1",
-        "예정",
+        "planned",
         comments=[OTHER_COMMENT],
-        # 목록 순서로는 내 것이 먼저다 -- 정본은 created_at 이 이른 쪽이어야 한다.
+        # Mine comes first in the listing -- the canonical one has to be the earlier created_at.
         relist=[OTHER_COMMENT, mine, theirs],
         reads=[theirs],
     )
     assert done.returncode == 0, done.stderr
     assert "issues/comments/700" in done.calls, done.calls
     body = done.written["body"]
-    assert "- 1 예정 2026-09-03T06:00Z aaa1111" in body, body
-    assert body.strip().splitlines()[-1].startswith("- 1 예정 "), body
+    assert "- 1 planned 2026-09-03T06:00Z aaa1111" in body, body
+    assert body.strip().splitlines()[-1].startswith("- 1 planned "), body
     assert len(body.strip().splitlines()) == 3, body
-    # 중복은 내가 만든 것이므로 내가 지운다.
+    # The duplicate is mine, so I am the one who deletes it.
     assert "-X DELETE" in done.calls and "issues/comments/2" in done.calls, done.calls
     assert "issues/comments/700" in [line for line in done.calls.splitlines() if "-X PATCH" in line][0]
 
 
 def test_the_journal_that_was_there_first_is_the_one_written_to(run):
-    # 선택 규칙은 목록 순서가 아니라 created_at 이다. 목록 순서에 기대면 페이지 경계나 정렬이 바뀌는 날
-    # 다른 코멘트에 붙기 시작한다.
+    # The rule is created_at, not listing order. Leaning on listing order starts appending to a
+    # different comment the day a page boundary or a sort changes.
     late = {
         "id": 901,
-        "body": "## 저널\n- 9 ok 2026-09-02T00:00Z ddd4444\n",
+        "body": f"{HEAD}\n- 9 ok 2026-09-02T00:00Z ddd4444\n",
         "created_at": "2026-09-02T00:00:00Z",
         "updated_at": "2026-09-02T00:00:00Z",
     }
