@@ -47,9 +47,10 @@ if [ "$mode" = "--predict" ]; then
   # commit body containing blank lines (nearly all of them) stay one awk record.
   git log --format='%H%n%B%x00' "HEAD..$ref" > "$commits_file"
 
-  # Same rule as `.githooks/commit-msg`: a keyword (close/fix/resolve, any tense) followed by a
-  # bare #n is a hit. "owner/repo#n" is stripped first so a properly-qualified ref never counts,
-  # and the keyword must stand on its own word (no "disclose #175").
+  # GitHub only treats a keyword as a closing directive when nothing but the ref list follows it
+  # on the line -- "fix(scope): #40 does X" starts with the Conventional Commits type "fix" too,
+  # but is prose, not "Fixes #40" (found live against PR #59: d8354de false-positived on #40
+  # before this anchor was added). "owner/repo#n" survives a merge unchanged, so it is excluded.
   awk -v RS='\0' '
     {
       rec = $0
@@ -60,9 +61,12 @@ if [ "$mode" = "--predict" ]; then
       body = substr(rec, nl + 1)
       m = split(body, lines, "\n")
       for (i = 1; i <= m; i++) {
-        low = tolower(lines[i])
-        if (match(low, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?)([^a-z0-9_]|$)/)) {
-          stripped = substr(lines[i], RSTART)
+        line = lines[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", line)
+        low = tolower(line)
+        if (match(low, /^(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+(([a-z0-9_.-]+\/[a-z0-9_.-]+)?#[0-9]+([ \t]*,[ \t]*|[ \t]+and[ \t]+)?)+$/)) {
+          match(low, /^(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+/)
+          stripped = substr(line, RLENGTH + 1)
           gsub(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+/, "", stripped)
           while (match(stripped, /#[0-9]+/)) {
             print sha, substr(stripped, RSTART + 1, RLENGTH - 1)
@@ -81,7 +85,10 @@ if [ "$mode" = "--predict" ]; then
     shas=$(awk -v n="$n" '$2 == n { print substr($1, 1, 7) }' "$pairs_file" | awk '!seen[$0]++')
     [ -z "$shas" ] && continue
     hit=1
-    list=$(printf '%s' "$shas" | paste -sd ', ' -)
+    # paste -sd with a multi-char delimiter cycles through its characters one per line rather than
+    # repeating the whole string, so ", " is built explicitly instead (caught live against #59:
+    # `paste -sd ', ' -` alternated ',' and ' ' and produced "d8354de,7054e16 d43a976").
+    list=$(printf '%s\n' "$shas" | awk 'NR==1 { printf "%s", $0; next } { printf ", %s", $0 } END { print "" }')
     printf '#%s · %s · closing commits %s\n' "$n" "$title" "$list"
   done <<EOF
 $(jq -c '.[]' "$open_file")

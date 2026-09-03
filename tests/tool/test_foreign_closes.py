@@ -193,6 +193,12 @@ def pr_repo(gitrepo: Path) -> Path:
     (gitrepo / "b.txt").write_text("3\n", encoding="utf-8")
     git("add", "-A", cwd=gitrepo)
     git("commit", "-qm", "chore: mentions #56 with no keyword", cwd=gitrepo)
+    # A Conventional Commits type prefix ("fix:") starts with the same word as the closing
+    # keyword; a subject that merely mentions an issue after it is not a closing directive
+    # (found live against PR #59's d8354de: "fix(analysis): #40 이 넘긴 ..." false-positived #40).
+    (gitrepo / "b.txt").write_text("4\n", encoding="utf-8")
+    git("add", "-A", cwd=gitrepo)
+    git("commit", "-qm", "fix(analysis): #77 passed a stale value, not a closing keyword", cwd=gitrepo)
     git("checkout", "-q", "main", cwd=gitrepo)
     return gitrepo
 
@@ -249,6 +255,14 @@ def test_a_keyword_less_reference_is_never_a_hit(run_predict):
 
 def test_an_open_issue_with_no_matching_commit_stays_silent(run_predict):
     done = run_predict([{"number": 999, "title": "unrelated"}])
+    assert done.returncode == 0, done.stdout
+    assert done.stdout == ""
+
+
+def test_a_conventional_commit_type_prefix_is_not_a_closing_keyword(run_predict):
+    # "fix(analysis): #77 ..." is prose that happens to start with the word "fix"; only a line
+    # that is nothing but the keyword and a ref list ("Fixes #77") is a real closing directive.
+    done = run_predict([{"number": 77, "title": "prefix false positive"}])
     assert done.returncode == 0, done.stdout
     assert done.stdout == ""
 
