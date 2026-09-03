@@ -101,8 +101,8 @@ def partial_page(repo: str, issues: list[dict], labels: list[str] | None = None)
 
     This is what makes the failure quiet. `issues.nodes` is still a list of issues, so the
     repository looks answered; it is `subIssues`, `assignees` and `blockedBy` that came back
-    empty, and those are exactly what the queue order, the WIP gate and the blockers are read
-    from. The server says so in `errors` -- the only place the loss is visible.
+    empty, and those are exactly what the queue order, the held-resource summary and the blockers
+    are read from. The server says so in `errors` -- the only place the loss is visible.
     """
     hollowed = []
     for source in issues:
@@ -275,7 +275,7 @@ def test_ready_leads_with_the_resources_the_running_issues_hold(run):
     # One row per resource with both repos on it: the collision that matters is the cross-repo one.
     assert "ops cosmai#11, cosmai-import-ydc#6" in first, first
     assert "공유DB cosmai#11, cosmai-import-ydc#6" in first, first
-    assert "WIP" not in done.stdout and "새 착수 금지" not in done.stdout, done.stdout
+    assert "WIP" not in done.stdout and "금지" not in done.stdout, done.stdout
     assert "in progress: shk95 since" in done.stdout
 
 
@@ -576,9 +576,9 @@ def test_a_partial_response_is_not_read_as_the_whole_graph(run):
     assert UPSTREAM in done.stderr, done.stderr
 
 
-def test_a_partial_response_does_not_empty_the_wip_gate(run):
+def test_a_partial_response_does_not_empty_the_held_summary(run):
     # The sharpest loss: `assignees` comes back empty, so two issues someone is already working
-    # read as startable and the "새 착수 금지" gate never fires. Dying is the only safe answer.
+    # read as startable and the resources they hold vanish. Dying is the only safe answer.
     done = run(
         "ready",
         upstream=[
@@ -589,7 +589,7 @@ def test_a_partial_response_does_not_empty_the_wip_gate(run):
         gh_partial_on="upstream",
     )
     assert done.returncode != 0, done.stdout
-    assert "WIP" not in done.stdout, done.stdout
+    assert "진행 중" not in done.stdout, done.stdout
 
 
 def test_a_partial_response_on_the_fork_names_the_fork(run):
@@ -729,9 +729,9 @@ def test_recheck_renders_the_reason_and_the_checklist(run):
     )
     assert done.returncode == 1, done.stdout
     assert "재점검 1건" in done.stdout, done.stdout
-    row = [line for line in done.stdout.splitlines() if "해제 조건" in line and "점검" in line]
-    assert row, done.stdout
-    assert "점검: 해제 조건" in row[0], row
+    rows = [line for line in done.stdout.splitlines() if line.startswith("    ")]
+    assert rows == ["    해제 조건 " + day(-2) + " 이 지났다 → 점검: 해제 조건"], done.stdout
+    assert "  cosmai#11 · 날짜 지남" in done.stdout, done.stdout
 
 
 def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
