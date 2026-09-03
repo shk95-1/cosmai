@@ -1,0 +1,27 @@
+#!/bin/sh
+# Appends one line to an issue's journal comment.
+
+set -e
+
+case "$0" in */*) journal_tool_dir=${0%/*} ;; *) journal_tool_dir=. ;; esac
+. "$journal_tool_dir/checks/prerequisite"
+require_command gh jq git
+
+usage() {
+    cat >&2 <<'EOF'
+usage: tool/journal [-R owner/repo] <issue> <step> <예정|ok|fail> [note]
+EOF
+    exit 64
+}
+
+repo=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -R) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
+        -*) usage ;;
+        *) break ;;
+    esac
+done
+
+[ $# -ge 3 ] || usage
+exit 0

@@ -27,6 +27,7 @@ usage() {
 usage: tool/issue <command>
 
   ready [--user] [--json]   startable issues per channel, in queue order
+  recheck [--json]          open issues to look at again, and why; exit 1 when there is one
   lint [--json]             rule violations; exit 1 when there is one
   audit                     drift report; exit 0
 EOF
@@ -213,6 +214,7 @@ flat as $all
      | sort_by(-.unblocks, .short, .key) | map(del(.short))
    else [] end) as $queue
 | {wip: $wip, limit: $limit, gate: ($wip >= $limit),
+   held: {in_progress: 0, resources: []},
    channels: ready_channels($all; $user), user_queue: $queue}
 '
 
@@ -352,6 +354,15 @@ case "$cmd" in
         else
             printf '%s' "$model" | jq -r "$RENDER_READY"
         fi
+        ;;
+    recheck)
+        items='[]'
+        if [ "$as_json" = 1 ]; then
+            printf '%s\n' "$items"
+        else
+            printf '재점검 없음\n'
+        fi
+        printf '%s' "$items" | jq -e 'length == 0' >/dev/null
         ;;
     lint)
         findings=$(printf '%s' "$graph_json" | jq "$JQ_LIB $LINT")

@@ -67,6 +67,20 @@ def issue(
     }
 
 
+def closed(number: int, title: str, body: str, *, days_ago: float, labels: tuple[str, ...]) -> dict:
+    row = issue(number, title, body=body, labels=labels, updated_days_ago=days_ago)
+    row["closedAt"] = stamp(days_ago)
+    return row
+
+
+def released(date: str) -> str:
+    return BODY + f"\n## 해제 조건\n{date} 이후\n"
+
+
+def day(days_from_now: float) -> str:
+    return (NOW + timedelta(days=days_from_now)).strftime("%Y-%m-%d")
+
+
 def page(repo: str, issues: list[dict], labels: list[str] | None = None) -> dict:
     return {
         "data": {
@@ -113,6 +127,9 @@ for arg in "$@"; do
     query=*'name: "cosmai"'*) which=upstream ;;
     *) continue ;;
   esac
+  # recheck (e) needs closed issues, which the shared graph does not carry; the fixture is
+  # separate so a test can prove the closed page is fetched by recheck and by nothing else.
+  case "$arg" in *'states: CLOSED'*) cat "$FIXTURES/$which.closed.json"; exit 0 ;; esac
   if [ "$FAKE_GH_FAIL" = "$which" ]; then echo "fake gh: the API said no" >&2; exit 1; fi
   if [ "$FAKE_GH_ERRORS" = "$which" ]; then
     echo '{"errors":[{"message":"Although you appear to have the correct authorization"}]}'
@@ -162,6 +179,12 @@ def run(tmp_path: Path):
         (tmp_path / "fork.partial.json").write_text(
             json.dumps(partial_page(FORK, fork or [], fixture_kwargs.get("fork_labels"))),
             encoding="utf-8",
+        )
+        (tmp_path / "upstream.closed.json").write_text(
+            json.dumps(page(UPSTREAM, fixture_kwargs.get("upstream_closed") or [])), encoding="utf-8"
+        )
+        (tmp_path / "fork.closed.json").write_text(
+            json.dumps(page(FORK, fixture_kwargs.get("fork_closed") or [])), encoding="utf-8"
         )
         env = {
             **os.environ,
@@ -232,37 +255,45 @@ def test_a_blocker_in_the_other_repo_blocks(run):
     )
 
 
-def test_two_assignees_across_the_repos_close_the_gate(run):
-    # The cap is two workers over both repos, so counting one repo at a time would wave a third in.
+def test_ready_leads_with_the_resources_the_running_issues_hold(run):
+    # The cap on workers is gone (#185): what a new issue collides with is a resource someone is
+    # already holding, and that is only visible if the first line says who holds what.
+    resourced = "## 채널·자리 / 등급 / 규모\n규모 M · 자원: ops(구 스택 정지 = 매번 승인) · 공유DB\n"
     done = run(
         "ready",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "진행 중", labels=("ch:tool",), assignees=("shk95",)),
+            issue(11, "진행 중", body=resourced, labels=("ch:tool",), assignees=("shk95",)),
         ],
-        fork=[issue(6, "포크 진행 중", labels=("ch:analysis/retrieval",), assignees=("shk95",))],
+        fork=[
+            issue(6, "포크 진행 중", body=resourced, labels=("ch:analysis/retrieval",), assignees=("shk95",))
+        ],
     )
     assert done.returncode == 0, done.stderr
-    assert "WIP 2/2" in done.stdout
-    assert "새 착수 금지" in done.stdout
+    first = done.stdout.splitlines()[0]
+    assert first.startswith("진행 중 2 · 점유:"), done.stdout
+    # One row per resource with both repos on it: the collision that matters is the cross-repo one.
+    assert "ops cosmai#11, cosmai-import-ydc#6" in first, first
+    assert "공유DB cosmai#11, cosmai-import-ydc#6" in first, first
+    assert "WIP" not in done.stdout and "새 착수 금지" not in done.stdout, done.stdout
     assert "in progress: shk95 since" in done.stdout
 
 
-def test_the_coordinators_repo_issue_does_not_occupy_a_worker_slot(run):
-    # The coordinator claims its own ledger issue (ch:repo) while dispatching workers; counting it
-    # closed the gate on a fresh session in the #60 cold-boot test.
+def test_a_resource_of_none_is_not_folded_into_the_held_summary(run):
+    # 자원: 없음 is most issues. Folding it would put a row on the first line that blocks nothing.
     done = run(
         "ready",
+        "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "워커", labels=("ch:tool",), assignees=("shk95",)),
-            epic(20, "repo", subs=(21,)),
-            issue(21, "원장", labels=("ch:repo",), assignees=("shk95",)),
+            issue(11, "원장", labels=("ch:repo",), assignees=("shk95",)),
         ],
     )
     assert done.returncode == 0, done.stderr
-    assert "WIP 1/2" in done.stdout
-    assert "새 착수 금지" not in done.stdout
+    model = json.loads(done.stdout)
+    assert model["held"] == {"in_progress": 1, "resources": []}, model["held"]
+    # The gate is deleted, not hidden behind a flag: nothing may read wip/limit/gate again.
+    assert "wip" not in model and "limit" not in model and "gate" not in model, list(model)
 
 
 def test_a_channel_issue_without_a_parent_is_reported_at_the_end_of_its_channel(run):
@@ -640,3 +671,110 @@ def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
     assert "TO" + "DO(#8)" not in done.stdout, done.stdout
     missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
     assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout
+
+
+def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
+    # AGENTS.md's recheck rule is five questions (전제 · blockedBy · 해제 조건 · 등급 · 중복). A bare
+    # list of issue numbers would leave the reader to guess which of the five this row is about.
+    quoted = BODY + "\n`tool/issue` 는 있고 `tool/nowhere.py:12` 는 없다\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11, 12, 13, 14, 15)),
+            issue(11, "묵음", labels=("ch:tool",), parent=10, updated_days_ago=20),
+            issue(12, "날짜 지남", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
+            issue(
+                13,
+                "산문 조건",
+                body=BODY + "\n## 해제 조건\n소비자가 생기면\n",
+                labels=("ch:tool", "deferred"),
+                parent=10,
+            ),
+            issue(14, "옮겨간 경로", body=quoted, labels=("ch:tool",), parent=10),
+            issue(15, "목표가 닫혔다", labels=("ch:tool",), parent=10),
+        ],
+        upstream_closed=[
+            closed(30, "[목표] 끝난 목표", "#15 로 이어진다\n", days_ago=2, labels=("goal",)),
+            closed(31, "[결정] 오래된 결정", "#11 로 이어진다\n", days_ago=30, labels=("decision",)),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    by_key = {row["key"]: row for row in json.loads(done.stdout)}
+    assert set(by_key) == {f"cosmai#{n}" for n in (11, 12, 13, 14, 15)}, sorted(by_key)
+    assert {r["code"] for r in by_key["cosmai#11"]["reasons"]} == {"a"}
+    assert by_key["cosmai#11"]["reasons"][0]["checks"] == ["전제", "blockedBy", "해제 조건", "등급", "중복"]
+    assert {r["code"] for r in by_key["cosmai#12"]["reasons"]} == {"b"}
+    assert by_key["cosmai#12"]["reasons"][0]["checks"] == ["해제 조건"]
+    assert day(-2) in by_key["cosmai#12"]["reasons"][0]["why"]
+    assert {r["code"] for r in by_key["cosmai#13"]["reasons"]} == {"c"}
+    assert by_key["cosmai#13"]["reasons"][0]["checks"] == ["blockedBy", "해제 조건"]
+    assert {r["code"] for r in by_key["cosmai#14"]["reasons"]} == {"d"}
+    assert "tool/nowhere.py" in by_key["cosmai#14"]["reasons"][0]["why"]
+    # The path that is there must not be reported, or the reason becomes noise nobody reads.
+    assert "tool/issue" not in by_key["cosmai#14"]["reasons"][0]["why"]
+    assert {r["code"] for r in by_key["cosmai#15"]["reasons"]} == {"e"}
+    assert "cosmai#30" in by_key["cosmai#15"]["reasons"][0]["why"]
+    # 30일 전에 닫힌 결정은 이미 반영됐다고 본다 -- 안 그러면 목록이 영원히 자란다.
+    assert not any(r["code"] == "e" for r in by_key["cosmai#11"]["reasons"])
+
+
+def test_recheck_renders_the_reason_and_the_checklist(run):
+    done = run(
+        "recheck",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "날짜 지남", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "재점검 1건" in done.stdout, done.stdout
+    row = [line for line in done.stdout.splitlines() if "해제 조건" in line and "점검" in line]
+    assert row, done.stdout
+    assert "점검: 해제 조건" in row[0], row
+
+
+def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
+    # #86 (date not yet reached) and #183 (deferred behind an open blocker) are the two shapes that
+    # must stay quiet, or boot starts with a list of issues nobody can act on.
+    done = run(
+        "recheck",
+        upstream=[
+            epic(10, "tool", subs=(11, 12)),
+            issue(11, "아직 이르다", body=released(day(5)), labels=("ch:tool", "deferred"), parent=10),
+            issue(
+                12,
+                "막혀 있다",
+                body=BODY + "\n## 해제 조건\n네이버가 끝난 뒤\n",
+                labels=("ch:tool", "deferred"),
+                parent=10,
+                blocked_by=((UPSTREAM, 11, "OPEN"),),
+            ),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "재점검 없음" in done.stdout, done.stdout
+    assert "cosmai#11" not in done.stdout and "cosmai#12" not in done.stdout, done.stdout
+
+
+def test_recheck_does_not_read_a_repo_name_or_a_label_as_a_path(run):
+    # Bodies are full of `owner/repo` and `ch:collectors/youtube`. Reported as missing files they
+    # would put every issue on the list, which is the same as having no list.
+    body = BODY + "\n`shk95-1/cosmai` 와 `ch:collectors/youtube` 와 `tool/checks/paths`\n"
+    done = run(
+        "recheck",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "인용", body=body, labels=("ch:tool",), parent=10)],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "cosmai#11" not in done.stdout, done.stdout
+
+
+def test_recheck_skips_memos(run):
+    # A memo has its own 14-day track in audit and the user queue; listing it twice teaches the
+    # reader that recheck is mostly memos.
+    done = run(
+        "recheck",
+        upstream=[issue(20, "묵은 메모", body=MEMO_BODY, labels=("memo",), updated_days_ago=40)],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "cosmai#20" not in done.stdout, done.stdout
