@@ -22,6 +22,12 @@ printf '%s\\n' "$*" >> "$CALLS"
 case "$*" in
   *"-X PATCH"*) cat > "$WRITTEN"; printf '{"id":1}\\n' ;;
   *"--input"*)  cat > "$WRITTEN"; printf '{"id":2}\\n' ;;
+  # One comment by id. Every read answers with the next fixture, which is how a comment that
+  # somebody else is editing at the same moment looks from here.
+  *"issues/comments/"*)
+      n=$(cat "$SEQ" 2>/dev/null || echo 0)
+      n=$((n + 1)); printf '%s' "$n" > "$SEQ"
+      [ -f "$FIXTURES/read$n.json" ] && cat "$FIXTURES/read$n.json" || cat "$FIXTURES/read-last.json" ;;
   *)            cat "$FIXTURES/comments.json" ;;
 esac
 """
@@ -37,13 +43,26 @@ def run(tmp_path: Path):
     calls = tmp_path / "calls"
     written = tmp_path / "written"
 
-    def _run(*args: str, comments: list[dict] | None = None, home: str | None = None):
+    def _run(
+        *args: str,
+        comments: list[dict] | None = None,
+        home: str | None = None,
+        reads: list[dict] | None = None,
+    ):
         (tmp_path / "comments.json").write_text(json.dumps(comments or []), encoding="utf-8")
+        # Without `reads` the comment is not moving: every read answers with what the listing said.
+        listed = [c for c in (comments or []) if c["body"].startswith("## 저널")]
+        for index, row in enumerate(reads or listed, start=1):
+            (tmp_path / f"read{index}.json").write_text(json.dumps(row), encoding="utf-8")
+        (tmp_path / "read-last.json").write_text(
+            json.dumps((reads or listed or [{"id": 0, "body": ""}])[-1]), encoding="utf-8"
+        )
         env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "FIXTURES": str(tmp_path),
             "CALLS": str(calls),
+            "SEQ": str(tmp_path / "seq"),
             "WRITTEN": str(written),
         }
         if home is not None:
@@ -58,7 +77,21 @@ def run(tmp_path: Path):
     return _run
 
 
-JOURNAL_COMMENT = {"id": 900, "body": "## 저널\n- 1 ok 2026-09-01T00:00Z abc1234\n"}
+JOURNAL_COMMENT = {
+    "id": 900,
+    "body": "## 저널\n- 1 ok 2026-09-01T00:00Z abc1234\n",
+    "updated_at": "2026-09-01T00:00:00Z",
+}
+
+
+def edited(*extra: str, at: str) -> dict:
+    return {
+        "id": 900,
+        "body": JOURNAL_COMMENT["body"] + "".join(line + "\n" for line in extra),
+        "updated_at": at,
+    }
+
+
 OTHER_COMMENT = {"id": 800, "body": "착수합니다. 워크트리는 tool-185.\n"}
 
 
@@ -130,3 +163,54 @@ def test_an_unknown_status_is_a_usage_error(run):
     done = run("185", "2", "done", comments=[JOURNAL_COMMENT])
     assert done.returncode == 64, (done.returncode, done.stderr)
     assert done.calls == ""
+
+
+def test_a_line_added_between_the_two_reads_is_not_lost(run):
+    # 워커는 동시에 여럿이고 wave 채널 에픽의 저널은 그중 둘이 같이 쓴다. GET 스냅숏에 이어붙여 PATCH 하면
+    # 그 사이에 들어온 남의 줄이 조용히 사라지고, 저널은 "어디까지 갔는지" 를 잃는다 -- 도구의 목적 자체다.
+    other = "- 4 ok 2026-09-03T05:00Z bbb2222 남의 단계"
+    done = run(
+        "185",
+        "5",
+        "ok",
+        "내 단계",
+        comments=[OTHER_COMMENT, JOURNAL_COMMENT],
+        reads=[edited(other, at="2026-09-03T05:00:00Z"), edited(other, at="2026-09-03T05:00:00Z")],
+    )
+    assert done.returncode == 0, done.stderr
+    body = done.written["body"]
+    assert other in body, body
+    assert body.strip().splitlines()[-1].endswith(" 내 단계"), body
+    # 다시 읽고 그 위에 얹는다: 첫 스냅숏에 이어붙였다면 남의 줄이 없는 본문이 올라갔을 것이다.
+    assert done.calls.count("issues/comments/900") >= 2, done.calls
+
+
+def test_a_comment_that_keeps_moving_is_refused_rather_than_overwritten(run):
+    # 계속 갈리면 이길 때까지 덮어쓰는 대신 그만둔다 -- 저널 한 줄보다 남의 줄이 더 중요하다.
+    done = run(
+        "185",
+        "5",
+        "ok",
+        comments=[OTHER_COMMENT, JOURNAL_COMMENT],
+        reads=[
+            edited("- 4 ok 2026-09-03T05:00Z bbb2222", at="2026-09-03T05:00:00Z"),
+            edited(
+                "- 4 ok 2026-09-03T05:00Z bbb2222",
+                "- 5 ok 2026-09-03T05:01Z ccc3333",
+                at="2026-09-03T05:01:00Z",
+            ),
+            edited("- 6 ok 2026-09-03T05:02Z ddd4444", at="2026-09-03T05:02:00Z"),
+            edited("- 7 ok 2026-09-03T05:03Z eee5555", at="2026-09-03T05:03:00Z"),
+        ],
+    )
+    assert done.returncode == 3, (done.returncode, done.stdout, done.stderr)
+    assert done.written is None, done.written
+    assert "동시" in done.stderr or "바뀌" in done.stderr, done.stderr
+
+
+def test_a_full_git_sha_in_the_note_is_not_a_secret(run):
+    # 저널은 SHA 를 적는 곳이다. 40자 커밋 SHA 가 secret 휴리스틱에 걸리면 규칙대로 쓴 메모가 거부된다.
+    sha = "0f863fa" + "0" * 33
+    done = run("185", "2", "ok", f"{sha} 위에서 돌렸다", comments=[JOURNAL_COMMENT])
+    assert done.returncode == 0, done.stderr
+    assert sha in done.written["body"], done.written
