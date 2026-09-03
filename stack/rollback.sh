@@ -49,7 +49,7 @@ old_stack=${OLD_STACK_DIR:-../service/stack}
 old_compose=$old_stack/docker-compose.yml
 new_compose=stack/docker-compose.yml
 
-# 컷오버가 멈춘 셋. tubedepth-api·대시보드 둘·postgrest 둘·shared-postgres 는 컷오버에서 멈추지
+# 컷오버가 멈춘 셋. tubedepth-api·대시보드 둘·postgrest 둘·cosmai-postgres 는 컷오버에서 멈추지
 # 않았으므로 여기서도 건드리지 않는다.
 old_services='trend-radar-collector tubedepth-worker tubedepth-flatten'
 # stack/docker-compose.yml 의 스케줄러 전부. portal 은 수집이 아니라 정적 노출이라 뺀다.
@@ -90,7 +90,7 @@ echo "  구 스택 : $old_stack (기본 탐색 -- override 포함)"
 echo "  up   -> $old_services"
 echo "  새 스택 : $new_compose"
 echo "  stop -> $new_services"
-echo "  그대로 : shared-postgres, tubedepth-api, postgrest, 대시보드, portal"
+echo "  그대로 : cosmai-postgres, tubedepth-api, postgrest, 대시보드, portal"
 echo "  지금 도는 구 서비스: $(old_compose_cmd ps --services --status running | tr '\n' ' ')"
 
 # 리허설. up -d 가 "있는 컨테이너를 켜는" 것인지 "다시 만드는" 것인지를 정하는 값이 config-hash 이고,

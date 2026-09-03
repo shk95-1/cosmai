@@ -17,7 +17,7 @@ STATUS = REPO_ROOT / "tool" / "status"
 SECTIONS = ["containers", "images", "db", "cron", "gpu", "test-leftovers"]
 
 # Answers "docker ps -a --format ...", "docker image inspect ...", "docker run ... sh -c ...",
-# and "docker exec shared-postgres psql ..." with fixed text so the test never touches a real
+# and "docker exec cosmai-postgres psql ..." with fixed text so the test never touches a real
 # daemon; DOCKER_PS_FAIL turns the containers section into a forced failure to prove the other
 # five sections still print when one breaks.
 FAKE_DOCKER = """#!/bin/sh
