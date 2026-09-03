@@ -1,6 +1,6 @@
 ---
 name: judge
-description: 4차 웨이브 판정 전용 — 컷오버 조건 1–5 판정, 단계 말 전체 브랜치 리뷰, 계약 변경 판정. Fable, 읽기 전용, 실행은 세션이.
+description: Wave-4 adjudication only - verdicts on cutover conditions 1-5, end-of-stage whole-branch review, verdicts on contract changes. Fable, read-only; the session executes.
 model: fable
 effort: high
 disallowedTools: Agent, Edit, Write, NotebookEdit
