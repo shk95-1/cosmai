@@ -26,6 +26,25 @@ if [ -n "$issue" ] && ! grep -v '^#' "$1" | grep -q "#$issue\b"; then
   exit 1
 fi
 
+# A bare "Closes #n" is only correct in the repo it is committed to: once the commit is merged
+# into a fork, GitHub re-resolves the same #n against the fork and closes an unrelated fork issue
+# (#175). "owner/repo#n" survives the merge unchanged, so keyword+bare-# is rejected outright.
+bare_closes=$(grep -v '^#' "$1" | grep -Ei '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]:]*#[0-9]+' || true)
+if [ -n "$bare_closes" ]; then
+  cat >&2 <<EOF
+
+✗ Bare closing keyword closes the wrong issue once this commit merges into a fork (the same
+  #n is re-resolved against whichever repo receives the merge).
+
+  Got:      $(printf '%s\n' "$bare_closes" | head -1)
+  Expected: Closes owner/repo#n
+
+  Example:  Closes shk95-1/cosmai#175
+
+EOF
+  exit 1
+fi
+
 if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
   cat >&2 <<EOF
 
@@ -38,8 +57,6 @@ if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
   Examples: feat(auth): add passwordless sign-in
             fix(db): stop save from rewinding the revision
             feat(api)!: make list endpoints paginated
-
-  Bypass once with: git commit --no-verify
 
 EOF
   exit 1

@@ -1,0 +1,49 @@
+#!/bin/sh
+# #175: a bare `Closes #n` in an upstream commit re-resolves against whichever repo receives the
+# merge, so once a fork merges upstream it can close an unrelated fork issue with the same number.
+# The hook (`.githooks/commit-msg`) stops NEW bare closes; this finds damage from OLD ones already
+# on upstream main. Run it in the fork clone after merging upstream, before closing the merge issue:
+#   tool/checks/foreign-closes shk95/cosmai-import-ydc upstream
+#
+# Usage: tool/checks/foreign-closes <this-repo owner/repo> <other-repo remote name>
+
+repo=$1
+remote=$2
+if [ -z "$repo" ] || [ -z "$remote" ]; then
+  printf 'usage: %s <owner/repo> <remote>\n' "$0" >&2
+  exit 2
+fi
+
+issues_file=$(mktemp)
+items_file=$(mktemp)
+out_file=$(mktemp)
+err_file=$(mktemp)
+trap 'rm -f "$issues_file" "$items_file" "$out_file" "$err_file"' EXIT
+
+if ! gh api "repos/$repo/issues?state=closed&per_page=100" > "$issues_file" 2>"$err_file"; then
+  printf 'gh api failed listing closed issues for %s: %s\n' "$repo" "$(cat "$err_file")" >&2
+  exit 2
+fi
+jq -c '.[] | {number, title}' "$issues_file" > "$items_file"
+
+while IFS= read -r item; do
+  [ -z "$item" ] && continue
+  n=$(printf '%s' "$item" | jq -r '.number')
+  title=$(printf '%s' "$item" | jq -r '.title')
+  if ! timeline=$(gh api "repos/$repo/issues/$n/timeline" 2>"$err_file"); then
+    printf 'gh api failed reading timeline for %s#%s: %s\n' "$repo" "$n" "$(cat "$err_file")" >&2
+    exit 2
+  fi
+  commit=$(printf '%s' "$timeline" | jq -r '[.[] | select(.event == "closed") | .commit_id] | last // empty')
+  [ -z "$commit" ] && continue
+  if git merge-base --is-ancestor "$commit" "$remote/main" 2>/dev/null; then
+    short=$(printf '%s' "$commit" | cut -c1-7)
+    printf '#%s · %s · 닫은 커밋 %s\n' "$n" "$title" "$short" >> "$out_file"
+  fi
+done < "$items_file"
+
+if [ -s "$out_file" ]; then
+  cat "$out_file"
+  exit 1
+fi
+exit 0
