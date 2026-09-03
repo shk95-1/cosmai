@@ -6,6 +6,7 @@ absolute rules, not enough to become a second STATE.md.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -23,8 +24,16 @@ def test_agents_md_stays_a_pointer_page():
 
 def test_agents_md_names_the_boot_order_and_the_rules_index():
     text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    for needle in ("tool/issue audit", "tool/issue ready", "STATE.md", "[규약]", "blockedBy"):
+    for needle in ("tool/issue audit", "tool/issue ready", "STATE.md", "[rules]", "blockedBy"):
         assert needle in text, needle
+
+
+def test_agents_md_is_english():
+    # English is the project's first language (issue #192 D10), and AGENTS.md is the one file every
+    # session and subagent loads, so Hangul here would be read by every model on every boot.
+    text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    hangul = sorted({ch for ch in text if re.match(r"[\uac00-\ud7a3]", ch)})
+    assert not hangul, f"AGENTS.md must be English; found Hangul: {''.join(hangul)}"
 
 
 def test_claude_md_only_imports_agents_md():

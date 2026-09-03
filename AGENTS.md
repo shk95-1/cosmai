@@ -1,21 +1,24 @@
-# AGENTS.md — 부팅과 절대 규칙 (본문 25줄 이하, tests/test_agents_md.py 가 지킨다)
+# AGENTS.md — boot and absolute rules (body ≤25 lines, kept by tests/test_agents_md.py)
 
-## 부팅 (이 순서)
-1. `tool/issue audit` → `tool/issue recheck`(다시 볼 이슈와 이유) → `tool/issue ready` (두 레포 한 그래프). 도구가 없거나 죽으면 `gh issue list -l ch:<채널>` 로 퇴화 부팅. assignee 붙은 이슈가 있으면 그 저널 코멘트부터 읽는다.
-2. 핀 이슈: `[규약]`(규칙이 어디서 강제되는지 색인 + 변경 원장) · 현행 `[목표]` · 진행 중인 `[repo]` 이슈.
-3. `STATE.md` §2(계산 불가 사실)·§3(승인 경계). 계산 가능한 사실은 `tool/status` 가 찍는다.
-4. `contracts/README.md` → 자기 채널 에픽(`channel` 라벨) → 착수할 이슈 본문. 본문이 현재 진실, 코멘트는 이력.
+## Boot (in this order)
+1. `tool/issue audit` → `tool/issue recheck` (which issues to look at again, and why) → `tool/issue ready` (both repos, one graph). If the tool is missing or dies, degrade to `gh issue list -l ch:<channel>`. If an issue has an assignee, read its journal comment first.
+2. Pinned issues: `[rules]` (index of where each rule is enforced + the ledger of changes) · the current `[goal]` · the `[repo]` issue in flight.
+3. `STATE.md` §2 (facts that cannot be computed) · §3 (approval boundaries). Computable facts are printed by `tool/status`.
+4. `contracts/README.md` → your channel epic (`channel` label) → the body of the issue you start. The body is the current truth and its `## Done when` is what closes it; comments are history.
 
-## 절대 규칙
-- 계획은 이슈에만. 메모리·문서·인계 파일·플랜 파일에 계획을 두지 않는다. 인계는 이슈 코멘트로.
-- 이슈 1 = PR 1 = 채널 1(`ch:` 라벨 하나). 브랜치 `<채널>/<이슈#>-<slug>`, 워크트리 `../cosmai-wt/<채널, 슬래시는 하이픈>-<이슈#>`(포트는 경로 해시), 착수 = assignee + 착수 코멘트. 착수 전 `ready` 의 점유 자원과 이슈의 `자원:` 을 대조한다 — 겹치면 대기, 워커 수 상한은 없다(방치는 `audit` 24h).
-- 논리 의존은 `blockedBy`, 대기열은 sub-issue 위치. 채널이 같아도 `blockedBy` 가 없으면 동시에 연다. 동시에 여는 둘이 파일을 공유하면 뒤 이슈에 `blockedBy`. 메모(`memo`)는 실행하지 않는다 — 승격이 먼저.
-- 한 채널에서 둘 이상이 동시에 열리면(wave) `<채널>` 브랜치를 세워 이슈 브랜치를 그 위에 리베이스하고, wave 끝에 채널 브랜치를 main 으로 한 번 머지한다. 리베이스 뒤 스위트 재실행. wave 가 아니면 이슈 브랜치 → main. 워커는 스위트가 초록일 때마다 푸시한다.
-- 열린 이슈는 `[목표]`·`[결정]` 닫힘과 wave 머지 뒤, 그리고 갱신 후 14일마다 재점검한다(전제 · blockedBy · 해제 조건 · 등급 · 중복). 본문을 고치고 코멘트 한 줄 "재점검 YYYY-MM-DD: …". 닫을 때는 사유.
-- 상태를 바꾸는 단계가 둘 이상인 ops 이슈와 wave 채널 에픽은 코멘트 하나를 저널로 둔다(`tool/journal`). 저널은 단계 번호·상태·시각·SHA 만 — 명령 본문·경로·오류 원문은 적지 않는다. 워커의 완료 보고도 이슈 코멘트로.
-- secret 은 키 이름만(`contracts/secrets.md`). 머신 경로 금지(레포 상대 또는 `~`). `--no-verify` 금지. force push 는 자기 이슈 브랜치에 `--force-with-lease` 만, main·채널 브랜치는 금지.
-- 운영 DB·컨테이너 조치는 코디네이터 세션이 직접, 한 명령씩. 매번 승인이 필요한 것은 `STATE.md` §3.
-- 계약(`contracts/`)이 정본, DDL 은 추가만. 완료 커밋 본문에 `Closes #n`(교차 레포는 `owner/repo#n`).
+## Absolute rules
+- Plans live in issues only. No plans in memory, documents, handoff files or plan files. A handoff is an issue comment.
+- Issue 1 = PR 1 = channel 1 (one `ch:` label). Branch `<channel>/<issue#>-<slug>`, starting = assignee + a start comment. Before starting, compare the occupancy in `ready` against the issue's `Resources:` — overlap means wait, there is no cap on workers (idle is `audit` 24h).
+- Worktree root is derived from the clone directory: `../<clone dir>-wt/<channel, slash→hyphen>-<issue#>` — upstream `../cosmai-wt/…`, fork `../cosmai-import-ydc-wt/…`. Ports stay the path hash (`tool/checks/test`).
+- Logical dependency is `blockedBy`, the queue is the sub-issue position. Same channel opens concurrently when there is no `blockedBy`. If two issues open at once share files, the later one gets `blockedBy`. A memo (`memo`) is not executed — promotion first.
+- When two or more open at once in one channel (a wave), stand up a `wave/<channel>` branch, rebase the issue branches onto it, and merge that branch into main once at the end of the wave. Re-run the suite after a rebase. Outside a wave: issue branch → main. A worker pushes every time the suite is green.
+- Open issues are rechecked when a `[goal]` or `[decision]` closes, after a wave merge, and every 14 days since the last update (premise · blockedBy · release condition · grade · duplicates). Fix the body and leave one comment "Recheck YYYY-MM-DD: …". State the reason when closing.
+- An ops issue with more than one state-changing step, and a wave channel epic, keep one comment as their journal (`## Journal`, `tool/journal`). A journal holds step number · state · time · SHA only — no command bodies, paths or raw error text. A worker's completion report is an issue comment too.
+- Secrets by key name only (`contracts/secrets.md`). No machine paths (repo-relative or `~`). No `--no-verify`. Force push only on your own issue branch with `--force-with-lease`, never on main or a wave branch.
+- Production DB and container actions are run by the coordinator session itself, one command at a time. What needs approval every time is in `STATE.md` §3.
+- Fork concurrency: gap bound — the fork re-merges upstream in the same wave a shared surface changes (`db/`, `tool/checks/`, `contracts/ddl/`, AGENTS.md), and fork → upstream is one PR per wave (`tool/issue audit`); ownership — the fork writes 02x DDL and its own modules only, never `STATE.md` or upstream guards (ownership file + test); one deployment path (`db/migrate.sh`, `STATE.md` §3); two-way merge — predict closes first, then `foreign-closes` · `ddl-drift` · suite · reopen (`tool/checks/foreign-closes`).
+- English is the project's first language — everything except chat with the user and user-designated documents (`README.ko.md`); data values and history are exempt (`tool/checks/lang`, `tool/issue lint`, the commit-msg hook).
+- `contracts/` is canonical and DDL is additive only. The completion commit body carries `Closes #n` (`owner/repo#n` across repos).
 
-## 규칙이 강제되는 자리
-훅(`.githooks/`, `tool/checks/`) · 테스트(`tests/`) · 에이전트 정의(`.claude/agents/`) · `tool/issue lint`·`recheck` · `tool/journal` · 이 파일. 규칙 본문은 그 자리에 있고, 바뀌면 `[규약]` 에 코멘트 한 줄.
+## Where the rules are enforced
+Hooks (`.githooks/`, `tool/checks/`) · tests (`tests/`) · agent definitions (`.claude/agents/`) · `tool/issue lint`·`recheck` · `tool/journal` · this file. A rule's text lives at its site; when it changes, one comment on `[rules]`.
