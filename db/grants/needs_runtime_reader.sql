@@ -39,14 +39,22 @@ FROM (VALUES
     ('trend_radar.run'),        -- commerce 팔의 run_id/started_at/finished_at/status
     ('trend_radar.fetch_log'),  -- 같은 팔의 dataset/requests/ok/blocked/failed/p90_ms (status,error,elapsed_ms)
     ('trend_radar.run_source'),  -- #78: status='partial' 인 run 이 전부 skipped 인지 가르는 상관 서브쿼리
+    ('trend_radar.review'),     -- #144: 계보 두 뷰가 리뷰 언급의 원문(body 120자 발췌·rating·written_at)과
+                                -- 그 리뷰의 captured_at(수집 run 후보를 잇는 유일한 값)을 읽는다.
+                                -- needs_runtime 이 위에서 이미 받는 표지만 needs_owner 는 못 읽었다
+                                -- (실측 2026-08-27) -- 뷰는 소유자 권한으로 도니 그 GRANT 로는 안 선다.
+    ('tubedepth.comments'),     -- #144: 댓글 언급의 원문(text 120자 발췌·like_count·published_at)과
+                                -- 그 댓글을 처음 본 시각(first_seen_at). needs_runtime 쪽과 같은 이유.
+    ('tubedepth.artifacts'),    -- #144: 그 댓글을 실어 온 수집분 (target,kind='video.comments',
+                                -- fetched_at,byte_count). 한 영상에 판이 여럿이라 fetched_at 이 가른다.
     ('tubedepth.jobs')          -- #77: youtube 팔의 12컬럼 전부 (dataset,state,error_code,started_at,
-                                -- created_at,finished_at,elapsed_ms). 이 스키마에서 뷰가 읽는 유일한 표다.
+                                -- created_at,finished_at,elapsed_ms). #144 가 그 판을 만든 일감으로도 읽는다.
 ) v(t)
 WHERE to_regclass(t) IS NOT NULL \gexec
 
 -- 미래 테이블까지 자동으로 열리게 하지 않는다: DEFAULT PRIVILEGES 는 일부러 부여하지 않는다.
 -- 새 원천 테이블을 읽어야 하면 여기 한 줄을 더하고 근거(슬라이스 file:line)를 주석에 남긴다.
--- 읽지 않는 것(근거): needs_runtime 은 trend_radar.run/fetch_log/run_source 와 tubedepth.jobs 에
--- 직접 닿지 않는다 -- 넷 다 needs_owner 가 운영 뷰를 통해서만 읽는다 · trend_radar.review_summary ·
--- tubedepth.channel_snapshots · tubedepth 수집기 내부 상태 표 중 jobs 를 뺀 나머지(artifacts·
--- lane_health·flatten_progress 등, 뷰의 youtube 팔이 jobs 하나로 12컬럼을 다 낸다) · cosmai.* 전부.
+-- 읽지 않는 것(근거): needs_runtime 은 trend_radar.run/fetch_log/run_source 와 tubedepth.jobs/
+-- artifacts 에 직접 닿지 않는다 -- 다섯 다 needs_owner 가 운영 뷰를 통해서만 읽는다 ·
+-- trend_radar.review_summary · tubedepth.channel_snapshots · tubedepth 수집기 내부 상태 표 중
+-- jobs·artifacts 를 뺀 나머지(lane_health·flatten_progress·worker_control 등) · cosmai.* 전부.

@@ -21,7 +21,8 @@
 | `interfaces.md` §홀드아웃 | 새로 쌓인 커머스 리뷰로 기존 결론을 되묻는 홀드아웃 검증과 상수(포크 #51). ydc `holdout_commerce.py` 승격분이고 **어느 표에도 쓰지 않는다** — 이 답의 행은 (팔, 주제)가 키인데 `팔` 의 경계가 청크 색인이라 `retrieval chunk` 가 돌 때마다 움직인다(오늘의 홀드아웃이 내일의 기존이다). 그래서 이 승격의 DDL 도 0장이다. 답은 `cosmai trend holdout` 의 stdout 이다. 전량 실측(2026-08-27, `verdict=순위 변동`)이 같은 절에 있고, **구성비 축의 재현 수를 싣지 않는 근거**(`share == rate / scale`, 계수 1.42·1.34 가 문턱의 눈금을 바꾼다)도 그 자리에 실측 세 줄과 함께 있다. 같은 절이 **컷오프를 날짜에서 청크 색인으로 바꾼 근거**와, ydc 가 손으로 얹은 추출 규칙 셋(정지·전순서 정렬·행수 대조)이 우리 자리에서 각각 무엇이 지는지를 든다 — 그대로 옮기면 항등식이라 검사가 아니다 | `tests/test_holdout_rules.py` (두 분모·축의 눈금·순위 게이트·표준화·바스켓·판정 네 갈래·상수 표 대조) + `tests/test_holdout_pipeline.py` (두 팔의 가름·한 스냅샷·막힘 넷·종료 코드·아무것도 안 쓴다) + `tool/compare-ydc-holdout` (태그의 `holdout_commerce.py` 를 손대지 않고 돌려 상수 셋·규칙 넷을 맞댄다 — 컷오프·BASE·플랫폼 목록은 그 머신의 배치라 맞대지 않고 도구가 말하고 넘어간다) |
 | `entrypoints.md` | CLI 진입점·종료 코드·run/fetch_log 공통 뷰 | CLI `--help` 스냅샷 + 뷰 존재 테스트 |
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입·수식, 평가 하네스가 넘어야 할 기준선 | `tests/test_contract_types.py` 가 `analysis/types.py` 와 대조 · `eval <task>` 가 기준선과 비교 |
-| `formats.md` | 사전·평가셋 CSV/테이블 포맷 | 적재 스크립트가 검증 |
+| `formats.md` | 사전·평가셋 CSV/테이블 포맷 · §카테고리 표기(A21) 가 `category` 의 정본을 못박는다 | 적재 스크립트가 검증 · `tests/test_category_canonical.py` 가 §카테고리 표기의 python 블록을 `analysis/units.py` 와 대조 |
+| `anon_exposure.md` | PostgREST `postgrest_anon` 이 읽는 관계 — **적용 전 34개**(2026-08-27 실측)와 **적용 후 21개**(#168 안 B, 미적용) | `tests/test_anon_exposure_contract.py` 가 `needs` 절을 실제 DB 의 `has_table_privilege` 와, 적용 후 절을 `db/grants/postgrest_anon_old_stack.sql` 과 대조 · 운영 실측은 `db/grants/postgrest_anon_check.sql` |
 | `secrets.md` | secret 파일 경로와 키 이름 (값 없음) | 기동 시 키 존재 검사 |
 | `versioning.md` | `*_version` 컬럼 규칙과 `analysis_run.versions` 의 키 | `tests/test_version_strings.py` (두 형식) + `tests/test_trend_quarter.py` (`metric` 키) + 코드 리뷰 |
 | `../db/grants/needs_runtime_reader.sql` | 분석이 읽는 원천 테이블 12개의 SELECT 권한 | `tests/test_grants_reader.py` 가 `ddl/current` 와 대조 |

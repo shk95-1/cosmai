@@ -43,6 +43,37 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 - `method='name_keyword'`: `source_category` 는 **제품명 정규식**이다 — 랭킹 스냅샷이 없는 제품(글로우픽)의 폴백. 정규식은 서로 겹치므로(`선크림|…` 과 `크림` 이 "선크림"에 둘 다 맞는다) **`priority` 오름차순으로 먼저 맞는 것**을 쓴다. 동률의 순서는 정의하지 않는다 — 동률을 만들지 마라. v1 은 CSV 행 번호(1부터)를 그대로 쓴다.
 - 유도 순서: 사이트 카테고리 leaf → 없으면 `name_keyword` → 그래도 없으면 카테고리 없음. 표에 없는 leaf 는 그대로 `lexicon_category` 가 된다(항등).
 
+## 카테고리 표기 (A21, #123)
+`category` 의 정본은 하나뿐이다: **사이트가 발행한 카테고리 경로를 자르지 않은 문자열**. 아래 세 자리가
+그 같은 문자열을 쓴다 — 한 자리가 leaf 로 자르면(`'01 > 선케어 > 선블록'` → `'선블록'`) 두 값은 절대
+같아지지 않고 카테고리 scope 는 분모를 하나도 받지 못한다(운영 실측 run 24: 카테고리 scope 22개에서
+`population_share_pct`·`low_share`·`denom_low`·`denom_site` 전부 NULL).
+
+| 자리 | 값 |
+|---|---|
+| `needs.need_mention.category` | `trend_radar.rank_snapshot.category_name` 원문 (`analysis/units.py:review_unit`) |
+| `needs.product_denominator.category` | 같은 문자열 (`analysis/aggregate/ranking.py:denominators`) |
+| `needs.metrics_need.scope` | 같은 문자열 — `scope='all'` 롤업만 예외 (`analysis/aggregate/pipeline.py:scopes_for`) |
+
+- 사이트마다 깊이가 다르다: oliveyoung 은 `'01 > 선케어 > 선블록'`, glowpick 은 `'크림'`, daisomall 은
+  `'뷰티/위생'` 하나뿐이다. 얕은 값도 그 사이트가 발행한 **경로 전체**이므로 이미 정본이다 — 정본은
+  "계층형으로 만들어라"가 아니라 "원문을 자르지 마라"다.
+- 사이트가 카테고리를 말하지 않으면 NULL 이다. 사전 라벨로 메우지 않는다 — 그것은 `lexicon_category`
+  (B10)의 자리이고, 두 열은 뜻이 다르다. 제품명 정규식 폴백(`category_map.method='name_keyword'`)은
+  `lexicon_category` 만 낸다.
+- leaf 로 자른 짧은 형이 필요하면 `analysis/units.py:leaf()` 로 그때 자른다. 저장하지 않는다 —
+  경로→leaf 는 함수지만 leaf→경로는 아니다(`'블러셔'` 는 glowpick 의 `'블러셔'` 이기도 하고
+  oliveyoung 의 `'02 > 베이스 메이크업 > 블러셔'` 이기도 하다).
+
+```python
+CATEGORY_CANONICAL_SOURCE = "trend_radar.rank_snapshot.category_name"
+CATEGORY_CANONICAL_COLUMNS = (
+    "needs.need_mention.category",
+    "needs.product_denominator.category",
+    "needs.metrics_need.scope",
+)
+```
+
 ## 패널 명부 CSV (→ `needs.panel_channel`, 포크 #3)
 한 줄 = 한 채널. ydc 의 모든 비율이 이 명부를 분모로 쓴다(시드 원본 `eval/panel/channels_v1.csv`, **43채널**). 파일은 11열이고 여섯 열만 표로 간다 — 나머지 다섯은 적재하지 않는다. 무엇을 버렸는지가 여기 적혀 있지 않으면 #31 의 적재기와 이 스펙이 조용히 갈라진다.
 

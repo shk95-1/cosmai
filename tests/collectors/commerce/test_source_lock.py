@@ -69,6 +69,8 @@ def _source(source_key: str) -> Source:
     class _FakeSource:
         key: ClassVar[str] = source_key
         datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING})
+        # 이 가짜 소스는 리뷰를 걷지 않는다 -- 빈 값이 답이다(#144 의 review_body_datasets).
+        review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset()
         scope: ClassVar[Scope] = {Dataset.RANKING: {"seeds": 1}}
         policy: ClassVar[SourcePolicy] = POLICY
 

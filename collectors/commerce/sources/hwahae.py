@@ -36,6 +36,8 @@ _BOARDS: tuple[tuple[str, str, str | None], ...] = (
 class Hwahae:
     key: ClassVar[str] = "hwahae"
     datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING})
+    # This source has no review walk at all. Empty is an answer, not an omission.
+    review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset()
     scope: ClassVar[Scope] = MappingProxyType({Dataset.RANKING: MappingProxyType({"boards": len(_BOARDS)})})
     policy: ClassVar[SourcePolicy] = SourcePolicy(
         min_interval_s=1.0,

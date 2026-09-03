@@ -1,6 +1,9 @@
 -- Stage 1 has no needs_reader role; postgrest_anon gets a direct SELECT whitelist instead
 -- (same pattern as service/stack/init/40-postgrest-tubedepth-grants.sh for tubedepth).
 -- Whitelist, not default privileges: mention/labeled_set tables must stay invisible to anon.
+-- 이 문장은 `needs` 절에만 참이다. 같은 anon 롤이 `trend_radar` 13개(trend_radar_reader 멤버십)와
+-- `tubedepth` 12개(직접 GRANT + DEFAULT PRIVILEGES)도 읽고, 그 둘은 구 스택 init 이 열어 이
+-- 파일이 닿지 않는다 -- 실측·경로·결정 대기 상태는 contracts/anon_exposure.md (#168).
 
 SELECT format('CREATE ROLE postgrest_anon NOLOGIN')
 WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgrest_anon') \gexec
