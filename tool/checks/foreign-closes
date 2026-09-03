@@ -6,10 +6,114 @@
 #   tool/checks/foreign-closes shk95/cosmai-import-ydc upstream
 #
 # Usage: tool/checks/foreign-closes <this-repo owner/repo> <other-repo remote name>
+#
+# #190: the same collision the other direction -- a PR about to MERGE INTO this repo can carry
+# bare `Closes #n` commits meant for some other repo, closing this repo's issues by accident.
+# --predict answers it BEFORE the merge instead of finding the damage after:
+#   tool/checks/foreign-closes <owner/repo> --predict <ref>
 
 repo=$1
-remote=$2
-if [ -z "$repo" ] || [ -z "$remote" ]; then
+mode=$2
+if [ -z "$repo" ]; then
+  printf 'usage: %s <owner/repo> <remote>\n' "$0" >&2
+  printf '       %s <owner/repo> --predict <ref>\n' "$0" >&2
+  exit 2
+fi
+
+if [ "$mode" = "--predict" ]; then
+  ref=$3
+  if [ -z "$ref" ]; then
+    printf 'usage: %s <owner/repo> --predict <ref>\n' "$0" >&2
+    exit 2
+  fi
+
+  open_file=$(mktemp)
+  raw_file=$(mktemp)
+  pairs_file=$(mktemp)
+  commits_file=$(mktemp)
+  err_file=$(mktemp)
+  trap 'rm -f "$open_file" "$raw_file" "$pairs_file" "$commits_file" "$err_file"' EXIT
+
+  # gh's exit status, not jq's: POSIX sh has no pipefail, so `if ! gh ... | jq ...` only tests the
+  # pipeline's last command, and a `--paginate` failure after a valid first page would leave jq
+  # succeeding on partial data and the run silently under-reporting.
+  if ! gh api --paginate "repos/$repo/issues?state=open&per_page=100" > "$raw_file" 2>"$err_file"; then
+    printf 'gh api failed listing open issues for %s: %s\n' "$repo" "$(cat "$err_file")" >&2
+    exit 2
+  fi
+  if ! jq -s 'add | map(select(.pull_request == null)) | sort_by(.number)' "$raw_file" > "$open_file"; then
+    printf 'jq failed to read the open-issues response for %s (not the expected array shape)\n' "$repo" >&2
+    exit 2
+  fi
+
+  # sha on its own line, then the full message, then a NUL record terminator -- the NUL lets a
+  # commit body containing blank lines (nearly all of them) stay one awk record. An unresolvable
+  # <ref> must not read as "no commits, nothing found, exit 0" -- git already fails loudly on
+  # stderr, so its exit status is checked like every other failure path here.
+  if ! git log --format='%H%n%B%x00' "HEAD..$ref" > "$commits_file" 2>"$err_file"; then
+    printf 'git log failed for range HEAD..%s: %s\n' "$ref" "$(cat "$err_file")" >&2
+    exit 2
+  fi
+
+  # Same rule as `.githooks/commit-msg:44`: a keyword (close/fix/resolve, any tense) on its own
+  # word, immediately followed by a ref list, is a closing directive -- "immediately" is adjacency,
+  # not "the rest of the line is nothing else" (that anchor over-corrected and silenced real closes
+  # like "This closes #5 for good." and "Closes #18."). "fix(analysis): #40 ..." still misses: the
+  # "(" right after "fix" breaks the required ":?[ \t]+" before the ref. "owner/repo#n" is excluded
+  # by requiring the extracted ref to carry no "/".
+  awk -v RS='\0' '
+    {
+      rec = $0
+      sub(/^\n/, "", rec)
+      nl = index(rec, "\n")
+      if (nl == 0) { next }
+      sha = substr(rec, 1, nl - 1)
+      body = substr(rec, nl + 1)
+      m = split(body, lines, "\n")
+      for (i = 1; i <= m; i++) {
+        line = lines[i]
+        low = tolower(line)
+        if (!match(low, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+/)) { continue }
+        cursor = RSTART + RLENGTH
+        while (1) {
+          rest = substr(line, cursor)
+          if (!match(rest, /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[0-9]+/)) { break }
+          ref = substr(rest, RSTART, RLENGTH)
+          if (index(ref, "/") == 0) {
+            print sha, substr(ref, index(ref, "#") + 1)
+          }
+          cursor += RLENGTH
+          sep = tolower(substr(line, cursor))
+          if (match(sep, /^[ \t]*,[ \t]*/)) { cursor += RLENGTH; continue }
+          if (match(sep, /^[ \t]+and[ \t]+/)) { cursor += RLENGTH; continue }
+          break
+        }
+      }
+    }
+  ' "$commits_file" > "$pairs_file"
+
+  hit=0
+  while IFS= read -r issue; do
+    [ -z "$issue" ] && continue
+    n=$(printf '%s' "$issue" | jq -r '.number')
+    title=$(printf '%s' "$issue" | jq -r '.title')
+    shas=$(awk -v n="$n" '$2 == n { print substr($1, 1, 7) }' "$pairs_file" | awk '!seen[$0]++')
+    [ -z "$shas" ] && continue
+    hit=1
+    # paste -sd with a multi-char delimiter cycles through its characters one per line rather than
+    # repeating the whole string, so ", " is built explicitly instead (caught live against #59:
+    # `paste -sd ', ' -` alternated ',' and ' ' and produced "d8354de,7054e16 d43a976").
+    list=$(printf '%s\n' "$shas" | awk 'NR==1 { printf "%s", $0; next } { printf ", %s", $0 } END { print "" }')
+    printf '#%s · %s · closing commits %s\n' "$n" "$title" "$list"
+  done <<EOF
+$(jq -c '.[]' "$open_file")
+EOF
+
+  exit $hit
+fi
+
+remote=$mode
+if [ -z "$remote" ]; then
   printf 'usage: %s <owner/repo> <remote>\n' "$0" >&2
   exit 2
 fi
@@ -54,7 +158,7 @@ while IFS= read -r item; do
   fi
   if [ "$ancestor_status" -eq 0 ]; then
     short=$(printf '%s' "$commit" | cut -c1-7)
-    printf '#%s · %s · 닫은 커밋 %s\n' "$n" "$title" "$short" >> "$out_file"
+    printf '#%s · %s · closed by %s\n' "$n" "$title" "$short" >> "$out_file"
   fi
 done < "$items_file"
 
