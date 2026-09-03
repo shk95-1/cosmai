@@ -20,15 +20,21 @@ JOURNAL = REPO_ROOT / "tool" / "journal"
 FAKE_GH = """#!/bin/sh
 printf '%s\\n' "$*" >> "$CALLS"
 case "$*" in
-  *"-X PATCH"*) cat > "$WRITTEN"; printf '{"id":1}\\n' ;;
-  *"--input"*)  cat > "$WRITTEN"; printf '{"id":2}\\n' ;;
+  *"-X PATCH"*)  cat > "$WRITTEN"; printf '{"id":1}\\n' ;;
+  *"-X DELETE"*) printf '{}\\n' ;;
+  *"--input"*)   cat > "$WRITTEN"; printf '{"id":2,"created_at":"2026-09-03T06:00:02Z"}\\n' ;;
   # One comment by id. Every read answers with the next fixture, which is how a comment that
   # somebody else is editing at the same moment looks from here.
   *"issues/comments/"*)
       n=$(cat "$SEQ" 2>/dev/null || echo 0)
       n=$((n + 1)); printf '%s' "$n" > "$SEQ"
       [ -f "$FIXTURES/read$n.json" ] && cat "$FIXTURES/read$n.json" || cat "$FIXTURES/read-last.json" ;;
-  *)            cat "$FIXTURES/comments.json" ;;
+  # The comment listing, once per call: the second one is what the issue looks like after a POST,
+  # which is the only moment a second `## 저널` comment can be seen.
+  *)
+      n=$(cat "$LSEQ" 2>/dev/null || echo 0)
+      n=$((n + 1)); printf '%s' "$n" > "$LSEQ"
+      [ -f "$FIXTURES/list$n.json" ] && cat "$FIXTURES/list$n.json" || cat "$FIXTURES/comments.json" ;;
 esac
 """
 
@@ -48,8 +54,11 @@ def run(tmp_path: Path):
         comments: list[dict] | None = None,
         home: str | None = None,
         reads: list[dict] | None = None,
+        relist: list[dict] | None = None,
     ):
         (tmp_path / "comments.json").write_text(json.dumps(comments or []), encoding="utf-8")
+        if relist is not None:
+            (tmp_path / "list2.json").write_text(json.dumps(relist), encoding="utf-8")
         # Without `reads` the comment is not moving: every read answers with what the listing said.
         listed = [c for c in (comments or []) if c["body"].startswith("## 저널")]
         for index, row in enumerate(reads or listed, start=1):
@@ -63,6 +72,7 @@ def run(tmp_path: Path):
             "FIXTURES": str(tmp_path),
             "CALLS": str(calls),
             "SEQ": str(tmp_path / "seq"),
+            "LSEQ": str(tmp_path / "lseq"),
             "WRITTEN": str(written),
         }
         if home is not None:
@@ -80,6 +90,7 @@ def run(tmp_path: Path):
 JOURNAL_COMMENT = {
     "id": 900,
     "body": "## 저널\n- 1 ok 2026-09-01T00:00Z abc1234\n",
+    "created_at": "2026-09-01T00:00:00Z",
     "updated_at": "2026-09-01T00:00:00Z",
 }
 
@@ -214,3 +225,48 @@ def test_a_full_git_sha_in_the_note_is_not_a_secret(run):
     done = run("185", "2", "ok", f"{sha} 위에서 돌렸다", comments=[JOURNAL_COMMENT])
     assert done.returncode == 0, done.stderr
     assert sha in done.written["body"], done.written
+
+
+def test_two_first_lines_at_once_leave_one_journal_and_delete_the_duplicate(run):
+    # 두 워커가 wave 에픽의 저널 첫 줄을 거의 동시에 쓰면 둘 다 "저널 없음" 을 보고 각자 코멘트를 만든다.
+    # 그대로 두면 뒤진 코멘트는 한 줄만 가진 채 도구 시야 밖에 영원히 남는다.
+    theirs = {
+        "id": 700,
+        "body": "## 저널\n- 1 예정 2026-09-03T06:00Z aaa1111\n",
+        "created_at": "2026-09-03T06:00:01Z",
+        "updated_at": "2026-09-03T06:00:01Z",
+    }
+    mine = {"id": 2, "body": "## 저널\n- 1 예정 …\n", "created_at": "2026-09-03T06:00:02Z"}
+    done = run(
+        "185",
+        "1",
+        "예정",
+        comments=[OTHER_COMMENT],
+        # 목록 순서로는 내 것이 먼저다 -- 정본은 created_at 이 이른 쪽이어야 한다.
+        relist=[OTHER_COMMENT, mine, theirs],
+        reads=[theirs],
+    )
+    assert done.returncode == 0, done.stderr
+    assert "issues/comments/700" in done.calls, done.calls
+    body = done.written["body"]
+    assert "- 1 예정 2026-09-03T06:00Z aaa1111" in body, body
+    assert body.strip().splitlines()[-1].startswith("- 1 예정 "), body
+    assert len(body.strip().splitlines()) == 3, body
+    # 중복은 내가 만든 것이므로 내가 지운다.
+    assert "-X DELETE" in done.calls and "issues/comments/2" in done.calls, done.calls
+    assert "issues/comments/700" in [line for line in done.calls.splitlines() if "-X PATCH" in line][0]
+
+
+def test_the_journal_that_was_there_first_is_the_one_written_to(run):
+    # 선택 규칙은 목록 순서가 아니라 created_at 이다. 목록 순서에 기대면 페이지 경계나 정렬이 바뀌는 날
+    # 다른 코멘트에 붙기 시작한다.
+    late = {
+        "id": 901,
+        "body": "## 저널\n- 9 ok 2026-09-02T00:00Z ddd4444\n",
+        "created_at": "2026-09-02T00:00:00Z",
+        "updated_at": "2026-09-02T00:00:00Z",
+    }
+    done = run("185", "2", "ok", comments=[late, JOURNAL_COMMENT], reads=[JOURNAL_COMMENT])
+    assert done.returncode == 0, done.stderr
+    assert "issues/comments/900" in done.calls, done.calls
+    assert "issues/comments/901" not in done.calls, done.calls
