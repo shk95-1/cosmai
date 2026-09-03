@@ -1,0 +1,154 @@
+#!/bin/sh
+# Appends one line to an issue's journal comment: the ledger for an ops issue whose steps change
+# state, and for a wave channel epic (AGENTS.md). One comment, first line `## 저널`, one line per
+# step, so a session that dies mid-way leaves behind which step it reached and on which commit.
+#
+# What it refuses is as much the point as what it writes. Both repositories are public (#15) and
+# an agent writing here has a machine path and whatever it just read in hand; a comment can be
+# edited afterwards but the edit history keeps the first version. So $HOME becomes ~, a leftover
+# absolute path or a secret-shaped token is refused, and none of that costs an API call.
+#
+# It never reads the secret file: the note is an argument, and this tool has no other input.
+
+set -e
+
+case "$0" in */*) journal_tool_dir=${0%/*} ;; *) journal_tool_dir=. ;; esac
+. "$journal_tool_dir/checks/prerequisite"
+require_command gh jq git
+
+usage() {
+    cat >&2 <<'EOF'
+usage: tool/journal [-R owner/repo] <issue> <step> <예정|ok|fail> [note]
+
+  Appends "- <step> <state> <UTC> <short SHA> [note]" to the issue's `## 저널` comment,
+  creating that comment when the issue has none. -R defaults to this checkout's origin.
+  Refuses (exit 2) a note that still holds an absolute path or a secret-shaped token.
+EOF
+    exit 64
+}
+
+refuse() {
+    printf '\033[31m✗ %s\033[0m\n' "$1" >&2
+    exit 2
+}
+
+# A different exit code from a refusal: nothing about the line is wrong, the comment is simply
+# being written by somebody else right now, and the caller can just run this again.
+diverged() {
+    printf '\033[31m✗ %s\033[0m\n' "$1" >&2
+    exit 3
+}
+
+# How many times to re-read before giving up. The window between the last read and the PATCH cannot
+# be closed from here -- GitHub has no If-Match on a comment -- so this narrows it, it does not
+# remove it, and the line above is what the loser of a race sees.
+CAS_READS=3
+
+repo=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -R) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
+        -*) usage ;;
+        *) break ;;
+    esac
+done
+
+[ $# -ge 3 ] && [ $# -le 4 ] || usage
+number=$1
+step=$2
+state=$3
+note=${4:-}
+
+case "$number" in ''|*[!0-9]*) usage ;; esac
+case "$state" in 예정|ok|fail) ;; *) usage ;; esac
+
+# Literal replacement, not sed: $HOME is a path and would otherwise be read as a regex.
+scrub() {
+    printf '%s' "$1" | awk -v home="$HOME" '
+        { while (home != "" && index($0, home) > 0) {
+              at = index($0, home)
+              $0 = substr($0, 1, at - 1) "~" substr($0, at + length(home))
+          }
+          print }'
+}
+step=$(scrub "$step")
+note=$(scrub "$note")
+written="$step $note"
+
+# Someone else's home, or a mount, survives the rewrite above and is still a machine path.
+# The prefix is split so that tool/checks/paths does not read this guard as the thing it guards.
+case "$written" in
+    *"/ho""me/"*|*/mnt/*) refuse "메모에 절대 경로가 있다 — 레포 상대 경로나 ~ 로 쓴다." ;;
+esac
+# 20 characters of unbroken [A-Za-z0-9+/=] is a key or a token, not prose: journals carry step
+# numbers, states, times and SHAs (AGENTS.md), so nothing legitimate here is that long -- except a
+# whole commit or blob SHA, which is exactly 40 or 64 lowercase hex digits and is the one long
+# token this file is for. Those are taken out before the run below is measured.
+unshaed=$(printf '%s' "$written" | sed -E \
+    's/(^|[^0-9a-zA-Z])[0-9a-f]{40}([^0-9a-zA-Z]|$)/\1SHA\2/g; s/(^|[^0-9a-zA-Z])[0-9a-f]{64}([^0-9a-zA-Z]|$)/\1SHA\2/g')
+if printf '%s' "$unshaed" | grep -Eq '[A-Za-z0-9+/=]{20,}'; then
+    refuse "메모에 secret 처럼 보이는 토큰이 있다 — 저널에는 단계·상태·시각·SHA 만 적는다."
+fi
+
+if [ -z "$repo" ]; then
+    origin=$(git remote get-url origin 2>/dev/null) || refuse "origin 이 없다 — -R owner/repo 로 레포를 지정한다."
+    repo=$(printf '%s' "$origin" | sed -e 's|^git@[^:]*:|| ; s|^[a-z+]*://[^/]*/||' -e 's|\.git$||')
+fi
+case "$repo" in */*) ;; *) refuse "레포 이름이 owner/repo 가 아니다: $repo" ;; esac
+
+line="- $step $state $(date -u +%Y-%m-%dT%H:%MZ) $(git rev-parse --short HEAD)"
+[ -z "$note" ] || line="$line $note"
+
+# --paginate can emit one array per page; -s add folds both shapes into one array.
+# The one journal is the earliest `## 저널` comment, by created_at rather than by where it sits in
+# the listing: two of them can exist for a moment (see below), and every caller has to pick the same
+# one or the steps split across two comments without anybody noticing.
+journal_comment() {
+    gh api --paginate "repos/$repo/issues/$number/comments" \
+        | jq -s '[.[][]] | map(select((.body // "") | startswith("## 저널")))
+                 | sort_by(.created_at) | first // null'
+}
+
+# Appends $line to the comment given as $1. The listing is a snapshot, and appending to a snapshot
+# is how a line disappears: two workers run at once (AGENTS.md) and a wave epic journal is written
+# by both of them. So the comment is read again until two reads agree, and the line goes on top of
+# that agreed body.
+append_line() {
+    append_id=$(printf '%s' "$1" | jq -r '.id')
+    seen=$(printf '%s' "$1" | jq -c '[.body, .updated_at]')
+    reads=0
+    while :; do
+        fresh=$(gh api "repos/$repo/issues/comments/$append_id")
+        reads=$((reads + 1))
+        current=$(printf '%s' "$fresh" | jq -c '[.body, .updated_at]')
+        [ "$current" != "$seen" ] || break
+        seen=$current
+        [ "$reads" -lt "$CAS_READS" ] \
+            || diverged "저널 코멘트가 읽을 때마다 바뀐다 — 다른 세션이 동시에 쓰고 있다. 잠시 뒤 다시 실행한다."
+    done
+    printf '%s' "$fresh" | jq --arg line "$line" '{body: ((.body | sub("\n*$"; "")) + "\n" + $line + "\n")}' \
+        | gh api -X PATCH "repos/$repo/issues/comments/$append_id" --input - >/dev/null
+}
+
+existing=$(journal_comment)
+
+if [ "$existing" = null ]; then
+    body=$(printf '## 저널\n%s\n' "$line")
+    mine=$(printf '%s' "$body" | jq -R -s '{body: .}' \
+        | gh api "repos/$repo/issues/$number/comments" --input -)
+    # Creating has the same race as appending, one step earlier: both workers read "no journal yet"
+    # and both create one, and the loser would keep its single line outside every later call. There
+    # is no create-if-absent here, so the check is after the fact -- list again, and if somebody
+    # elses journal is older than mine, move my line onto theirs and take mine back.
+    mine_id=$(printf '%s' "$mine" | jq -r '.id')
+    canonical=$(journal_comment)
+    canonical_id=$(printf '%s' "$canonical" | jq -r '.id? // ""')
+    if [ "$canonical" != null ] && [ -n "$canonical_id" ] && [ "$canonical_id" != "$mine_id" ]; then
+        append_line "$canonical"
+        gh api -X DELETE "repos/$repo/issues/comments/$mine_id" >/dev/null
+        printf '· 같은 순간에 저널이 둘 생겨 %s 에 얹고 내 것은 지웠다\n' "$canonical_id" >&2
+    fi
+else
+    append_line "$existing"
+fi
+printf '%s · %s\n' "$repo#$number" "$line"
