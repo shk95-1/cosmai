@@ -71,8 +71,16 @@ def run(tmp_path: Path, gitrepo: Path):
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
 
-    def _run(*, issues: list[dict], timelines: dict[int, list[dict]]):
-        (tmp_path / "issues.json").write_text(json.dumps(issues), encoding="utf-8")
+    def _run(
+        *,
+        issues: list[dict] | None = None,
+        issues_raw: str | None = None,
+        timelines: dict[int, list[dict]],
+    ):
+        # issues_raw lets a test hand the fake gh two concatenated JSON arrays, the way real
+        # `gh api --paginate` concatenates one page's array after another on stdout.
+        body = issues_raw if issues_raw is not None else json.dumps(issues)
+        (tmp_path / "issues.json").write_text(body, encoding="utf-8")
         for n, events in timelines.items():
             (tmp_path / f"timeline-{n}.json").write_text(json.dumps(events), encoding="utf-8")
         env = {
@@ -112,6 +120,45 @@ def test_an_issue_closed_by_our_own_commit_is_not_reported(run, gitrepo: Path):
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout == ""
+
+
+def test_a_second_page_of_closed_issues_is_read(run, gitrepo: Path):
+    # `gh api --paginate` concatenates each page's array back to back on stdout; a script that
+    # reads only the first page would silently miss whatever a repo's second page holds
+    # (#175 review, should-fix 3).
+    foreign_commit = git("rev-parse", "main~1", cwd=gitrepo).stdout.strip()
+    page1 = json.dumps([{"number": 38, "title": "1페이지"}])
+    page2 = json.dumps([{"number": 58, "title": "2페이지"}])
+    done = run(
+        issues_raw=page1 + page2,
+        timelines={
+            38: [{"event": "closed", "commit_id": foreign_commit}],
+            58: [{"event": "closed", "commit_id": foreign_commit}],
+        },
+    )
+    assert done.returncode == 1, done.stderr
+    assert "#38" in done.stdout and "#58" in done.stdout, done.stdout
+
+
+def test_malformed_issues_response_exits_2(run, gitrepo: Path):
+    # gh exited 0 but the body isn't the expected array shape; jq's failure must not be swallowed
+    # into a silent, wrong "exit 0: nothing found" (#175 review, minor 5).
+    done = run(issues_raw="not json", timelines={})
+    assert done.returncode == 2, done.stdout
+    assert done.stderr != ""
+
+
+def test_an_unreachable_commit_warns_but_does_not_crash(run, gitrepo: Path):
+    # merge-base --is-ancestor exits 128 when the commit isn't known locally at all (never
+    # fetched) -- different from exit 1 ("known, just not an ancestor"); it must not be silently
+    # folded into "clean" (#175 review, minor 4).
+    done = run(
+        issues=[{"number": 99, "title": "안 당겨온 커밋"}],
+        timelines={99: [{"event": "closed", "commit_id": "0" * 40}]},
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout == ""
+    assert "not found locally" in done.stderr, done.stderr
 
 
 def test_gh_failure_exits_2(run, gitrepo: Path, tmp_path: Path):

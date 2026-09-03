@@ -29,7 +29,23 @@ fi
 # A bare "Closes #n" is only correct in the repo it is committed to: once the commit is merged
 # into a fork, GitHub re-resolves the same #n against the fork and closes an unrelated fork issue
 # (#175). "owner/repo#n" survives the merge unchanged, so keyword+bare-# is rejected outright.
-bare_closes=$(grep -v '^#' "$1" | grep -Ei '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]:]*#[0-9]+' || true)
+# Scanned against the whole message (subject included, not just the body) -- a Conventional
+# Commits subject never matches this pattern by construction, and staying conservative costs
+# nothing (#175 review, minor 6).
+# GitHub also lets one keyword govern a comma list ("Closes owner/repo#1, #2"); every ref after
+# the keyword is checked, not just the first, so a bare #n later in the list cannot hide behind a
+# properly-qualified one before it (#175 review, should-fix 1).
+bare_closes=$(grep -v '^#' "$1" | awk '
+  {
+    low = tolower($0)
+    if (match(low, /(close[sd]?|fix(e[sd])?|resolve[sd]?)/)) {
+      rest = substr($0, RSTART)
+      stripped = rest
+      gsub(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+/, "", stripped)
+      if (stripped ~ /#[0-9]+/) print $0
+    }
+  }
+')
 if [ -n "$bare_closes" ]; then
   cat >&2 <<EOF
 

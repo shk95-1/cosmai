@@ -20,11 +20,19 @@ out_file=$(mktemp)
 err_file=$(mktemp)
 trap 'rm -f "$issues_file" "$items_file" "$out_file" "$err_file"' EXIT
 
-if ! gh api "repos/$repo/issues?state=closed&per_page=100" > "$issues_file" 2>"$err_file"; then
+# --paginate: closed-issue counts regularly exceed one page (100) in this repo, and a script whose
+# whole purpose is finding already-merged damage must not silently look at only the newest page
+# (#175 review, should-fix 3). --paginate concatenates each page's JSON array back to back, so the
+# pages are re-joined into one array before jq reads it.
+if ! gh api --paginate "repos/$repo/issues?state=closed&per_page=100" 2>"$err_file" \
+    | jq -s 'add' > "$issues_file"; then
   printf 'gh api failed listing closed issues for %s: %s\n' "$repo" "$(cat "$err_file")" >&2
   exit 2
 fi
-jq -c '.[] | {number, title}' "$issues_file" > "$items_file"
+if ! jq -c '.[] | {number, title}' "$issues_file" > "$items_file"; then
+  printf 'jq failed to read the closed-issues response for %s (not the expected array shape)\n' "$repo" >&2
+  exit 2
+fi
 
 while IFS= read -r item; do
   [ -z "$item" ] && continue
@@ -36,7 +44,15 @@ while IFS= read -r item; do
   fi
   commit=$(printf '%s' "$timeline" | jq -r '[.[] | select(.event == "closed") | .commit_id] | last // empty')
   [ -z "$commit" ] && continue
-  if git merge-base --is-ancestor "$commit" "$remote/main" 2>/dev/null; then
+  git merge-base --is-ancestor "$commit" "$remote/main" 2>/dev/null
+  ancestor_status=$?
+  if [ "$ancestor_status" -eq 128 ]; then
+    # Not exactly "clean" or "foreign" -- the commit isn't reachable at all here (not fetched).
+    printf 'warning: %s#%s: %s not found locally; fetch %s and re-run to check it\n' \
+      "$repo" "$n" "$commit" "$remote" >&2
+    continue
+  fi
+  if [ "$ancestor_status" -eq 0 ]; then
     short=$(printf '%s' "$commit" | cut -c1-7)
     printf '#%s · %s · 닫은 커밋 %s\n' "$n" "$title" "$short" >> "$out_file"
   fi
