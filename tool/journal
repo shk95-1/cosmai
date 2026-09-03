@@ -100,22 +100,25 @@ line="- $step $state $(date -u +%Y-%m-%dT%H:%MZ) $(git rev-parse --short HEAD)"
 [ -z "$note" ] || line="$line $note"
 
 # --paginate can emit one array per page; -s add folds both shapes into one array.
-existing=$(gh api --paginate "repos/$repo/issues/$number/comments" \
-    | jq -s '[.[][]] | map(select((.body // "") | startswith("## 저널"))) | first // null')
+# The one journal is the earliest `## 저널` comment, by created_at rather than by where it sits in
+# the listing: two of them can exist for a moment (see below), and every caller has to pick the same
+# one or the steps split across two comments without anybody noticing.
+journal_comment() {
+    gh api --paginate "repos/$repo/issues/$number/comments" \
+        | jq -s '[.[][]] | map(select((.body // "") | startswith("## 저널")))
+                 | sort_by(.created_at) | first // null'
+}
 
-if [ "$existing" = null ]; then
-    body=$(printf '## 저널\n%s\n' "$line")
-    printf '%s' "$body" | jq -R -s '{body: .}' \
-        | gh api "repos/$repo/issues/$number/comments" --input - >/dev/null
-else
-    id=$(printf '%s' "$existing" | jq -r '.id')
-    # The listing is a snapshot, and appending to a snapshot is how a line disappears: two workers
-    # run at once (AGENTS.md) and a wave epic's journal is written by both of them. So the comment
-    # is read again until two reads agree, and the line goes on top of that agreed body.
-    seen=$(printf '%s' "$existing" | jq -c '[.body, .updated_at]')
+# Appends $line to the comment given as $1. The listing is a snapshot, and appending to a snapshot
+# is how a line disappears: two workers run at once (AGENTS.md) and a wave epic journal is written
+# by both of them. So the comment is read again until two reads agree, and the line goes on top of
+# that agreed body.
+append_line() {
+    append_id=$(printf '%s' "$1" | jq -r '.id')
+    seen=$(printf '%s' "$1" | jq -c '[.body, .updated_at]')
     reads=0
     while :; do
-        fresh=$(gh api "repos/$repo/issues/comments/$id")
+        fresh=$(gh api "repos/$repo/issues/comments/$append_id")
         reads=$((reads + 1))
         current=$(printf '%s' "$fresh" | jq -c '[.body, .updated_at]')
         [ "$current" != "$seen" ] || break
@@ -124,6 +127,28 @@ else
             || diverged "저널 코멘트가 읽을 때마다 바뀐다 — 다른 세션이 동시에 쓰고 있다. 잠시 뒤 다시 실행한다."
     done
     printf '%s' "$fresh" | jq --arg line "$line" '{body: ((.body | sub("\n*$"; "")) + "\n" + $line + "\n")}' \
-        | gh api -X PATCH "repos/$repo/issues/comments/$id" --input - >/dev/null
+        | gh api -X PATCH "repos/$repo/issues/comments/$append_id" --input - >/dev/null
+}
+
+existing=$(journal_comment)
+
+if [ "$existing" = null ]; then
+    body=$(printf '## 저널\n%s\n' "$line")
+    mine=$(printf '%s' "$body" | jq -R -s '{body: .}' \
+        | gh api "repos/$repo/issues/$number/comments" --input -)
+    # Creating has the same race as appending, one step earlier: both workers read "no journal yet"
+    # and both create one, and the loser would keep its single line outside every later call. There
+    # is no create-if-absent here, so the check is after the fact -- list again, and if somebody
+    # elses journal is older than mine, move my line onto theirs and take mine back.
+    mine_id=$(printf '%s' "$mine" | jq -r '.id')
+    canonical=$(journal_comment)
+    canonical_id=$(printf '%s' "$canonical" | jq -r '.id? // ""')
+    if [ "$canonical" != null ] && [ -n "$canonical_id" ] && [ "$canonical_id" != "$mine_id" ]; then
+        append_line "$canonical"
+        gh api -X DELETE "repos/$repo/issues/comments/$mine_id" >/dev/null
+        printf '· 같은 순간에 저널이 둘 생겨 %s 에 얹고 내 것은 지웠다\n' "$canonical_id" >&2
+    fi
+else
+    append_line "$existing"
 fi
 printf '%s · %s\n' "$repo#$number" "$line"
