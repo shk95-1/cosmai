@@ -1,18 +1,21 @@
 # AGENTS.md — 부팅과 절대 규칙 (본문 25줄 이하, tests/test_agents_md.py 가 지킨다)
 
 ## 부팅 (이 순서)
-1. `tool/issue audit` → `tool/issue ready` (두 레포 한 그래프). 도구가 없거나 죽으면 `gh issue list -l ch:<채널>` 로 퇴화 부팅.
+1. `tool/issue audit` → `tool/issue recheck`(다시 볼 이슈와 이유) → `tool/issue ready` (두 레포 한 그래프). 도구가 없거나 죽으면 `gh issue list -l ch:<채널>` 로 퇴화 부팅. assignee 붙은 이슈가 있으면 그 저널 코멘트부터 읽는다.
 2. 핀 이슈: `[규약]`(규칙이 어디서 강제되는지 색인 + 변경 원장) · 현행 `[목표]` · 진행 중인 `[repo]` 이슈.
 3. `STATE.md` §2(계산 불가 사실)·§3(승인 경계). 계산 가능한 사실은 `tool/status` 가 찍는다.
 4. `contracts/README.md` → 자기 채널 에픽(`channel` 라벨) → 착수할 이슈 본문. 본문이 현재 진실, 코멘트는 이력.
 
 ## 절대 규칙
 - 계획은 이슈에만. 메모리·문서·인계 파일·플랜 파일에 계획을 두지 않는다. 인계는 이슈 코멘트로.
-- 이슈 1 = PR 1 = 채널 1(`ch:` 라벨 하나). 브랜치 `<채널>/<이슈#>-<slug>`, 워크트리 `../cosmai-wt/<채널, 슬래시는 하이픈>`, 착수 = assignee + 착수 코멘트(자원·워크트리·포트). 워커는 동시에 둘까지.
-- 논리 의존은 `blockedBy`, 대기열은 sub-issue 위치. 파일 겹침은 적지 않는다. 메모(`memo`)는 실행하지 않는다 — 승격이 먼저.
-- secret 은 키 이름만(`contracts/secrets.md`). 머신 경로 금지(레포 상대 또는 `~`). `--no-verify`·force push 금지.
+- 이슈 1 = PR 1 = 채널 1(`ch:` 라벨 하나). 브랜치 `<채널>/<이슈#>-<slug>`, 워크트리 `../cosmai-wt/<채널, 슬래시는 하이픈>-<이슈#>`(포트는 경로 해시), 착수 = assignee + 착수 코멘트. 착수 전 `ready` 의 점유 자원과 이슈의 `자원:` 을 대조한다 — 겹치면 대기, 워커 수 상한은 없다(방치는 `audit` 24h).
+- 논리 의존은 `blockedBy`, 대기열은 sub-issue 위치. 채널이 같아도 `blockedBy` 가 없으면 동시에 연다. 동시에 여는 둘이 파일을 공유하면 뒤 이슈에 `blockedBy`. 메모(`memo`)는 실행하지 않는다 — 승격이 먼저.
+- 한 채널에서 둘 이상이 동시에 열리면(wave) `<채널>` 브랜치를 세워 이슈 브랜치를 그 위에 리베이스하고, wave 끝에 채널 브랜치를 main 으로 한 번 머지한다. 리베이스 뒤 스위트 재실행. wave 가 아니면 이슈 브랜치 → main. 워커는 스위트가 초록일 때마다 푸시한다.
+- 열린 이슈는 `[목표]`·`[결정]` 닫힘과 wave 머지 뒤, 그리고 갱신 후 14일마다 재점검한다(전제 · blockedBy · 해제 조건 · 등급 · 중복). 본문을 고치고 코멘트 한 줄 "재점검 YYYY-MM-DD: …". 닫을 때는 사유.
+- 상태를 바꾸는 단계가 둘 이상인 ops 이슈와 wave 채널 에픽은 코멘트 하나를 저널로 둔다(`tool/journal`). 저널은 단계 번호·상태·시각·SHA 만 — 명령 본문·경로·오류 원문은 적지 않는다. 워커의 완료 보고도 이슈 코멘트로.
+- secret 은 키 이름만(`contracts/secrets.md`). 머신 경로 금지(레포 상대 또는 `~`). `--no-verify` 금지. force push 는 자기 이슈 브랜치에 `--force-with-lease` 만, main·채널 브랜치는 금지.
 - 운영 DB·컨테이너 조치는 코디네이터 세션이 직접, 한 명령씩. 매번 승인이 필요한 것은 `STATE.md` §3.
 - 계약(`contracts/`)이 정본, DDL 은 추가만. 완료 커밋 본문에 `Closes #n`(교차 레포는 `owner/repo#n`).
 
 ## 규칙이 강제되는 자리
-훅(`.githooks/`, `tool/checks/`) · 테스트(`tests/`) · 에이전트 정의(`.claude/agents/`) · `tool/issue lint` · 이 파일. 규칙 본문은 그 자리에 있고, 바뀌면 `[규약]` 에 코멘트 한 줄.
+훅(`.githooks/`, `tool/checks/`) · 테스트(`tests/`) · 에이전트 정의(`.claude/agents/`) · `tool/issue lint`·`recheck` · `tool/journal` · 이 파일. 규칙 본문은 그 자리에 있고, 바뀌면 `[규약]` 에 코멘트 한 줄.
