@@ -180,38 +180,54 @@ def test_gh_failure_exits_2(run, gitrepo: Path, tmp_path: Path):
 # merge happens -- the same collision as #175, caught pre-merge instead of found as damage after.
 
 
+def _short(sha: str) -> str:
+    return sha[:7]
+
+
 @pytest.fixture
-def pr_repo(gitrepo: Path) -> Path:
-    """A `pr` branch ahead of HEAD carrying bare, qualified, and keyword-less `#n` refs."""
+def pr_repo(gitrepo: Path):
+    """A `pr` branch ahead of HEAD exercising every closing form and every non-hit form.
+
+    Returns (repo path, {label: short sha}) so tests can build the exact expected output line
+    instead of guessing commit order.
+    """
     git("checkout", "-qb", "pr", cwd=gitrepo)
-    (gitrepo / "b.txt").write_text("1\n", encoding="utf-8")
-    git("add", "-A", cwd=gitrepo)
-    git("commit", "-qm", "fix: bare close\n\nCloses #18", cwd=gitrepo)
-    (gitrepo / "b.txt").write_text("2\n", encoding="utf-8")
-    git("add", "-A", cwd=gitrepo)
-    git("commit", "-qm", "fix: qualified close\n\nCloses other/repo#40", cwd=gitrepo)
-    (gitrepo / "b.txt").write_text("3\n", encoding="utf-8")
-    git("add", "-A", cwd=gitrepo)
-    git("commit", "-qm", "chore: mentions #56 with no keyword", cwd=gitrepo)
+    shas: dict[str, str] = {}
+
+    def commit(label: str, content: str, message: str) -> None:
+        (gitrepo / "b.txt").write_text(content, encoding="utf-8")
+        git("add", "-A", cwd=gitrepo)
+        git("commit", "-qm", message, cwd=gitrepo)
+        shas[label] = _short(git("rev-parse", "HEAD", cwd=gitrepo).stdout.strip())
+
+    # Adjacency, not line-anchoring: keyword immediately followed by the ref is the directive,
+    # whatever comes before or after it on the line (#190 review, important 1).
+    commit("bare_18", "1\n", "fix: bare close\n\nCloses #18")
+    commit("period_18", "2\n", "test: second closer\n\nCloses #18.")
+    commit("qualified_40", "3\n", "fix: qualified close\n\nCloses other/repo#40")
+    commit("mention_56", "4\n", "chore: mentions #56 with no keyword")
     # A Conventional Commits type prefix ("fix:") starts with the same word as the closing
-    # keyword; a subject that merely mentions an issue after it is not a closing directive
-    # (found live against PR #59's d8354de: "fix(analysis): #40 이 넘긴 ..." false-positived #40).
-    (gitrepo / "b.txt").write_text("4\n", encoding="utf-8")
-    git("add", "-A", cwd=gitrepo)
-    git("commit", "-qm", "fix(analysis): #77 passed a stale value, not a closing keyword", cwd=gitrepo)
+    # keyword; the "(" right after it breaks the required ":?[ \t]+" before a ref, so this is
+    # prose, not "Fixes #40" (found live against PR #59's d8354de).
+    commit("prefix_40", "5\n", "fix(analysis): #40 passed a stale value, not a closing keyword")
+    commit("midline_108", "6\n", "fix(tool): closes #108")
+    commit("prose_5", "7\n", "docs: notes\n\nThis closes #5 for good.")
+    commit("paren_77", "8\n", "chore: parenthetical\n\nCloses #77 (wave)")
+
     git("checkout", "-q", "main", cwd=gitrepo)
-    return gitrepo
+    return gitrepo, shas
 
 
 @pytest.fixture
-def run_predict(tmp_path: Path, pr_repo: Path):
+def run_predict(tmp_path: Path, pr_repo):
+    repo, shas = pr_repo
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh = bin_dir / "gh"
     gh.write_text(FAKE_GH, encoding="utf-8")
     gh.chmod(0o755)
 
-    def _run(open_issues: list[dict]):
+    def _run(open_issues: list[dict], ref: str = "pr"):
         (tmp_path / "open-issues.json").write_text(json.dumps(open_issues), encoding="utf-8")
         env = {
             **os.environ,
@@ -219,28 +235,32 @@ def run_predict(tmp_path: Path, pr_repo: Path):
             "FIXTURES": str(tmp_path),
         }
         return subprocess.run(
-            [str(SCRIPT), REPO, "--predict", "pr"],
+            [str(SCRIPT), REPO, "--predict", ref],
             capture_output=True,
             text=True,
-            cwd=str(pr_repo),
+            cwd=str(repo),
             env=env,
             check=False,
         )
 
+    _run.shas = shas  # type: ignore[attr-defined]
     return _run
 
 
 def test_a_bare_close_on_an_open_issue_is_reported(run_predict):
     done = run_predict([{"number": 18, "title": "ydc import #18"}])
     assert done.returncode == 1, done.stderr
-    assert "#18" in done.stdout
-    assert "ydc import #18" in done.stdout
-    assert "closing commits" in done.stdout
+    # exact line, not a substring match (the title alone contains "#18") -- pins the two-commit
+    # `closing commits a1b2c3d, d4e5f6a` format too (#190 review, minor 4 and 5). `period_18` was
+    # committed after `bare_18`, so it is the newer commit and `git log` yields it first.
+    shas = run_predict.shas
+    expected = f"#18 · ydc import #18 · closing commits {shas['period_18']}, {shas['bare_18']}\n"
+    assert done.stdout == expected, done.stdout
 
 
 def test_a_qualified_owner_repo_ref_is_never_a_hit(run_predict):
-    # "Closes other/repo#40" is correct for the repo it targets; it must not be mistaken for a
-    # bare close on THIS repo's #40.
+    # "Closes other/repo#40" is correct for the repo it targets, and "fix(analysis): #40 ..." is
+    # prose (no keyword adjacency); neither is a bare close on THIS repo's #40.
     done = run_predict([{"number": 40, "title": "not ours to close"}])
     assert done.returncode == 0, done.stdout
     assert done.stdout == ""
@@ -260,11 +280,29 @@ def test_an_open_issue_with_no_matching_commit_stays_silent(run_predict):
 
 
 def test_a_conventional_commit_type_prefix_is_not_a_closing_keyword(run_predict):
-    # "fix(analysis): #77 ..." is prose that happens to start with the word "fix"; only a line
-    # that is nothing but the keyword and a ref list ("Fixes #77") is a real closing directive.
-    done = run_predict([{"number": 77, "title": "prefix false positive"}])
+    # "fix(analysis): #40 ..." is prose that happens to start with the word "fix"; only a keyword
+    # immediately followed by a ref ("Fixes #40") is a real closing directive.
+    done = run_predict([{"number": 40, "title": "prefix false positive"}])
     assert done.returncode == 0, done.stdout
     assert done.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("label", "number", "title"),
+    [
+        # A keyword mid-line, not at the start of the message ("fix(tool): closes #108").
+        ("midline_108", 108, "keyword mid-line"),
+        # A keyword inside a sentence, with trailing prose after the ref.
+        ("prose_5", 5, "keyword in a sentence"),
+        # A trailing parenthetical right after the ref number.
+        ("paren_77", 77, "trailing parenthetical"),
+    ],
+)
+def test_closing_forms_github_honours_are_all_caught(run_predict, label, number, title):
+    # #190 review, important 1: a whole-line anchor previously silenced every one of these.
+    done = run_predict([{"number": number, "title": title}])
+    assert done.returncode == 1, done.stderr
+    assert f"#{number} · {title} · closing commits {run_predict.shas[label]}\n" == done.stdout
 
 
 def test_only_the_overlapping_number_is_printed_among_several_open_issues(run_predict):
@@ -279,3 +317,13 @@ def test_only_the_overlapping_number_is_printed_among_several_open_issues(run_pr
     assert "#18" in done.stdout
     assert "#40" not in done.stdout
     assert "#999" not in done.stdout
+
+
+def test_an_unresolvable_ref_exits_2_not_0(run_predict):
+    # git log fails loudly on stderr for a typo'd or unfetched ref; that must not read as "no
+    # commits in range, nothing found" (#190 review, important 2) -- a pre-merge gate wired as
+    # `if foreign-closes ...; then merge` would otherwise treat a bad ref as a pass.
+    done = run_predict([{"number": 18, "title": "ydc import #18"}], ref="origin/no-such-branch")
+    assert done.returncode == 2, done.stdout
+    assert done.stdout == ""
+    assert done.stderr != ""

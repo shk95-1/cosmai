@@ -28,29 +28,39 @@ if [ "$mode" = "--predict" ]; then
   fi
 
   open_file=$(mktemp)
+  raw_file=$(mktemp)
   pairs_file=$(mktemp)
   commits_file=$(mktemp)
   err_file=$(mktemp)
-  trap 'rm -f "$open_file" "$pairs_file" "$commits_file" "$err_file"' EXIT
+  trap 'rm -f "$open_file" "$raw_file" "$pairs_file" "$commits_file" "$err_file"' EXIT
 
-  if ! gh api --paginate "repos/$repo/issues?state=open&per_page=100" 2>"$err_file" \
-      | jq -s 'add | map(select(.pull_request == null)) | sort_by(.number)' > "$open_file"; then
+  # gh's exit status, not jq's: POSIX sh has no pipefail, so `if ! gh ... | jq ...` only tests the
+  # pipeline's last command, and a `--paginate` failure after a valid first page would leave jq
+  # succeeding on partial data and the run silently under-reporting.
+  if ! gh api --paginate "repos/$repo/issues?state=open&per_page=100" > "$raw_file" 2>"$err_file"; then
     printf 'gh api failed listing open issues for %s: %s\n' "$repo" "$(cat "$err_file")" >&2
     exit 2
   fi
-  if ! jq -e 'type == "array"' "$open_file" >/dev/null 2>&1; then
+  if ! jq -s 'add | map(select(.pull_request == null)) | sort_by(.number)' "$raw_file" > "$open_file"; then
     printf 'jq failed to read the open-issues response for %s (not the expected array shape)\n' "$repo" >&2
     exit 2
   fi
 
   # sha on its own line, then the full message, then a NUL record terminator -- the NUL lets a
-  # commit body containing blank lines (nearly all of them) stay one awk record.
-  git log --format='%H%n%B%x00' "HEAD..$ref" > "$commits_file"
+  # commit body containing blank lines (nearly all of them) stay one awk record. An unresolvable
+  # <ref> must not read as "no commits, nothing found, exit 0" -- git already fails loudly on
+  # stderr, so its exit status is checked like every other failure path here.
+  if ! git log --format='%H%n%B%x00' "HEAD..$ref" > "$commits_file" 2>"$err_file"; then
+    printf 'git log failed for range HEAD..%s: %s\n' "$ref" "$(cat "$err_file")" >&2
+    exit 2
+  fi
 
-  # GitHub only treats a keyword as a closing directive when nothing but the ref list follows it
-  # on the line -- "fix(scope): #40 does X" starts with the Conventional Commits type "fix" too,
-  # but is prose, not "Fixes #40" (found live against PR #59: d8354de false-positived on #40
-  # before this anchor was added). "owner/repo#n" survives a merge unchanged, so it is excluded.
+  # Same rule as `.githooks/commit-msg:44`: a keyword (close/fix/resolve, any tense) on its own
+  # word, immediately followed by a ref list, is a closing directive -- "immediately" is adjacency,
+  # not "the rest of the line is nothing else" (that anchor over-corrected and silenced real closes
+  # like "This closes #5 for good." and "Closes #18."). "fix(analysis): #40 ..." still misses: the
+  # "(" right after "fix" breaks the required ":?[ \t]+" before the ref. "owner/repo#n" is excluded
+  # by requiring the extracted ref to carry no "/".
   awk -v RS='\0' '
     {
       rec = $0
@@ -62,16 +72,21 @@ if [ "$mode" = "--predict" ]; then
       m = split(body, lines, "\n")
       for (i = 1; i <= m; i++) {
         line = lines[i]
-        gsub(/^[ \t]+|[ \t]+$/, "", line)
         low = tolower(line)
-        if (match(low, /^(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+(([a-z0-9_.-]+\/[a-z0-9_.-]+)?#[0-9]+([ \t]*,[ \t]*|[ \t]+and[ \t]+)?)+$/)) {
-          match(low, /^(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+/)
-          stripped = substr(line, RLENGTH + 1)
-          gsub(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+/, "", stripped)
-          while (match(stripped, /#[0-9]+/)) {
-            print sha, substr(stripped, RSTART + 1, RLENGTH - 1)
-            stripped = substr(stripped, RSTART + RLENGTH)
+        if (!match(low, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \t]+/)) { continue }
+        cursor = RSTART + RLENGTH
+        while (1) {
+          rest = substr(line, cursor)
+          if (!match(rest, /^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[0-9]+/)) { break }
+          ref = substr(rest, RSTART, RLENGTH)
+          if (index(ref, "/") == 0) {
+            print sha, substr(ref, index(ref, "#") + 1)
           }
+          cursor += RLENGTH
+          sep = tolower(substr(line, cursor))
+          if (match(sep, /^[ \t]*,[ \t]*/)) { cursor += RLENGTH; continue }
+          if (match(sep, /^[ \t]+and[ \t]+/)) { cursor += RLENGTH; continue }
+          break
         }
       }
     }
