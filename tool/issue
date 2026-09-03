@@ -57,7 +57,7 @@ RECHECK_DAYS=14
 # coordinator sets it to the day this wave lands on main; issues opened before it are left alone,
 # because flagging them all at once would report both backlogs and the rule would be ignored.
 LANG_EFFECTIVE_DATE=2026-09-04
-# recheck (e) asks which open issues a just-closed [목표]/[결정] moved. A week is how long a
+# recheck (e) asks which open issues a just-closed goal or decision moved. A week is how long a
 # closing is still news; older than that and every boot would re-report the same issues forever.
 CLOSED_DAYS=7
 CLOSED_PAGE=50
@@ -252,7 +252,7 @@ def WHEN_TO_FIX: "(?:When to fix|언제 고치나)";
 # ("## Channel / grade / size") and which case that heading lands in is not for this tool to fix.
 def SCALE: "(?:(?i:size)|규모)";
 # null, not [], when the heading is absent: the caller has to be able to tell "no such section"
-# from "the section is empty", and 규모 falls back to the whole body only in the first case.
+# from "the section is empty", and the scale section falls back to the whole body only in the first case.
 def section_lines($name):
   (.body | split("\n")) as $l
   | [range(0; $l | length) | select($l[.] | test("^#{1,6}.*" + $name))] as $heads
@@ -352,7 +352,7 @@ def head:
 | .[]
 '
 
-# AGENTS.md: an open issue is looked at again when a [목표]/[결정] closes, after a wave merge, and
+# AGENTS.md: an open issue is looked at again when a goal or a decision closes, after a wave merge, and
 # every 14 days -- against five questions. This reports which issue and which of the five, because
 # a bare list of numbers moves the reading work back onto the reader and stops being run.
 RECHECK='
