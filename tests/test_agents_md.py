@@ -28,7 +28,7 @@ def test_agents_md_names_the_boot_order_and_the_rules_index():
         assert needle in text, needle
 
 
-def test_agents_md_is_english():
+def test_agents_md_has_no_hangul():
     # English is the project's first language (issue #192 D10), and AGENTS.md is the one file every
     # session and subagent loads, so Hangul here would be read by every model on every boot.
     text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")

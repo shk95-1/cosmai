@@ -28,6 +28,7 @@ BASE_SITES = {
     "stack/Dockerfile.cron": r"ARG COSMAI_IMAGE=(\S+)",
     "tool/stack-build": r"-t (\S+) \.",
     "README.md": r"-t (\S+) \.",
+    "README.ko.md": r"-t (\S+) \.",
 }
 
 
@@ -55,6 +56,7 @@ def test_the_compose_file_tags_the_scheduler_image_it_builds():
         "stack/Dockerfile.cron",
         "stack/docker-compose.yml",
         "README.md",
+        "README.ko.md",
         "tool/stack-build",
     ],
     ids=lambda s: s,

@@ -4,7 +4,7 @@
 
 ## 2. Facts (not computable) — §1 (boot) is `AGENTS.md`
 - **The new stack** (`stack/docker-compose.yml`) must be running: `cosmai-{analyze, collector-commerce, collector-naver, collector-youtube-work, collector-youtube-flatten, portal}`. `collector-youtube-watch` sits behind `profiles: ["youtube-watch"]` — the condition for restarting it is #39.
-- **Old-stack remnants (no downtime)**: `shared-postgres` · postgrest ×2 · data-portal · trend-radar-dashboard · tubedepth-api · cosmai-old ×4. **Must be stopped**: trend-radar-collector · tubedepth-worker · tubedepth-flatten.
+- **Old-stack remnants (kept running)**: `shared-postgres` · postgrest ×2 · data-portal · trend-radar-dashboard · tubedepth-api · cosmai-old ×4. **Must be stopped**: trend-radar-collector · tubedepth-worker · tubedepth-flatten.
 - The base of the images `cosmai-needs:local` and `cosmai-needs-cron:local` must be **trixie / OpenSSL ≥ 3.5** — bookworm (3.0) is blocked by the Cloudflare challenge on the oliveyoung review API (measured A/B, #35). `tests/stack/test_image_tls_stack.py` pins the lower bound.
 - `stack/.env` must exist (paths only, no secret values). Without it compose dies on an unset `COSMAI_SECRET_FILE_HOST`.
 - The browser profiles `var/browser-profiles/{oliveyoung,glowpick}` are read by `collector-commerce` as a bind mount (`user: "1000:1000"`, `HOME=/tmp`). A human creates them with `cosmai login`.
