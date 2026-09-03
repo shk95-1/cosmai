@@ -23,8 +23,9 @@ section_containers() {
         echo "(unavailable)"
         return
     fi
-    # cosmai-* is the new stack, shared-*/shared-postgres the old one, cosmai-test-postgres-*
-    # a suite leftover -- all three are worth seeing in one place, not just filtered away.
+    # cosmai-* is this stack -- the database too since #177 (cosmai-postgres) -- shared-* the old
+    # fleet's leftovers, cosmai-test-postgres-* a suite leftover. All three are worth seeing in one
+    # place, not just filtered away.
     filtered=$(printf '%s\n' "$all" | grep -E '^(cosmai-|shared-)')
     if [ -z "$filtered" ]; then
         echo "(none)"
@@ -62,26 +63,26 @@ section_db() {
     fi
     # One `psql` call per fact rather than one multi-statement call: a single query failing (e.g.
     # a column renamed under a migration in flight) must not blank out the rest of this section.
-    if versions=$(docker exec shared-postgres psql -U platform -d app -Atc \
+    if versions=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
         "select version || ' ' || applied_at from needs.schema_migration order by version" 2>/dev/null); then
         echo "ledger versions:"
         printf '%s\n' "$versions"
     else
         echo "ledger versions: (unavailable)"
     fi
-    if size=$(docker exec shared-postgres psql -U platform -d app -Atc \
+    if size=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
         "select pg_size_pretty(pg_database_size('app'))" 2>/dev/null); then
         echo "app size: $size"
     else
         echo "app size: (unavailable)"
     fi
-    if rows=$(docker exec shared-postgres psql -U platform -d app -Atc \
+    if rows=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
         "select count(*) from needs.retrieval_chunk" 2>/dev/null); then
         echo "retrieval_chunk rows: $rows"
     else
         echo "retrieval_chunk rows: (unavailable)"
     fi
-    if conns=$(docker exec shared-postgres psql -U platform -d app -Atc \
+    if conns=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
         "select count(*) from pg_stat_activity where usename like 'needs%'" 2>/dev/null); then
         echo "needs% role connections: $conns"
     else

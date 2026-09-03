@@ -14,6 +14,20 @@ case "$subject" in
   "Merge "*|"Revert "*|fixup!*|squash!*) exit 0 ;;
 esac
 
+# Both repositories operate in English (#192 D12), and a commit message is the one thing here that
+# cannot be edited afterwards. Codepoints rather than a literal Hangul range: outside a UTF-8
+# locale grep reads such a range as bytes and then every multibyte character matches.
+if grep -v '^#' "$1" | grep -qP '[\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{A960}-\x{A97F}\x{AC00}-\x{D7A3}\x{FFA0}-\x{FFDC}]'; then
+  cat >&2 <<'EOF'
+
+✗ Commit message is in Korean. Write the subject and the body in English.
+
+  Example:  fix(tool): keep the recheck reasons in one order
+
+EOF
+  exit 1
+fi
+
 pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: .+$'
 
 # A branch named <channel>/<issue>-<slug> belongs to exactly one issue (issue #60 rules), and a
@@ -23,6 +37,43 @@ branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)
 issue=$(printf '%s' "$branch" | sed -nE 's|^[a-z0-9/-]+/([0-9]+)-[a-z0-9-]+$|\1|p')
 if [ -n "$issue" ] && ! grep -v '^#' "$1" | grep -q "#$issue\b"; then
   printf '\n✗ Branch %s belongs to issue #%s; mention #%s in the commit message.\n\n' "$branch" "$issue" "$issue" >&2
+  exit 1
+fi
+
+# A bare "Closes #n" is only correct in the repo it is committed to: once the commit is merged
+# into a fork, GitHub re-resolves the same #n against the fork and closes an unrelated fork issue
+# (#175). "owner/repo#n" survives the merge unchanged, so keyword+bare-# is rejected outright.
+# Scanned against the whole message (subject included, not just the body) -- a Conventional
+# Commits subject never matches this pattern by construction, and staying conservative costs
+# nothing (#175 review, minor 6).
+# GitHub also lets one keyword govern a comma list ("Closes owner/repo#1, #2"); every ref after
+# the keyword is checked, not just the first, so a bare #n later in the list cannot hide behind a
+# properly-qualified one before it (#175 review, should-fix 1).
+# The keyword must stand on its own word, both sides -- "disclose #175" and "prefixes #175" are
+# not closing keywords, and matching them as substrings was a round-2 regression (#175 re-review).
+bare_closes=$(grep -v '^#' "$1" | awk '
+  {
+    low = tolower($0)
+    if (match(low, /(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)([^[:alnum:]_]|$)/)) {
+      rest = substr($0, RSTART)
+      stripped = rest
+      gsub(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+/, "", stripped)
+      if (stripped ~ /#[0-9]+/) print $0
+    }
+  }
+')
+if [ -n "$bare_closes" ]; then
+  cat >&2 <<EOF
+
+✗ Bare closing keyword closes the wrong issue once this commit merges into a fork (the same
+  #n is re-resolved against whichever repo receives the merge).
+
+  Got:      $(printf '%s\n' "$bare_closes" | head -1)
+  Expected: Closes owner/repo#n
+
+  Example:  Closes shk95-1/cosmai#175
+
+EOF
   exit 1
 fi
 
@@ -38,8 +89,6 @@ if ! printf '%s' "$subject" | grep -Eq "$pattern"; then
   Examples: feat(auth): add passwordless sign-in
             fix(db): stop save from rewinding the revision
             feat(api)!: make list endpoints paginated
-
-  Bypass once with: git commit --no-verify
 
 EOF
   exit 1

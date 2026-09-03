@@ -1,0 +1,42 @@
+#!/bin/sh
+# The repository operates in English (#192 D12), so a Hangul line in a tracked file is a regression
+# the moment it is staged. Only staged additions are examined, like tool/checks/paths: history is
+# not this check's business, and the migration itself has to be able to delete Korean.
+set -e
+
+# Codepoints rather than a literal 가-힣 range: outside a UTF-8 locale grep reads such a range as
+# bytes and then every multibyte character matches, which would fail on Japanese product names.
+HANGUL='[\x{1100}-\x{11FF}\x{3130}-\x{318F}\x{A960}-\x{A97F}\x{AC00}-\x{D7A3}\x{FFA0}-\x{FFDC}]'
+
+# A grep without -P would find nothing and this check would pass everything in silence, which is
+# indistinguishable from a clean commit. Prove the detector sees Hangul before trusting a pass.
+printf '\355\225\234\n' | grep -qP "$HANGUL" || {
+    printf '\n✗ tool/checks/lang: this grep has no -P, so the Korean check cannot run.\n\n' >&2
+    exit 1
+}
+
+# Korean that is content rather than operating surface stays. Each entry leaves as a later wave of
+# #192 removes its reason, so the list is here rather than spread across the tree.
+# A fixture directory is named twice because git's default pathspec matching gives `**` no empty
+# match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
+hits=$(git diff --cached -U0 --no-color -- . \
+    ':!tool/checks/lang' \
+    ':!tool/issue' \
+    ':!tool/journal' \
+    ':!README.ko.md' \
+    ':!eval/' \
+    ':!db/seed/' \
+    ':!analysis/**/*.csv' \
+    ':!portal/public/' \
+    ':!tests/fixtures/**' \
+    ':!tests/golden*/**' \
+    ':!tests/**/fixtures/**' \
+    ':!tests/**/golden*/**' \
+    | awk '/^\+\+\+ /{ f = substr($0, 7); next } /^\+[^+]/ { print f ": " substr($0, 2) }' \
+    | grep -P "$HANGUL" || true)
+[ -z "$hits" ] && exit 0
+printf '%s\n' "$hits" >&2
+printf '\n✗ A staged line is in Korean. The tools and the repository operate in English (#192).\n' >&2
+printf '  Korean that is data (seed rows, evaluation sets, UI strings) belongs on the allowlist in\n' >&2
+printf '  tool/checks/lang; Korean a test needs belongs under a tests/**/fixtures/ directory.\n\n' >&2
+exit 1

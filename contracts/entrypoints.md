@@ -36,8 +36,9 @@ cosmai login --source <source>
 COSMAI_DB_HOST   기본값 127.0.0.1
 COSMAI_DB_PORT   기본값 5434
 ```
-- 호스트에서 `uv run cosmai ...` 는 shared-postgres 의 게시 포트(127.0.0.1:5434)로, 컴포즈 망 안에서는
-  서비스명:5432 로 **같은 DB** 에 닿는다. 움직이는 것은 호스트와 포트뿐이다.
+- On the host, `uv run cosmai ...` reaches the database through the published port of
+  cosmai-postgres (127.0.0.1:5434); inside the compose network the service name on 5432 reaches
+  the **same DB**. Only the host and the port move.
 - compose 는 값이 없는 `${VAR}` 를 빈 문자열로 넘기므로 **빈 값은 기본값**으로 읽는다.
 - 세 자리가 같은 규칙을 따른다: `db/runtime.py`(needs_runtime), `collectors/commerce/storage/db.py`,
   `collectors/youtube/storage/db.py`. 함수에 명시된 host/port 인자가 env 를 이긴다.

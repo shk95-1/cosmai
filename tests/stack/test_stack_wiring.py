@@ -33,8 +33,16 @@ SECRETS_MD = REPO_ROOT / "contracts" / "secrets.md"
 # path with this prefix.
 IMAGE_ROOT = "/srv/cosmai/"
 SCHEDULER = "supercronic"
-DB_HOST = "shared-postgres"
+DB_HOST = "postgres"
 DB_PORT = "5432"
+# #177: this compose owns the database now. The container keeps a cosmai- name like every
+# other one here, and the old fleet's name survives only as a network alias.
+DB_SERVICE = "postgres"
+DB_CONTAINER = "cosmai-postgres"
+DB_IMAGE = "postgres:18"
+DB_PUBLISHED = "127.0.0.1:5434:5432"
+DB_DATA_IN_CONTAINER = "/var/lib/postgresql"
+TRANSITION_ALIAS = "shared-postgres"
 SECRET_IN_CONTAINER = "/run/cosmai/env"
 
 COMPOSE_TEXT = COMPOSE.read_text(encoding="utf-8")
@@ -238,8 +246,9 @@ def test_every_cron_line_names_a_command_the_cli_has(case: tuple[str, list[str]]
 @pytest.mark.parametrize("name", sorted(SCHEDULED), ids=lambda n: n)
 def test_a_scheduled_service_reaches_the_database_by_the_contracted_knobs(name: str):
     # contracts/entrypoints.md §DB 접속 노브: inside the compose network the same database is
-    # shared-postgres:5432. Missing knobs do not fail loudly -- db/runtime.py falls back to the host
-    # defaults 127.0.0.1:5434, which inside a container is nothing at all.
+    # postgres:5432 -- the service this file now declares (#177). Missing knobs do not fail loudly
+    # -- db/runtime.py falls back to the host defaults 127.0.0.1:5434, which inside a container is
+    # nothing at all.
     body = SERVICES[name]
     assert f"COSMAI_DB_HOST: {DB_HOST}" in body, f"{name} does not set COSMAI_DB_HOST={DB_HOST}"
     assert re.search(rf'COSMAI_DB_PORT: "?{DB_PORT}"?', body), f"{name} does not set COSMAI_DB_PORT"
@@ -272,12 +281,92 @@ def test_a_scheduled_service_gets_its_secrets_by_read_only_mount(name: str):
     )
 
 
-def test_the_shared_network_is_joined_not_owned():
-    # db-net belongs to the shared-db project (service/stack/docker-compose.yml). Declaring it
-    # external is what makes `docker compose down` here leave the fleet's network alone.
+def test_this_compose_owns_the_shared_network():
+    # #177 flips the ownership the file was written under: the shared-db project that created
+    # db-net is dead and its compose file is gone, so nothing else declares this network any more.
+    # `external: true` would now mean `up` fails on a host where nobody made it first.
     block = _blocks(COMPOSE_TEXT, re.compile(r"^  ([\w.-]+):\s*$"), under="networks")
     assert "db-net" in block, "stack/docker-compose.yml declares no db-net"
-    assert "external: true" in block["db-net"], "db-net is the shared-db project's network, not ours"
+    assert "name: db-net" in block["db-net"], (
+        "db-net must keep its unprefixed name -- old-stack containers are attached to it by that name"
+    )
+    declared = [ln.strip() for ln in block["db-net"].splitlines() if not ln.strip().startswith("#")]
+    assert not any(ln.startswith("external") for ln in declared), (
+        "the shared-db project that owned db-net is gone (#176); this compose creates it now"
+    )
+
+
+def test_the_compose_file_declares_the_database_it_talks_to():
+    assert DB_SERVICE in SERVICES, (
+        f"stack/docker-compose.yml declares no {DB_SERVICE} service, so COSMAI_DB_HOST={DB_HOST} "
+        "names nothing on this network"
+    )
+
+
+def test_the_database_service_serves_the_cluster_that_is_already_on_disk():
+    """The old fleet's container is gone but its data directory is not, and every row this repo has
+    is in it. Image tag, mount point and published port are what aim the service at that cluster;
+    what makes a wrong aim loud instead of silent is the separate absence checked below."""
+    body = SERVICES[DB_SERVICE]
+    assert f"container_name: {DB_CONTAINER}" in body, f"{DB_SERVICE} is not named {DB_CONTAINER}"
+    assert f"image: {DB_IMAGE}" in body, (
+        f"the cluster on disk was written by {DB_IMAGE}; another major would refuse to start on it"
+    )
+    assert re.search(rf"- \$\{{COSMAI_PG_DATA_DIR:\?[^}}]+}}:{DB_DATA_IN_CONTAINER}\b", body), (
+        f"{DB_SERVICE} must bind the host data directory at {DB_DATA_IN_CONTAINER} -- the parent, "
+        "so PGDATA's 18/docker below it is found -- through a variable with NO default: `name: "
+        "cosmai` and container_name are fixed, so a default that resolves per checkout lets an "
+        "`up` from a worktree recreate the production container over the wrong directory"
+    )
+    assert re.search(rf'- "{re.escape(DB_PUBLISHED)}"', body), (
+        f"{DB_SERVICE} must publish {DB_PUBLISHED} -- db/runtime.py's host default is 5434"
+    )
+    assert "healthcheck:" in body and "pg_isready" in body, (
+        f"{DB_SERVICE} needs a healthcheck; the depends_on conditions below wait on it"
+    )
+
+
+# The five the entrypoint reads before it decides whether to run initdb.
+INITDB_VARS = (
+    "POSTGRES_PASSWORD",
+    "POSTGRES_PASSWORD_FILE",
+    "POSTGRES_USER",
+    "POSTGRES_DB",
+    "POSTGRES_HOST_AUTH_METHOD",
+)
+
+
+@pytest.mark.parametrize("var", INITDB_VARS, ids=lambda v: v)
+def test_the_database_service_sets_nothing_initdb_would_need(var: str):
+    """The absence is the safety net, not the mount path. The cluster on disk is initialised, so
+    the entrypoint never asks for these and setting one changes nothing on a good day -- but it
+    turns a mistyped COSMAI_PG_DATA_DIR from `exit 1` into a brand-new empty cluster that
+    pg_isready reports healthy and all six schedulers then write into. contracts/secrets.md names
+    no POSTGRES_ key, so test_no_secret_key_is_given_a_value_in_the_repo does not cover them."""
+    assert var not in SERVICES[DB_SERVICE], (
+        f"{DB_SERVICE} names {var}; the cluster already exists and initdb must stay unreachable"
+    )
+
+
+def test_the_database_service_answers_to_the_old_fleets_name_during_the_transition():
+    # The old stack's PostgREST still resolves the database as shared-postgres on this network and
+    # the portal still calls it from the browser (#179). The alias is what keeps that name resolving
+    # while it does; #181 removes both.
+    body = SERVICES[DB_SERVICE]
+    assert re.search(rf"aliases:\s*\n\s*- {TRANSITION_ALIAS}\b", body), (
+        f"{DB_SERVICE} does not answer to {TRANSITION_ALIAS} on db-net"
+    )
+    assert "#181" in body, "the transition alias must say which issue removes it"
+
+
+@pytest.mark.parametrize("name", sorted(set(SCHEDULED) | {"portal"}), ids=lambda n: n)
+def test_a_service_waits_for_the_database_to_be_healthy(name: str):
+    # Without the condition, a cron container that starts while the cluster is still replaying WAL
+    # runs its next line against a refused connection -- a failed run, not a crash loop, so nothing
+    # restarts it and the schedule just loses that slot.
+    assert re.search(
+        rf"depends_on:\s*\n\s*{DB_SERVICE}:\s*\n\s*condition: service_healthy", SERVICES[name]
+    ), f"{name} does not wait for {DB_SERVICE} to be healthy"
 
 
 def secret_key_names() -> list[str]:
