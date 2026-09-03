@@ -778,3 +778,25 @@ def test_recheck_skips_memos(run):
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "cosmai#20" not in done.stdout, done.stdout
+
+
+def test_recheck_reads_the_last_date_in_the_release_section_not_any_date(run):
+    # #86 은 해제 조건 절 안에 지난 날짜와 미래 날짜를 함께 적는다("재구성 2026-08-25 + 14일; 2026-09-08
+    # 이후"). 아무 날짜나 지났으면 잡는 규칙이면 아직 이른 이슈가 매 부팅 목록에 오르고, #18 은 반대로
+    # 과거 날짜 둘이라 잡혀야 한다. 가장 늦은 날짜만이 두 경우를 다 맞힌다.
+    mixed = "## 해제 조건\n컷오버(%s) 후 7일간 문제가 없고 %s 이후\n"
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11, 12)),
+            issue(11, "아직 이르다", body=BODY + mixed % (day(-9), day(5)), labels=("ch:tool",), parent=10),
+            issue(12, "지났다", body=BODY + mixed % (day(-9), day(-2)), labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [row["key"] for row in rows] == ["cosmai#12"], rows
+    assert [r["code"] for r in rows[0]["reasons"]] == ["b"], rows
+    assert day(-2) in rows[0]["reasons"][0]["why"], rows
+    assert day(-9) not in rows[0]["reasons"][0]["why"], rows

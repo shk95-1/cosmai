@@ -294,6 +294,8 @@ def head:
 # a bare list of numbers moves the reading work back onto the reader and stops being run.
 RECHECK='
 def release_dates: [ (section_lines("해제 조건") // []) | join("\n") | scan("[0-9]{4}-[0-9]{2}-[0-9]{2}") ];
+# Its own regex, not a rule borrowed from tool/checks/paths: that check greps a staged diff for the
+# literal home prefix and has no notion of a quoted path, so there is nothing there to reuse.
 # Only backticked, slash-carrying tokens whose first segment is something the checkout actually has:
 # bodies are full of `owner/repo` and `ch:collectors/youtube`, and reporting those as missing files
 # would put every issue on the list, which is the same as having no list at all.
