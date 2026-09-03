@@ -10,9 +10,12 @@
 #
 # audit and recheck test the checkout's own TODO(#n) markers and paths, so both pick a "primary" repo
 # from the checkout's `origin` remote rather than always the first of REPOS (#174) --
-# COSMAI_ISSUE_PRIMARY overrides that read. audit's foreign-closes section shells out to
-# tool/checks/foreign-closes against the checkout's `upstream` remote (COSMAI_FOREIGN_CLOSES
-# overrides which script), and is skipped when there is no such remote.
+# COSMAI_ISSUE_PRIMARY overrides that read. audit's foreign-closes and fork-behind sections read the
+# checkout's `upstream` remote (COSMAI_FOREIGN_CLOSES overrides which script the first one calls),
+# and are skipped when there is no such remote. Nothing here fetches.
+#
+# Every anchor this tool reads out of an issue body is accepted in English and in Korean until both
+# repos have migrated their issues (#192 step 4 removes the Korean half).
 
 set -e
 
@@ -50,6 +53,10 @@ pick_primary() {
 STALE_HOURS=24
 MEMO_DAYS=14
 RECHECK_DAYS=14
+# From this date on, a newly opened issue written in Korean is a lint finding (#192 D12). The
+# coordinator sets it to the day this wave lands on main; issues opened before it are left alone,
+# because flagging them all at once would report both backlogs and the rule would be ignored.
+LANG_EFFECTIVE_DATE=2026-09-04
 # recheck (e) asks which open issues a just-closed [목표]/[결정] moved. A week is how long a
 # closing is still news; older than that and every boot would re-report the same issues forever.
 CLOSED_DAYS=7
@@ -86,7 +93,7 @@ query(\$cursor: String) {
     issues(first: 100, states: OPEN, after: \$cursor) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number title updatedAt body
+        number title updatedAt createdAt body
         labels(first: 20) { nodes { name } }
         assignees(first: 5) { nodes { login } }
         parent { number }
@@ -184,8 +191,8 @@ MERGE='
 TRUNCATED='
 [.[] as $r | $r.issues[]
  | select((.subIssues.pageInfo.hasNextPage == true) or (.blockedBy.pageInfo.hasNextPage == true))
- | "· 잘림: " + ($r.repo | sub("^[^/]*/"; "")) + "#" + (.number | tostring)
-   + " 의 subIssues/blockedBy 가 한 페이지를 넘는다 (tool/issue 의 first: 값을 올려야 한다)"]
+ | "· truncated: " + ($r.repo | sub("^[^/]*/"; "")) + "#" + (.number | tostring)
+   + " has more subIssues/blockedBy than one page (raise the first: values in tool/issue)"]
 | .[]
 '
 
@@ -224,6 +231,7 @@ def flat:
         title: .title,
         body: (.body // ""),
         updatedAt: .updatedAt,
+        createdAt: (.createdAt // ""),
         labels: [.labels.nodes[].name],
         assignees: [.assignees.nodes[].login],
         parent: (.parent.number),
@@ -235,6 +243,14 @@ def channel_labels: [.labels[] | select(startswith("ch:"))];
 def channel: (channel_labels | first // null);
 def open_blockers: [.blockers[] | select(.state == "OPEN") | .key];
 def section($name): (.body | test("(^|\n)#{1,6}[ \t]*" + $name));
+# The anchors, English first. Each is one regex rather than two call sites, so no rule can come to
+# read one set and not the other.
+def DONE_WHEN: "(?:Done when|완료 기준)";
+def RELEASE_CONDITION: "(?:Release condition|해제 조건)";
+def WHEN_TO_FIX: "(?:When to fix|언제 고치나)";
+# Case-insensitive on the English half only: this one is a word inside a longer heading
+# ("## Channel / grade / size") and which case that heading lands in is not for this tool to fix.
+def SCALE: "(?:(?i:size)|규모)";
 # null, not [], when the heading is absent: the caller has to be able to tell "no such section"
 # from "the section is empty", and 규모 falls back to the whole body only in the first case.
 def section_lines($name):
@@ -244,14 +260,16 @@ def section_lines($name):
     else ($heads | last) as $start
       | ([range($start + 1; $l | length) | select($l[.] | test("^#{1,6}[ \t]"))] | first // ($l | length)) as $end
       | $l[$start + 1:$end] end;
-def scale_lines: section_lines("규모") // (.body | split("\n"));
-def resource: (scale_lines | join("\n") | (capture("자원:[ \t]*(?<v>[^\n]*)").v // "")) | sub("[ \t\r]+$"; "");
-# The token is the first word of each `·`-separated item, so "ops(정지 = 매번 승인)" and "공유DB 읽기"
-# both fold onto the resource they contend for. 없음 is dropped: it collides with nothing.
+def scale_lines: section_lines(SCALE) // (.body | split("\n"));
+def resource: (scale_lines | join("\n")
+               | (capture("(?:Resources|자원):[ \t]*(?<v>[^\n]*)").v // "")) | sub("[ \t\r]+$"; "");
+# The token is the first word of each `·`-separated item, so "ops(stop = approval each time)" and
+# "sharedDB read" both fold onto the resource they contend for. A resource of "none" is dropped in
+# either language: it collides with nothing.
 def resource_tokens:
   resource | split("·")
   | map(capture("^[ \t]*(?<t>[^ \t(][^ \t(]*)").t | sub("[.,;:]+$"; ""))
-  | map(select(. != "없음" and . != "")) | unique;
+  | map(select(. != "none" and . != "없음" and . != "")) | unique;
 def excluded_from_ready: (tagged("memo") or tagged("channel") or tagged("goal") or tagged("deferred"));
 def targets($user): map(select((excluded_from_ready | not) and ($user or (tagged("needs-user") | not))));
 def status_of:
@@ -260,7 +278,18 @@ def status_of:
   else {status: "ready", detail: null} end;
 def item($note): status_of + {key: .key, title: .title, resource: resource,
                               needs_user: tagged("needs-user"), note: $note};
-def stray_note: (if .parent == null then "부모 없음" else "에픽 밖" end);
+def stray_note: (if .parent == null then "no parent" else "outside the epic" end);
+# A fenced block is quoted evidence -- a log line, a seed row, a body being migrated -- so Korean
+# inside one is not prose the issue wrote, and rewriting it would falsify the quote.
+def outside_fences:
+  (split("\n"))
+  | reduce .[] as $line ({inside: false, out: []};
+      if ($line | test("^[ \t]*```")) then .inside = (.inside | not)
+      elif .inside then .
+      else .out += [$line] end)
+  | .out | join("\n");
+def hangul: test("[ᄀ-ᇿ㄰-㆏가-힣ꥠ-꥿]");
+def title_tag($en; $ko): (.title | startswith("[" + $en + "]") or startswith("[" + $ko + "]"));
 def ready_channels($all; $user):
   ($all | targets($user)) as $t
   | ($t | map({(.key): .}) | add // {}) as $byk
@@ -303,21 +332,22 @@ flat as $all
 
 RENDER_READY='
 def head:
-  if .channel == null then "(채널 없음)"
+  if .channel == null then "(no channel)"
   elif .epic != null then .channel + " — " + .epic_title + " (" + .epic + ")"
-  else .channel + " — (에픽 없음)" end;
-[.held as $h | "진행 중 " + ($h.in_progress | tostring)
+  else .channel + " — (no epic)" end;
+[.held as $h | "in progress " + ($h.in_progress | tostring)
  + (if ($h.resources | length) == 0 then ""
-    else " · 점유: " + ([$h.resources[] | .resource + " " + (.keys | join(", "))] | join(" · ")) end)]
+    else " · held: " + ([$h.resources[] | .resource + " " + (.keys | join(", "))] | join(" · ")) end)]
 + ([.channels[] | ["", head]
-    + (if (.items | length) == 0 then ["  (없음)"]
+    + (if (.items | length) == 0 then ["  (none)"]
        else [.items[] | "  " + .key + " · " + .title + (if .needs_user then " [needs-user]" else "" end)
              + " · " + (if .status == "ready" then "ready" else .status + ": " + .detail end)
-             + (if .resource != "" then " · 자원: " + .resource else "" end)
+             + (if .resource != "" then " · resources: " + .resource else "" end)
              + (if .note != null then " (" + .note + ")" else "" end)]
        end)] | add // [])
 + (if (.user_queue | length) > 0
-   then ["", "사용자 큐"] + [.user_queue[] | "  " + .key + " · " + .title + " · " + .kind + " · 푸는 이슈 " + (.unblocks | tostring)]
+   then ["", "User queue"]
+        + [.user_queue[] | "  " + .key + " · " + .title + " · " + .kind + " · unblocks " + (.unblocks | tostring)]
    else [] end)
 | .[]
 '
@@ -326,14 +356,14 @@ def head:
 # every 14 days -- against five questions. This reports which issue and which of the five, because
 # a bare list of numbers moves the reading work back onto the reader and stops being run.
 RECHECK='
-def release_dates: [ (section_lines("해제 조건") // []) | join("\n") | scan("[0-9]{4}-[0-9]{2}-[0-9]{2}") ];
+def release_dates: [ (section_lines(RELEASE_CONDITION) // []) | join("\n") | scan("[0-9]{4}-[0-9]{2}-[0-9]{2}") ];
 # Its own regex, not a rule borrowed from tool/checks/paths: that check greps a staged diff for the
 # literal home prefix and has no notion of a quoted path, so there is nothing there to reuse.
 # Only backticked, slash-carrying tokens whose first segment is something the checkout actually has:
 # bodies are full of `owner/repo` and `ch:collectors/youtube`, and reporting those as missing files
 # would put every issue on the list, which is the same as having no list at all.
-# A path immediately followed by a parenthetical note ("`stack/x` (예정)", "`stack/x`(포크)") is a
-# path the body already marks as not-yet-there or gone; checking it would just restate the note.
+# A path immediately followed by a parenthetical note ("`stack/x` (planned)", "`stack/x`(fork)") is
+# a path the body already marks as not-yet-there or gone; checking it would just restate the note.
 def body_paths:
   [ .body | scan("`([^`\n]+)`( ?\\()?") ]
   | map(select((.[1] // "") == ""))
@@ -349,7 +379,7 @@ flat as $all
        title: .title, body: (.body // ""), labels: [.labels.nodes[].name], closedAt: .closedAt}
     | select(.closedAt != null and (days_since(.closedAt) <= $closed_days))
     | select((.labels | index("goal")) or (.labels | index("decision"))
-             or (.title | startswith("[목표]")) or (.title | startswith("[결정]")))]) as $moved
+             or title_tag("goal"; "목표") or title_tag("decision"; "결정"))]) as $moved
 # Each edge carries the closing closedAt too, not just the key: (e) goes quiet once the pointed-at
 # issue was updated after that closing -- a recheck comment left there is how the signal turns off.
 | (reduce ($moved[] | . as $m
@@ -361,34 +391,38 @@ flat as $all
    | . as $i
    | (release_dates) as $dates
    | ([ (if days_since(.updatedAt) >= $recheck_days
-         then {code: "a", why: ("갱신 후 " + (days_since(.updatedAt) | tostring) + "일"),
-               checks: ["전제", "blockedBy", "해제 조건", "등급", "중복"]} else empty end),
+         then {code: "a", why: ("updated " + (days_since(.updatedAt) | tostring) + " days ago"),
+               checks: ["premise", "blockedBy", "release condition", "grade", "duplicate"]} else empty end),
         (if ($dates | length) > 0 and ($dates | max) < $today
-         then {code: "b", why: ("해제 조건 " + ($dates | max) + " 이 지났다"), checks: ["해제 조건"]} else empty end),
-        # A "## 해제 조건" section already gives (b) a date to watch, or -- with no date in it --
+         then {code: "b", why: ("release condition " + ($dates | max) + " has passed"),
+               checks: ["release condition"]} else empty end),
+        # A release-condition section already gives (b) a date to watch, or -- with no date in it --
         # leaves prose that only (a) 14-day cycle can judge; without the section there is nothing
         # else watching this deferred issue, so only then does the missing-blocker gap need saying.
-        (if tagged("deferred") and (open_blockers | length) == 0 and (section("해제 조건") | not)
-         then {code: "c", why: "deferred 인데 열린 blockedBy 도 ## 해제 조건 절도 없다", checks: ["blockedBy", "해제 조건"]} else empty end),
+        (if tagged("deferred") and (open_blockers | length) == 0 and (section(RELEASE_CONDITION) | not)
+         then {code: "c", why: "deferred with no open blockedBy and no release-condition section",
+               checks: ["blockedBy", "release condition"]} else empty end),
         # Only the repo this checkout is: issues in the other repo quote files that live there
         # and not here, and reporting every one of them would drown the reasons that are real.
         ((if .short == $primary then (body_paths | map(select($tracked[.] != true))) else [] end) as $gone
          | if ($gone | length) > 0
-           then {code: "d", why: ("본문의 " + ($gone | join(", ")) + " 가 체크아웃에 없다"), checks: ["전제"]} else empty end),
+           then {code: "d", why: ("the body quotes " + ($gone | join(", ")) + ", not in the checkout"),
+                 checks: ["premise"]} else empty end),
         ((($points_at[$i.key] // []) | map(select(.closedAt > $i.updatedAt)) | map(.key)) as $src
          | if ($src | length) > 0
-           then {code: "e", why: (($src | join(", ")) + " 이 최근 " + ($closed_days | tostring) + "일 안에 닫혔다"),
-                 checks: ["전제", "등급", "중복"]} else empty end) ]) as $reasons
+           then {code: "e", why: (($src | join(", ")) + " closed within the last "
+                                  + ($closed_days | tostring) + " days"),
+                 checks: ["premise", "grade", "duplicate"]} else empty end) ]) as $reasons
    | select(($reasons | length) > 0)
    | {key: .key, short: .short, number: .number, title: .title, reasons: $reasons}]
 | sort_by(.short, .number) | map(del(.short, .number))
 '
 
 RENDER_RECHECK='
-if length == 0 then ["재점검 없음"]
-else ["재점검 " + (length | tostring) + "건 (전제 · blockedBy · 해제 조건 · 등급 · 중복)"]
+if length == 0 then ["nothing to recheck"]
+else ["recheck " + (length | tostring) + " (premise · blockedBy · release condition · grade · duplicate)"]
      + ([.[] | ["", "  " + .key + " · " + .title]
-         + [.reasons[] | "    " + .why + " → 점검: " + (.checks | join(", "))]] | add)
+         + [.reasons[] | "    " + .why + " → check: " + (.checks | join(", "))]] | add)
 end | .[]
 '
 
@@ -409,30 +443,36 @@ flat as $all
 | ([$all[] | . as $i
     | (if ($i | tagged("memo") or tagged("goal") or tagged("channel")) then empty
        else
-         (if (channel_labels | length) != 1 then {key: .key, short: .short, number: .number, reason: "ch:* 라벨이 정확히 하나가 아니다"} else empty end),
-         (if .parent == null then {key: .key, short: .short, number: .number, reason: "부모 에픽이 없다"} else empty end),
-         # when-touched 의 완료 시점은 이 이슈가 아니라 그 파일을 다음에 만지는 작업에 얹혀 있다
-         # (라벨 정의: "그 파일을 다음에 만질 때 고친다"). 완료 기준을 요구하면 라벨의 뜻과 어긋나고,
-         # 실제로 그 어긋남이 lint 를 계속 빨갛게 두었다(포크 #43·#44, 본문은 옳고 규칙이 틀렸다).
-         # 면제가 무규칙은 아니다 -- 언제 고치는지는 여전히 적혀 있어야 한다. 코드의 TODO(#n) 표식
-         # 대조는 audit 이 양방향으로 따로 한다.
+         (if (channel_labels | length) != 1 then {key: .key, short: .short, number: .number, reason: "not exactly one ch:* label"} else empty end),
+         (if .parent == null then {key: .key, short: .short, number: .number, reason: "no parent epic"} else empty end),
+         # A when-touched issue is finished by whatever work next opens that file, not by this issue
+         # (the label reads "fixed the next time that file is touched"). Demanding a completion
+         # criterion contradicts the label, and that mismatch did in fact keep lint red on issues
+         # whose bodies were right (fork #43, #44). The exemption is not an absence of rules -- when
+         # it gets fixed still has to be written down, and audit matches the TODO(#n) markers in the
+         # code against these issues in both directions on its own.
          (if ($i | tagged("when-touched"))
-          then (if section("언제 고치나") then empty else {key: .key, short: .short, number: .number, reason: "when-touched 본문에 ## 언제 고치나 가 없다"} end)
-          else (if section("완료 기준") then empty else {key: .key, short: .short, number: .number, reason: "본문에 ## 완료 기준 이 없다"} end)
+          then (if section(WHEN_TO_FIX) then empty else {key: .key, short: .short, number: .number, reason: "when-touched issue has no When to fix section"} end)
+          else (if section(DONE_WHEN) then empty else {key: .key, short: .short, number: .number, reason: "body has no Done when section"} end)
           end)
        end),
       (if ($i | tagged("memo")) then
-         (if (channel_labels | length) > 0 then {key: .key, short: .short, number: .number, reason: "memo 에 ch:* 라벨이 있다"} else empty end),
-         (if .parent != null then {key: .key, short: .short, number: .number, reason: "memo 에 부모가 있다"} else empty end),
-         (if section("완료 기준") then {key: .key, short: .short, number: .number, reason: "memo 본문에 ## 완료 기준 이 있다"} else empty end)
+         (if (channel_labels | length) > 0 then {key: .key, short: .short, number: .number, reason: "memo has a ch:* label"} else empty end),
+         (if .parent != null then {key: .key, short: .short, number: .number, reason: "memo has a parent"} else empty end),
+         (if section(DONE_WHEN) then {key: .key, short: .short, number: .number, reason: "memo body has a Done when section"} else empty end)
        else empty end),
-      (.blockers[] | select(.state == "OPEN") | select(($byk[.key].labels // []) | index("memo")) | {key: $i.key, short: $i.short, number: $i.number, reason: ("memo " + .key + " 에 blockedBy 돼 있다")}),
-      (if ($i | tagged("deferred")) and (open_blockers | length) == 0 and (section("해제 조건") | not)
-       then {key: .key, short: .short, number: .number, reason: "deferred 인데 열린 blockedBy 도 ## 해제 조건 절도 없다"} else empty end),
-      (if (.body | test("/ho" + "me/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "본문에 머신 경로(홈 디렉터리)가 있다"} else empty end)]
+      (.blockers[] | select(.state == "OPEN") | select(($byk[.key].labels // []) | index("memo")) | {key: $i.key, short: $i.short, number: $i.number, reason: ("blockedBy memo " + .key)}),
+      (if ($i | tagged("deferred")) and (open_blockers | length) == 0 and (section(RELEASE_CONDITION) | not)
+       then {key: .key, short: .short, number: .number, reason: "deferred with no open blockedBy and no Release condition section"} else empty end),
+      (if (.body | test("/ho" + "me/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "body contains a machine path (home directory)"} else empty end),
+      # #192 D12. Only issues opened on or after the effective date, and only prose: a fenced block
+      # is quoted evidence, and rewriting it would falsify the quote.
+      (if .createdAt >= $lang_effective and ((.title | hangul) or (.body | outside_fences | hangul))
+       then {key: .key, short: .short, number: .number,
+             reason: ("Korean in the title or body of an issue opened on or after " + $lang_effective)} else empty end)]
    | sort_by(.short, .number, .reason)) as $findings
 | ([$all[] | .key as $k | cycles($edges; [$k])] | map(rotate) | unique
-   | map({key: .[0], short: (.[0] | split("#")[0]), number: 0, reason: ("blockedBy 순환 — " + join(" → "))})) as $loops
+   | map({key: .[0], short: (.[0] | split("#")[0]), number: 0, reason: ("blockedBy cycle — " + join(" → "))})) as $loops
 | $findings + $loops
 '
 
@@ -440,12 +480,12 @@ AUDIT='
 . as $repos
 | flat as $all
 | (reduce (ready_channels($all; true)[]) as $c ({};
-     .[$c.channel // "(채널 없음)"] = ([$c.items[] | select(.needs_user)] | length))) as $waiting
+     .[$c.channel // "(no channel)"] = ([$c.items[] | select(.needs_user)] | length))) as $waiting
 | {
   channels: [ready_channels($all; false)[]
-    | {channel: (.channel // "(채널 없음)"), epic: (.epic // "에픽 없음"), length: (.items | length),
+    | {channel: (.channel // "(no channel)"), epic: (.epic // "no epic"), length: (.items | length),
        head: (.items | first | if . == null then null else .key + " · " + .title end),
-       needs_user: ($waiting[(.channel // "(채널 없음)")] // 0)}],
+       needs_user: ($waiting[(.channel // "(no channel)")] // 0)}],
   stale_in_progress: [$all[] | select((.assignees | length) > 0 and ($now - (.updatedAt | fromdateiso8601)) > ($stale_hours * 3600))
     | {key: .key, assignee: .assignees[0], hours: ((($now - (.updatedAt | fromdateiso8601)) / 3600) | floor)}],
   old_memos: ([$all[] | select(tagged("memo") and ($now - (.updatedAt | fromdateiso8601)) > ($memo_days * 86400)) | .key]),
@@ -460,23 +500,25 @@ AUDIT='
   merged_worktrees: [$worktrees[] | split("\t") | {path: .[0], branch: .[1]}
     | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
   missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)],
-  foreign_closes: $foreign_closes
+  foreign_closes: $foreign_closes,
+  fork_behind: $fork_behind
 }
 '
 
 RENDER_AUDIT='
-def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  없음"] else $lines end);
-block("채널별 대기열"; [.channels[] | "  " + .channel + " (" + .epic + ") · " + (.length | tostring) + "건"
-      + (if .needs_user > 0 then " · needs-user " + (.needs_user | tostring) + "건" else "" end)
-      + " · 머리 " + (.head // "없음")])
-+ block("착수 후 방치 (24h 이상 무변경)"; [.stale_in_progress[] | "  " + .key + " · " + .assignee + " · " + (.hours | tostring) + "h"])
-+ block("14일 넘은 memo (" + (.old_memos | length | tostring) + "건)"; [.old_memos[] | "  " + .])
-+ block("stale-open (머지된 브랜치가 있는데 열려 있다)"; [.stale_open[] | "  " + .key + " ← " + (.branches | join(", "))])
-+ block("TODO(#n) 표식인데 열린 when-touched 이슈가 아니다"; [.todo_without_issue[] | "  " + .])
-+ block("열린 when-touched 이슈인데 코드에 표식이 없다"; [.when_touched_without_todo[] | "  " + .])
-+ block("머지됐는데 남은 워크트리"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
-+ block("두 레포에 없는 공통 라벨"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
-+ block("닫혔는데 닫은 커밋이 남의 레포 것"; [.foreign_closes[] | "  " + .])
+def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  none"] else $lines end);
+block("Queue per channel"; [.channels[] | "  " + .channel + " (" + .epic + ") · " + (.length | tostring) + " open"
+      + (if .needs_user > 0 then " · needs-user " + (.needs_user | tostring) else "" end)
+      + " · head " + (.head // "none")])
++ block("Started but idle (no change for 24h+)"; [.stale_in_progress[] | "  " + .key + " · " + .assignee + " · " + (.hours | tostring) + "h"])
++ block("memo older than 14 days (" + (.old_memos | length | tostring) + ")"; [.old_memos[] | "  " + .])
++ block("stale-open (a merged branch exists but the issue is open)"; [.stale_open[] | "  " + .key + " ← " + (.branches | join(", "))])
++ block("TODO(#n) marker with no open when-touched issue"; [.todo_without_issue[] | "  " + .])
++ block("open when-touched issue with no marker in the code"; [.when_touched_without_todo[] | "  " + .])
++ block("Worktree left behind after its branch was merged"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
++ block("Shared label missing from a repo"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
++ block("Closed by a commit that belongs to the other repo"; [.foreign_closes[] | "  " + .])
++ block("fork behind on shared surfaces"; [.fork_behind[] | "  " + .])
 | .[]
 '
 
@@ -537,7 +579,7 @@ case "$cmd" in
         printf '%s' "$items" | jq -e 'length == 0' >/dev/null
         ;;
     lint)
-        findings=$(printf '%s' "$graph_json" | jq "$JQ_LIB $LINT")
+        findings=$(printf '%s' "$graph_json" | jq --arg lang_effective "$LANG_EFFECTIVE_DATE" "$JQ_LIB $LINT")
         if [ "$as_json" = 1 ]; then
             printf '%s\n' "$findings"
         else
@@ -562,8 +604,23 @@ case "$cmd" in
         if git remote get-url upstream >/dev/null 2>&1; then
             foreign_closes_cmd=${COSMAI_FOREIGN_CLOSES:-"$issue_tool_dir/checks/foreign-closes"}
             foreign_closes=$("$foreign_closes_cmd" "$primary" upstream 2>&1 || true)
+            # The surfaces both repos have to keep identical: schema, the checks that enforce the
+            # rules, the DDL contract and the boot page. A fork that falls behind on one of these
+            # re-opens the same gap every migration wave closes, and only the checkout can see it.
+            # Read, never fetched -- a boot command that reaches the network is a boot command that
+            # hangs -- so a ref nobody has fetched is reported as unknown rather than as "up to date".
+            if git rev-parse --verify -q upstream/main >/dev/null 2>&1; then
+                behind=$(git log --format=%h upstream/main --not HEAD -- db/ tool/checks/ contracts/ddl/ AGENTS.md)
+                behind_count=$(printf '%s' "$behind" | grep -c . || true)
+                fork_behind=$(printf '%s' "$behind" | head -20)
+                [ "$behind_count" -le 20 ] \
+                    || fork_behind=$(printf '%s\n… and %s more' "$fork_behind" "$((behind_count - 20))")
+            else
+                fork_behind='(no upstream/main ref — nothing has been fetched from upstream)'
+            fi
         else
-            foreign_closes='(상대 리모트 없음 — 건너뜀)'
+            foreign_closes='(no upstream remote — skipped)'
+            fork_behind='(no upstream remote — skipped)'
         fi
         printf '%s' "$graph_json" | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
             --argjson memo_days "$MEMO_DAYS" \
@@ -572,6 +629,7 @@ case "$cmd" in
             --argjson worktrees "$(printf '%s' "$worktrees" | jq -R -s "$to_lines")" \
             --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
             --argjson foreign_closes "$(printf '%s' "$foreign_closes" | jq -R -s "$to_lines")" \
+            --argjson fork_behind "$(printf '%s' "$fork_behind" | jq -R -s "$to_lines")" \
             "$JQ_LIB $AUDIT | $RENDER_AUDIT"
         ;;
     *) usage ;;

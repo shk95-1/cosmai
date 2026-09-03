@@ -7,12 +7,17 @@ actually has.
 
 Isolation here is PATH precedence, not conftest's socket block: tool/issue shells out, and a
 subprocess is outside the guard that stops in-process sockets.
+
+The tool accepts both anchor sets during #192's migration window. The Korean half is read from
+tests/tool/fixtures/korean_anchors.json rather than written here: tool/checks/lang stops a Hangul
+literal from reaching a .py file, and the follow-up that drops the anchors drops the fixture too.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,13 +29,30 @@ ISSUE = REPO_ROOT / "tool" / "issue"
 UPSTREAM = "slopindustries/cosmai"
 FORK = "slopindustries/cosmai-import-ydc"
 COMMON_LABELS = ["channel", "goal", "decision", "memo", "when-touched", "needs-user"]
+KO = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "korean_anchors.json").read_text(encoding="utf-8")
+)
+# Escapes, not literals: this pattern is the assertion that the output carries no Korean at all.
+HANGUL = re.compile("[\u1100-\u11ff\u3130-\u318f\uac00-\ud7a3]")
 
 NOW = datetime.now(UTC)
-BODY = "## 맥락\n뭔가\n\n## 완료 기준\n기계로 검사된다\n\n## 채널·자리 / 등급 / 규모\n규모 S · 자원: 없음\n"
-MEMO_BODY = "## 맥락\n관찰만 적는다\n"
-# when-touched 의 완료 시점은 이 이슈가 아니라 그 파일을 만지는 다른 작업에 얹혀 있다 --
-# 그래서 완료 기준 대신 「언제 고치나」를 쓴다 (#137).
-WHEN_TOUCHED_BODY = "## 사실\n지금은 안 터진다\n\n## 언제 고치나\n그 파일을 만지는 작업이 함께 고친다\n"
+BODY = (
+    "## Context\nsomething\n\n## Done when\na machine checks it\n\n"
+    "## Channel / grade / size\nSize S · Resources: none\n"
+)
+KO_BODY = (
+    f"## Context\nsomething\n\n{KO['done_when']}\na machine checks it\n\n"
+    f"{KO['scale_heading']}\n{KO['scale_line']}\n"
+)
+MEMO_BODY = "## Context\nan observation, nothing else\n"
+# A when-touched issue is finished by whatever work next opens that file, not by this issue, so it
+# carries "When to fix" instead of "Done when" (#137).
+WHEN_TOUCHED_BODY = "## Fact\nit does not break today\n\n## When to fix\nwhoever next opens that file\n"
+KO_WHEN_TOUCHED_BODY = f"## Fact\nit does not break today\n\n{KO['when_to_fix']}\nthe next edit\n"
+# Every fixture issue is old enough that the Korean-in-a-new-issue rule cannot fire on it, and the
+# one test of that rule names its own creation date -- neither depends on today's date.
+BEFORE_THE_WINDOW = "2026-01-01T00:00:00Z"
+AFTER_THE_WINDOW = "2099-01-01T00:00:00Z"
 
 
 def stamp(days_ago: float = 0.0) -> str:
@@ -39,7 +61,7 @@ def stamp(days_ago: float = 0.0) -> str:
 
 def issue(
     number: int,
-    title: str = "제목",
+    title: str = "a title",
     *,
     body: str = BODY,
     labels: tuple[str, ...] = (),
@@ -48,11 +70,13 @@ def issue(
     subs: tuple[int, ...] = (),
     blocked_by: tuple[tuple[str, int, str], ...] = (),
     updated_days_ago: float = 0.0,
+    created_at: str = BEFORE_THE_WINDOW,
 ) -> dict:
     return {
         "number": number,
         "title": title,
         "updatedAt": stamp(updated_days_ago),
+        "createdAt": created_at,
         "body": body,
         "labels": {"nodes": [{"name": name} for name in labels]},
         "assignees": {"nodes": [{"login": login} for login in assignees]},
@@ -74,7 +98,11 @@ def closed(number: int, title: str, body: str, *, days_ago: float, labels: tuple
 
 
 def released(date: str) -> str:
-    return BODY + f"\n## 해제 조건\n{date} 이후\n"
+    return BODY + f"\n## Release condition\nafter {date}\n"
+
+
+def ko_released(date: str) -> str:
+    return KO_BODY + f"\n{KO['release_condition']}\n{date}\n"
 
 
 def day(days_from_now: float) -> str:
@@ -208,7 +236,7 @@ def run(tmp_path: Path):
 
 
 def epic(number: int, channel: str, subs: tuple[int, ...] = ()) -> dict:
-    return issue(number, f"[{channel}] 에픽", labels=("channel", f"ch:{channel}"), subs=subs)
+    return issue(number, f"[channel] {channel}", labels=("channel", f"ch:{channel}"), subs=subs)
 
 
 def test_a_closed_blocker_does_not_hold_an_issue_back(run):
@@ -219,7 +247,7 @@ def test_a_closed_blocker_does_not_hold_an_issue_back(run):
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "닫힌 블로커", labels=("ch:tool",), blocked_by=((UPSTREAM, 9, "CLOSED"),)),
+            issue(11, "closed blocker", labels=("ch:tool",), blocked_by=((UPSTREAM, 9, "CLOSED"),)),
         ],
     )
     assert done.returncode == 0, done.stderr
@@ -234,9 +262,9 @@ def test_a_blocker_in_the_other_repo_blocks(run):
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "교차 레포", labels=("ch:tool",), blocked_by=((FORK, 6, "OPEN"),)),
+            issue(11, "cross repo", labels=("ch:tool",), blocked_by=((FORK, 6, "OPEN"),)),
         ],
-        fork=[issue(6, "포크 쪽 일", labels=("ch:analysis/retrieval",))],
+        fork=[issue(6, "work on the fork", labels=("ch:analysis/retrieval",))],
     )
     assert done.returncode == 0, done.stderr
     item = json.loads(done.stdout)["channels"][0]["items"][0]
@@ -248,9 +276,9 @@ def test_a_blocker_in_the_other_repo_blocks(run):
             "ready",
             upstream=[
                 epic(10, "tool", subs=(11,)),
-                issue(11, "교차 레포", labels=("ch:tool",), blocked_by=((FORK, 6, "OPEN"),)),
+                issue(11, "cross repo", labels=("ch:tool",), blocked_by=((FORK, 6, "OPEN"),)),
             ],
-            fork=[issue(6, "포크 쪽 일", labels=("ch:analysis/retrieval",))],
+            fork=[issue(6, "work on the fork", labels=("ch:analysis/retrieval",))],
         ).stdout
     )
 
@@ -258,35 +286,38 @@ def test_a_blocker_in_the_other_repo_blocks(run):
 def test_ready_leads_with_the_resources_the_running_issues_hold(run):
     # The cap on workers is gone (#185): what a new issue collides with is a resource someone is
     # already holding, and that is only visible if the first line says who holds what.
-    resourced = "## 채널·자리 / 등급 / 규모\n규모 M · 자원: ops(구 스택 정지 = 매번 승인) · 공유DB\n"
+    resourced = "## Channel / grade / size\nSize M · Resources: ops(stopping the old stack) · sharedDB\n"
     done = run(
         "ready",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "진행 중", body=resourced, labels=("ch:tool",), assignees=("shk95",)),
+            issue(11, "in progress", body=resourced, labels=("ch:tool",), assignees=("shk95",)),
         ],
         fork=[
-            issue(6, "포크 진행 중", body=resourced, labels=("ch:analysis/retrieval",), assignees=("shk95",))
+            issue(
+                6, "fork in progress", body=resourced, labels=("ch:analysis/retrieval",), assignees=("shk95",)
+            )
         ],
     )
     assert done.returncode == 0, done.stderr
     first = done.stdout.splitlines()[0]
-    assert first.startswith("진행 중 2 · 점유:"), done.stdout
+    assert first.startswith("in progress 2 · held:"), done.stdout
     # One row per resource with both repos on it: the collision that matters is the cross-repo one.
     assert "ops cosmai#11, cosmai-import-ydc#6" in first, first
-    assert "공유DB cosmai#11, cosmai-import-ydc#6" in first, first
-    assert "WIP" not in done.stdout and "금지" not in done.stdout, done.stdout
+    assert "sharedDB cosmai#11, cosmai-import-ydc#6" in first, first
+    assert "WIP" not in done.stdout, done.stdout
     assert "in progress: shk95 since" in done.stdout
 
 
 def test_a_resource_of_none_is_not_folded_into_the_held_summary(run):
-    # 자원: 없음 is most issues. Folding it would put a row on the first line that blocks nothing.
+    # "Resources: none" is most issues. Folding it would put a row on the first line that blocks
+    # nothing.
     done = run(
         "ready",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "원장", labels=("ch:repo",), assignees=("shk95",)),
+            issue(11, "the ledger", labels=("ch:repo",), assignees=("shk95",)),
         ],
     )
     assert done.returncode == 0, done.stderr
@@ -296,19 +327,33 @@ def test_a_resource_of_none_is_not_folded_into_the_held_summary(run):
     assert "wip" not in model and "limit" not in model and "gate" not in model, list(model)
 
 
+def test_a_korean_resource_of_none_is_not_folded_either(run):
+    # The window keeps reading the bodies that are still Korean; "none" has to be dropped in both.
+    done = run(
+        "ready",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "the ledger", body=KO_BODY, labels=("ch:repo",), assignees=("shk95",)),
+        ],
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["held"]["resources"] == [], done.stdout
+
+
 def test_a_channel_issue_without_a_parent_is_reported_at_the_end_of_its_channel(run):
     done = run(
         "ready",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "제자리", labels=("ch:tool",)),
-            issue(12, "떠돌이", labels=("ch:tool",)),
+            issue(11, "in place", labels=("ch:tool",)),
+            issue(12, "stray", labels=("ch:tool",)),
         ],
     )
     assert done.returncode == 0, done.stderr
     lines = [line for line in done.stdout.splitlines() if "cosmai#1" in line]
-    assert "(부모 없음)" in lines[-1] and "cosmai#12" in lines[-1], done.stdout
-    assert "(부모 없음)" not in lines[0]
+    assert "(no parent)" in lines[-1] and "cosmai#12" in lines[-1], done.stdout
+    assert "(no parent)" not in lines[0]
 
 
 def test_being_blocked_by_a_memo_is_a_lint_error(run):
@@ -317,8 +362,10 @@ def test_being_blocked_by_a_memo_is_a_lint_error(run):
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "메모에 막힘", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 20, "OPEN"),)),
-            issue(20, "관찰", body=MEMO_BODY, labels=("memo",)),
+            issue(
+                11, "blocked on a memo", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 20, "OPEN"),)
+            ),
+            issue(20, "an observation", body=MEMO_BODY, labels=("memo",)),
         ],
     )
     assert done.returncode == 1
@@ -331,13 +378,13 @@ def test_a_blockedby_cycle_is_found_across_the_repos(run):
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "가", labels=("ch:tool",), parent=10, blocked_by=((FORK, 6, "OPEN"),)),
+            issue(11, "one", labels=("ch:tool",), parent=10, blocked_by=((FORK, 6, "OPEN"),)),
         ],
         fork=[
             epic(5, "analysis/retrieval", subs=(6,)),
             issue(
                 6,
-                "나",
+                "two",
                 labels=("ch:analysis/retrieval",),
                 parent=5,
                 blocked_by=((UPSTREAM, 11, "OPEN"),),
@@ -345,7 +392,7 @@ def test_a_blockedby_cycle_is_found_across_the_repos(run):
         ],
     )
     assert done.returncode == 1
-    cycles = [line for line in done.stdout.splitlines() if "순환" in line]
+    cycles = [line for line in done.stdout.splitlines() if "cycle" in line]
     assert len(cycles) == 1, done.stdout
     assert "cosmai#11" in cycles[0] and "cosmai-import-ydc#6" in cycles[0]
 
@@ -353,12 +400,25 @@ def test_a_blockedby_cycle_is_found_across_the_repos(run):
 def test_a_deferred_issue_with_a_release_condition_section_passes(run):
     # #60 allows either shape, so a deferred issue whose condition is an observation and not an
     # issue must not be reported -- otherwise `lint` is noise and stops being run.
-    body = BODY + "\n## 해제 조건\n검색 소비자가 생기면\n"
+    body = BODY + "\n## Release condition\nwhen a retrieval consumer exists\n"
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "미룸", body=body, labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "deferred", body=body, labels=("ch:tool", "deferred"), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == ""
+
+
+def test_a_deferred_issue_with_the_korean_release_condition_section_passes(run):
+    body = KO_BODY + f"\n{KO['release_condition']}\na consumer appears\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "deferred", body=body, labels=("ch:tool", "deferred"), parent=10),
         ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
@@ -370,29 +430,57 @@ def test_a_deferred_issue_with_neither_condition_is_a_lint_error(run):
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "미룸", labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "deferred", labels=("ch:tool", "deferred"), parent=10),
         ],
     )
     assert done.returncode == 1
-    assert "해제 조건" in done.stdout
+    assert "Release condition" in done.stdout
 
 
 def test_lint_reports_the_rest_of_the_registration_rules(run):
     done = run(
         "lint",
         upstream=[
-            issue(11, "채널 둘", labels=("ch:tool", "ch:repo"), parent=10),
-            issue(12, "완료 기준 없음", body="## 맥락\n없다\n", labels=("ch:tool",), parent=10),
-            issue(13, "머신 경로", body=BODY + "\n/ho" + "me/user1/x\n", labels=("ch:tool",), parent=10),
-            issue(20, "메모인데 채널", body=MEMO_BODY, labels=("memo", "ch:tool"), parent=10),
+            issue(11, "two channels", labels=("ch:tool", "ch:repo"), parent=10),
+            issue(12, "no done-when", body="## Context\nnothing\n", labels=("ch:tool",), parent=10),
+            issue(13, "machine path", body=BODY + "\n/ho" + "me/user1/x\n", labels=("ch:tool",), parent=10),
+            issue(20, "a memo with a channel", body=MEMO_BODY, labels=("memo", "ch:tool"), parent=10),
         ],
     )
     assert done.returncode == 1
     reasons = done.stdout
     assert "cosmai#11:" in reasons and "ch:*" in reasons
-    assert "cosmai#12:" in reasons and "완료 기준" in reasons
-    assert "cosmai#13:" in reasons and "머신 경로" in reasons
+    assert "cosmai#12:" in reasons and "Done when" in reasons
+    assert "cosmai#13:" in reasons and "machine path" in reasons
     assert "cosmai#20:" in reasons
+
+
+def test_a_body_with_only_english_anchors_lints_clean(run):
+    # #192 D11: the anchors move to English, and an issue that already uses them must not be read as
+    # an issue with no completion criterion at all.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "english anchors", body=BODY, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == ""
+
+
+def test_a_body_with_only_korean_anchors_still_lints_clean(run):
+    # The window stays open until both repos have migrated their issues (#192 step 4); until then
+    # most bodies are still the Korean ones.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "korean anchors", body=KO_BODY, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.strip() == ""
 
 
 def test_the_user_queue_is_ordered_by_how_much_it_unblocks(run):
@@ -402,12 +490,12 @@ def test_the_user_queue_is_ordered_by_how_much_it_unblocks(run):
         "--json",
         upstream=[
             epic(10, "tool", subs=(11, 12)),
-            issue(11, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
-            issue(12, "다른 결정", labels=("ch:tool", "needs-user"), parent=10),
-            issue(13, "가", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 12, "OPEN"),)),
-            issue(14, "나", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 12, "OPEN"),)),
-            issue(20, "묵은 메모", body=MEMO_BODY, labels=("memo",), updated_days_ago=20),
-            issue(21, "새 메모", body=MEMO_BODY, labels=("memo",), updated_days_ago=1),
+            issue(11, "awaiting a decision", labels=("ch:tool", "needs-user"), parent=10),
+            issue(12, "another decision", labels=("ch:tool", "needs-user"), parent=10),
+            issue(13, "one", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 12, "OPEN"),)),
+            issue(14, "two", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 12, "OPEN"),)),
+            issue(20, "an old memo", body=MEMO_BODY, labels=("memo",), updated_days_ago=20),
+            issue(21, "a new memo", body=MEMO_BODY, labels=("memo",), updated_days_ago=1),
         ],
     )
     assert done.returncode == 0, done.stderr
@@ -419,7 +507,7 @@ def test_the_user_queue_is_ordered_by_how_much_it_unblocks(run):
 def test_needs_user_is_out_of_the_default_ready_listing(run):
     fixture = [
         epic(10, "tool", subs=(11,)),
-        issue(11, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
+        issue(11, "awaiting a decision", labels=("ch:tool", "needs-user"), parent=10),
     ]
     assert "cosmai#11" not in run("ready", upstream=fixture).stdout
     assert "cosmai#11" in run("ready", "--user", upstream=fixture).stdout
@@ -430,14 +518,14 @@ def test_audit_reports_drift_without_failing(run):
         "audit",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "방치", labels=("ch:tool",), parent=10, assignees=("shk95",), updated_days_ago=3),
-            issue(20, "묵은 메모", body=MEMO_BODY, labels=("memo",), updated_days_ago=30),
+            issue(11, "idle", labels=("ch:tool",), parent=10, assignees=("shk95",), updated_days_ago=3),
+            issue(20, "an old memo", body=MEMO_BODY, labels=("memo",), updated_days_ago=30),
         ],
         fork_labels=["channel"],
     )
     assert done.returncode == 0, done.stderr
     assert "cosmai#11" in done.stdout
-    assert "14일 넘은 memo (1건)" in done.stdout, done.stdout
+    assert "memo older than 14 days (1)" in done.stdout, done.stdout
     # The fork fixture is missing five of the six shared labels, which is what makes a rule
     # unenforceable in one repo while reading as enforced in the other.
     assert "when-touched" in done.stdout
@@ -461,15 +549,36 @@ def test_the_tool_says_it_is_unverified_when_gh_is_missing(tmp_path: Path):
 
 
 def test_the_resource_is_read_from_the_scale_section_only(run):
-    # #61's own body quotes the word 자원 while describing this rule; a whole-body search printed
-    # that sentence as the issue's resource.
-    body = "## 할 일\n각 줄에 `자원:` 값을 붙인다\n\n## 채널·자리 / 등급 / 규모\n규모 M · 자원: 공유DB 읽기\n"
+    # #61's own body quotes the word "Resources:" while describing this rule; a whole-body search
+    # printed that sentence as the issue's resource.
+    body = (
+        "## Todo\nput a `Resources:` value on every row\n\n"
+        "## Channel / grade / size\nSize M · Resources: shared DB read\n"
+    )
     done = run(
         "ready",
         "--json",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "규모 절", body=body, labels=("ch:tool",))],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "scale section", body=body, labels=("ch:tool",))],
     )
-    assert json.loads(done.stdout)["channels"][0]["items"][0]["resource"] == "공유DB 읽기"
+    assert json.loads(done.stdout)["channels"][0]["items"][0]["resource"] == "shared DB read"
+
+
+def test_the_resource_is_read_from_a_korean_scale_section_too(run):
+    done = run(
+        "ready",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11,
+                "scale section",
+                body=f"## Todo\nnothing\n\n{KO['scale_heading']}\n{KO['scale_line_resourced']}\n",
+                labels=("ch:tool",),
+            ),
+        ],
+    )
+    resource = json.loads(done.stdout)["channels"][0]["items"][0]["resource"]
+    assert resource and "ops" in resource, done.stdout
 
 
 def test_a_rule_quoting_home_is_not_a_machine_path(run):
@@ -481,8 +590,8 @@ def test_a_rule_quoting_home_is_not_a_machine_path(run):
             epic(10, "tool", subs=(11,)),
             issue(
                 11,
-                "규칙 인용",
-                body=BODY + "\n- 본문에 `/ho" + "me/` 이 있다.\n",
+                "quoting the rule",
+                body=BODY + "\n- the body contains `/ho" + "me/`.\n",
                 labels=("ch:tool",),
                 parent=10,
             ),
@@ -496,13 +605,13 @@ def test_audit_counts_the_default_ready_queue_and_needs_user_apart(run):
     # them disagree, because it is the one issue the default listing drops.
     fixture = [
         epic(10, "tool", subs=(11, 13)),
-        issue(11, "제자리", labels=("ch:tool",), parent=10),
-        issue(13, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
-        issue(12, "떠돌이", labels=("ch:tool",)),
+        issue(11, "in place", labels=("ch:tool",), parent=10),
+        issue(13, "awaiting a decision", labels=("ch:tool", "needs-user"), parent=10),
+        issue(12, "stray", labels=("ch:tool",)),
     ]
     audit = run("audit", upstream=fixture).stdout
-    assert "ch:tool (cosmai#10) · 2건" in audit, audit
-    assert "needs-user 1건" in audit, audit
+    assert "ch:tool (cosmai#10) · 2 open" in audit, audit
+    assert "needs-user 1" in audit, audit
     ready = json.loads(run("ready", "--json", upstream=fixture).stdout)["channels"][0]["items"]
     assert [row["key"] for row in ready] == ["cosmai#11", "cosmai#12"]
 
@@ -512,8 +621,8 @@ def test_the_user_listing_marks_which_items_are_waiting_on_the_user(run):
     # startable work and which are sitting in their own queue.
     fixture = [
         epic(10, "tool", subs=(11, 12)),
-        issue(11, "결정 대기", labels=("ch:tool", "needs-user"), parent=10),
-        issue(12, "그냥 일", labels=("ch:tool",), parent=10),
+        issue(11, "awaiting a decision", labels=("ch:tool", "needs-user"), parent=10),
+        issue(12, "plain work", labels=("ch:tool",), parent=10),
     ]
     rows = json.loads(run("ready", "--user", "--json", upstream=fixture).stdout)["channels"][0]["items"]
     assert [row["needs_user"] for row in rows] == [True, False]
@@ -530,8 +639,10 @@ def test_a_closed_memo_blocker_does_not_keep_lint_red(run):
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "승격 뒤", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 20, "CLOSED"),)),
-            issue(20, "닫힌 메모", body=MEMO_BODY, labels=("memo",)),
+            issue(
+                11, "after promotion", labels=("ch:tool",), parent=10, blocked_by=((UPSTREAM, 20, "CLOSED"),)
+            ),
+            issue(20, "a closed memo", body=MEMO_BODY, labels=("memo",)),
         ],
     )
     assert done.returncode == 0, done.stdout
@@ -542,7 +653,7 @@ def test_a_repo_that_fails_to_fetch_stops_the_command(run):
     # fork fetch would report a blocked issue as ready.
     done = run(
         "ready",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
         gh_fails_on="fork",
     )
     assert done.returncode != 0, done.stdout
@@ -555,7 +666,7 @@ def test_an_errors_response_is_not_read_as_an_empty_repo(run):
     # no open issues" to anything that only checks gh's exit code.
     done = run(
         "lint",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
         gh_errors_on="upstream",
     )
     assert done.returncode != 0, done.stdout
@@ -568,7 +679,7 @@ def test_a_partial_response_is_not_read_as_the_whole_graph(run):
     # What is missing is the nesting, and the queue is built out of the nesting.
     done = run(
         "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
         gh_partial_on="upstream",
     )
     assert done.returncode != 0, done.stdout
@@ -583,21 +694,24 @@ def test_a_partial_response_does_not_empty_the_held_summary(run):
         "ready",
         upstream=[
             epic(10, "tool", subs=(11, 12)),
-            issue(11, "하나", labels=("ch:tool",), parent=10, assignees=("shk95",)),
-            issue(12, "둘", labels=("ch:tool",), parent=10, assignees=("shk95",)),
+            issue(11, "one", labels=("ch:tool",), parent=10, assignees=("shk95",)),
+            issue(12, "two", labels=("ch:tool",), parent=10, assignees=("shk95",)),
         ],
         gh_partial_on="upstream",
     )
     assert done.returncode != 0, done.stdout
-    assert "진행 중" not in done.stdout, done.stdout
+    assert "in progress" not in done.stdout, done.stdout
 
 
 def test_a_partial_response_on_the_fork_names_the_fork(run):
     # Two repos share one graph; the message has to say which half was lost.
     done = run(
         "lint",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
-        fork=[epic(20, "population", subs=(21,)), issue(21, "포크", labels=("ch:population",), parent=20)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        fork=[
+            epic(20, "population", subs=(21,)),
+            issue(21, "fork work", labels=("ch:population",), parent=20),
+        ],
         gh_partial_on="fork",
     )
     assert done.returncode != 0, done.stdout
@@ -605,13 +719,27 @@ def test_a_partial_response_on_the_fork_names_the_fork(run):
 
 
 def test_a_when_touched_issue_needs_no_completion_criteria(run):
-    # 완료 시점이 다른 작업에 얹혀 있는 부류다. 완료 기준을 요구하면 라벨의 뜻과 어긋나고,
-    # 실제로 그 어긋남이 lint 를 계속 빨갛게 두었다(포크 #43·#44).
+    # This kind is finished by other work. Demanding a completion criterion contradicts the label
+    # and did in fact keep lint red on issues whose bodies were right (fork #43, #44).
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "만질 때", body=WHEN_TOUCHED_BODY, labels=("ch:tool", "when-touched"), parent=10),
+            issue(11, "when touched", body=WHEN_TOUCHED_BODY, labels=("ch:tool", "when-touched"), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+
+
+def test_a_when_touched_issue_with_the_korean_section_needs_no_completion_criteria(run):
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, "when touched", body=KO_WHEN_TOUCHED_BODY, labels=("ch:tool", "when-touched"), parent=10
+            ),
         ],
     )
     assert done.returncode == 0, done.stdout
@@ -619,16 +747,70 @@ def test_a_when_touched_issue_needs_no_completion_criteria(run):
 
 
 def test_a_when_touched_issue_without_when_to_fix_is_a_lint_error(run):
-    # 면제가 곧 무규칙은 아니다 -- 언제 고치는지는 여전히 적혀 있어야 한다.
+    # The exemption is not an absence of rules -- when it gets fixed still has to be written down.
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "만질 때", body=BODY, labels=("ch:tool", "when-touched"), parent=10),
+            issue(11, "when touched", body=BODY, labels=("ch:tool", "when-touched"), parent=10),
         ],
     )
     assert done.returncode != 0, done.stdout
-    assert "언제 고치나" in done.stdout, done.stdout
+    assert "When to fix" in done.stdout, done.stdout
+
+
+def test_korean_in_an_issue_opened_after_the_effective_date_is_a_lint_error(run):
+    # #192 D12: after the migration date a new issue written in Korean is a rule violation, not a
+    # body left over from before. The date is a constant in the tool, so this fixture names a
+    # creation date far past it rather than leaning on today's.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11, 12)),
+            issue(
+                11, "korean body", body=KO_BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+            issue(
+                12, KO["goal_prefix"], body=BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    flagged = [line for line in done.stdout.splitlines() if "Korean" in line]
+    assert len(flagged) == 2, done.stdout
+    assert any(line.startswith("cosmai#11:") for line in flagged), done.stdout
+    assert any(line.startswith("cosmai#12:") for line in flagged), done.stdout
+
+
+def test_korean_in_an_issue_opened_before_the_effective_date_is_not_a_lint_error(run):
+    # Otherwise the rule reports every issue in both repos on the day it lands, which is the same
+    # as having no rule.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "korean body", body=KO_BODY, labels=("ch:tool",), parent=10),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+
+
+def test_korean_inside_a_code_fence_is_not_a_lint_error(run):
+    # A fenced block is quoted evidence -- a log line, a seed row, a body being migrated. Rewriting
+    # it would falsify the quote.
+    body = BODY + "\n```\n" + KO["scale_line"] + "\n```\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, "quoted korean", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
 
 
 @pytest.fixture
@@ -646,12 +828,12 @@ def checkout(tmp_path: Path) -> Path:
     subprocess.run(
         [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
     )
-    (repo / "kept.py").write_text("# TO" + "DO(#7) 만지는 김에 고친다\n", encoding="utf-8")
-    (repo / "scratch.py").write_text("# 표식 없음\n", encoding="utf-8")
+    (repo / "kept.py").write_text("# TO" + "DO(#7) fix it while you are in here\n", encoding="utf-8")
+    (repo / "scratch.py").write_text("# no marker\n", encoding="utf-8")
     subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
     subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
-    (repo / "kept.py").write_text("# 작업 중에 지운 표식\n", encoding="utf-8")
-    (repo / "scratch.py").write_text("# TO" + "DO(#8) 커밋되지 않은 표식\n", encoding="utf-8")
+    (repo / "kept.py").write_text("# the marker was removed mid-work\n", encoding="utf-8")
+    (repo / "scratch.py").write_text("# TO" + "DO(#8) an uncommitted marker\n", encoding="utf-8")
     return repo
 
 
@@ -662,55 +844,62 @@ def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
         "audit",
         upstream=[
             epic(10, "tool", subs=(7, 9)),
-            issue(7, "표식 있음", labels=("ch:tool", "when-touched"), parent=10),
-            issue(9, "표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+            issue(7, "has a marker", labels=("ch:tool", "when-touched"), parent=10),
+            issue(9, "has no marker", labels=("ch:tool", "when-touched"), parent=10),
         ],
         cwd=checkout,
     )
     assert done.returncode == 0, done.stderr
     assert "TO" + "DO(#8)" not in done.stdout, done.stdout
-    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
+    missing = done.stdout.split("open when-touched issue with no marker in the code")[1]
     assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout
 
 
 def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
-    # AGENTS.md's recheck rule is five questions (전제 · blockedBy · 해제 조건 · 등급 · 중복). A bare
-    # list of issue numbers would leave the reader to guess which of the five this row is about.
-    quoted = BODY + "\n`tool/issue` 는 있고 `tool/nowhere.py:12` 는 없다\n"
+    # AGENTS.md's recheck rule is five questions (premise, blockedBy, release condition, grade,
+    # duplicate). A bare list of issue numbers would leave the reader to guess which of the five
+    # this row is about.
+    quoted = BODY + "\n`tool/issue` is here and `tool/nowhere.py:12` is not\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11, 12, 13, 14, 15)),
-            issue(11, "묵음", labels=("ch:tool",), parent=10, updated_days_ago=20),
-            issue(12, "날짜 지남", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "untouched", labels=("ch:tool",), parent=10, updated_days_ago=20),
+            issue(12, "date passed", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
             issue(
                 13,
-                "산문 조건",
-                body=BODY + "\n## 해제 조건\n소비자가 생기면\n",
+                "prose condition",
+                body=BODY + "\n## Release condition\nwhen a consumer exists\n",
                 labels=("ch:tool", "deferred"),
                 parent=10,
             ),
-            issue(14, "옮겨간 경로", body=quoted, labels=("ch:tool",), parent=10),
+            issue(14, "a path that moved", body=quoted, labels=("ch:tool",), parent=10),
             # updated before the closing it is pointed at by, so (e) still has something to say
             # about it (C-3: an issue touched after the closing goes quiet instead).
-            issue(15, "목표가 닫혔다", labels=("ch:tool",), parent=10, updated_days_ago=5),
+            issue(15, "its goal closed", labels=("ch:tool",), parent=10, updated_days_ago=5),
         ],
         upstream_closed=[
-            closed(30, "[목표] 끝난 목표", "#15 로 이어진다\n", days_ago=2, labels=("goal",)),
-            closed(31, "[결정] 오래된 결정", "#11 로 이어진다\n", days_ago=30, labels=("decision",)),
+            closed(30, "[goal] a finished goal", "leads to #15\n", days_ago=2, labels=("goal",)),
+            closed(31, "[decision] an old decision", "leads to #11\n", days_ago=30, labels=("decision",)),
         ],
     )
     assert done.returncode == 1, done.stdout + done.stderr
     by_key = {row["key"]: row for row in json.loads(done.stdout)}
-    # cosmai#13 is not in the set at all: a "## 해제 조건" section with no date in it is (C-2) no
-    # longer treated as "no release condition" -- only (a)'s 14-day cycle watches it, and it has not
-    # been 14 days.
+    # cosmai#13 is not in the set at all: a "Release condition" section with no date in it is (C-2)
+    # no longer treated as "no release condition" -- only (a)'s 14-day cycle watches it, and it has
+    # not been 14 days.
     assert set(by_key) == {f"cosmai#{n}" for n in (11, 12, 14, 15)}, sorted(by_key)
     assert {r["code"] for r in by_key["cosmai#11"]["reasons"]} == {"a"}
-    assert by_key["cosmai#11"]["reasons"][0]["checks"] == ["전제", "blockedBy", "해제 조건", "등급", "중복"]
+    assert by_key["cosmai#11"]["reasons"][0]["checks"] == [
+        "premise",
+        "blockedBy",
+        "release condition",
+        "grade",
+        "duplicate",
+    ]
     assert {r["code"] for r in by_key["cosmai#12"]["reasons"]} == {"b"}
-    assert by_key["cosmai#12"]["reasons"][0]["checks"] == ["해제 조건"]
+    assert by_key["cosmai#12"]["reasons"][0]["checks"] == ["release condition"]
     assert day(-2) in by_key["cosmai#12"]["reasons"][0]["why"]
     assert {r["code"] for r in by_key["cosmai#14"]["reasons"]} == {"d"}
     assert "tool/nowhere.py" in by_key["cosmai#14"]["reasons"][0]["why"]
@@ -718,8 +907,27 @@ def test_recheck_names_each_reason_with_the_checklist_items_to_walk(run):
     assert "tool/issue" not in by_key["cosmai#14"]["reasons"][0]["why"]
     assert {r["code"] for r in by_key["cosmai#15"]["reasons"]} == {"e"}
     assert "cosmai#30" in by_key["cosmai#15"]["reasons"][0]["why"]
-    # 30일 전에 닫힌 결정은 이미 반영됐다고 본다 -- 안 그러면 목록이 영원히 자란다.
+    # A decision closed 30 days ago is taken as already absorbed -- otherwise the list grows forever.
     assert not any(r["code"] == "e" for r in by_key["cosmai#11"]["reasons"])
+
+
+def test_recheck_reads_the_korean_goal_prefix_as_well_as_the_english_one(run):
+    # Half the closed goals carry the old title prefix and half the new one during the window; (e)
+    # has to see both or it goes quiet on exactly the issues that just moved.
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "not touched", labels=("ch:tool",), parent=10, updated_days_ago=5),
+        ],
+        upstream_closed=[
+            closed(30, f"{KO['goal_prefix']} a finished goal", "leads to #11\n", days_ago=3, labels=()),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [r["code"] for r in rows[0]["reasons"]] == ["e"], rows
 
 
 def test_recheck_renders_the_reason_and_the_checklist(run):
@@ -727,14 +935,16 @@ def test_recheck_renders_the_reason_and_the_checklist(run):
         "recheck",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "날짜 지남", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "date passed", body=released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
         ],
     )
     assert done.returncode == 1, done.stdout
-    assert "재점검 1건" in done.stdout, done.stdout
+    assert "recheck 1" in done.stdout, done.stdout
     rows = [line for line in done.stdout.splitlines() if line.startswith("    ")]
-    assert rows == ["    해제 조건 " + day(-2) + " 이 지났다 → 점검: 해제 조건"], done.stdout
-    assert "  cosmai#11 · 날짜 지남" in done.stdout, done.stdout
+    assert rows == ["    release condition " + day(-2) + " has passed → check: release condition"], (
+        done.stdout
+    )
+    assert "  cosmai#11 · date passed" in done.stdout, done.stdout
 
 
 def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
@@ -744,11 +954,11 @@ def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
         "recheck",
         upstream=[
             epic(10, "tool", subs=(11, 12)),
-            issue(11, "아직 이르다", body=released(day(5)), labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "too early", body=released(day(5)), labels=("ch:tool", "deferred"), parent=10),
             issue(
                 12,
-                "막혀 있다",
-                body=BODY + "\n## 해제 조건\n네이버가 끝난 뒤\n",
+                "blocked",
+                body=BODY + "\n## Release condition\nafter the naver work\n",
                 labels=("ch:tool", "deferred"),
                 parent=10,
                 blocked_by=((UPSTREAM, 11, "OPEN"),),
@@ -756,17 +966,35 @@ def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
         ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "재점검 없음" in done.stdout, done.stdout
+    assert "nothing to recheck" in done.stdout, done.stdout
     assert "cosmai#11" not in done.stdout and "cosmai#12" not in done.stdout, done.stdout
+
+
+def test_recheck_reads_a_korean_release_condition_date(run):
+    done = run(
+        "recheck",
+        "--json",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "date passed", body=ko_released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
+        ],
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    rows = json.loads(done.stdout)
+    assert [r["code"] for r in rows[0]["reasons"]] == ["b"], rows
+    assert day(-2) in rows[0]["reasons"][0]["why"], rows
 
 
 def test_recheck_does_not_read_a_repo_name_or_a_label_as_a_path(run):
     # Bodies are full of `owner/repo` and `ch:collectors/youtube`. Reported as missing files they
     # would put every issue on the list, which is the same as having no list.
-    body = BODY + "\n`shk95-1/cosmai` 와 `ch:collectors/youtube` 와 `tool/checks/paths`\n"
+    body = BODY + "\n`shk95-1/cosmai` and `ch:collectors/youtube` and `tool/checks/paths`\n"
     done = run(
         "recheck",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "인용", body=body, labels=("ch:tool",), parent=10)],
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "quoting", body=body, labels=("ch:tool",), parent=10),
+        ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "cosmai#11" not in done.stdout, done.stdout
@@ -777,24 +1005,25 @@ def test_recheck_skips_memos(run):
     # reader that recheck is mostly memos.
     done = run(
         "recheck",
-        upstream=[issue(20, "묵은 메모", body=MEMO_BODY, labels=("memo",), updated_days_ago=40)],
+        upstream=[issue(20, "an old memo", body=MEMO_BODY, labels=("memo",), updated_days_ago=40)],
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert "cosmai#20" not in done.stdout, done.stdout
 
 
 def test_recheck_reads_the_last_date_in_the_release_section_not_any_date(run):
-    # #86 은 해제 조건 절 안에 지난 날짜와 미래 날짜를 함께 적는다("재구성 2026-08-25 + 14일; 2026-09-08
-    # 이후"). 아무 날짜나 지났으면 잡는 규칙이면 아직 이른 이슈가 매 부팅 목록에 오르고, #18 은 반대로
-    # 과거 날짜 둘이라 잡혀야 한다. 가장 늦은 날짜만이 두 경우를 다 맞힌다.
-    mixed = "## 해제 조건\n컷오버(%s) 후 7일간 문제가 없고 %s 이후\n"
+    # #86 writes a past date and a future one into the same release-condition section ("rebuild
+    # 2026-08-25 + 14 days; after 2026-09-08"). A rule that fires on any past date puts an issue
+    # that is still early on every boot's list, while #18 has two past dates and must be caught.
+    # Only the latest date gets both cases right.
+    mixed = "## Release condition\nseven quiet days after the cutover (%s) and after %s\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11, 12)),
-            issue(11, "아직 이르다", body=BODY + mixed % (day(-9), day(5)), labels=("ch:tool",), parent=10),
-            issue(12, "지났다", body=BODY + mixed % (day(-9), day(-2)), labels=("ch:tool",), parent=10),
+            issue(11, "too early", body=BODY + mixed % (day(-9), day(5)), labels=("ch:tool",), parent=10),
+            issue(12, "passed", body=BODY + mixed % (day(-9), day(-2)), labels=("ch:tool",), parent=10),
         ],
     )
     assert done.returncode == 1, done.stdout + done.stderr
@@ -815,7 +1044,7 @@ def checkout_with_marker(tmp_path: Path) -> Path:
     subprocess.run(
         [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
     )
-    (repo / "pipeline.py").write_text("# TO" + "DO(#43) 만지는 김에 고친다\n", encoding="utf-8")
+    (repo / "pipeline.py").write_text("# TO" + "DO(#43) fix it while you are in here\n", encoding="utf-8")
     subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
     subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
     return repo
@@ -831,17 +1060,17 @@ def test_a_fork_checkout_matches_todo_markers_against_the_forks_own_issues(
         "audit",
         upstream=[
             epic(10, "tool", subs=(9,)),
-            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+            issue(9, "upstream has no marker", labels=("ch:tool", "when-touched"), parent=10),
         ],
         fork=[
             epic(20, "population", subs=(43,)),
-            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+            issue(43, "the fork's marker", labels=("ch:tool", "when-touched"), parent=20),
         ],
         cwd=checkout_with_marker,
     )
     assert done.returncode == 0, done.stderr
     assert "TO" + "DO(#43)" not in done.stdout, done.stdout
-    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1]
+    missing = done.stdout.split("open when-touched issue with no marker in the code")[1]
     assert "cosmai-import-ydc#43" not in missing.split("\n\n")[0], done.stdout
 
 
@@ -856,17 +1085,17 @@ def test_an_upstream_checkout_keeps_matching_todo_markers_against_upstream(
         "audit",
         upstream=[
             epic(10, "tool", subs=(9,)),
-            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+            issue(9, "upstream has no marker", labels=("ch:tool", "when-touched"), parent=10),
         ],
         fork=[
             epic(20, "population", subs=(43,)),
-            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+            issue(43, "the fork's marker", labels=("ch:tool", "when-touched"), parent=20),
         ],
         cwd=checkout_with_marker,
     )
     assert done.returncode == 0, done.stderr
     assert "TO" + "DO(#43)" in done.stdout, done.stdout
-    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1].split("\n\n")[0]
+    missing = done.stdout.split("open when-touched issue with no marker in the code")[1].split("\n\n")[0]
     assert "cosmai#9" in missing, done.stdout
 
 
@@ -880,18 +1109,18 @@ def test_the_primary_repo_is_matched_by_name_not_owner(run, monkeypatch, checkou
         "audit",
         upstream=[
             epic(10, "tool", subs=(9,)),
-            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+            issue(9, "upstream has no marker", labels=("ch:tool", "when-touched"), parent=10),
         ],
         fork=[
             epic(20, "population", subs=(43,)),
-            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+            issue(43, "the fork's marker", labels=("ch:tool", "when-touched"), parent=20),
         ],
         cwd=checkout_with_marker,
     )
     assert done.returncode == 0, done.stderr
     assert "matches no REPOS entry" not in done.stderr, done.stderr
     assert "TO" + "DO(#43)" not in done.stdout, done.stdout
-    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1].split("\n\n")[0]
+    missing = done.stdout.split("open when-touched issue with no marker in the code")[1].split("\n\n")[0]
     assert "cosmai-import-ydc#43" not in missing, done.stdout
 
 
@@ -917,8 +1146,51 @@ def checkout_with_upstream_remote(tmp_path: Path) -> Path:
     return repo
 
 
+@pytest.fixture
+def fork_behind_upstream(tmp_path: Path) -> Path:
+    """A fork checkout whose `upstream/main` carries commits it does not have.
+
+    One of them touches a shared surface (db/) and one does not (portal/), which is the whole
+    judgment the audit item makes. No network: `upstream` is a sibling directory.
+    """
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+    def run_git(cwd: Path, *args: str) -> None:
+        subprocess.run(
+            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(cwd), *args],
+            check=True,
+            capture_output=True,
+            env=clean,
+        )
+
+    origin = tmp_path / "upstream-repo"
+    origin.mkdir()
+    subprocess.run(
+        ["git", "init", "-q", "-b", "main", str(origin)], check=True, capture_output=True, env=clean
+    )
+    (origin / "seed.py").write_text("# seed\n", encoding="utf-8")
+    run_git(origin, "add", "-A")
+    run_git(origin, "commit", "-qm", "chore: seed")
+
+    fork = tmp_path / "fork-repo"
+    subprocess.run(["git", "clone", "-q", str(origin), str(fork)], check=True, capture_output=True, env=clean)
+    run_git(fork, "remote", "add", "upstream", str(origin))
+
+    (origin / "db").mkdir()
+    (origin / "db" / "bootstrap.sql").write_text("-- shared\n", encoding="utf-8")
+    run_git(origin, "add", "-A")
+    run_git(origin, "commit", "-qm", "feat(db): a shared surface")
+    (origin / "portal").mkdir()
+    (origin / "portal" / "app.js").write_text("// not shared\n", encoding="utf-8")
+    run_git(origin, "add", "-A")
+    run_git(origin, "commit", "-qm", "feat(portal): not a shared surface")
+
+    run_git(fork, "fetch", "-q", "upstream")
+    return fork
+
+
 FAKE_FOREIGN_CLOSES = """#!/bin/sh
-printf '%s\\n' "#43 · 남의 커밋 · 닫은 커밋 abc1234"
+printf '%s\\n' "#43 · closed by a commit from the other repo · abc1234"
 exit 1
 """
 
@@ -934,11 +1206,11 @@ def test_audit_carries_the_foreign_closes_output_verbatim(
     monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
     done = run(
         "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
         cwd=checkout_with_upstream_remote,
     )
     assert done.returncode == 0, done.stderr
-    assert "#43 · 남의 커밋 · 닫은 커밋 abc1234" in done.stdout, done.stdout
+    assert "#43 · closed by a commit from the other repo · abc1234" in done.stdout, done.stdout
 
 
 def test_audit_skips_foreign_closes_without_an_upstream_remote(run, checkout: Path):
@@ -946,23 +1218,76 @@ def test_audit_skips_foreign_closes_without_an_upstream_remote(run, checkout: Pa
     # relative to itself), so the section says it was skipped instead of erroring.
     done = run(
         "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "일", labels=("ch:tool",), parent=10)],
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
         cwd=checkout,
     )
     assert done.returncode == 0, done.stderr
-    assert "상대 리모트 없음 — 건너뜀" in done.stdout, done.stdout
+    assert done.stdout.count("(no upstream remote — skipped)") == 2, done.stdout
+
+
+def test_audit_lists_upstream_commits_on_shared_surfaces_the_fork_lacks(
+    run, monkeypatch, tmp_path: Path, fork_behind_upstream: Path
+):
+    # #192 methodology row 1: the fork drifting behind on db/, tool/checks/, contracts/ddl/ and
+    # AGENTS.md is the gap the migration keeps reopening, so boot has to say it out loud.
+    fake = tmp_path / "fake-foreign-closes"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", FORK)
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=fork_behind_upstream,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("fork behind on shared surfaces")[1].split("\n\n")[0]
+    listed = [line.strip() for line in block.splitlines() if line.strip()]
+    # The db/ commit, and only it: the portal/ one is not a surface the two repos share.
+    assert len(listed) == 1, done.stdout
+    shas = subprocess.run(
+        ["git", "-C", str(fork_behind_upstream), "log", "--format=%h", "upstream/main", "--not", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert listed[0] == shas[1], (listed, shas)
+
+
+def test_audit_skips_fork_behind_without_an_upstream_remote(run, checkout: Path):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("fork behind on shared surfaces")[1]
+    assert "(no upstream remote — skipped)" in block.split("\n\n")[0], done.stdout
+
+
+def test_audit_says_so_when_the_upstream_ref_was_never_fetched(run, checkout_with_upstream_remote: Path):
+    # The remote exists but nothing was fetched, so there is no upstream/main to compare against.
+    # Printing "none" there would read as "the fork is up to date", which is not what is known.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=checkout_with_upstream_remote,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("fork behind on shared surfaces")[1].split("\n\n")[0]
+    assert "no upstream/main" in block, done.stdout
 
 
 def test_recheck_d_skips_a_path_with_a_parenthetical_note_right_after(run):
     # #174 (C-1): a path the body already marks as not-yet-there or moved should not also be
     # reported as "missing from the checkout" -- that would just restate the same note as a defect.
-    body = BODY + "\n`tool/nowhere.py`(예정) 가 아직 없다\n"
+    body = BODY + "\n`tool/nowhere.py`(planned) is not here yet\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "주석 붙은 경로", body=body, labels=("ch:tool",), parent=10),
+            issue(11, "an annotated path", body=body, labels=("ch:tool",), parent=10),
         ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
@@ -970,14 +1295,14 @@ def test_recheck_d_skips_a_path_with_a_parenthetical_note_right_after(run):
 
 
 def test_recheck_d_skips_a_path_with_a_parenthetical_note_after_a_space(run):
-    # The space-before-paren shape ("`path` (포크)") is the other form #174 (C-1) names.
-    body = BODY + "\n`tool/nowhere.py` (포크) 로 옮겨갔다\n"
+    # The space-before-paren shape ("`path` (fork)") is the other form #174 (C-1) names.
+    body = BODY + "\n`tool/nowhere.py` (fork) is where it went\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "주석 붙은 경로", body=body, labels=("ch:tool",), parent=10),
+            issue(11, "an annotated path", body=body, labels=("ch:tool",), parent=10),
         ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
@@ -985,13 +1310,13 @@ def test_recheck_d_skips_a_path_with_a_parenthetical_note_after_a_space(run):
 
 
 def test_recheck_d_still_flags_a_path_with_no_note(run):
-    body = BODY + "\n`tool/nowhere.py` 가 아직 없다\n"
+    body = BODY + "\n`tool/nowhere.py` is not here yet\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "평범한 경로", body=body, labels=("ch:tool",), parent=10),
+            issue(11, "a plain path", body=body, labels=("ch:tool",), parent=10),
         ],
     )
     assert done.returncode == 1, done.stdout + done.stderr
@@ -1001,15 +1326,15 @@ def test_recheck_d_still_flags_a_path_with_no_note(run):
 
 
 def test_recheck_c_is_quiet_when_a_release_condition_section_exists_without_a_date(run):
-    # #174 (C-2): a "## 해제 조건" section with prose instead of a date already has (a)'s 14-day
-    # cycle watching it -- firing (c) too on every boot is what killed the signal.
-    body = BODY + "\n## 해제 조건\n소비자가 생기면\n"
+    # #174 (C-2): a "Release condition" section with prose instead of a date already has (a)'s
+    # 14-day cycle watching it -- firing (c) too on every boot is what killed the signal.
+    body = BODY + "\n## Release condition\nwhen a consumer exists\n"
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "산문 조건", body=body, labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "prose condition", body=body, labels=("ch:tool", "deferred"), parent=10),
         ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
@@ -1022,7 +1347,7 @@ def test_recheck_c_still_fires_without_a_release_condition_section_at_all(run):
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "조건 없음", labels=("ch:tool", "deferred"), parent=10),
+            issue(11, "no condition", labels=("ch:tool", "deferred"), parent=10),
         ],
     )
     assert done.returncode == 1, done.stdout + done.stderr
@@ -1032,15 +1357,17 @@ def test_recheck_c_still_fires_without_a_release_condition_section_at_all(run):
 
 def test_recheck_e_is_quiet_once_the_pointed_at_issue_was_touched_after_the_closing(run):
     # #174 (C-3): a recheck comment on the issue is an update to it, so it should turn (e) off for
-    # the rest of the 7-day window instead of repeating every boot (실측: #73·#89·#112·#124).
+    # the rest of the 7-day window instead of repeating every boot (measured: #73, #89, #112, #124).
     done = run(
         "recheck",
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "코멘트함", labels=("ch:tool",), parent=10, updated_days_ago=1),
+            issue(11, "commented on", labels=("ch:tool",), parent=10, updated_days_ago=1),
         ],
-        upstream_closed=[closed(30, "[목표] 끝난 목표", "#11 로 이어진다\n", days_ago=3, labels=("goal",))],
+        upstream_closed=[
+            closed(30, "[goal] a finished goal", "leads to #11\n", days_ago=3, labels=("goal",))
+        ],
     )
     assert done.returncode == 0, done.stdout + done.stderr
     assert done.stdout.strip() == "[]", done.stdout
@@ -1052,11 +1379,34 @@ def test_recheck_e_still_fires_when_updated_before_the_closing(run):
         "--json",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "안 만짐", labels=("ch:tool",), parent=10, updated_days_ago=5),
+            issue(11, "not touched", labels=("ch:tool",), parent=10, updated_days_ago=5),
         ],
-        upstream_closed=[closed(30, "[목표] 끝난 목표", "#11 로 이어진다\n", days_ago=3, labels=("goal",))],
+        upstream_closed=[
+            closed(30, "[goal] a finished goal", "leads to #11\n", days_ago=3, labels=("goal",))
+        ],
     )
     assert done.returncode == 1, done.stdout + done.stderr
     rows = json.loads(done.stdout)
     assert [r["code"] for r in rows[0]["reasons"]] == ["e"], rows
     assert "cosmai#30" in rows[0]["reasons"][0]["why"], rows
+
+
+def test_no_subcommand_prints_korean(run, monkeypatch, tmp_path: Path, checkout_with_upstream_remote: Path):
+    # #192 D10's completion criterion, checked rather than eyeballed: the four subcommands are what
+    # a boot reads, and a single leftover Korean heading is what makes the migration look done.
+    fake = tmp_path / "fake-foreign-closes"
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
+    fixture = [
+        epic(10, "tool", subs=(11, 13)),
+        issue(11, "idle", labels=("ch:tool",), parent=10, assignees=("shk95",), updated_days_ago=3),
+        issue(12, "two channels", labels=("ch:tool", "ch:repo")),
+        issue(13, "awaiting a decision", labels=("ch:tool", "needs-user"), parent=10),
+        issue(14, "deferred", labels=("ch:tool", "deferred"), parent=10, updated_days_ago=30),
+        issue(20, "an old memo", body=MEMO_BODY, labels=("memo",), updated_days_ago=30),
+    ]
+    for args in (("ready", "--user"), ("recheck",), ("lint",), ("audit",)):
+        done = run(*args, upstream=fixture, cwd=checkout_with_upstream_remote, fork_labels=["channel"])
+        assert not HANGUL.search(done.stdout), (args, done.stdout)
+        assert not HANGUL.search(done.stderr), (args, done.stderr)
