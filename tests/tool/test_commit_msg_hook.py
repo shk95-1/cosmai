@@ -73,6 +73,19 @@ def test_a_fully_qualified_comma_list_is_accepted(repo: Path):
     assert done.returncode == 0, done.stderr
 
 
+def test_a_word_containing_close_as_a_substring_is_not_a_keyword(repo: Path):
+    # #175 mentioned so this only exercises the bare-closes boundary, not the branch-mention rule
+    # (round-2 regression: the awk rewrite lost the original regex's \b and matched "close" and
+    # "fix" as substrings of unrelated words -- #175 re-review).
+    done = run_hook(repo, "fix(hook): x\n\ndisclose #175\n")
+    assert done.returncode == 0, done.stderr
+
+
+def test_a_word_containing_fix_as_a_substring_is_not_a_keyword(repo: Path):
+    done = run_hook(repo, "fix(hook): x\n\nprefixes #175\n")
+    assert done.returncode == 0, done.stderr
+
+
 def test_merge_title_is_exempt_even_with_a_bare_closes_in_the_body(repo: Path):
     done = run_hook(repo, "Merge branch 'x'\n\nCloses #175\n")
     assert done.returncode == 0, done.stderr
