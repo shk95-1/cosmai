@@ -6,10 +6,92 @@
 #   tool/checks/foreign-closes shk95/cosmai-import-ydc upstream
 #
 # Usage: tool/checks/foreign-closes <this-repo owner/repo> <other-repo remote name>
+#
+# #190: the same collision the other direction -- a PR about to MERGE INTO this repo can carry
+# bare `Closes #n` commits meant for some other repo, closing this repo's issues by accident.
+# --predict answers it BEFORE the merge instead of finding the damage after:
+#   tool/checks/foreign-closes <owner/repo> --predict <ref>
 
 repo=$1
-remote=$2
-if [ -z "$repo" ] || [ -z "$remote" ]; then
+mode=$2
+if [ -z "$repo" ]; then
+  printf 'usage: %s <owner/repo> <remote>\n' "$0" >&2
+  printf '       %s <owner/repo> --predict <ref>\n' "$0" >&2
+  exit 2
+fi
+
+if [ "$mode" = "--predict" ]; then
+  ref=$3
+  if [ -z "$ref" ]; then
+    printf 'usage: %s <owner/repo> --predict <ref>\n' "$0" >&2
+    exit 2
+  fi
+
+  open_file=$(mktemp)
+  pairs_file=$(mktemp)
+  commits_file=$(mktemp)
+  err_file=$(mktemp)
+  trap 'rm -f "$open_file" "$pairs_file" "$commits_file" "$err_file"' EXIT
+
+  if ! gh api --paginate "repos/$repo/issues?state=open&per_page=100" 2>"$err_file" \
+      | jq -s 'add | map(select(.pull_request == null)) | sort_by(.number)' > "$open_file"; then
+    printf 'gh api failed listing open issues for %s: %s\n' "$repo" "$(cat "$err_file")" >&2
+    exit 2
+  fi
+  if ! jq -e 'type == "array"' "$open_file" >/dev/null 2>&1; then
+    printf 'jq failed to read the open-issues response for %s (not the expected array shape)\n' "$repo" >&2
+    exit 2
+  fi
+
+  # sha on its own line, then the full message, then a NUL record terminator -- the NUL lets a
+  # commit body containing blank lines (nearly all of them) stay one awk record.
+  git log --format='%H%n%B%x00' "HEAD..$ref" > "$commits_file"
+
+  # Same rule as `.githooks/commit-msg`: a keyword (close/fix/resolve, any tense) followed by a
+  # bare #n is a hit. "owner/repo#n" is stripped first so a properly-qualified ref never counts,
+  # and the keyword must stand on its own word (no "disclose #175").
+  awk -v RS='\0' '
+    {
+      rec = $0
+      sub(/^\n/, "", rec)
+      nl = index(rec, "\n")
+      if (nl == 0) { next }
+      sha = substr(rec, 1, nl - 1)
+      body = substr(rec, nl + 1)
+      m = split(body, lines, "\n")
+      for (i = 1; i <= m; i++) {
+        low = tolower(lines[i])
+        if (match(low, /(^|[^a-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?)([^a-z0-9_]|$)/)) {
+          stripped = substr(lines[i], RSTART)
+          gsub(/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+#[0-9]+/, "", stripped)
+          while (match(stripped, /#[0-9]+/)) {
+            print sha, substr(stripped, RSTART + 1, RLENGTH - 1)
+            stripped = substr(stripped, RSTART + RLENGTH)
+          }
+        }
+      }
+    }
+  ' "$commits_file" > "$pairs_file"
+
+  hit=0
+  while IFS= read -r issue; do
+    [ -z "$issue" ] && continue
+    n=$(printf '%s' "$issue" | jq -r '.number')
+    title=$(printf '%s' "$issue" | jq -r '.title')
+    shas=$(awk -v n="$n" '$2 == n { print substr($1, 1, 7) }' "$pairs_file" | awk '!seen[$0]++')
+    [ -z "$shas" ] && continue
+    hit=1
+    list=$(printf '%s' "$shas" | paste -sd ', ' -)
+    printf '#%s · %s · closing commits %s\n' "$n" "$title" "$list"
+  done <<EOF
+$(jq -c '.[]' "$open_file")
+EOF
+
+  exit $hit
+fi
+
+remote=$mode
+if [ -z "$remote" ]; then
   printf 'usage: %s <owner/repo> <remote>\n' "$0" >&2
   exit 2
 fi
@@ -54,7 +136,7 @@ while IFS= read -r item; do
   fi
   if [ "$ancestor_status" -eq 0 ]; then
     short=$(printf '%s' "$commit" | cut -c1-7)
-    printf '#%s · %s · 닫은 커밋 %s\n' "$n" "$title" "$short" >> "$out_file"
+    printf '#%s · %s · closed by %s\n' "$n" "$title" "$short" >> "$out_file"
   fi
 done < "$items_file"
 

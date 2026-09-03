@@ -23,6 +23,7 @@ FAKE_GH = """#!/bin/sh
 for arg in "$@"; do
   case "$arg" in
     *issues?state=closed*) cat "$FIXTURES/issues.json" || exit 1; exit 0 ;;
+    *issues?state=open*) cat "$FIXTURES/open-issues.json" || exit 1; exit 0 ;;
     *issues/*/timeline) num=$(printf '%s' "$arg" | sed -nE 's#.*issues/([0-9]+)/timeline#\\1#p')
                          cat "$FIXTURES/timeline-$num.json" 2>/dev/null || echo '[]'
                          exit 0 ;;
@@ -110,6 +111,9 @@ def test_an_issue_closed_by_a_foreign_commit_is_reported(run, gitrepo: Path):
     assert "#38" in done.stdout
     assert "패널 43채널 재수집" in done.stdout
     assert foreign_commit[:7] in done.stdout
+    # R3: the one existing Korean output line is English now (D10).
+    assert "closed by" in done.stdout
+    assert "닫은 커밋" not in done.stdout
 
 
 def test_an_issue_closed_by_our_own_commit_is_not_reported(run, gitrepo: Path):
@@ -170,3 +174,94 @@ def test_gh_failure_exits_2(run, gitrepo: Path, tmp_path: Path):
     )
     assert done.returncode == 2, done.stdout
     assert done.stderr != ""
+
+
+# #190: --predict answers "which OPEN issues of this repo would this merge close" before the
+# merge happens -- the same collision as #175, caught pre-merge instead of found as damage after.
+
+
+@pytest.fixture
+def pr_repo(gitrepo: Path) -> Path:
+    """A `pr` branch ahead of HEAD carrying bare, qualified, and keyword-less `#n` refs."""
+    git("checkout", "-qb", "pr", cwd=gitrepo)
+    (gitrepo / "b.txt").write_text("1\n", encoding="utf-8")
+    git("add", "-A", cwd=gitrepo)
+    git("commit", "-qm", "fix: bare close\n\nCloses #18", cwd=gitrepo)
+    (gitrepo / "b.txt").write_text("2\n", encoding="utf-8")
+    git("add", "-A", cwd=gitrepo)
+    git("commit", "-qm", "fix: qualified close\n\nCloses other/repo#40", cwd=gitrepo)
+    (gitrepo / "b.txt").write_text("3\n", encoding="utf-8")
+    git("add", "-A", cwd=gitrepo)
+    git("commit", "-qm", "chore: mentions #56 with no keyword", cwd=gitrepo)
+    git("checkout", "-q", "main", cwd=gitrepo)
+    return gitrepo
+
+
+@pytest.fixture
+def run_predict(tmp_path: Path, pr_repo: Path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(FAKE_GH, encoding="utf-8")
+    gh.chmod(0o755)
+
+    def _run(open_issues: list[dict]):
+        (tmp_path / "open-issues.json").write_text(json.dumps(open_issues), encoding="utf-8")
+        env = {
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "FIXTURES": str(tmp_path),
+        }
+        return subprocess.run(
+            [str(SCRIPT), REPO, "--predict", "pr"],
+            capture_output=True,
+            text=True,
+            cwd=str(pr_repo),
+            env=env,
+            check=False,
+        )
+
+    return _run
+
+
+def test_a_bare_close_on_an_open_issue_is_reported(run_predict):
+    done = run_predict([{"number": 18, "title": "ydc import #18"}])
+    assert done.returncode == 1, done.stderr
+    assert "#18" in done.stdout
+    assert "ydc import #18" in done.stdout
+    assert "closing commits" in done.stdout
+
+
+def test_a_qualified_owner_repo_ref_is_never_a_hit(run_predict):
+    # "Closes other/repo#40" is correct for the repo it targets; it must not be mistaken for a
+    # bare close on THIS repo's #40.
+    done = run_predict([{"number": 40, "title": "not ours to close"}])
+    assert done.returncode == 0, done.stdout
+    assert done.stdout == ""
+
+
+def test_a_keyword_less_reference_is_never_a_hit(run_predict):
+    # "mentions #56" carries no closing keyword, so it never closes anything.
+    done = run_predict([{"number": 56, "title": "just mentioned"}])
+    assert done.returncode == 0, done.stdout
+    assert done.stdout == ""
+
+
+def test_an_open_issue_with_no_matching_commit_stays_silent(run_predict):
+    done = run_predict([{"number": 999, "title": "unrelated"}])
+    assert done.returncode == 0, done.stdout
+    assert done.stdout == ""
+
+
+def test_only_the_overlapping_number_is_printed_among_several_open_issues(run_predict):
+    done = run_predict(
+        [
+            {"number": 18, "title": "overlap"},
+            {"number": 40, "title": "qualified, not a hit"},
+            {"number": 999, "title": "no matching commit"},
+        ]
+    )
+    assert done.returncode == 1, done.stderr
+    assert "#18" in done.stdout
+    assert "#40" not in done.stdout
+    assert "#999" not in done.stdout
