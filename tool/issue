@@ -28,20 +28,22 @@ REPOS=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-
 # The checked-out repo, not the first entry of REPOS, is what audit's TODO(#n)/path checks must test
 # against -- a fork checkout's TODO(#n) markers point at fork issues, not upstream's (#174).
 # COSMAI_ISSUE_PRIMARY stands in for `git remote get-url origin` so a test can fake a checkout that
-# has no real remote; it is read only when the override is unset.
+# has no real remote; it is read only when the override is unset. Matched by repo name alone --
+# REPOS' owner and origin's owner drift independently of one another, and every caller of
+# pick_primary keeps only ${primary##*/} anyway.
 pick_primary() {
     origin=${COSMAI_ISSUE_PRIMARY:-$(git remote get-url origin 2>/dev/null || true)}
-    origin_repo=$(printf '%s' "$origin" | sed -E 's#^(git@|https://|http://)[^/:]+[:/]##; s#\.git$##')
+    origin_repo=$(printf '%s' "$origin" | sed -E 's#\.git$##; s#.*/##')
     for repo in $REPOS; do
-        if [ "$repo" = "$origin_repo" ]; then
+        if [ "${repo##*/}" = "$origin_repo" ]; then
             printf '%s' "$repo"
             return
         fi
     done
     # Falls back to the old fixed choice rather than failing: a checkout whose origin is renamed
     # or missing should not lose audit/recheck entirely, only the fork-vs-upstream distinction.
-    printf 'tool/issue: checkout origin (%s) matches neither repo in REPOS; defaulting to %s\n' \
-        "$origin" "${REPOS%% *}" >&2
+    printf 'tool/issue: checkout origin repo (%s) matches no REPOS entry by name; defaulting to %s\n' \
+        "$origin_repo" "${REPOS%% *}" >&2
     printf '%s' "${REPOS%% *}"
 }
 

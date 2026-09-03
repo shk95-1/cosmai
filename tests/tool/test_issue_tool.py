@@ -870,6 +870,31 @@ def test_an_upstream_checkout_keeps_matching_todo_markers_against_upstream(
     assert "cosmai#9" in missing, done.stdout
 
 
+def test_the_primary_repo_is_matched_by_name_not_owner(run, monkeypatch, checkout_with_marker: Path):
+    # Origin's owner and REPOS' owner can each be renamed independently (real case: origin is
+    # shk95-1/cosmai and shk95/cosmai-import-ydc while REPOS still says slopindustries/*) -- matching
+    # the full owner/repo would then pick primary for no checkout at all, silently falling back to
+    # upstream and reviving the #174 bug on every fork checkout.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", "some-other-owner/cosmai-import-ydc")
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(9,)),
+            issue(9, "upstream 표식 없음", labels=("ch:tool", "when-touched"), parent=10),
+        ],
+        fork=[
+            epic(20, "population", subs=(43,)),
+            issue(43, "포크 쪽 표식", labels=("ch:tool", "when-touched"), parent=20),
+        ],
+        cwd=checkout_with_marker,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "matches no REPOS entry" not in done.stderr, done.stderr
+    assert "TO" + "DO(#43)" not in done.stdout, done.stdout
+    missing = done.stdout.split("열린 when-touched 이슈인데 코드에 표식이 없다")[1].split("\n\n")[0]
+    assert "cosmai-import-ydc#43" not in missing, done.stdout
+
+
 @pytest.fixture
 def checkout_with_upstream_remote(tmp_path: Path) -> Path:
     """A fork-shaped checkout: a plain git repo with an `upstream` remote configured."""
