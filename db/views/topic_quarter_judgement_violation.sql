@@ -1,4 +1,4 @@
--- 판정 표의 두 불변식을 저장된 행에 대고 되묻는다. 비어 있으면 참이다 (contracts/interfaces.md §판정).
+-- Asks the two invariants of the verdict table back against the stored rows. Empty means true (contracts/interfaces.md §Verdict).
 -- The type vocabulary, judged and the score's definition are already kept inside one row by 024's
 -- CHECK, so they are not here. What is here is two things a single row cannot show -- a 1:1 with the
 -- metrics row, and gap_pp, which the two source rows must carry the same value for.

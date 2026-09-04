@@ -286,7 +286,7 @@ def test_the_lane_ceiling_leaves_every_lane_a_connection_to_write_through():
 
 
 def test_two_overlapping_runs_fit_inside_the_roles_connection_limit():
-    """The schedule puts two commerce runs on this role at once -- contracts/entrypoints.md §스케줄
+    """The schedule puts two commerce runs on this role at once -- contracts/entrypoints.md §Schedule
     records the hourly ranking walk still running when 02:10 product and 04:15 review start, which is
     what the per-source advisory lock exists for. Both of them draw on `trend_radar_runtime`'s single
     CONNECTION LIMIT, so a per-process ceiling is only half the budget."""

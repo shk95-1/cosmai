@@ -4,5 +4,5 @@
 10 6 1 * *  cosmai collect naver --dataset datalab
 # naver blog: monthly too -- every run re-walks all 15 keyword-group terms from scratch (no cursor;
 # natural-key upsert on post_id makes that safe), so once a month is enough spend. 06:40 clears datalab
-# (06:10), analyze all (05:00, entrypoints.md §스케줄) and every commerce time.
+# (06:10), analyze all (05:00, entrypoints.md §Schedule) and every commerce time.
 40 6 1 * *  cosmai collect naver --dataset blog

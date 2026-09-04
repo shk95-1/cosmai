@@ -155,9 +155,10 @@ def mention_row(row: dict[str, str], snapshot_id: int) -> tuple[Any, ...]:
 def check_channels(cur: psycopg.Cursor[Any], source_dir: Path, panel_version: int) -> int:
     """코퍼스가 언급하는 채널이 전부 활성 명부에 같은 역할로 있는가.
 
-    `channel.csv` 를 표로 만들지 않는 이유가 이 함수다. 채널의 역할은 분모를 정하는 값이고
-    (`contracts/formats.md` §패널 명부 CSV), 그것이 두 표에 살면 두 분모가 생겨 나중 것이 앞선 것과
-    조용히 갈린다. 그래서 명부는 `panel_channel` 하나로 두고, 반입은 어긋남을 **거절**한다.
+    This function is why `channel.csv` is not made a table. A channel's role is the value that fixes a
+    denominator (`contracts/formats.md` §Panel roster CSV), and if it lives in two tables there are two
+    denominators, and the later one quietly parts from the earlier. So the roster stays as `panel_channel`
+    alone, and the import **refuses** a disagreement.
 
     돌려주는 것은 명부 크기가 아니라 **읽은 `channel.csv` 의 행수**다 -- 매니페스트의 `table_counts`
     가 세는 것이 그쪽이고, 명부에는 이 코퍼스에 없는 채널도 있을 수 있다.

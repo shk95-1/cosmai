@@ -52,7 +52,7 @@ def measured() -> dict:
 @lru_cache(maxsize=1)
 def contract() -> str:
     body = INTERFACES.read_text(encoding="utf-8")
-    start = body.index("## 질의 라우팅 (라우터를 붙이지 않는다")
+    start = body.index("## Query routing (no router is attached")
     return body[start : body.index("\n## ", start)]
 
 
@@ -221,13 +221,13 @@ def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
 def test_the_decision_and_its_blockers_are_still_written_down():
     """With only the numbers left and the decision gone, the next person just attaches the router."""
     table = contract()
-    assert "성분명 판정의 정본은 토크나이저 사전이 아니다" in table
+    assert "The canonical decision on an ingredient name is not the tokeniser dictionary" in table
     assert "slopindustries/cosmai#73" in table
     assert "§검색 실측 과 **같은 자가 아니다**" in table
     assert "라우터는 #11 을 대체하지 못한다" in table
     # The misread number (`4/10`) is nailed down as a literal, and without the sentence that defuses it nailed
     # down too it is asymmetric.
     assert "**그래서 이 절의 답은 첫 줄이 아니라 넷째 줄과 마지막 줄이다**" in table
-    assert "어느 것도 #11 의 입력이 아니다" in table
+    assert "Not one of the seven lines of the table above is an input to #11" in table
     assert "**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.**" in table
     assert "이득 0 · 손해 2" in table

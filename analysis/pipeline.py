@@ -40,11 +40,12 @@ YOUTUBE_SCHEMA = "tubedepth"
 POPULATION = (EXTRACTOR_VERSION,)
 RULESETS = (SUNCARE_RULESET, GENERIC_RULESET)
 LINK_COUNTS = ("product_ref", "brand_mention")
-OK = "ok"  # entrypoints.md §공통 운영 뷰의 어휘: ok | partial | blocked | failed | running
+OK = "ok"  # entrypoints.md §Common operations view vocabulary: ok | partial | blocked | failed | running
 FAILED = "failed"
 PARTIAL = "partial"
-# 수집기가 소스를 양보할 때와 같은 어휘·같은 종료 코드다 (entrypoints.md §수집기): 사이트가 거절한 게
-# 아니라 우리가 양보한 것이고, 건너뛴 일은 다음 실행이 그대로 가져간다(모든 단계가 자연키 upsert).
+# The same vocabulary and the same exit code as a collector yielding a source (entrypoints.md §Collectors):
+# the site did not refuse, we yielded, and the skipped work is taken as it is by the next run (every step is
+# a natural-key upsert).
 SKIPPED = (
     f"skipped: another analyze run holds the {ANALYZE} lock, and running both would let one read a "
     "month the other has half-rewritten"
@@ -185,8 +186,9 @@ def _amend(outcome: StageOutcome, stale: Sequence[str]) -> StageOutcome:
 
 
 def _reported(conn: psycopg.Connection[Any], outcome: StageOutcome) -> StageOutcome:
-    """단독 stage 실행이 찾아낸 구멍도 run 행에 남는다 — 종료 코드는 크론 메일에만 있고, 계약이
-    운영자에게 보라고 한 것은 `needs.analysis_health` 의 그 행이다 (entrypoints.md §분석 실행).
+    """A hole a single-stage run found stays on the run row too — the exit code lives only in the cron mail,
+    and what the contract told the operator to look at is that row of `needs.analysis_health`
+    (entrypoints.md §Analysis).
 
     polarity opens its own run and closes it `ok`, so that row is closed again as partial -- the same one row
     as `run_all`, and since versions are only merged, what that pass labelled with stays. The note of

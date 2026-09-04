@@ -1,4 +1,4 @@
-"""분기 시계열의 다섯 수식 — `contracts/interfaces.md` §수식 이 정본이다 (포크 #5).
+"""The five formulas of the quarterly time series — `contracts/interfaces.md` §Formulas is canonical (#5).
 
 The rules come from ydc `analysis/slices/ydc/trend.py` (v0.2) and were written over rather than imported
 from the slice (the way `analysis/retrieval/` did it). This module knows no DB: it takes counts (`Counts` ·
@@ -24,7 +24,7 @@ MIN_MENTIONS = 5
 # The cap on the window length of persistence. Not the four newest quarters globally but the four ending at
 # that row's quarter.
 WINDOW_QUARTERS = 4
-# 저장 자리수 (interfaces.md §수식 "저장 자리수", 022 의 numeric(p,s)).
+# Stored decimal places (interfaces.md §Formulas, "stored decimal places"; 022's numeric(p,s)).
 DIGITS: Mapping[str, int] = {
     "composition": 5,
     "velocity_yoy": 4,
@@ -55,7 +55,8 @@ class VideoPanel:
 
 
 def previous_year_quarter(quarter: str) -> str:
-    """계절 상품이라 비교 상대가 인접 분기가 아니라 전년 동분기다 (formats.md §시간)."""
+    """A seasonal product, so the comparison partner is not the adjacent quarter but the same quarter of the
+    previous year (formats.md §Time)."""
     return f"{int(quarter[:4]) - 1}Q{quarter[5]}"
 
 
@@ -130,7 +131,7 @@ def rows(
                     persistence=round(persist / len(window), DIGITS["persistence"]),
                     persist_quarters=persist,
                     window_quarters=len(window),
-                    # 중복 포함 언급 수가 0인 칸은 NULL 이 아니라 1 이다 (§수식).
+                    # A cell whose duplicate-inclusive mention count is 0 is 1, not NULL (§Formulas).
                     unique_ratio=round(mentions / duplicated if duplicated else 1.0, DIGITS["unique_ratio"]),
                     channel_count=counts.channels.get((topic, quarter), 0),
                     channel_diffusion=round(

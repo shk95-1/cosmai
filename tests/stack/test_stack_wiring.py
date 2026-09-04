@@ -245,7 +245,7 @@ def test_every_cron_line_names_a_command_the_cli_has(case: tuple[str, list[str]]
 
 @pytest.mark.parametrize("name", sorted(SCHEDULED), ids=lambda n: n)
 def test_a_scheduled_service_reaches_the_database_by_the_contracted_knobs(name: str):
-    # contracts/entrypoints.md §DB 접속 노브: inside the compose network the same database is
+    # contracts/entrypoints.md §DB connection knobs: inside the compose network the same database is
     # postgres:5432 -- the service this file now declares (#177). Missing knobs do not fail loudly
     # -- db/runtime.py falls back to the host defaults 127.0.0.1:5434, which inside a container is
     # nothing at all.
@@ -257,7 +257,7 @@ def test_a_scheduled_service_reaches_the_database_by_the_contracted_knobs(name: 
 @pytest.mark.parametrize("name", sorted(SCHEDULED), ids=lambda n: n)
 def test_a_scheduled_service_reads_its_crontab_in_utc(name: str):
     # Every file in stack/crontab.d/ opens with "UTC." and every time in contracts/entrypoints.md
-    # §스케줄 is UTC. Without TZ set that is a property of whatever the base image happens to ship,
+    # §Schedule is UTC. Without TZ set that is a property of whatever the base image happens to ship,
     # and a base image change moves six schedules at once with nothing here noticing.
     assert "TZ: UTC" in SERVICES[name], f"{name} does not pin TZ=UTC, which its crontab assumes"
 

@@ -6,13 +6,14 @@ and starting to fold them cuts the connection. Committing with `conn.commit()` a
 looking at the DB after that is the shape of this file, and `analysis/trend/pipeline.py` has the same shape
 for the same reason. What is pulled in is pointers and like counts, not bodies -- the body is joined by the
 view when it needs one. Over the whole set (261,317 documents) 15,602 candidate rows · 178ms of query ·
-명령 전체 0.52s · 최대 상주 73MB 로 **재 봤다**(2026-08-26, 계약 §근거 "전량 실측"); 재지 않은 채
-"가볍다"고 적어 두면 그것은 다음 사람이 밟을 단언이다.
+The whole command was **really measured** at 0.52s and 73MB peak resident (2026-08-26, the contract's
+§Evidence, "full measurement"); writing "it is light" without measuring leaves an assertion the next person
+steps on.
 
 **The population is not written again.** The `POPULATION` CTE that built the metrics is imported and used as
 it is. Choosing the evidence from a different population would stand the speech a card quotes and the numbers
 written on that card on different denominators, and both would look plausible enough to hide it
-보이지 않는다 (계약 §근거).
+and neither would be visible (the contract's §Evidence).
 """
 
 from __future__ import annotations

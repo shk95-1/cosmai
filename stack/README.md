@@ -1,6 +1,6 @@
 # stack — operational know-how (bought by measuring it)
 
-계약은 `contracts/entrypoints.md` §스케줄·§운영 노브, 의도와 승인 경계는 `STATE.md`, 지금 도는 것은 `tool/status`. 여기는 그 셋이 말하지 않는 **함정**만 적는다. 결함은 이슈다 — 여기에 적지 않는다.
+The contract is `contracts/entrypoints.md` §Schedule·§DB connection knobs, the intent and the approval boundaries are `STATE.md`, and what is running now is `tool/status`. Only the **traps** those three do not mention are written here. A defect is an issue — it is not written here.
 
 - **Starting with `docker start` runs the old image.** If the image changed, use `docker compose up -d --force-recreate <service>`. Recreating the new stack (`cosmai-*`) is done directly by the coordinator (`STATE.md` §3).
 - **`tool/stack-build`'s second stage dies inside compose interpolation without `stack/.env`** — that is a missing variable, not a build failure. `.env` only carries paths, no secret values (`stack/env.example`).

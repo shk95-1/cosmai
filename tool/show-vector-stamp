@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Prints in one line which version the vector store is (fork #49).
 
-`cosmai retrieval eval` 이 vector·hybrid 행마다 싣는 것과 **같은 문자열**이다 -- 계약
-(`contracts/interfaces.md` §검색 실측)이 적어 둔 판본을 다시 확인하는 길이고, 그래서 매니페스트와
-id 목록만 읽는다: 1.2GB 행렬을 열지 않으므로 GPU 도 몇 분도 필요 없다.
+It is **the same string** `cosmai retrieval eval` puts on every vector and hybrid row -- the way to confirm
+again the version the contract (`contracts/interfaces.md` §Retrieval measurements) wrote down, and that is why
+it reads the manifest and the id list only: it does not open the 1.2GB matrix, so it needs neither a GPU nor
+several minutes.
 
 The count is **the number of rows in the id file**, not the `count` the manifest claims. When the two
 diverge it prints no version and blocks -- a store whose word about itself differs from the fact is the
@@ -12,9 +13,9 @@ same place `vectors.load` refuses.
     tool/show-vector-stamp                             # var/retrieval/vectors/e5base
     tool/show-vector-stamp var/retrieval/vectors/e5base
 
-종료 코드: 0 판본을 찍었다 · 2 저장소를 읽을 수 없다(파일 없음 · 매니페스트가 깨졌음 · 필수 키 없음 ·
-개수 어긋남 -- `contracts/entrypoints.md` §검색 의 blocked 와 같은 자리다). 1 은 없다: 반쯤 읽은
-판본이라는 것이 없어서, 찍었으면 그 줄은 온전하다.
+exit codes: 0 the version was printed · 2 the store cannot be read (no file · a broken manifest · a required
+key missing · a count disagreement -- the same place as blocked in `contracts/entrypoints.md` §Search). There
+is no 1: there is no such thing as a half-read version, so if it printed, that line is whole.
 """
 
 from __future__ import annotations

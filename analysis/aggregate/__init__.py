@@ -26,7 +26,7 @@ __all__ = [
 # argument points at it.
 AGGREGATE_VERSION = "rule-v1.0"
 
-# interfaces.md §수식 A8: 상한은 슬라이스에 없고 계약이 정한다.
+# interfaces.md §Formulas A8: the cap is not in the slice; the contract sets it.
 LIKE_CAP = 100
 # The length of the example sentence a person reads a candidate by — the same width slice-p9 aggregate.py
 # cut to (A7).
@@ -115,8 +115,8 @@ class RuleAggregator:
         for d in denoms:
             by_key.setdefault((d.source, d.product_key), []).append(d)
         for product, group in groups.items():
-            # 분모도 그 제품의 것만 남긴다 — 제품 하나짜리 집합에서 population_share_pct 는 제품 단위
-            # 정의로 그대로 되돌아간다 (interfaces.md §수식).
+            # The denominator is narrowed to that product too — over a one-product set
+            # population_share_pct collapses back to the per-product definition (interfaces.md §Formulas).
             keys = {(m.site, m.source_product_key) for m in group}
             mine = [d for k in keys if k in by_key for d in by_key[k]]
             out += self._rows(scope, product, group, mine, key)

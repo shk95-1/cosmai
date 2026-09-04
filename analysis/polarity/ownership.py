@@ -149,8 +149,8 @@ def unready(owners: Mapping[str, Owner], version: str, scope: str | None) -> str
     population, and the price is time or a GPU (which is why paid-or-not is not the criterion). A named scope
     with no owner yet is refused as well: the rules relabel an ownerless scope every day at 05:00, so a pass
     that runs without registering succeeds and is gone by the next dawn.
-    남의 scope 를 지정한 실행은 여기서 걸러내지 않는다 — 그 거절은 단계의 몫이고 계약은 그것을
-    failed run + 종료 코드 1 로 약속한다 (contracts/entrypoints.md §분석).
+    A run that named someone else's scope is not filtered out here — that refusal is the step's job, and the
+    contract promises it as a failed run + exit code 1 (contracts/entrypoints.md §Analysis).
     """
     if version == RULE_VERSION:
         return None

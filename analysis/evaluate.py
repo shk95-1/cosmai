@@ -25,7 +25,8 @@ INSERT INTO analysis_run (finished_at, status, versions, note)
 VALUES (now(), 'ok', %s::jsonb, %s) RETURNING run_id
 """
 
-# 채택/비채택은 예측 라벨이고, 분모는 채택한 쌍이다 (interfaces.md §기준선).
+# Adopted/not adopted is the predicted label, and the denominator is the adopted pairs (interfaces.md
+# §Baselines).
 ADOPTED = frozenset({"Y"})
 REJECTED = frozenset({"N"})
 STRICT_GOLD = frozenset({"Y"})

@@ -1,4 +1,4 @@
-"""홀드아웃의 규칙 (포크 #51, 계약 `contracts/interfaces.md` §홀드아웃).
+"""The holdout rules (fork #51, the contract `contracts/interfaces.md` §Holdout).
 
 ydc `holdout_commerce.py` 의 `demo()` 가 못 박은 입력·출력이 여기 그대로 온다 -- 승격이 답을 바꾸지
 않았다는 말은 같은 입력에 같은 답이 나온다는 뜻이고, 우리 원천으로는 그 입력을 재현할 수 없으므로
@@ -134,7 +134,8 @@ def test_one_topic_rising_alone_moves_both_axes():
 
 
 def test_the_share_axis_is_the_rate_axis_divided_by_that_arms_scale():
-    """**두 축의 재현 수를 나란히 놓으면 안 되는 이유가 이 한 줄이다** (계약 §홀드아웃).
+    """**This one line is why the reproduction counts of the two axes must not be put side by side** (the
+    contract's §Holdout).
 
     `share == rate / scale` 이라, 두 팔의 리뷰당 언급 수가 다르면 같은 `MATERIAL_PP` 가 구성비 축에서
     체계적으로 헐겁다. 전량 실측(2026-08-27)의 계수 1.4218 · 1.3405 를 그대로 세우고, `발림성` 이 실제로
@@ -180,8 +181,9 @@ def test_the_platform_mix_is_read_off_both_arms():
 
 
 def test_standardizing_takes_the_composition_effect_out():
-    """플랫폼마다의 언급률은 그대로인데 구성만 바뀐 경우. **원값은 움직이고 표준화 값은 안 움직인다** --
-    그 둘이 같이 움직이면 이 표는 아무것도 갈라내지 못한다 (계약 §홀드아웃)."""
+    """The case where the per-platform mention rates stay the same and only the composition changes. **The
+    raw value moves and the standardised value does not** -- if the two moved together this table would tell
+    nothing apart (the contract's §Holdout)."""
     seen = [
         *(_review("백탁", platform="oliveyoung") for _ in range(5)),
         *(_review(platform="oliveyoung") for _ in range(5)),
@@ -367,9 +369,10 @@ def test_the_level_threshold_wins_before_the_rank_is_asked():
 
 
 def _constant_rows() -> list[list[str]]:
-    """§홀드아웃 상수 의 표만. 같은 머리글이 §대조 에도 있으므로 절 제목에서 내려와 찾는다."""
+    """The table of §Holdout constants only. The same header is in §Crosscheck too, so it is found by
+    descending from the section title."""
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
-    start = lines.index("### 홀드아웃 상수 (`analysis/holdout` 한 곳에 모여 있다)")
+    start = lines.index("### Holdout constants (gathered in `analysis/holdout` alone)")
     rows: list[list[str]] = []
     for line in lines[start + 3 :]:
         if not line.startswith("|"):

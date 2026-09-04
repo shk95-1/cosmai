@@ -159,9 +159,10 @@ def test_a_topic_the_registry_marks_as_not_for_trends_gets_no_row(loaded: str):
 
 
 def test_a_registry_topic_the_snapshot_never_mentions_is_still_a_row(loaded: str):
-    """축의 두 변은 갈라져 있다 (interfaces.md §분기 표의 행 집합): 분기는 이 산출에 존재하는 것,
-    주제는 레지스트리의 `trend_use=true` 전부다. 관측 distinct 로 축을 만들면 한 번도 안 걸린 주제가
-    표에서 조용히 사라지고, 격자는 여전히 직사각형이라 불변식 뷰가 아무 말도 하지 않는다."""
+    """The two sides of the axis are split (interfaces.md §The quarterly table's row set): the quarters are
+    those existing in this output, and the topics are every `trend_use=true` row of the registry. Build the
+    axis from observed distinct values and a topic that never hit disappears from the table quietly, while
+    the grid stays rectangular so the invariant view says nothing."""
     with connect(loaded) as conn:
         run(conn)
         axis = _axis(conn)

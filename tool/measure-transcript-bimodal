@@ -6,7 +6,7 @@ and that the split is bimodal: of the 58 queries with candidates 47 first appear
 (median first rank 32) while 11 reach the top 10, often at rank 1. This tool measures the two
 candidate causes with numbers -- **chunk length** (BM25's length normalisation, `bm25.B`) and **term
 competition** (how much of a query term's df the source owns) -- and prices what moving `B` would
-cost on the §Retrieval-measurements table baseline.
+cost on the §Retrieval measurements table baseline.
 
 Parts. Each prints a table; `--json` prints the same numbers.
 
@@ -20,7 +20,7 @@ Parts. Each prints a table; `--json` prints the same numbers.
              query set reaches, and how often its chunks carry a topic label at all -- the gold of
              `eval` is topic labels, so a source whose chunks are labelled more often is more likely
              to be gold for any query.
-    eval     P@10 / MRR@10 / Hit@10 per `B` for both modes -- the §Retrieval-measurements
+    eval     P@10 / MRR@10 / Hit@10 per `B` for both modes -- the §Retrieval measurements
              table's row. The gold set is built once and reused across the sweep;
              `eval.gold_from_chunks` is the slow part because it matches topics over every chunk.
 
@@ -56,7 +56,7 @@ from analysis.retrieval import bm25, topics  # noqa: E402
 from analysis.retrieval import eval as retrieval_eval  # noqa: E402
 
 SOURCE = "youtube_transcript"  # the source this issue is about
-K = 10  # the same k as the §Retrieval-measurements table and `analysis/retrieval/eval.K`
+K = 10  # the same k as the §Retrieval measurements table and `analysis/retrieval/eval.K`
 # The sweep the issue names. 0.0 is "no length normalisation at all" and 1.0 is "normalise fully";
 # 0.75 is the value in the code, so it is always in the sweep as the baseline column.
 B_SWEEP = (0.0, 0.25, 0.5, 0.75, 0.9, 1.0)
@@ -336,7 +336,7 @@ def report_gold(measured: dict) -> None:
 
 
 def eval_sweep(conn, index, origin, dictionary, values: tuple[float, ...], k: int = K) -> dict:
-    """The §Retrieval-measurements table's two bm25 rows per `B`. Neither the gold set nor the
+    """The §Retrieval measurements table's two bm25 rows per `B`. Neither the gold set nor the
     held-out exclusions depend on `B`, so both are computed once -- otherwise every `B` in the sweep
     would rescan 380k chunks."""
     gold_all = retrieval_eval.gold_from_chunks(conn, None, dictionary=dictionary)
@@ -434,7 +434,7 @@ def report_cohort(measured: dict, k: int = K) -> None:
 
 def report_eval(measured: dict, k: int = K) -> None:
     # fmt: off
-    print(f"the §Retrieval-measurements table bm25 rows per B (P@{k} / MRR@{k} / Hit@{k})")
+    print(f"the §Retrieval measurements table bm25 rows per B (P@{k} / MRR@{k} / Hit@{k})")
     print("     B | mode    | queries | P@10  | MRR@10 | Hit@10 | transcript docs in top 10")
     for value, modes in measured.items():
         for mode, cell in modes.items():

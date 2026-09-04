@@ -134,8 +134,8 @@ def test_every_subcommand_calls_its_worker(argv, key, worked, capsys):
 
 
 def test_an_eval_that_scores_no_query_is_partial(worked, monkeypatch):
-    """청크가 비었거나 사전이 안 얹히면 질의가 하나도 채점되지 않는다 -- 조용한 0 은 녹색으로
-    읽히므로 partial 이다(계약 §검색 종료 코드, #17 S6)."""
+    """With the chunks empty or the dictionary not loaded, not one query is scored -- a quiet 0 reads as
+    green, so it is partial (the contract's §Search exit codes, #17 S6)."""
     from analysis.retrieval import eval as retrieval_eval
 
     monkeypatch.setattr(retrieval_eval, "run", lambda *_a, **_kw: [])

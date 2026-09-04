@@ -230,7 +230,7 @@ def test_the_search_section_carries_the_gate_and_what_it_costs():
 
 def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():
     body = INTERFACES.read_text(encoding="utf-8")
-    start = body.index("### 그러면 근거 없는 질의는 무엇이 막는가")
+    start = body.index("### Then what stops a query with no grounding")
     section = body[start : body.index("\n## ", start)]
     assert f"길이 ≥ {grounding.ZERO_DF_MINLEN} (`ZERO_DF_MINLEN`)" in section
     # Half of this section is why the two branches dropped while choosing the rule were dropped.

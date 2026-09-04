@@ -1,4 +1,4 @@
-"""새 표본으로 되묻는다 — `contracts/interfaces.md` §홀드아웃 이 정본이다 (포크 #51).
+"""Asks again with a new sample — `contracts/interfaces.md` §Holdout is canonical (fork #51).
 
 The rules come from ydc `holdout_commerce.py` (v0.3.0) and were written over rather than imported from the
 slice (the way `analysis/crosscheck` and `analysis/sensitivity` did it).
@@ -27,8 +27,9 @@ HOLDOUT = "holdout"
 # ydc `holdout_commerce.report` 의 `abs(d) <= 1.5`: "홀드아웃이 3분의 1 크기라 표본 흔들림이 있다.
 # 1.5%p 를 넘으면 사람이 본다." 적합값이 아니라 **사람이 볼지 정하는 문턱**이다 (계약 §홀드아웃).
 MATERIAL_PP = 1.5
-# 같은 함수의 `ra[:2] == rb[:2]`. 뒤에 붙은 최하위 일치는 옮기지 않았다 -- 13주제 축의 꼬리는 0으로
-# 묶여 있어 그 자리를 검사하면 순위가 아니라 정렬 순서를 검사하게 된다 (계약 §홀드아웃).
+# The same function's `ra[:2] == rb[:2]`. The lowest-rank match appended after it was not carried over --
+# the tail of the 13-topic axis is tied at 0, so checking that place checks the sort order rather than the
+# rank (the contract's §Holdout).
 RANK_TOP = 2
 
 WINDOW_NEW = "새 기간이다"
@@ -54,7 +55,8 @@ class Review:
 
 @dataclass(frozen=True)
 class Arm:
-    """한 팔의 크기와 창. **분모가 둘이라 둘 다 든다** (계약 §홀드아웃)."""
+    """One arm's size and window. **There are two denominators, so both are carried** (the contract's
+    §Holdout)."""
 
     name: str
     reviews: int
@@ -67,8 +69,9 @@ class Arm:
 
     @property
     def scale(self) -> float:
-        """리뷰 한 건당 주제 언급 수. **두 축을 잇는 계수다** -- `share == rate / scale` 이라, 두 팔의
-        계수가 다르면 같은 `MATERIAL_PP` 가 구성비 축에서 더 헐겁다 (계약 §홀드아웃)."""
+        """Topic mentions per review. **The coefficient joining the two axes** -- `share == rate / scale`,
+        so when the two arms' coefficients differ the same `MATERIAL_PP` is looser on the composition axis
+        (the contract's §Holdout)."""
         return self.mentions / self.reviews if self.reviews else 0.0
 
 
@@ -94,7 +97,8 @@ class TopicRow:
 
     @property
     def share_diff_pp(self) -> float:
-        """§구성 의 축에서의 차. `rate_diff_pp` 와 빼거나 더하지 않는다 -- 분모가 다르다."""
+        """The difference on §Composition's axis. It is neither subtracted from nor added to `rate_diff_pp` --
+        the denominators differ."""
         return self.holdout_share - self.seen_share
 
     @property
@@ -172,9 +176,11 @@ class Comparison:
     def reproduced(self) -> int:
         """**판정 축(언급률)에서** 재현된 주제 수. 분모는 `ranked` 다.
 
-        구성비 축의 같은 셈은 두지 않는다 -- 두 수를 나란히 놓으면 둘째가 첫째의 독립 근거로 읽히는데,
-        `share == rate / scale` 이라 두 팔의 계수가 다르면 그 차이는 안정성이 아니라 **눈금**이다
-        (계약 §홀드아웃, 2026-08-27 실측 세 줄). 축의 차이는 행마다 `share_diff_pp` 가 싣는다.
+        The same count on the composition axis is not kept -- put the two numbers side by side and the second
+        reads as independent evidence for the first, when `share == rate / scale` means that with different
+        coefficients on the two arms that difference is a **scale** rather than stability (the contract's
+        §Holdout, the three measured lines of 2026-08-27). The difference of axis is carried per row by
+        `share_diff_pp`.
         """
         return sum(1 for row in self.ranked if row.reproduced)
 
@@ -186,14 +192,16 @@ def rate(documents: int, reviews: int) -> float:
 
 
 def share(documents: int, mentions: int) -> float:
-    """분모는 **그 팔의 `trend_use` 주제 언급 합**이다 (§구성 의 축). `rate` 와 섞지 않는다."""
+    """The denominator is **that arm's sum of `trend_use` topic mentions** (§Composition's axis). It is not
+    mixed with `rate`."""
     return 100 * documents / mentions if mentions else 0.0
 
 
 def arm(name: str, reviews: Sequence[Review], topic_keys: Sequence[str]) -> Arm:
-    """한 팔을 센다. 한 리뷰에 같은 주제가 여러 표기로 나와도 한 번이다 (ydc `rates`).
+    """Counts one arm. The same topic under several surfaces in one review counts once (ydc `rates`).
 
-    축 밖 주제는 두 분모 어디에도 들지 않는다 -- 들면 구성비가 조용히 작아진다 (§구성 과 같은 규칙).
+    A topic outside the axis enters neither denominator -- let it in and the composition quietly shrinks
+    (the same rule as §Composition).
     """
     axis = set(topic_keys)
     documents: dict[str, int] = {topic: 0 for topic in topic_keys}
@@ -226,13 +234,15 @@ def mix(counted: Arm) -> dict[str, float]:
 
 
 def _gated(seen: Arm, topic_keys: Sequence[str]) -> tuple[str, ...]:
-    """순위를 갖는 주제. 게이트는 **기존 팔**이 진다 -- 홀드아웃에 걸면 새 표본이 얇다는 이유로 기존
-    순위가 사라져 물음이 거꾸로 선다 (계약 §홀드아웃)."""
+    """The topics that have a rank. The gate is carried by **the seen arm** -- put it on the holdout and the
+    existing rank disappears because the new sample is thin, and the question stands on its head (the
+    contract's §Holdout)."""
     return tuple(topic for topic in topic_keys if seen.documents.get(topic, 0) >= MIN_MENTIONS)
 
 
 def topics(seen: Arm, holdout: Arm, topic_keys: Sequence[str]) -> tuple[TopicRow, ...]:
-    """주제마다 한 줄. 두 분모를 나란히 싣되 차를 분모를 넘어 내지 않는다 (계약 §홀드아웃)."""
+    """One line per topic. The two denominators are carried side by side, but no difference is emitted across
+    a denominator (the contract's §Holdout)."""
     ranked = _gated(seen, topic_keys)
     seen_place = ranks({topic: rate(seen.documents.get(topic, 0), seen.reviews) for topic in ranked})
     hold_place = ranks({topic: rate(holdout.documents.get(topic, 0), holdout.reviews) for topic in ranked})
@@ -350,14 +360,16 @@ def basket(
 
 
 def window_reading(seen: Arm, holdout: Arm) -> str:
-    """새 기간인가, 같은 창이 길어진 것인가. **선언하지 않고 읽어서 답한다** (계약 §홀드아웃)."""
+    """A new period, or the same window grown longer? **It answers by reading rather than by declaring** (the
+    contract's §Holdout)."""
     if seen.last_captured is None or holdout.first_captured is None:
         return ""
     return WINDOW_NEW if holdout.first_captured >= seen.last_captured else WINDOW_EXTENDED
 
 
 def verdict(rows: Sequence[TopicRow]) -> str:
-    """ydc `holdout_commerce.report` 의 갈래 순서 그대로 -- **수준이 먼저다** (계약 §홀드아웃)."""
+    """The branch order of ydc `holdout_commerce.report` as it is -- **the level comes first** (the contract's
+    §Holdout)."""
     ranked = [row for row in rows if row.seen_rank is not None and row.holdout_rank is not None]
     if not ranked:
         return VERDICT_THIN

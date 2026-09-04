@@ -1,4 +1,4 @@
--- run 한 줄에 시작·끝·상태·행 수. contracts/entrypoints.md §공통 운영 뷰(collector_health)의 분석판이다.
+-- One line per run: start, end, status, row counts. The analysis counterpart of contracts/entrypoints.md §Common operations view (collector_health).
 -- Only two tables carry a run_id, so those are the only ones whose row count can be counted here --
 -- need_mention/wish_mention do not hang off a run (versioning.md A19), so each stage's own count of
 -- what it made rides in `note` as name=value (analysis/pipeline.py).

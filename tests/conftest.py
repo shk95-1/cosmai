@@ -306,7 +306,7 @@ def _apply_tubedepth_ddl(conn: Any, schema: str) -> None:
 
 @pytest.fixture
 def tubedepth_schema(database_url_for_tests: str, _schema_name: str) -> str:
-    """#8's tubedepth DDL applied to a throwaway schema -- op §승인 경계: production `tubedepth` gets
+    """#8's tubedepth DDL applied to a throwaway schema -- op approval boundary: production `tubedepth` gets
     none of this, only the test schema does.
     """
     engine = create_engine(database_url_for_tests)

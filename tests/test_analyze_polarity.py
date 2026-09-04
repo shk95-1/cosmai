@@ -58,7 +58,8 @@ REVIEWS = [
     ("oliveyoung", "R1", "P1", 5.0, "백탁이 하나도 없어서 진짜 좋아요", WRITTEN),
     ("oliveyoung", "R2", "P1", 1.0, "백탁이 너무 심해서 최악이에요", WRITTEN),
     ("oliveyoung", "R3", "P1", 5.0, "그냥 무난합니다", WRITTEN),
-    # written_at 이 NULL 인 리뷰 — captured_at 으로 폴백하고 그 수를 센다 (formats.md §시간).
+    # A review whose written_at is NULL — it falls back to captured_at and that count is recorded (formats.md
+    # §Time).
     ("oliveyoung", "R4", "P1", 2.0, "끈적임이 심하고 밀려요", None),
     ("oliveyoung", "R5", "P2", 1.0, "비듬이 너무 심해서 최악이에요", WRITTEN),
 ]
@@ -703,8 +704,8 @@ def test_a_run_that_names_a_scope_it_does_not_own_is_refused(loaded: str, _schem
 def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quietly(
     loaded: str, _schema_name: str
 ):
-    """entrypoints.md §분석 이 약속하는 모양: 거절은 `analysis_run.status='failed'` 로 남고 CLI 는 1 을
-    낸다 — 열린 채 남는 run 도, 아무 일 없었다는 듯한 종료 코드 0 도 아니다."""
+    """The shape entrypoints.md §Analysis promises: a refusal stays as `analysis_run.status='failed'` and the
+    CLI emits 1 — neither a run left open nor an exit code 0 as if nothing had happened."""
     with connect(loaded) as conn:
         found = run_stage(
             conn, "polarity", scope="선블록", commerce_schema=_schema_name, youtube_schema=_schema_name
@@ -871,7 +872,8 @@ def test_a_run_without_a_scope_must_own_one():
     # 05:00.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
     assert unready(OWNERS, GEMMA4, "선블록") is None
-    # 남의 scope 는 이 함수의 일이 아니다: 단계가 failed run 으로 거절한다 (entrypoints.md §분석).
+    # Someone else's scope is not this function's job: the step refuses it with a failed run (entrypoints.md
+    # §Analysis).
     assert unready(OWNERS, "stub-v9", "선블록") is None
 
 
@@ -1056,8 +1058,9 @@ class UnreachablePolarity(OwnerPolarity):
 def test_a_probe_that_cannot_reach_the_model_fails_the_run_instead_of_labelling_nothing(
     loaded: str, _schema_name: str
 ):
-    """조용한 실패가 이 이슈가 세 번 밟은 병이다: 못 닿은 밤은 '0건 성공'이 아니라 failed run 이어야
-    하고, `cosmai/cli.py` 가 그 상태를 종료 코드 1 로 옮긴다 (entrypoints.md §분석)."""
+    """A quiet failure is the illness this issue stepped on three times: a night it could not reach is a
+    failed run rather than "0 rows, success", and `cosmai/cli.py` moves that state to exit code 1
+    (entrypoints.md §Analysis)."""
     judge = UnreachablePolarity()
     owners = {SUNBLOCK: Owner(judge.version, ALWAYS)}
     with connect(loaded) as conn:

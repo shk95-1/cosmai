@@ -1,10 +1,11 @@
 """반입하는 스냅샷이 계약이 설명하는 그 스냅샷인지 되묻는다 (포크 #4).
 
-`manifest.json` 의 `rules`·`limitations`·`text_rule` 은 숫자가 무엇을 센 것인지를 말하는 문장이다.
-그 문장이 파일 안에만 있으면 나중에 숫자만 남고 뜻이 사라지므로, 여기 상수로 옮겨 계약
-(`contracts/formats.md` §코퍼스 스냅샷 · `contracts/interfaces.md` §모집단의 한계)이 같은 문장을
-지고, 적재기는 읽어 들인 매니페스트가 이 문장들과 다르면 거절한다 -- 다른 규칙으로 만들어진 코퍼스가
-같은 표에 조용히 섞이면 그 표의 모든 비율이 오류 없이 달라진다.
+`rules`, `limitations` and `text_rule` in `manifest.json` are the sentences that say what the numbers
+counted. With those sentences only inside the file, the numbers would be left later with their meaning gone,
+so they are moved here as constants for the contract (`contracts/formats.md` §Corpus snapshot ·
+`contracts/interfaces.md` §Limitations of the population) to carry the same sentences, and the loader refuses
+when the manifest it read in differs from them -- a corpus made under different rules quietly mixed into the
+same table changes every ratio of that table with no error.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-# manifest.json 의 rules 11줄 그대로. 계약 문장의 자리는 contracts/formats.md §코퍼스 스냅샷.
+# The 11 rules lines of manifest.json, verbatim. The contract sentence's place is
+# contracts/formats.md §Corpus snapshot.
 RULES: tuple[str, ...] = (
     "유일키는 source + source_item_id 다. doc_id 는 그 둘을 콜론으로 이은 값이다.",
     "분기는 저장하지 않는다. published_at 의 연·월로 달력 분기를 만든다"
@@ -32,8 +34,8 @@ RULES: tuple[str, ...] = (
     "포함하면 선크림 장문이 962 → 1,019편이 되고 모든 composition 이 움직인다.",
 )
 
-# source_run_manifests[*].limitations 8줄. 두 런이 같은 목록을 싣는다.
-# 계약 문장의 자리는 contracts/interfaces.md §모집단의 한계.
+# The 8 lines of source_run_manifests[*].limitations. Both runs carry the same list.
+# The contract sentence's place is contracts/interfaces.md §Limitations of the population.
 LIMITATIONS: tuple[str, ...] = (
     "모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).",
     "패널 밖 신규 채널·신규 브랜드의 등장은 관측되지 않는다.",
@@ -51,8 +53,9 @@ TEXT_RULE = (
     "그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외."
 )
 
-# 매니페스트가 선언한 행수를 담는 두 칸. 문장이 아니라 수라 상수로 옮기지 않고 대조만 한다 --
-# 판본마다 다른 값이고, 계약이 지는 것은 "대조한다"는 규칙 쪽이다(contracts/formats.md §코퍼스 스냅샷).
+# The two slots holding the row counts the manifest declared. They are numbers rather than sentences, so
+# they are compared rather than moved into constants -- the value differs per version, and what the contract
+# carries is the rule that they are compared (contracts/formats.md §Corpus snapshot).
 COUNT_KEYS = ("table_counts", "documents_by_content_type")
 
 # The vocabulary the loader knows. Must be the same list as the DDL's CHECK (023).
@@ -86,7 +89,7 @@ def check(manifest: Mapping[str, Any]) -> None:
         raise ManifestMismatch(
             "manifest declares rules the contract does not carry: "
             + ", ".join(problems)
-            + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            + " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )
 
 
@@ -112,7 +115,7 @@ def check_counts(manifest: Mapping[str, Any], measured: Mapping[str, Mapping[str
             + "; ".join(problems)
             + " -- the rows stay under this snapshot_id and are never activated; fix the source and"
             " re-run the same snapshot_id, ON CONFLICT DO NOTHING fills the gaps"
-            " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )
 
 
@@ -132,5 +135,5 @@ def check_unique(read: Mapping[str, int], inserted: Mapping[str, int]) -> None:
         raise ManifestMismatch(
             "duplicate unique keys in the source: "
             + "; ".join(f"{n} has {c} rows but {i} arrived" for n, (c, i) in off.items())
-            + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            + " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )

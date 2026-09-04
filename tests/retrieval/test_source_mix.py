@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 TOOL = ROOT / "tool" / "measure-source-mix"
-HEADER = "## 소스별 분배"
+HEADER = "## Per-source allocation"
 
 
 def loaded() -> ModuleType:
@@ -210,7 +210,7 @@ def test_the_contract_carries_the_verdict_and_the_numbers_it_was_measured_with()
 def test_the_decision_says_what_would_have_been_built_and_why_it_was_not():
     """With only the numbers left and the decision gone, the next person just puts RRF in."""
     body = section()
-    assert "더하지 않는다" in body
+    assert "is not added to `ranked_chunks`" in body
     assert "RRF" in body
     assert "§Retrieval measurements" in body, "measured over the same query list, so it joins up with that"
 

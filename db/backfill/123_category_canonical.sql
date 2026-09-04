@@ -4,8 +4,9 @@
 --   analysis/aggregate/ranking.py:denominators() 가 사이트 카테고리를 leaf 로 잘라 적었다
 --   ('01 > 선케어 > 선블록' → '선블록'). metrics_need.scope 는 need_mention.category 에서 나오고
 --   그쪽은 원문 그대로라, 두 문자열이 절대 만나지 못해 카테고리 scope 가 분모를 하나도 못 받았다.
---   정본은 contracts/formats.md §카테고리 표기 (A21) 가 못박는다. 코드는 같은 PR 에서 고쳤으므로
---   앞으로 쌓이는 행은 이 파일 없이도 정본이다 — 이 파일은 이미 쌓인 행만 되돌린다.
+--   The canonical form is nailed down by contracts/formats.md §Category notation (A21). The code was fixed
+--   in the same PR, so rows piling up from now on are canonical without this file -- this file only puts
+--   back the rows that piled up already.
 --
 -- Why this does not use a short-form -> hierarchical lookup table
 --   leaf → 경로는 함수가 아니다('블러셔' 는 glowpick 의 '블러셔' 이면서 oliveyoung 의

@@ -14,8 +14,9 @@ import psycopg
 from analysis.types import TextUnit
 
 LEAF_SEPARATOR = " > "
-# contracts/formats.md §카테고리 표기 (#123): 정본은 사이트가 발행한 경로 원문 하나뿐이고, 세 자리가
-# 같은 문자열을 쓴다. 값이 md 와 여기 둘 다에 있어야 tests/test_category_canonical.py 가 대조할 수 있다.
+# contracts/formats.md §Category notation (#123): the canonical form is the one uncut path string the site
+# published, and three places use that same string. The value has to be both in the md and here for
+# tests/test_category_canonical.py to be able to compare them.
 CATEGORY_CANONICAL_SOURCE = "trend_radar.rank_snapshot.category_name"
 CATEGORY_CANONICAL_COLUMNS = (
     "needs.need_mention.category",
@@ -23,7 +24,8 @@ CATEGORY_CANONICAL_COLUMNS = (
     "needs.metrics_need.scope",
 )
 ANY_SITE = "*"
-# formats.md §시간: 상대시간에서 복원한 댓글 시각은 2025-09 이후만 월 단위로 믿는다.
+# formats.md §Time: a comment time restored from a relative time is trusted at month grain only from 2025-09
+# on.
 YOUTUBE_MONTH_FROM = date(2025, 9, 1)
 
 CATEGORY_MAP: LiteralString = """
@@ -100,7 +102,7 @@ def review_unit(
     captured_at: datetime | date,
     category: str | None,
 ) -> TextUnit:
-    """리뷰는 일 단위다. written_at 이 NULL 이면 captured_at 으로 폴백한다 (formats.md §시간)."""
+    """A review is at day grain. When written_at is NULL it falls back to captured_at (formats.md §Time)."""
     day = as_day(written_at) or as_day(captured_at)
     assert day is not None  # captured_at is NOT NULL (contracts/ddl/current/app.trend_radar.sql)
     return TextUnit(

@@ -153,10 +153,11 @@ class Built:
     def status(self) -> str:
         """`ok` = the answers were computed. **A wobble is not carried here.**
 
-        흔들린다는 것은 이 명령이 답하려고 존재하는 발견이지 실행의 실패가 아니고, 그 신호는 `note` 의
-        `panel_flips=`·`ad_flips=` 와 표가 이미 싣는다. 종료 코드에 얹으면 두 가지가 깨진다 -- 전량에서
-        1 이 평상 상태라 `set -e` 셸 한 줄이 정상 실행을 실패로 읽고, "발견했다"와 "믿지 마라"가 같은
-        수가 된다. `partial` 은 뒤의 하나만 뜻한다 (계약 §종료 코드, ydc 도 같은 자리다).
+        Wobbling is the finding this command exists to give rather than a failure of the run, and that signal
+        is already carried by `panel_flips=`·`ad_flips=` in the `note` and by the tables. Put it on the exit
+        code and two things break -- over everything a 1 is the normal state, so one `set -e` shell line reads
+        a normal run as a failure, and "we found something" and "do not trust this" become the same number.
+        `partial` means only the latter (the contract's §exit codes, and ydc is in the same place).
         """
         return "ok" if not self.violations else "partial"
 

@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 TOOL = ROOT / "tool" / "measure-vector-floor"
-HEADER = "## 벡터 하한선"
+HEADER = "## Vector floor"
 
 
 def loaded() -> ModuleType:

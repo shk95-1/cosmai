@@ -1,12 +1,12 @@
 """The two arms split by the chunk index -> the holdout comparison (fork #51).
 
-**이 파이프라인은 아무것도 쓰지 않는다.** 이 답의 행은 (팔, 주제)가 키인데 `팔` 의 경계가 청크 색인이라
-`cosmai retrieval chunk` 가 한 번 돌 때마다 움직인다 -- 오늘의 홀드아웃이 내일의 기존이다
-(`contracts/interfaces.md` §홀드아웃). 그래서 산출은 표가 아니라 답이고, 읽기 전용이라 운영 DB 에 그대로
-돌린다.
+**This pipeline writes nothing.** A row of this answer is keyed by (arm, topic), and the boundary of `arm`
+is the chunk index, so it moves every time `cosmai retrieval chunk` runs -- today's holdout is tomorrow's seen
+(`contracts/interfaces.md` §Holdout). So the output is an answer rather than a table, and being read-only it
+is run against the production DB as it is.
 
-모집단은 §대조 의 술어 그대로다(`crosscheck.pipeline.sun_params`) -- 두 팔이 같은 술어 위에 서야 차이가
-표본의 것이지 필터의 것이 아니다.
+The population is the predicate of §Crosscheck as it is (`crosscheck.pipeline.sun_params`) -- the two arms
+have to stand on the same predicate for the difference to be the sample's rather than the filter's.
 
 **The four reads (the chunk roster · the review-key roster · the empty-body count · the population) are done
 inside one transaction snapshot.** The collectors and the chunker keep running, so left outside it the four
@@ -33,14 +33,16 @@ from analysis.holdout import Comparison
 from analysis.retrieval import corpus
 from analysis.retrieval import topics as topic_registry
 
-# 커머스 청크의 `doc_id` 가 곧 **분석이 실제로 본 리뷰의 명부**다. 이것이 우리 컷오프이고, 날짜가 아닌
-# 이유는 계약 §홀드아웃 이 든다 -- `captured_at` 은 수집 시각이지 우리가 본 시각이 아니다.
+# A commerce chunk's `doc_id` is exactly **the roster of reviews the analysis actually saw**. This is our
+# cutoff, and why it is not a date is carried by the contract's §Holdout -- `captured_at` is the collection
+# time, not the time we saw it.
 CHUNKED: LiteralString = "SELECT DISTINCT doc_id FROM retrieval_chunk WHERE source = %s"
 # The roster for finding commerce chunks that are not in the source. A chunk has no foreign key (020) --
 # which is why this comparison is needed.
 ALL_KEYS = "SELECT source, review_key FROM {review}"
-# 본문이 빈 리뷰는 두 팔 모두에서 뺀다: 빈 본문은 청크를 만들지 않으므로, 남기면 "안 본 리뷰" 가 아니라
-# "볼 것이 없는 리뷰" 가 홀드아웃을 채운다 (계약 §홀드아웃).
+# A review with an empty body is removed from both arms: an empty body makes no chunk, so leaving it in
+# fills the holdout with "reviews with nothing to see" rather than "reviews never seen" (the contract's
+# §Holdout).
 POPULATION = (
     "SELECT r.source, r.review_key, r.product_key, r.captured_at, r.body FROM {review} r"
     + SUN_JOIN
@@ -74,9 +76,9 @@ class Built:
 
     @property
     def status(self) -> str:
-        """`ok` = 두 팔이 계산됐다. **재현 실패는 여기 실리지 않는다** -- 그것이 이 명령이 답하려고
-        존재하는 발견이고, 신호는 `verdict` 와 표가 이미 싣는다 (계약 §종료 코드, §대조·§민감도 와 같은
-        자리, 같은 문장)."""
+        """`ok` = the two arms were computed. **A failure to reproduce is not carried here** -- that is the
+        finding this command exists to give, and the signal is already carried by `verdict` and the tables
+        (the contract's §exit codes, the same place and the same sentence as §Crosscheck and §Sensitivity)."""
         return "ok" if not self.violations else "partial"
 
     @property
@@ -88,8 +90,10 @@ class Built:
             f"trend holdout seen={made.seen.reviews:,} holdout={made.holdout.reviews:,} "
             f"empty={self.dropped_empty:,} topics={len(made.topics)} ranked={ranked} "
             f"reproduced={made.reproduced}/{ranked} "
-            # 구성비 축의 재현 수는 싣지 않는다 -- 인용될 때 판정 축의 독립 근거로 읽히는데, 그 차이는
-            # 안정성이 아니라 눈금이다. 대신 그 눈금 자체(두 팔의 계수)를 싣는다 (계약 §홀드아웃).
+            # The reproduction count on the composition axis is not carried -- quoted, it reads as
+            # independent evidence for the verdict axis, when that difference is a scale rather than
+            # stability. Instead the scale itself (the two arms' coefficients) is carried (the contract's
+            # §Holdout).
             f"scale={made.seen.scale:.2f}→{made.holdout.scale:.2f} "
             f"verdict={made.verdict} window={made.window} "
             f"basket_shared={made.basket.shared if made.basket else 0}{tail}"
@@ -121,9 +125,9 @@ def _snapshot(conn: psycopg.Connection[Any]) -> Iterator[None]:
     """Makes the four reads see the same moment.
 
     **이 절의 유일한 기계 방어다.** 수집기와 청커는 계속 도는 중이라, 밖에 두면 팔의 크기와 뺀 빈 본문
-    수와 고아 청크 수가 서로 다른 모집단의 수가 된다. ydc 는 PostgREST 위에서 이것을 못 가져 정지를
-    손으로 흉내 냈다(count=exact → 전순서 정렬 페이징 → 행수 대조) -- 우리 자리에서 그 셋은 항등식이라
-    검사가 아니다 (계약 §홀드아웃).
+    count and the orphan chunk count would be counts of different populations. ydc could not have this on
+    PostgREST and imitated the stop by hand (count=exact -> total-order paging -> row-count comparison) --
+    in our place those three are an identity rather than a check (the contract's §Holdout).
     """
     previous = conn.isolation_level
     conn.rollback()  # the isolation level cannot be changed with a transaction open
@@ -148,12 +152,13 @@ class Read:
 def load(
     conn: psycopg.Connection[Any], *, commerce_schema: str | None = None, source: str = COMMERCE_REVIEW
 ) -> Read:
-    """읽는다. `commerce_schema` 의 `None` 대 `""` 규약은 §대조 와 같다.
+    """Reads. The `None` versus `""` convention of `commerce_schema` is the same as §Crosscheck.
 
-    **주제 매칭은 트랜잭션 밖에서 돈다.** 네 질의는 연달아 돌고 끝나며, 본문을 다 받은 뒤에야 사전을
-    태운다 -- 커서를 연 채 매칭하면 `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에
-    걸린다(#6·#7 이 각각 밟은 자리). 모집단이 §대조 의 청크 전량이 아니라 선케어 리뷰 수천 건이라
-    페이징도 필요 없다.
+    **Topic matching runs outside the transaction.** The four queries run one after another and end, and the
+    dictionary is applied only after every body has been received -- matching with a cursor open runs into
+    `needs_runtime`'s `idle_in_transaction_session_timeout` (15 seconds) (the place #6 and #7 each stepped
+    on). The population is a few thousand suncare reviews rather than all the chunks of §Crosscheck, so no
+    paging is needed either.
     """
     commerce_schema = COMMERCE_SCHEMA if commerce_schema is None else commerce_schema
     dictionary = topic_registry.use_active(conn)
@@ -164,7 +169,7 @@ def load(
         if not int((cur.fetchone() or (0,))[0]):
             raise NoHoldout(
                 "no suncare product in rank_snapshot; run `cosmai collect commerce` -- the ranking is "
-                "what decides the commerce population (contracts/interfaces.md §대조)"
+                "what decides the commerce population (contracts/interfaces.md §Crosscheck)"
             )
         cur.execute(CHUNKED, (source,))
         chunked = {str(row[0]) for row in cur.fetchall()}
@@ -221,7 +226,8 @@ def build(
 
 
 def _pad(text: str, width: int, *, right: bool = False) -> str:
-    """한글은 터미널에서 두 칸을 먹는다 (§대조 의 `render` 와 같은 자, 같은 이유)."""
+    """Hangul takes two columns in a terminal (the same place and the same reason as `render` in
+    §Crosscheck)."""
     space = " " * max(0, width - _width(text))
     return (space + text) if right else (text + space)
 
@@ -247,8 +253,9 @@ def render(built: Built) -> list[str]:
         f"본문 빈 리뷰 {built.dropped_empty:,}건은 두 팔 모두에서 뺐다",
         f"지표  언급률 분모 = 그 팔의 리뷰 수 · 구성비 분모 = 그 팔의 주제 언급 합 "
         f"({seen.mentions:,} · {hold.mentions:,}) · 판정 {made.verdict}",
-        # 계수가 1보다 크면 구성비 축의 문턱이 헐거워지고 작으면 빡빡해진다 -- 어느 쪽인지 단언하지
-        # 않고 계수를 찍는 것은 그것이 모집단마다 다르기 때문이다 (계약 §홀드아웃).
+        # A coefficient above 1 loosens the threshold on the composition axis and below 1 tightens it --
+        # the coefficient is printed rather than asserting which, because it differs per population
+        # (the contract's §Holdout).
         f"      **판정과 재현 표시는 언급률 축에서만 한다** — 구성비는 언급률을 그 팔의 리뷰당 언급 수"
         f"(기존 {seen.scale:.4f} · 홀드 {hold.scale:.4f})로 나눈 값이라,",
         "      같은 %p 가 두 축에서 같은 것을 뜻하지 않는다. 두 축의 Δ 를 빼거나 재현 수를 비교하지 않는다",

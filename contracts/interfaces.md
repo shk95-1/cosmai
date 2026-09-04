@@ -1621,8 +1621,9 @@ next remeasurement replaces this line with the stamp it was measured on.
 - **빈도는 색인 축에서 읽는다**(`bm25.tokenize` · `Index.postings`) — 질의 불용어 목록(포크 #46)을 타지
   않는다. `eval.docs_with_tokens` 가 같은 이유로 같은 축이다. 위 표를 잰 시점의 활성 불용어 목록은
   비어 있었으므로(`version=None`, 2026-08-27) 두 토큰화는 같은 토큰을 냈고, 표는 어느 축으로 읽어도 같다.
-- **게이트는 `pipeline.search` 에만 있다.** `retrieval eval` 은 타지 않으므로 §검색 실측 여섯 줄이 이
-  게이트로 움직이지 않는다 — 타더라도 안 움직인다는 것이 위 표 셋째 줄 첫 칸의 **0** 이다.
+- **The gate is on `pipeline.search` alone.** `retrieval eval` does not ride it, so the six lines of
+  §Retrieval measurements do not move under this gate — and that they would not move even if it did ride it
+  is the **0** in the first column of the third row of the table above.
 
 ## Per-source allocation (not added — the global top k does not follow the composition, fork #54)
 `ranked_chunks(..., sources=...)` 는 `sources` 로 후보를 **좁힐** 뿐, 남은 것 중 전역 상위 k 를 낸다 — 소스별
@@ -1686,9 +1687,10 @@ literal` 이 쓰는 그 주제 별칭 63개 중 후보가 있는 **59개**(`재�
   140 characters would sit at `avg_len`), which needs a re-chunk and a re-embed of production and a new
   retrieval-measurements table — its own issue. `youtube_video` has the same shape (38 of its 47 candidate queries
   outside the top 10 · median 35 · max 777) and the same reading applies.
-- **그래서 분배(각 소스 k/n 씩 뽑아 합치기 · RRF)를 `ranked_chunks` 에 더하지 않는다.** 분배는 공짜가
-  아니다 — 상위 k 의 자리를 관련도가 아니라 소속으로 나눠 주므로, 고칠 쏠림이 없으면 남는 것은 손해뿐이다.
-  §검색 실측 의 정답은 소스와 무관한 (문서, 주제) 라벨이라 그 손해가 곧 P@10 하락으로 나온다.
+- **So an allocation (drawing k/n per source and merging · RRF) is not added to `ranked_chunks`.** An
+  allocation is not free — it hands out the top k slots by membership rather than by relevance, so with no
+  skew to fix all that is left is the loss. The gold of §Retrieval measurements is a (document, topic) label
+  independent of the source, so that loss comes straight out as a fall in P@10.
 - **다시 재야 하는 때**: 이 판정은 위 구성비 위에 선다. 한 소스가 자라 지배 소스의 상위 10 점유율이 색인
   구성비를 넘으면 첫 관문이 뒤집히므로, 코퍼스가 크게 자라거나 소스가 늘면 `tool/measure-source-mix` 를
   다시 돌린다. `sources` 로 **좁히는** 기능은 그대로다 — 이 절이 없다고 말하는 것은 몫이지 좁힘이 아니다.
@@ -1782,8 +1784,9 @@ ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector
 넘기는 것은 하나뿐이다: **라우터는 #11 을 대체하지 못한다** — 신호 넷 중 둘이 막혀 갈래 둘이 서지 않고,
 남은 신호 둘만으로 세우면 실측으로 이득 0 · 손해 2 라 기본값보다 나쁘다. 성분표가 오기 전에는 그 상태가
 바뀌지 않는다. 그러니 #11 은 기본값을 골라야 한다.
-**위 표의 일곱 줄은 어느 것도 #11 의 입력이 아니다** — 기본 엔진 판단의 입력은 전 소스에서 같은 자로 잰
-§검색 실측 여섯 줄이고, §근거 가 자기 두 줄에 대해 못 박은 것과 같은 자리다.
+**Not one of the seven lines of the table above is an input to #11** — the input to the default-engine
+judgment is the six lines of §Retrieval measurements, measured on the same footing over every source, and it
+is the same place §Evidence pinned for its own two lines.
 
 ## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
 The LLM is the last layer and makes no conclusion: `search` finds the evidence (gate included), the code folds

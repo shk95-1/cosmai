@@ -1,8 +1,9 @@
 """저장된 세 표 → 기회 카드 (포크 #6). **아무것도 쓰지 않는다.**
 
-카드가 표를 만들지 않는 이유는 계약 §기회 카드 가 든다 -- 모든 수치가 이미 저장돼 있고(ydc 설계 원칙 2)
-한 벌 더 두면 그 순간 정본을 다툰다. 파일로도 떨구지 않는다(`retrieval terms` 와 같은 규약): 자라는
-코퍼스의 스냅숏이라 레포에 두면 낡고, 남기려면 리다이렉트한다.
+Why cards make no table is carried by the contract's §Opportunity cards -- every number is already stored
+(ydc design principle 2) and a second copy fights over being canonical the moment it exists. It is not dropped
+to a file either (the same convention as `retrieval terms`): a snapshot of a growing corpus goes stale in the
+repo, so redirect it if you want to keep it.
 
 근거를 읽는 길은 뷰 `needs.topic_quarter_evidence_quote` 하나다. 이 파일이 판정·근거·코퍼스를 손으로
 조인하지 않는 것이 이 이슈의 완료 기준이 실제로 서 있다는 증거다 -- 사람이 쓰는 길과 코드가 쓰는 길이
@@ -66,9 +67,10 @@ class CardOutcome:
 
     @property
     def status(self) -> str:
-        """**카드 0건은 1 이 아니다.** 그것은 규칙이 다 돌고 나온 정상적으로 계산된 답이고(이 표본에서도
-        11분기 중 8분기가 0장이다), 이 파일 맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 --
-        #41 이 `sensitivity` 에서 못 박은 그 자리와 같다 (`contracts/entrypoints.md` §민감도).
+        """**Zero cards is not a 1.** It is the normally computed answer after every rule has run (in this
+        sample too, 8 of 11 quarters have none), and in the common convention at the top of this file a 1
+        means "the output is not whole" -- the same place #41 pinned in `sensitivity`
+        (`contracts/entrypoints.md` §Sensitivity).
 
         잘린 산출은 하나뿐이다: 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 셀.
         """

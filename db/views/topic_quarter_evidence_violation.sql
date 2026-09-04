@@ -1,4 +1,4 @@
--- 근거 표의 두 불변식을 저장된 행에 대고 되묻는다. 비어 있으면 참이다 (contracts/interfaces.md §근거).
+-- Asks the two invariants of the evidence table back against the stored rows. Empty means true (contracts/interfaces.md §Evidence).
 -- rank's grammar, the source match and duplicate documents are already kept inside one row by 025's
 -- CHECK and unique key, so they are not here. What is here is the two things a single row cannot show.
 -- db/migrate.sh re-applies this on every deploy.
