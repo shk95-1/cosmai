@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Re-measures what the MFDS registration ledger actually joins to (fork #55, work item 1).
+
+Issue #55 asks for "one line of cross-check: the number of products that join". Which key that line
+counts is a decision, and the decision was made by measuring the candidates rather than by reading
+the column names:
+
+  item_name   normalised and compared with `trend_radar.product.name` -- **0** products (measured
+              2026-09-04). A registered name is the legal name on the filing -- brand, formulation and
+              SPF glued into one token -- and a listing name is marketing copy, so exact equality is
+              empty and containment only finds coincidences. The product side is not quoted as a fixed
+              number anywhere: it grows with every collection, which is why this is a tool.
+  entp_name   normalised and compared with `needs.entity_lexicon(kind='brand').surface` -- 233 of the
+              4,735 rows, on 40 brands (measured 2026-09-04). The corporate form has to come off
+              first: 4,332 companies carry one and no brand surface does, and leaving it in drops the
+              join to 1 row. Both sides are folded, not only the ledger side -- 118 of the 950 active
+              brand surfaces move under the fold.
+
+So the key is `entp_key` (db/seed/mfds.py `normalize_company`, stored on the row by 028) against the
+brand lexicon, and this tool prints that count against the database as it is now. Numbers move as the
+lexicon grows -- that is the point of a tool rather than a fixed test.
+
+The database is only ever read: the session sets `default_transaction_read_only`, so a stray write
+here fails instead of landing in production.
+
+    uv run tool/measure-mfds-join                  # production needs_runtime, read-only
+    uv run tool/measure-mfds-join --url <url>
+    uv run tool/measure-mfds-join --json
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from sqlalchemy.engine import make_url  # noqa: E402
+
+from db.runtime import runtime_url  # noqa: E402
+from db.seed._common import EVAL_DIR, connect  # noqa: E402
+from db.seed.mfds import MFDS_CSV, fold, normalize_company, rows  # noqa: E402
+
+COMMERCE_SCHEMA = "trend_radar"
+READ_ONLY = "-c default_transaction_read_only=on"
+
+BRANDS = """
+SELECT canonical, surface FROM entity_lexicon WHERE kind = 'brand' AND active
+"""
+PRODUCTS = "SELECT name, brand FROM {schema}.product"
+PRODUCT_REFS = "SELECT brand, name FROM product_ref"
+
+
+def read_only(url: str) -> str:
+    """Read-only at the session level. A measurement tool that can write is a production write waiting
+    for a typo, and #55's fork side is explicitly not allowed one.
+
+    libpq takes one `options` string, so the flag is joined onto whatever the caller's URL already
+    carries rather than written over it -- `update_query_dict` replaces the key, and replacing it would
+    silently drop the `-csearch_path=` the per-test URLs are built with.
+    """
+    parsed = make_url(url)
+    existing = parsed.query.get("options", "")
+    options = " ".join(
+        part for part in (existing if isinstance(existing, str) else " ".join(existing), READ_ONLY) if part
+    )
+    return parsed.update_query_dict({"options": options}).render_as_string(hide_password=False)
+
+
+def measure(url: str, schema: str) -> dict[str, object]:
+    ledger = rows(EVAL_DIR)
+    companies: dict[str, int] = {}
+    items: dict[str, int] = {}
+    for _seq, item_name, _entp_name, _report_date, entp_key in ledger:
+        companies[entp_key] = companies.get(entp_key, 0) + 1
+        items[fold(item_name)] = items.get(fold(item_name), 0) + 1
+
+    with connect(read_only(url)) as conn, conn.cursor() as cur:
+        cur.execute(BRANDS)
+        surfaces = cur.fetchall()
+        brand_rows = len(surfaces)
+        brands = {normalize_company(surface): canonical for canonical, surface in surfaces}
+        cur.execute(PRODUCTS.format(schema=schema))  # type: ignore[arg-type]
+        products = [(name, brand) for name, brand in cur.fetchall()]
+        cur.execute(PRODUCT_REFS)
+        refs = [(brand, name) for brand, name in cur.fetchall()]
+        conn.commit()
+
+    matched = sorted(set(companies) & set(brands))
+    canonical = {brands[key] for key in matched}
+    covered = {normalize_company(c) for c in canonical}
+    return {
+        "ledger_rows": len(ledger),
+        "ledger_companies": len(companies),
+        # Folding collapses surfaces onto one another, so these two are different numbers and the
+        # printed line has to say which one it is showing.
+        "brand_rows": brand_rows,
+        "brand_surfaces": len(brands),
+        "joined_rows": sum(companies[key] for key in matched),
+        "joined_brands": len(canonical),
+        "products": len(products),
+        # The cross-check the issue asks for: how much of the shelf those brands actually cover.
+        "products_under_joined_brands": sum(1 for _n, b in products if normalize_company(b) in covered),
+        "product_refs": len(refs),
+        "product_refs_under_joined_brands": sum(1 for b, _n in refs if normalize_company(b) in covered),
+        # The rejected candidate, re-measured every run so the rejection stays honest.
+        "item_name_exact_products": sum(1 for n, _b in products if fold(n) in items),
+        "brands": sorted(canonical),
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime, read-only.")
+    parser.add_argument("--schema", default=COMMERCE_SCHEMA, help="Schema holding trend_radar.product.")
+    parser.add_argument("--json", action="store_true", help="Print only in the machine-readable form.")
+    args = parser.parse_args()
+
+    m = measure(args.url or runtime_url(), args.schema)
+    if args.json:
+        print(json.dumps(m, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    # Repo-relative: an absolute path here would differ per checkout and mean nothing in a report.
+    print(f"source  eval/{MFDS_CSV}")
+    print(f"ledger  {m['ledger_rows']:,} filings · {m['ledger_companies']:,} companies")
+    print(f"lexicon {m['brand_surfaces']:,} distinct folded keys from {m['brand_rows']:,} active surfaces")
+    print(
+        f"join    entp_key = entity_lexicon.surface (kind='brand'): "
+        f"{m['joined_rows']:,} of {m['ledger_rows']:,} filings on {m['joined_brands']} brands · "
+        f"those brands cover {m['products_under_joined_brands']:,} of {m['products']:,} "
+        f"{args.schema}.product rows and {m['product_refs_under_joined_brands']} of "
+        f"{m['product_refs']} needs.product_ref rows"
+    )
+    print(
+        f"rejected item_name = product.name (normalised): "
+        f"{m['item_name_exact_products']} of {m['products']:,} products -- a registered name is not a "
+        f"listing name"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
