@@ -61,8 +61,10 @@ report() { # $1 = db.schema label (also the $work filename), $2 = what expected 
     fi
 }
 
-# db:schema pairs, matching the contracts/ddl/current/<db>.<schema>.sql naming.
-pairs='app:trend_radar app:tubedepth cosmai:cosmai'
+# db:schema pairs, matching the contracts/ddl/current/<db>.<schema>.sql naming. cosmai:cosmai is not
+# listed any more: database cosmai (cosmai-old) was dumped and dropped on 2026-09-04 (#18), and its
+# baseline contracts/ddl/current/cosmai.cosmai.sql stays only as the record of what was dropped.
+pairs='app:trend_radar app:tubedepth'
 
 # Everything is built before anything is dumped, and no schema is dropped in between. That is not
 # tidiness. pg_dump orders objects by dependency, not by name, so a schema dumped alone sorts
