@@ -27,8 +27,16 @@ MODULES = (
     "analysis.retrieval.eval",
     "analysis.retrieval.embed",
     "analysis.retrieval.vectors",
+    "analysis.retrieval.ask",
 )
-COMMANDS = ("retrieval", "retrieval chunk", "retrieval search", "retrieval eval", "retrieval embed")
+COMMANDS = (
+    "retrieval",
+    "retrieval chunk",
+    "retrieval search",
+    "retrieval ask",
+    "retrieval eval",
+    "retrieval embed",
+)
 
 # 차단은 import 시점에 ModuleNotFoundError 를 내는 finder 로 건다 -- 빈 가짜 모듈을 심으면
 # "있는데 비었다" 가 되어 이미지의 "아예 없다" 와는 다른 상황을 시험하게 된다.
