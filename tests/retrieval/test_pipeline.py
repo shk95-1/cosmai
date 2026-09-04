@@ -645,3 +645,61 @@ def test_the_vector_gate_narrowing_is_the_pre_ledger_source_set(conn):
     for engine in ("bm25", "hybrid"):
         assert pipeline.index_sources(engine, corpus.SOURCES) == corpus.SOURCES
         assert pipeline.index_sources(engine, None) is None
+
+
+# ---------- a scoped run sweeps its own source only (#79) ----------
+
+
+def _rows_by_source(conn: psycopg.Connection, source: str) -> list[tuple]:
+    """What a run outside this source has to leave byte-identical: the id, the body, and the moment the
+    body was last written."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT chunk_id, text, chunked_at FROM retrieval_chunk WHERE source = %s ORDER BY chunk_id",
+            (source,),
+        )
+        rows = cur.fetchall()
+    conn.commit()
+    return rows
+
+
+def _load_both_sources(conn: psycopg.Connection, schema: str) -> None:
+    # The chunks are built through the run itself: rows put into retrieval_chunk by hand would prove
+    # nothing about what a scan saw, which is the only evidence the sweep stands on.
+    _seed_filings(conn)
+    outcome = pipeline.run(
+        conn, youtube_schema=schema, mfds_schema=schema, sources=(corpus.YOUTUBE_COMMENT, corpus.MFDS)
+    )
+    assert (outcome.documents, outcome.chunks) == (4, 4)
+
+
+def test_a_scoped_sweep_deletes_only_its_own_sources_chunks(conn, owner, _schema_name):
+    """`cosmai retrieval chunk --source youtube_comment` reads no filing at all, so every ledger doc_id
+    looks vanished to it. Swept over the whole table the ledger loses its chunks, and since it is
+    bm25-only `cosmai retrieval embed` never puts them back -- only a full chunk pass would (#77, #79)."""
+    _load_both_sources(conn, _schema_name)
+    ledger = _rows_by_source(conn, corpus.MFDS)
+    assert len(ledger) == 1
+    with owner.cursor() as cur:
+        # Not every comment: a source scanned to 0 documents is left out of the cleanup wholesale, and
+        # then the sweep this test is about never runs.
+        cur.execute("DELETE FROM comments WHERE comment_id IN ('c1', 'c2')")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert (outcome.swept, outcome.vanished) == (True, 2)  # the delete path ran, so this is not inaction
+    assert [row[0] for row in _rows_by_source(conn, corpus.YOUTUBE_COMMENT)] == ["youtube_comment:c3#0"]
+    assert _rows_by_source(conn, corpus.MFDS) == ledger
+
+
+def test_an_incremental_scoped_run_sweeps_nothing_at_all(conn, owner, _schema_name):
+    # `--since` reads no out-of-range document, so nothing in this run is evidence that a document
+    # vanished -- neither in the source it scanned nor in the one it never opened.
+    _load_both_sources(conn, _schema_name)
+    before = _rows_by_source(conn, corpus.YOUTUBE_COMMENT) + _rows_by_source(conn, corpus.MFDS)
+    with owner.cursor() as cur:
+        cur.execute("DELETE FROM comments WHERE comment_id IN ('c1', 'c2')")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,), since=SINCE)
+    assert not outcome.swept
+    assert (outcome.vanished, outcome.pruned, outcome.emptied) == (0, 0, 0)
+    assert _rows_by_source(conn, corpus.YOUTUBE_COMMENT) + _rows_by_source(conn, corpus.MFDS) == before

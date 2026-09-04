@@ -356,7 +356,11 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   `vector` cannot find a filing and `hybrid` finds it through its lexical arm alone — and the grounding gate on
   `--engine vector` reads the four encoded sources only (`pipeline.index_sources`), so a token grounded by a
   filing alone is still refused there instead of buying a call answered from unrelated text chunks. `chunk` scans it with the
-  others; `--since` does not apply (a snapshot has no per-row time). Adding the source moved the index
+  others; `--since` does not apply (a snapshot has no per-row time). The default `--source` set is all five,
+  ledger included (`corpus.SOURCES`, restated in `cosmai/cli.py`), so `ask` with no `--source` can answer a
+  report number; a scoped run (`--source <one>`) sweeps only its own source's vanished documents (fork #79).
+  The first load in production was one `cosmai retrieval chunk --source mfds` run by the coordinator
+  (2026-09-05, 4,735 chunks); a refresh of the ledger needs the same run again. Adding the source moved the index
   fingerprint (`index_signature` hashes the source set), so the first `search`/`ask`/`eval`/`terms` after #77
   rebuilds the cache (`chunk` never reads it). Source: rows 8 and 13 of the #74 acceptance table on fork #69 — the seed alone lifted neither.
 - **The topic lexicon is the active version of `needs.aspect_lexicon`** (`ruleset='retrieval-topic'`, fork
