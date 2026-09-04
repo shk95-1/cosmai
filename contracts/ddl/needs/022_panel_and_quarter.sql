@@ -67,7 +67,7 @@ CREATE TABLE needs.metrics_topic_quarter (
   panel_version int  NOT NULL REFERENCES needs.panel_roster,
   panel_role    text NOT NULL CHECK (panel_role IN ('product','expert')),
   mentions         int NOT NULL,           -- numerator: documents this topic matched
-  documents        int NOT NULL,           -- documents of that population in that quarter (§Formulas' "quarterly document population")
+  documents        int NOT NULL,           -- documents of that population in that quarter (the quarterly document population, §Formulas)
   quarter_mentions int NOT NULL,           -- composition denominator: that quarter's trend_use topic mentions summed
   denom_channels   int NOT NULL,           -- panel channels that entered the computation that quarter
   -- The decimal places are the resolution of the verdict gate (ydc judge.py's TAU·DIFFUSION_TAU were

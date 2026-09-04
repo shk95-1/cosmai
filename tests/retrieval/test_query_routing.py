@@ -133,7 +133,7 @@ def test_the_tokenizer_dictionary_overlaps_the_words_people_ask_with():
     now."""
     people = {alias for entry in topics.active().entries for alias in entry["ko"]}
     caught = people & surfaces()
-    assert caught, "겹침이 0 이면 §질의 라우팅 의 근거가 바뀐 것이다"
+    assert caught, "an overlap of 0 would mean the grounds of §Query routing have changed"
     assert len(caught) == measured()["dictionary"]["ko_in_dictionary"]
     for word in ("선크림", "백탁", "톤업", "무기자차"):
         assert word in caught
@@ -161,7 +161,7 @@ def test_no_list_in_this_repo_can_decide_that_a_word_is_an_ingredient():
     inci = {alias for entry in topics.active().entries for alias in entry["mfds_inci"]}
     people = {alias for entry in topics.active().entries for alias in entry["ko"]}
     assert "자외선차단제" in inci, "제품 범주가 성분 표기 축에 섞여 있다"
-    assert inci & people, "두 축이 갈렸다면 §질의 라우팅 의 근거가 바뀐 것이다"
+    assert inci & people, "if the two axes had parted, the grounds of §Query routing would have changed"
 
 
 def test_the_frames_carry_no_exact_signal_of_their_own():

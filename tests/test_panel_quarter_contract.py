@@ -32,14 +32,14 @@ VIEW = ROOT / "db" / "views" / "metrics_topic_quarter_violation.sql"
 TOPIC_AXIS = ROOT / "analysis" / "retrieval" / "dict" / "topics_v1.csv"
 NEED_REGISTRY = ROOT / "eval" / "lexicon" / "need_key_v1.csv"
 PANEL_SEED = ROOT / "eval" / "panel" / "channels_v1.csv"
-GRAIN_HEADER = "| 그레인 | 정본 표 | 행의 시간 칸 |"
-ROLE_HEADER = "| `panel_role` | 뜻 | v1 패널 |"
-PANEL_CSV_HEADER = "| CSV 열 | → `needs.panel_channel` |"
+GRAIN_HEADER = "| grain | canonical table | the row's time slot |"
+ROLE_HEADER = "| `panel_role` | meaning | v1 panel |"
+PANEL_CSV_HEADER = "| CSV column | → `needs.panel_channel` |"
 PANEL_CHANNELS = 43  # ydc's 43 seed channels (issue #3's body). Loaded by tests/test_panel_seed.py (#31).
 # The registry for the topic axis. This sentence has to appear identically in two spots of the contract
 # (the two tests below).
 REGISTRY = "aspect_lexicon(ruleset='retrieval-topic')"
-NOT_THE_REGISTRY = "needs.need_key 가 아니다"
+NOT_THE_REGISTRY = "not needs.need_key"
 # The table belongs to needs_owner -- migrator only ever stands in that spot through SET ROLE
 # (db/bootstrap.sql).
 OWNER = text("SET ROLE needs_owner")
@@ -87,7 +87,7 @@ def _markdown_rows(path: Path, header: str) -> list[list[str]]:
 
 
 def _grain_rows() -> list[tuple[str, str]]:
-    """(그레인, 정본 표) — `contracts/formats.md` §시간."""
+    """(grain, canonical table) — `contracts/formats.md` §Time."""
     return [
         (cells[0], cells[1].strip("`").removeprefix("needs."))
         for cells in _markdown_rows(FORMATS, GRAIN_HEADER)
@@ -106,7 +106,7 @@ def test_the_contract_names_the_owner_of_each_grain():
     """The sentence this task most easily drops -- once the same concept of a metric lives in two
     tables, unless the contract says which table is the source of truth for which granularity, the two
     quietly become substitutes for each other."""
-    assert _grain_rows() == [("월", "metrics_need"), ("월", "metrics_wish"), ("분기", QUARTER)]
+    assert _grain_rows() == [("month", "metrics_need"), ("month", "metrics_wish"), ("quarter", QUARTER)]
 
 
 def test_no_table_is_the_owner_of_two_grains():
@@ -313,7 +313,7 @@ def test_the_stored_digits_are_the_digits_the_contract_pins():
     rounded value -- the digit count is exactly that gate's resolution, so the contract and the DDL must
     carry the same digit count."""
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
-    pinned = next(line for line in lines if line.strip().startswith("자리수:"))
+    pinned = next(line for line in lines if line.strip().startswith("Decimal places:"))
     assert _numeric_scales() == {name: int(digits) for name, digits in re.findall(r"`(\w+)` (\d+)", pinned)}
 
 

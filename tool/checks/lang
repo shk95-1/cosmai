@@ -33,12 +33,15 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 
 # Korean that is content rather than operating surface stays. Each entry leaves as a later wave of
 # #192 removes its reason, so the list is here rather than spread across the tree.
+# contracts/section-names.md is the whole of its entry's reason: it is the rename ledger of the `§`
+# anchors (#206), so every Korean string in it is a historical name, which AGENTS.md exempts.
 # A fixture directory is named twice because git's default pathspec matching gives `**` no empty
 # match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
 # Unquoted on purpose: one word, either --cached or a revision range.
 hits=$(git diff $lang_range -U0 --no-color -- . \
     ':!tool/checks/lang' \
     ':!README.ko.md' \
+    ':!contracts/section-names.md' \
     ':!eval/' \
     ':!db/seed/data/**' \
     ':!db/seed/mentions.py' \

@@ -36,14 +36,14 @@ def _search_baseline_rows() -> dict[tuple[str, str], dict[str, str]]:
 
 def _search_section() -> list[str]:
     lines = ENTRYPOINTS.read_text(encoding="utf-8").splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith("## 검색"))
+    start = next(i for i, line in enumerate(lines) if line.startswith("## Search"))
     end = next(i for i, line in enumerate(lines[start + 1 :], start + 1) if line.startswith("## "))
     return lines[start:end]
 
 
 def _exit_code_bullet() -> str:
     section = _search_section()
-    at = next(i for i, line in enumerate(section) if line.startswith("- 종료 코드:"))
+    at = next(i for i, line in enumerate(section) if line.startswith("- exit codes:"))
     bullet = [section[at]]
     for line in section[at + 1 :]:
         if not line.startswith("  "):  # continuation lines only; the next item starts with `- ` again
@@ -188,7 +188,7 @@ def test_the_scorecard_carries_the_dictionary_column_on_every_engine():
     from analysis.retrieval import eval as retrieval_eval
 
     section = "\n".join(_search_section())
-    assert "CSV `dictionary` 열" in section
+    assert "CSV `dictionary` column" in section
     assert {"store", "note", "dictionary"} <= set(retrieval_eval.FIELDS)
 
 
@@ -214,8 +214,8 @@ def test_the_baseline_names_the_store_the_vector_lines_stand_on():
     -- in ydc a delta labelled "first pass -> second pass" was really "no MFDS vectors -> second pass"
     (#49)."""
     text = INTERFACES.read_text(encoding="utf-8")
-    header = next(line for line in text.splitlines() if line.startswith("## 검색 실측"))
-    chunks = re.search(r"청크 ([\d,]+)", header)
+    header = next(line for line in text.splitlines() if line.startswith("## Retrieval measurements"))
+    chunks = re.search(r"([\d,]+) chunks", header)
     stamped = re.search(r"vectors=(\d+)", text)
     assert chunks and stamped, "표 머리의 청크 수와 저장소 판본 줄 중 하나가 없다"
     # A table measured with a store whose vectors do not cover the corpus has to say so inside the table.

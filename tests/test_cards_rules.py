@@ -1,7 +1,8 @@
 """카드 유형은 규칙이 배정한다 — LLM 이 "이건 기회야"라고 판단하지 않는다 (포크 #6, ydc `cards.py`).
 
-계약 §기회 카드 의 표가 여섯 줄이고 그중 넷만 이 레포에서 설 수 있다. 못 서는 둘을 어휘에서 지우지
-않는 것과, 없는 입력을 0 으로 깔지 않는 것이 같은 문장이라 이 파일이 그 둘을 함께 붙든다.
+The table of the contract's §Opportunity cards has six lines and only four of them can stand in this repo.
+Not erasing the two that cannot from the vocabulary, and not laying an absent input down as 0, are the same
+sentence, so this file holds the two together.
 """
 
 from __future__ import annotations
@@ -124,7 +125,8 @@ def test_a_card_needs_a_quote_or_it_is_not_a_card():
     """설계 원칙 3 — 근거 원문이 없으면 만들지 않는다. 다만 조용히 넘기지는 않는다."""
     made = cards.build([facts("채널 확산", "근거 부족", gap=19.48)], quotes={}, alias_rank={})
     assert made.cards == ()
-    # 규칙이 골라 낸 셀이 산출에서 빠진 것이라, 그 사실이 종료 코드까지 간다 (계약 §근거·카드).
+    # A cell the rules picked was left out of the output, and that fact reaches the exit code (the contract's
+    # §Evidence and cards).
     assert made.unquoted == (("자극_눈시림", "2026Q2"),)
 
 
@@ -135,7 +137,8 @@ def test_a_cell_no_rule_caught_is_not_an_unquoted_cell():
 
 
 def test_the_cap_on_quotes_is_the_one_the_evidence_rules_own():
-    """계약은 "그 수의 자리는 §근거 하나"라고 적는다 — 사본이 있으면 근거만 늘려도 카드는 셋이다."""
+    """The contract writes "that number has one place, §Evidence" — with a copy, adding evidence alone would
+    still leave three cards."""
     import inspect
 
     from analysis.evidence import TOP_PER_CELL
@@ -179,7 +182,7 @@ def test_the_limits_carry_the_hold_reason_when_there_is_one(kind: str, wanted: s
 
 
 def test_every_card_says_the_recent_quarter_is_structurally_undercounted():
-    """§모집단의 한계 의 여덟 문장 중 카드가 늘 지고 가야 하는 하나다."""
+    """The one of §Limitations of the population's eight sentences a card always has to carry."""
     made = cards.limits(facts("급상승", "근거 부족"), ())
     assert any("과소 집계" in line for line in made)
 
