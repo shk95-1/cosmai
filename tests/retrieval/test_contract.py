@@ -60,7 +60,7 @@ def test_the_exit_code_contract_covers_every_retrieval_subcommand():
     """계약이 덮지 않는 하위명령은 종료 코드가 구현에만 있다 -- `eval` 의 "질의 0개 -> 1"(cli.py)과
     `embed` 의 "언제나 0" 이 그랬다(#17 S6)."""
     bullet = _exit_code_bullet()
-    for action in ("chunk", "search", "eval", "embed", "terms"):
+    for action in ("chunk", "search", "eval", "embed", "terms", "ask"):
         assert f"`{action}`" in bullet, action
 
 
