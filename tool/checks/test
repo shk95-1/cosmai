@@ -4,7 +4,27 @@
 # the needs migration ledger and contracts/ddl/needs/*.sql. Removed on exit.
 set -e
 . tool/checks/prerequisite
+. tool/checks/suite-lock
+. tool/checks/tested-tree
 require_command uv docker pg_isready
+
+# One exit path for everything this run holds: the slot it took, the container it started, the
+# secret file, and -- only when pytest came back green -- the tested-tree entry that lets the next
+# push of this same tree skip the suite (#214). Killed or failed, this records nothing.
+secret_file=""
+container_name=""
+pytest_log=""
+suite_passed=""
+cleanup() {
+    cleanup_status=$?
+    [ -z "$secret_file" ] || rm -f "$secret_file" || true
+    [ -z "$pytest_log" ] || rm -f "$pytest_log" "$pytest_log.status" || true
+    [ -z "$container_name" ] || docker rm -f -v "$container_name" >/dev/null 2>&1 || true
+    [ -z "$suite_lock_dir" ] || rmdir "$suite_lock_dir" 2>/dev/null || true
+    [ -z "$suite_passed" ] || tested_tree_record "$suite_passed"
+    return $cleanup_status
+}
+trap cleanup EXIT
 
 # Before the postgres container: a broken portal/public/*.js fails here for free, without
 # paying the ~2min container-and-migrate cost that the python suite below needs.
@@ -37,10 +57,13 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
         printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
         exit 1
     fi
-    secret_file=$(mktemp)
+    # Our own leaked container from a killed run goes first, so it is not counted as somebody
+    # else's suite, and only then does this run queue for one of the host's three slots.
     # rm -v: removes the postgres image's anonymous volume too (without it every run leaks a ~1GB volume)
-    trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT
     docker rm -f -v "$name" >/dev/null 2>&1 || true
+    suite_lock_acquire "$port"
+    secret_file=$(mktemp)
+    container_name=$name
     docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
         -e POSTGRES_DB=fleet --tmpfs /var/lib/postgresql -p "$port":5432 "$image" >/dev/null
     for _ in $(seq 1 60); do
@@ -88,4 +111,18 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
 fi
 
 printf '→ pytest\n'
-uv run pytest
+# The cache entry carries the count out of pytest's summary line, so the run is tee'd. POSIX sh has
+# no PIPESTATUS, hence the status file; PYTHONUNBUFFERED keeps a fifteen-minute run streaming
+# rather than arriving in 8 KB blocks now that stdout is a pipe.
+pytest_log=$(mktemp)
+pytest_status="$pytest_log.status"
+{
+    if PYTHONUNBUFFERED=1 uv run pytest 2>&1; then pytest_rc=0; else pytest_rc=$?; fi
+    printf '%s\n' "$pytest_rc" > "$pytest_status"
+} | tee "$pytest_log"
+
+pytest_rc=$(cat "$pytest_status" 2>/dev/null || echo 1)
+rm -f "$pytest_status"
+[ "$pytest_rc" -eq 0 ] || exit "$pytest_rc"
+suite_passed=$(sed -n 's/.*[^0-9]\([0-9][0-9]*\) passed.*/\1/p' "$pytest_log" | tail -1)
+[ -n "$suite_passed" ] || suite_passed=0

@@ -1,0 +1,54 @@
+# origin: this repository (#214).
+# reuse: source it, then suite_lock_acquire <port> before starting a test container.
+#
+# Three suites at once fit in this host's memory; a fourth kills one of them (#212, #204), and a
+# killed run leaks its container. So a run waits for a slot instead of starting. Two things are
+# counted because a suite that is still migrating has no container yet: the running containers and
+# the lock directories, whichever number is larger. mkdir is the atomic part, and the caller's EXIT
+# trap removes the directory, so a killed run frees its slot.
+
+MAX_CONCURRENT_SUITES=3
+
+suite_lock_dir=""
+
+suite_lock_root() {
+    printf '%s\n' "${COSMAI_SUITE_LOCK_DIR:-/tmp/cosmai-suite-lock}"
+}
+
+suite_lock_count() {
+    suite_lock_containers=$(docker ps --filter name=cosmai-test-postgres- --format '{{.Names}}' 2>/dev/null | grep -c . || true)
+    suite_lock_dirs=$(ls -1 "$(suite_lock_root)" 2>/dev/null | grep -c . || true)
+    if [ "$suite_lock_containers" -ge "$suite_lock_dirs" ]; then
+        printf '%s\n' "$suite_lock_containers"
+    else
+        printf '%s\n' "$suite_lock_dirs"
+    fi
+}
+
+suite_lock_acquire() {
+    suite_lock_interval=${COSMAI_SUITE_WAIT_SECONDS:-15}
+    # One line a minute rather than one a poll: a twenty-minute wait must not scroll the terminal.
+    if [ "$suite_lock_interval" -ge 1 ]; then
+        suite_lock_every=$((60 / suite_lock_interval))
+    else
+        suite_lock_every=60
+    fi
+    [ "$suite_lock_every" -ge 1 ] || suite_lock_every=1
+
+    suite_lock_polls=0
+    suite_lock_running=$(suite_lock_count)
+    while [ "$suite_lock_running" -ge "$MAX_CONCURRENT_SUITES" ]; do
+        if [ $((suite_lock_polls % suite_lock_every)) -eq 0 ]; then
+            printf 'waiting: %s suites running (limit %s)\n' "$suite_lock_running" "$MAX_CONCURRENT_SUITES"
+        fi
+        suite_lock_polls=$((suite_lock_polls + 1))
+        sleep "$suite_lock_interval"
+        suite_lock_running=$(suite_lock_count)
+    done
+
+    mkdir -p "$(suite_lock_root)"
+    suite_lock_dir="$(suite_lock_root)/$1"
+    # An existing directory for THIS port is a leak from a killed run of this same worktree, never
+    # another suite: the port is derived from the worktree path. Adopting it is how it gets cleaned.
+    mkdir "$suite_lock_dir" 2>/dev/null || true
+}

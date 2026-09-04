@@ -1,0 +1,25 @@
+# origin: this repository (#214).
+# reuse: source it from a hook or a check; it is the one place that knows where a green run is kept.
+#
+# What the suite proves is a tree, not a push: the same tree pushed again -- the worker's own push,
+# the coordinator's merge carrying that identical tree, the wave branch -- has nothing new to check.
+# The record lives under the common git directory, so every worktree of one clone shares it and no
+# entry can ever be committed.
+
+tested_tree_dir() {
+    printf '%s/cosmai-tested\n' "$(git rev-parse --git-common-dir)"
+}
+
+# Prints "<UTC> <passed count>" for a tree that was green, and nothing for one that never was.
+tested_tree_stamp() {
+    cat "$(tested_tree_dir)/$1" 2>/dev/null || true
+}
+
+# Records the checkout's current tree. The caller runs this only after a green suite and after the
+# container is gone, so a failed or killed run leaves no claim behind.
+tested_tree_record() {
+    tested_tree_which=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || return 0
+    tested_tree_where=$(tested_tree_dir)
+    mkdir -p "$tested_tree_where"
+    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${1:-0}" > "$tested_tree_where/$tested_tree_which"
+}
