@@ -1,5 +1,5 @@
 -- origin: service/yt-scrapper/deploy/postgres-bootstrap.sql + service/stack/init/50-cosmai-bootstrap.sh (idempotent form)
--- reuse: psql -v schema=<name> -v database=<db> -v migrator_password=... -v runtime_password=...   (psql 이 :'var' 로 인용하므로 값에 따옴표를 넣지 않는다) -f db/bootstrap.sql
+-- reuse: psql -v schema=<name> -v database=<db> -v migrator_password=... -v runtime_password=...   (psql quotes the value itself through :'var', so no quotes go around the value) -f db/bootstrap.sql
 --        Run once per schema by the database owner, never by the app, never from a migration. Safe to re-run.
 --
 -- Three roles, not one: owner (NOLOGIN, owns everything), migrator (deploy only, SET ROLE owner),

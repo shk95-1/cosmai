@@ -24,8 +24,9 @@ TABLES = ("need_mention", "wish_mention", "brand_mention")
 
 FIVE = Decimal(5)
 
-# 005 로 extractor_version 이 자연키에 들어가, slice-suncare 가 이미 뽑은 리뷰를 slice-p1 이 다시
-# 뽑은 행도 이제 흡수되지 않고 각자 남는다 — DO NOTHING 이 막는 것은 같은 슬라이스의 재적재뿐이다.
+# With 005, extractor_version joined the natural key, so a row slice-p1 pulls again for a review
+# slice-suncare already pulled no longer gets absorbed and both stand on their own -- what DO NOTHING
+# blocks now is only a re-load of the same slice.
 NEED_SQL: LiteralString = """
 INSERT INTO need_mention
   (src, site, ref, product_ref, source_product_key, category, lexicon_category, need_key,
@@ -69,7 +70,8 @@ def _suncare_need(slices: Path) -> list[tuple[Any, ...]]:
                 opt(r["product_ref"]),
                 r["text_ref"].split("/", 1)[0] if review else None,
                 "선블록",
-                # B10: 이 슬라이스는 선블록 사전 하나로만 판정했으므로 사이트 원문과 사전 카테고리가 같다.
+                # B10: this slice was judged using only the 선블록 dictionary, so the site's original
+                # category and the dictionary category are the same.
                 "선블록",
                 r["need_key"],
                 None,
@@ -126,7 +128,8 @@ def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
         [
             (
                 "yt_comment",
-                # A20: 같은 댓글이 need_mention 과 같은 키를 갖도록 video_id/comment_id 로 적는다.
+                # A20: written as video_id/comment_id so the same comment carries the same key as
+                # need_mention.
                 f"{r['video_id']}/{r['comment_id']}",
                 opt(r["video_id"]),
                 None,
