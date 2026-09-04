@@ -118,6 +118,20 @@ if [ -z "$remote" ]; then
   exit 2
 fi
 
+# #203: once this repo's main is fully contained in `<remote>/main`, "reachable from
+# <remote>/main" is true of every commit ever made here, so the check can no longer tell a
+# foreign close from our own -- report the convergence instead of a false-positive list.
+if git merge-base --is-ancestor main "$remote/main" 2>/dev/null; then
+  converged_sha=$(git rev-parse --short main)
+  printf 'mains converged at %s — post-merge check has nothing to distinguish; use --predict before the next merge\n' "$converged_sha"
+  exit 0
+fi
+
+# #203: a commit already reachable from both mains before they diverged is shared history that
+# merged in through no fault of a foreign close -- only a commit that reached `<remote>/main`
+# strictly after the divergence point counts as evidence.
+divergence=$(git merge-base main "$remote/main" 2>/dev/null) || divergence=""
+
 issues_file=$(mktemp)
 items_file=$(mktemp)
 out_file=$(mktemp)
@@ -157,6 +171,9 @@ while IFS= read -r item; do
     continue
   fi
   if [ "$ancestor_status" -eq 0 ]; then
+    if [ -n "$divergence" ] && git merge-base --is-ancestor "$commit" "$divergence" 2>/dev/null; then
+      continue
+    fi
     short=$(printf '%s' "$commit" | cut -c1-7)
     printf '#%s · %s · closed by %s\n' "$n" "$title" "$short" >> "$out_file"
   fi
