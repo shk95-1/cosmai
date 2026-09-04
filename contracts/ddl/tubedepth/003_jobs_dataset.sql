@@ -1,7 +1,7 @@
--- Additive only (epic #16 사전 승인 2: DROP·타입 변경·다른 스키마 변경은 제외).
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
 -- Applied to the throwaway test schema only by tests/conftest.py's tubedepth_schema fixture --
 -- production tubedepth is untouched until the coordinator session applies this file directly (issue
--- #102 승인 경계, contracts/entrypoints.md).
+-- #102 approval boundary, contracts/entrypoints.md).
 --
 -- #102, judged on collector_health's youtube arm being absent (contracts/entrypoints.md §공통 운영
 -- 뷰) because `jobs.kind` (`video.metadata` 계열) and the youtube dataset vocabulary

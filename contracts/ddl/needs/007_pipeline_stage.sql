@@ -1,19 +1,24 @@
--- #138: 파이프라인 단계의 기대 주기를 계약으로. 추가만 (tests/test_ddl_additive_only.py).
+-- #138: the expected period of a pipeline stage, as a contract. Additive only
+-- (tests/test_ddl_additive_only.py).
 --
--- 왜 표인가 -- 기대 주기는 stack/crontab.d/ 에만 있었고 포털은 PostgREST 로 DB 만 읽는다. 크론탭을
--- 파싱해 넣는 대신 여기서 선언하는 이유는 enabled 다: youtube watch 는 크론 줄이 *있는데* compose
--- profile 뒤라 안 돈다(STATE.md §2, 재가동은 #39). 크론탭도 DB 도 그 사실을 모르므로 누군가 선언해야
--- 하고, 자동화는 문제의 절반만 없앤다. 크론탭과의 어긋남은 tests/test_pipeline_stage.py 가 막는다.
+-- Why a table -- the expected period lived in stack/crontab.d/ alone, and the portal reads the DB
+-- through PostgREST only. The reason to declare it here rather than parse the crontab in is
+-- enabled: youtube watch *has* a cron line but does not run, being behind a compose profile
+-- (STATE.md §2, restart in #39). Neither the crontab nor the DB knows that, so someone has to
+-- declare it, and automation removes only half the problem. tests/test_pipeline_stage.py guards
+-- the drift against the crontab.
 --
--- 값은 db/seed/pipeline.py 가 넣는다. 판정은 이 표를 읽는 뷰 needs.pipeline_health 가 진다 --
--- 화면·tool/status·나중의 알림이 같은 답을 하려면 판정이 한 자리에 있어야 한다.
+-- db/seed/pipeline.py puts the values in. The verdict is carried by needs.pipeline_health, the
+-- view that reads this table --
+-- for the screen, tool/status and a later alert to answer the same, the verdict has to live in one place.
 CREATE TABLE needs.pipeline_stage (
-  stage_key         text PRIMARY KEY,          -- '<arm>:<dataset>'. analyze 증분 패스만 _missing 접미
+  stage_key         text PRIMARY KEY,          -- '<arm>:<dataset>'. _missing suffixes the analyze incremental pass alone
   arm               text NOT NULL,
   dataset           text NOT NULL,
-  expected_interval interval NOT NULL,         -- 크론 줄이 뜻하는 주기. late/stalled 의 눈금이 여기서 나온다
+  expected_interval interval NOT NULL,         -- the period the cron line means; the late/stalled scale comes from it
   enabled           boolean NOT NULL DEFAULT true,
   note              text NOT NULL DEFAULT '',
-  -- collector_health 의 세 팔 + 분석. 새 팔이 생기면 뷰의 UNION 도 함께 늘어야 하므로 여기서 막는다.
+  -- collector_health's three arms plus analysis. A new arm has to grow the view's UNION too, so
+  -- it is blocked here.
   CONSTRAINT pipeline_stage_arm_check CHECK (arm IN ('commerce', 'naver', 'youtube', 'analyze'))
 );

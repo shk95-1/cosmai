@@ -1,13 +1,16 @@
--- naver 수집기 원천 (이슈 #9, 조정 판정 (a)). 추가만 -- 001은 손대지 않는다 (test_ddl_additive_only.py).
+-- The naver collector's source tables (issue #9, coordinator ruling (a)). Additive only -- 001 is
+-- untouched (test_ddl_additive_only.py).
 --
--- 실용적 선택: needs 는 원래 분석 산출 스키마이지 원천 저장소가 아니다. 그런데 collectors/commerce·
--- collectors/youtube 는 각자 trend_radar·tubedepth 스키마를 갖는 반면, naver 는 5단계에서 처음 생기는
--- 수집기라 자기 스키마가 없다(원본 cosmai-old의 잡 큐·source 행 모델은 이 레포가 계승하지 않기로 했다 --
--- REBUILD 전제, #18). 새 스키마를 하나 더 만드는 대신 needs 에 naver_ 접두로 얹는다. 두 번째 수집기가
--- 원천 저장을 필요로 하면(예: #10 라이브 컷오버가 다른 소스를 추가하면) 그때 분리를 다시 본다.
+-- A pragmatic choice: needs is the analysis-output schema, not a source store. But collectors/commerce and
+-- collectors/youtube each own a trend_radar / tubedepth schema, while naver is the first collector to appear
+-- in step 5 and has no schema of its own (this repo decided not to inherit cosmai-old's job-queue
+-- and source-row model --
+-- the REBUILD premise, #18). Rather than one more schema, it sits in needs under a naver_ prefix.
+-- If a second collector
+-- needs source storage (say #10's live cutover adds another source), the split gets looked at again then.
 --
--- naver_blog_post 가 formats.md 의 ref 문법(`naver_blog` → `post_id`)이 가리키는 원천 테이블이고
--- (#17 T15가 지적한 공백), analysis.types.TextUnit(src='naver_blog') 은 이 테이블을 읽어 채워진다.
+-- naver_blog_post is the source table the ref grammar in formats.md (`naver_blog` -> `post_id`) points at
+-- (the gap #17 T15 named), and analysis.types.TextUnit(src='naver_blog') is filled by reading it.
 
 CREATE TABLE needs.naver_run (
   id                 uuid PRIMARY KEY,
@@ -26,7 +29,7 @@ CREATE TABLE needs.naver_fetch_log (
   run_id      uuid NOT NULL REFERENCES needs.naver_run(id) ON DELETE CASCADE,
   at          timestamptz NOT NULL,
   dataset     text NOT NULL,
-  query       text NOT NULL,                 -- 요청한 것: datalab 그룹명 또는 blog 검색어
+  query       text NOT NULL,                 -- what was requested: a datalab group name, or a blog search term
   status      int,
   attempt     int NOT NULL,
   elapsed_ms  int,
@@ -40,21 +43,21 @@ CREATE TABLE needs.naver_datalab_point (
   group_key    text NOT NULL,                 -- keywords.json 의 그룹 이름 (예: 백탁)
   month        text NOT NULL,                 -- 'YYYY-MM'
   ratio        numeric,
-  terms        jsonb NOT NULL,                -- 요청에 실제로 넣은 검색어 목록 (감사용)
+  terms        jsonb NOT NULL,                -- the search terms actually put in the request (for audit)
   captured_at  timestamptz NOT NULL,
   PRIMARY KEY (category, group_key, month)
 );
 
 CREATE TABLE needs.naver_blog_post (
-  post_id                 text PRIMARY KEY,   -- ref = post_id (formats.md). 원본의 안정적인 link.
+  post_id                 text PRIMARY KEY,   -- ref = post_id (formats.md). The source's stable link.
   url                     text NOT NULL,
   category                text,
   group_key               text,
-  query                   text,               -- 이 글을 찾은 검색어
+  query                   text,               -- the search term that found this post
   title                   text NOT NULL,
   excerpt                 text NOT NULL,
   author                  text,
-  published_at            date,               -- naver 가 postdate 를 못 주면 NULL
+  published_at            date,               -- NULL when naver gives no postdate
   observed_at_resolution  text NOT NULL CHECK (observed_at_resolution IN ('day','month','year')),
   captured_at             timestamptz NOT NULL
 );

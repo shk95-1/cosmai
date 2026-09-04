@@ -99,9 +99,9 @@ def survivors(declared: Iterable[str], tmp: Path) -> list[str]:
 
 def test_the_file_states_the_convention_it_exists_for():
     body = FOREIGN.read_text(encoding="utf-8")
-    assert "남의 DDL 이 운영에 들어오면 선언한다" in body
+    assert "someone else's DDL entering production gets declared" in body
     # 같은 목록이 두 레포에서 뜻이 달라지는 이유를 파일 머리가 지고 있어야 한다 (cosmai#108).
-    assert "이 체크아웃이 선언하는 객체는 무시한다" in body
+    assert "objects this checkout declares are ignored" in body
 
 
 def test_every_entry_is_a_table_or_a_table_column():
