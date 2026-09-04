@@ -15,6 +15,22 @@ set -e
 script="tool/checks/test"
 [ -x "$script" ] || exit 0
 
+# What the suite proves is a tree, so a push has something to verify only when it carries a tree no
+# green run has recorded (#214). Without the cache fragment the hook keeps its old behaviour and
+# tests every push, because an unreadable cache is not evidence of anything.
+if [ -r tool/checks/tested-tree ]; then
+  . tool/checks/tested-tree
+  cache=1
+else
+  cache=0
+fi
+
+# The one sanctioned way to re-verify a tree the cache calls green, since --no-verify is forbidden.
+forced=0
+if [ "$cache" -eq 1 ] && tested_tree_forced; then
+  forced=1
+fi
+
 # git feeds the refs being pushed on stdin, one per line:
 #
 #   <local ref> <local sha> <remote ref> <remote sha>
@@ -29,11 +45,40 @@ script="tool/checks/test"
 # running the tests. The safe default is to test.
 saw_ref=0
 pushing_content=0
+untested=0
+untested_tree=""
+tested_tree=""
+tested_stamp=""
 while read -r _ local_sha _ _; do
   saw_ref=1
   case "$local_sha" in
-    *[!0]*) pushing_content=1 ;;
+    *[!0]*) ;;
+    *) continue ;;
   esac
+  pushing_content=1
+
+  tree=$(git rev-parse "$local_sha^{tree}" 2>/dev/null) || tree=""
+
+  if [ "$forced" -eq 0 ]; then
+    if [ "$cache" -eq 1 ] && [ -n "$tree" ]; then
+      stamp=$(tested_tree_stamp "$tree" | cut -d' ' -f1)
+      if [ -n "$stamp" ]; then
+        tested_tree=$tree
+        tested_stamp=$stamp
+        continue
+      fi
+    fi
+    # #197: a commit that is already on origin/main was verified before it got there, whatever this
+    # clone happens to remember — re-testing it is the same tree twice. Checked on its own, so an
+    # unreadable cache fragment does not take this skip down with it.
+    if git merge-base --is-ancestor "$local_sha" origin/main 2>/dev/null; then
+      tested_tree=$tree
+      tested_stamp="on origin/main"
+      continue
+    fi
+  fi
+  untested=1
+  [ -n "$untested_tree" ] || untested_tree=$tree
 done
 
 if [ "$saw_ref" -eq 1 ] && [ "$pushing_content" -eq 0 ]; then
@@ -41,7 +86,20 @@ if [ "$saw_ref" -eq 1 ] && [ "$pushing_content" -eq 0 ]; then
   exit 0
 fi
 
-printf '→ test\n'
+if [ "$saw_ref" -eq 1 ] && [ "$untested" -eq 0 ] && [ -n "$tested_tree" ]; then
+  printf 'pre-push: tree %s tested %s, skipping the suite\n' \
+    "$(git rev-parse --short "$tested_tree")" "$tested_stamp"
+  exit 0
+fi
+
+if [ -n "$untested_tree" ] && [ "$forced" -eq 1 ]; then
+  printf 'pre-push: tree %s forced by COSMAI_FORCE_SUITE=1, running the suite\n' \
+    "$(git rev-parse --short "$untested_tree")"
+elif [ -n "$untested_tree" ]; then
+  printf 'pre-push: tree %s untested, running the suite\n' "$(git rev-parse --short "$untested_tree")"
+else
+  printf '→ test\n'
+fi
 "$script" || {
   printf '\033[31m✗ Tests failed. Push blocked.\033[0m\n' >&2
   exit 1
