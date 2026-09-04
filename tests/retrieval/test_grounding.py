@@ -205,7 +205,7 @@ def test_a_blocked_query_is_partial_at_the_command_line(monkeypatch: pytest.Monk
     argv = ["retrieval", "search", "--engine", "vector", "--query", "퀀텀펩타이드사이드 함유 제품 있어"]
     assert cli.main(argv) == 1
     printed = capsys.readouterr()
-    assert "결과 없음" in printed.out
+    assert "no results" in printed.out
     assert "퀀텀펩타이드사이드" in printed.err, "왜 0건인지 말하지 않으면 색인이 빈 것과 구분되지 않는다"
 
 

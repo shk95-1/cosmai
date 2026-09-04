@@ -198,7 +198,9 @@ def retrieval(made: list[Candidate], texts: dict[str, str], dictionary) -> dict[
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--corpus", type=Path, default=FIXTURE / "corpus")
     parser.add_argument("--json", action="store_true", help="테스트가 읽는 형식으로만 낸다.")
     args = parser.parse_args()

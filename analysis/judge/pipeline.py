@@ -39,6 +39,7 @@ FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
+# TODO(#200): same four-column predicate as trend/evidence, missing content_type here too.
 CLEAR: LiteralString = (
     "DELETE FROM topic_quarter_judgement "
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
