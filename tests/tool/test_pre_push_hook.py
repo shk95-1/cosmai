@@ -28,29 +28,39 @@ ZERO = "0" * 40
 # fragment, so a change to the cache format cannot pass here and fail in the hook.
 FAKE_SUITE = """#!/bin/sh
 set -e
+if [ -r tool/checks/tested-tree ]; then
+    . tool/checks/tested-tree
+    tested_tree_capture
+fi
 printf 'fake suite ran\\n'
 printf 'ran\\n' >> "$SUITE_MARKER"
 if [ "${FAKE_SUITE_FAILS:-0}" = 1 ]; then
     exit 1
 fi
-. tool/checks/tested-tree
-tested_tree_record 7
+if [ -r tool/checks/tested-tree ]; then
+    tested_tree_record
+fi
 """
 
 
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
-    """A throwaway git repo carrying its own tool/checks, isolated from THIS checkout (#60 GIT_DIR)."""
-    subprocess.run(["git", "init", "-q", "-b", "main", str(tmp_path)], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@example.com"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "config", "user.name", "t"], check=True)
-    checks = tmp_path / "tool" / "checks"
+    """A throwaway git repo carrying its own tool/checks, isolated from THIS checkout (#60 GIT_DIR).
+
+    The marker the fake suite writes lives OUTSIDE the repo: the cache refuses to record a run over
+    a dirty checkout, and an untracked marker would make every push here dirty.
+    """
+    root = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
+    checks = root / "tool" / "checks"
     checks.mkdir(parents=True)
     (checks / "tested-tree").write_text(TESTED_TREE.read_text(encoding="utf-8"), encoding="utf-8")
     suite = checks / "test"
     suite.write_text(FAKE_SUITE, encoding="utf-8")
     suite.chmod(0o755)
-    return tmp_path
+    return root
 
 
 def commit(repo: Path, text: str) -> str:
@@ -73,7 +83,7 @@ def tree_of(repo: Path, sha: str) -> str:
     ).stdout.strip()
 
 
-def run_hook(repo: Path, *shas: str, fails: bool = False) -> subprocess.CompletedProcess:
+def run_hook(repo: Path, *shas: str, fails: bool = False, force: bool = False) -> subprocess.CompletedProcess:
     stdin = "".join(f"refs/heads/main {sha} refs/heads/main {ZERO}\n" for sha in shas)
     return subprocess.run(
         ["sh", str(HOOK)],
@@ -85,14 +95,15 @@ def run_hook(repo: Path, *shas: str, fails: bool = False) -> subprocess.Complete
         env={
             **os.environ,
             "HOME": str(repo),
-            "SUITE_MARKER": str(repo / "marker"),
+            "SUITE_MARKER": str(repo.parent / "marker"),
             "FAKE_SUITE_FAILS": "1" if fails else "0",
+            "COSMAI_FORCE_SUITE": "1" if force else "0",
         },
     )
 
 
 def suite_runs(repo: Path) -> int:
-    marker = repo / "marker"
+    marker = repo.parent / "marker"
     return len(marker.read_text(encoding="utf-8").splitlines()) if marker.exists() else 0
 
 
@@ -116,14 +127,13 @@ def test_a_tree_the_suite_already_proved_green_skips_the_suite(repo: Path):
     assert "tested 2" in second.stdout, "the skip line must name when the tree was proved green"
 
 
-def test_the_cache_entry_names_the_tree_and_carries_the_count(repo: Path):
+def test_the_cache_entry_is_named_for_the_tree_and_holds_the_time(repo: Path):
     sha = commit(repo, "one")
     run_hook(repo, sha)
     entry = repo / ".git" / "cosmai-tested" / tree_of(repo, sha)
     assert entry.exists(), "tool/checks/tested-tree recorded nothing for a green run"
-    stamp, count = entry.read_text(encoding="utf-8").split()
+    stamp = entry.read_text(encoding="utf-8").strip()
     assert stamp.endswith("Z") and stamp.startswith("20"), stamp
-    assert count == "7"
 
 
 def test_a_merge_commit_carrying_an_already_tested_tree_is_free(repo: Path):
@@ -203,36 +213,45 @@ def test_exactly_one_decision_line_is_printed(repo: Path):
     assert len(decisions) == 1, done.stdout
 
 
-# The count in an entry is pytest's own summary count. It is read back from the run's output rather
-# than counted here, and the first version of that read recorded 0 for every real run: `-q` (this
-# project's addopts) puts the number first on the line, and the pattern insisted on a character
-# before it. A zero is not visibly wrong in a cache file, so it needs its own test.
-def passed_count(tmp_path: Path, log: str) -> str:
-    out = tmp_path / "pytest.log"
-    out.write_text(log, encoding="utf-8")
-    return subprocess.run(
-        ["sh", "-c", f'. tool/checks/tested-tree; tested_tree_passed "{out}"'],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+def test_a_forced_push_runs_the_suite_over_a_cached_tree(repo: Path):
+    # AGENTS.md forbids --no-verify, and the cache has already been shown to be able to hold a bad
+    # entry, so there has to be one sanctioned way to make the gate re-verify a green tree.
+    sha = commit(repo, "one")
+    run_hook(repo, sha)
+    assert suite_runs(repo) == 1
+
+    done = run_hook(repo, sha, force=True)
+    assert done.returncode == 0, done.stderr
+    assert suite_runs(repo) == 2, "COSMAI_FORCE_SUITE=1 did not re-run the suite"
+    assert "forced by COSMAI_FORCE_SUITE=1, running the suite" in done.stdout, done.stdout
 
 
-def test_the_count_is_read_from_a_quiet_summary_line(tmp_path: Path):
-    log = "....\n1999 passed, 1 skipped, 1 deselected, 2 xfailed in 1055.26s (0:17:35)\n"
-    assert passed_count(tmp_path, log) == "1999"
+def test_a_forced_push_runs_the_suite_over_a_commit_on_origin_main(repo: Path):
+    # Forcing has to beat BOTH skips, or the ancestor arm quietly outranks the escape hatch.
+    old = commit(repo, "one")
+    new = commit(repo, "two")
+    subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", new], check=True)
+    done = run_hook(repo, old, force=True)
+    assert suite_runs(repo) == 1, done.stdout
+    assert "forced by COSMAI_FORCE_SUITE=1" in done.stdout, done.stdout
 
 
-def test_the_count_is_read_from_a_decorated_summary_line(tmp_path: Path):
-    log = "tests/a.py ..\n====== 1986 passed, 3 skipped in 903.21s (0:15:03) ======\n"
-    assert passed_count(tmp_path, log) == "1986"
+def test_the_origin_main_skip_survives_an_unreadable_cache(repo: Path):
+    # R3 phrased the two skips as independent alternatives. Nested inside the cache branch, #197's
+    # skip would silently disappear on any checkout whose fragment is missing.
+    old = commit(repo, "one")
+    new = commit(repo, "two")
+    subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", new], check=True)
+    (repo / "tool" / "checks" / "tested-tree").unlink()
+    done = run_hook(repo, old)
+    assert done.returncode == 0, done.stderr
+    assert "skipping the suite" in done.stdout, done.stdout
+    assert suite_runs(repo) == 0
 
 
-def test_the_summary_wins_over_an_earlier_line_that_looks_like_one(tmp_path: Path):
-    log = "a test printed 5 passed\n....\n12 passed in 0.42s\n"
-    assert passed_count(tmp_path, log) == "12"
-
-
-def test_a_run_with_no_summary_yields_no_count(tmp_path: Path):
-    assert passed_count(tmp_path, "collection failed\n") == ""
+def test_an_unreadable_cache_still_runs_the_suite_for_anything_else(repo: Path):
+    sha = commit(repo, "one")
+    (repo / "tool" / "checks" / "tested-tree").unlink()
+    done = run_hook(repo, sha)
+    assert "running the suite" in done.stdout, done.stdout
+    assert suite_runs(repo) == 1

@@ -8,22 +8,38 @@ set -e
 . tool/checks/tested-tree
 require_command uv docker pg_isready
 
+# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
+# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
+# commit landed on a real branch during pre-push). The suite must see the same environment under
+# a hook as from a terminal. PYTEST_ADDOPTS for the same reason and a sharper one: an inherited
+# -k/-m/-x/--lf narrows the run, and a narrowed run must never write a cache entry every worktree
+# of this clone then trusts (#214).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR PYTEST_ADDOPTS
+
+# Before anything runs: what the suite proves is the tree it started against, not whatever HEAD has
+# become seventeen minutes later, and not a tree plus uncommitted edits (#214).
+tested_tree_capture
+
 # One exit path for everything this run holds: the slot it took, the container it started, the
 # secret file, and -- only when pytest came back green -- the tested-tree entry that lets the next
 # push of this same tree skip the suite (#214). Killed or failed, this records nothing.
+# /bin/sh here is dash, which runs no EXIT trap on SIGTERM: without the signal traps a `kill`, a
+# timeout wrapper or a supervisor would leak both the slot and the container (measured, #214 review).
 secret_file=""
 container_name=""
-pytest_log=""
-suite_passed=""
+suite_green=""
+cleanup_ran=""
 cleanup() {
     cleanup_status=$?
+    [ -z "$cleanup_ran" ] || return $cleanup_status
+    cleanup_ran=1
     [ -z "$secret_file" ] || rm -f "$secret_file" || true
-    [ -z "$pytest_log" ] || rm -f "$pytest_log" "$pytest_log.status" || true
     [ -z "$container_name" ] || docker rm -f -v "$container_name" >/dev/null 2>&1 || true
     [ -z "$suite_lock_dir" ] || rmdir "$suite_lock_dir" 2>/dev/null || true
-    [ -z "$suite_passed" ] || tested_tree_record "$suite_passed"
+    [ -z "$suite_green" ] || tested_tree_record || true
     return $cleanup_status
 }
+trap 'cleanup; exit 1' INT TERM HUP
 trap cleanup EXIT
 
 # Before the postgres container: a broken portal/public/*.js fails here for free, without
@@ -34,12 +50,6 @@ tool/checks/js
 # retrieval: the morphological analyzer (kiwipiepy) analysis/retrieval needs. Without it the BM25
 # tests fail wholesale with ModuleNotFoundError, indistinguishable from "the dictionary was not loaded" (#28).
 uv sync --extra dev --extra retrieval --frozen
-
-# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
-# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
-# commit landed on a real branch during pre-push). The suite must see the same environment under
-# a hook as from a terminal.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
 
 if [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
@@ -111,18 +121,7 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
 fi
 
 printf '→ pytest\n'
-# The cache entry carries the count out of pytest's summary line, so the run is tee'd. POSIX sh has
-# no PIPESTATUS, hence the status file; PYTHONUNBUFFERED keeps a fifteen-minute run streaming
-# rather than arriving in 8 KB blocks now that stdout is a pipe.
-pytest_log=$(mktemp)
-pytest_status="$pytest_log.status"
-{
-    if PYTHONUNBUFFERED=1 uv run pytest 2>&1; then pytest_rc=0; else pytest_rc=$?; fi
-    printf '%s\n' "$pytest_rc" > "$pytest_status"
-} | tee "$pytest_log"
-
-pytest_rc=$(cat "$pytest_status" 2>/dev/null || echo 1)
-rm -f "$pytest_status"
-[ "$pytest_rc" -eq 0 ] || exit "$pytest_rc"
-suite_passed=$(tested_tree_passed "$pytest_log")
-[ -n "$suite_passed" ] || suite_passed=0
+# Straight to the terminal, colour and stderr intact: nothing reads pytest's output, since what the
+# cleanup records is the tree and the time, not a count (#214 review).
+uv run pytest
+suite_green=1

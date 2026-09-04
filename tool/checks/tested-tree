@@ -5,28 +5,51 @@
 # the coordinator's merge carrying that identical tree, the wave branch -- has nothing new to check.
 # The record lives under the common git directory, so every worktree of one clone shares it and no
 # entry can ever be committed.
+#
+# To re-arm the gate for a tree the cache already calls green, push once with COSMAI_FORCE_SUITE=1;
+# deleting the file under <common git dir>/cosmai-tested/ is the permanent form of the same thing.
+# AGENTS.md forbids --no-verify, so those two are the sanctioned escapes.
 
 tested_tree_dir() {
     printf '%s/cosmai-tested\n' "$(git rev-parse --git-common-dir)"
 }
 
-# Prints "<UTC> <passed count>" for a tree that was green, and nothing for one that never was.
+tested_tree_forced() {
+    [ "${COSMAI_FORCE_SUITE:-0}" = 1 ]
+}
+
+# Prints the "<UTC>" a tree was proved green at; nothing for a tree that never was, and nothing at
+# all while the run is forced, so one push can re-verify what the cache claims.
 tested_tree_stamp() {
+    if tested_tree_forced; then
+        return 0
+    fi
     cat "$(tested_tree_dir)/$1" 2>/dev/null || true
 }
 
-# The count an entry carries is pytest's own, read back from the run's output: the summary line is
-# the last "<n> passed" in it. `-q` puts that count at the start of the line, so a pattern that
-# insists on something before it silently records a zero -- which is what the first version did.
-tested_tree_passed() {
-    grep -o '[0-9][0-9]* passed' "$1" 2>/dev/null | tail -1 | cut -d' ' -f1
+# Captured before the suite starts. Read at the end instead, it would stamp whatever HEAD became
+# during seventeen minutes of testing -- a rebase, a checkout -- and certify a tree nothing ever ran
+# against. Uncommitted changes are refused for the same reason: what was tested is not what HEAD is,
+# and the everyday flow is to run the suite and then commit.
+tested_tree_capture() {
+    tested_tree_captured=""
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        printf 'tested-tree: the checkout has uncommitted changes; this run will not be recorded\n'
+        return 0
+    fi
+    tested_tree_captured=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || tested_tree_captured=""
 }
 
-# Records the checkout's current tree. The caller runs this only after a green suite and after the
-# container is gone, so a failed or killed run leaves no claim behind.
+# Records the tree the suite actually ran against. The caller reaches this only after a green run
+# and after the container is gone, so a failed or killed run leaves no claim behind.
 tested_tree_record() {
-    tested_tree_which=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || return 0
+    [ -n "$tested_tree_captured" ] || return 0
+    tested_tree_now=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || tested_tree_now=""
+    if [ "$tested_tree_now" != "$tested_tree_captured" ]; then
+        printf 'tested-tree: HEAD moved during the run; this run will not be recorded\n'
+        return 0
+    fi
     tested_tree_where=$(tested_tree_dir)
     mkdir -p "$tested_tree_where"
-    printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${1:-0}" > "$tested_tree_where/$tested_tree_which"
+    printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tested_tree_where/$tested_tree_captured"
 }

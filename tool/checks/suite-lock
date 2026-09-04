@@ -4,10 +4,14 @@
 # Three suites at once fit in this host's memory; a fourth kills one of them (#212, #204), and a
 # killed run leaks its container. So a run waits for a slot instead of starting. Two things are
 # counted because a suite that is still migrating has no container yet: the running containers and
-# the lock directories, whichever number is larger. mkdir is the atomic part, and the caller's EXIT
-# trap removes the directory, so a killed run frees its slot.
+# the lock directories, whichever number is larger. A directory is a registration in a counter, not
+# a mutex -- two runs starting within the same instant can both pass the count -- and the caller's
+# trap removes it. What a trap cannot cover (SIGKILL) is covered by the age limit below: a slot
+# nobody can still be holding after three hours is dropped, so leaks cannot deadlock the host.
 
 MAX_CONCURRENT_SUITES=3
+SUITE_LOCK_STALE_MINUTES=180
+SUITE_LOCK_TIMEOUT_SECONDS=5400
 
 suite_lock_dir=""
 
@@ -15,34 +19,75 @@ suite_lock_root() {
     printf '%s\n' "${COSMAI_SUITE_LOCK_DIR:-/tmp/cosmai-suite-lock}"
 }
 
+# A slot older than the longest possible run belongs to nothing: drop it before counting, out loud,
+# because a silently vanishing lock and a silently held one are equally hard to reason about.
+suite_lock_expire() {
+    suite_lock_age=${COSMAI_SUITE_LOCK_STALE_MINUTES:-$SUITE_LOCK_STALE_MINUTES}
+    find "$(suite_lock_root)" -mindepth 1 -maxdepth 1 -type d -mmin "+$suite_lock_age" 2>/dev/null \
+    | while read -r suite_lock_stale; do
+        rmdir "$suite_lock_stale" 2>/dev/null \
+            && printf 'suite-lock: dropped a slot older than %s minutes (%s)\n' \
+                "$suite_lock_age" "$suite_lock_stale" \
+            || true
+    done
+}
+
+suite_lock_containers() {
+    docker ps --filter name=cosmai-test-postgres- --format '{{.Names}}' 2>/dev/null | grep -c . || true
+}
+
+suite_lock_slots() {
+    ls -1 "$(suite_lock_root)" 2>/dev/null | grep -c . || true
+}
+
 suite_lock_count() {
-    suite_lock_containers=$(docker ps --filter name=cosmai-test-postgres- --format '{{.Names}}' 2>/dev/null | grep -c . || true)
-    suite_lock_dirs=$(ls -1 "$(suite_lock_root)" 2>/dev/null | grep -c . || true)
-    if [ "$suite_lock_containers" -ge "$suite_lock_dirs" ]; then
-        printf '%s\n' "$suite_lock_containers"
+    suite_lock_a=$(suite_lock_containers)
+    suite_lock_b=$(suite_lock_slots)
+    if [ "$suite_lock_a" -ge "$suite_lock_b" ]; then
+        printf '%s\n' "$suite_lock_a"
     else
-        printf '%s\n' "$suite_lock_dirs"
+        printf '%s\n' "$suite_lock_b"
     fi
 }
 
 suite_lock_acquire() {
+    # A fractional or empty interval would abort the run inside the arithmetic below, so anything
+    # that is not a whole number of seconds falls back to the default.
     suite_lock_interval=${COSMAI_SUITE_WAIT_SECONDS:-15}
+    case "$suite_lock_interval" in
+        '' | *[!0-9]*) suite_lock_interval=15 ;;
+    esac
     # One line a minute rather than one a poll: a twenty-minute wait must not scroll the terminal.
     if [ "$suite_lock_interval" -ge 1 ]; then
         suite_lock_every=$((60 / suite_lock_interval))
+        suite_lock_tick=$suite_lock_interval
     else
         suite_lock_every=60
+        suite_lock_tick=1
     fi
     [ "$suite_lock_every" -ge 1 ] || suite_lock_every=1
+    suite_lock_timeout=${COSMAI_SUITE_WAIT_TIMEOUT_SECONDS:-$SUITE_LOCK_TIMEOUT_SECONDS}
 
     suite_lock_polls=0
+    suite_lock_waited=0
+    suite_lock_expire
     suite_lock_running=$(suite_lock_count)
     while [ "$suite_lock_running" -ge "$MAX_CONCURRENT_SUITES" ]; do
         if [ $((suite_lock_polls % suite_lock_every)) -eq 0 ]; then
-            printf 'waiting: %s suites running (limit %s)\n' "$suite_lock_running" "$MAX_CONCURRENT_SUITES"
+            printf 'waiting: %s suites running (limit %s, slots in %s)\n' \
+                "$suite_lock_running" "$MAX_CONCURRENT_SUITES" "$(suite_lock_root)"
+        fi
+        # Waiting for ever is the one failure mode nobody can diagnose from the outside, so the wait
+        # gives up and says where to look and how much of the count was a real container.
+        if [ "$suite_lock_waited" -ge "$suite_lock_timeout" ]; then
+            printf '✗ suite-lock: gave up after %s s with %s suites counted (%s containers running). Slots live in %s — remove a leftover one to unblock.\n' \
+                "$suite_lock_waited" "$suite_lock_running" "$(suite_lock_containers)" "$(suite_lock_root)" >&2
+            exit 1
         fi
         suite_lock_polls=$((suite_lock_polls + 1))
         sleep "$suite_lock_interval"
+        suite_lock_waited=$((suite_lock_waited + suite_lock_tick))
+        suite_lock_expire
         suite_lock_running=$(suite_lock_count)
     done
 
