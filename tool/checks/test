@@ -4,7 +4,43 @@
 # the needs migration ledger and contracts/ddl/needs/*.sql. Removed on exit.
 set -e
 . tool/checks/prerequisite
+. tool/checks/suite-lock
+. tool/checks/tested-tree
 require_command uv docker pg_isready
+
+# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
+# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
+# commit landed on a real branch during pre-push). The suite must see the same environment under
+# a hook as from a terminal. PYTEST_ADDOPTS for the same reason and a sharper one: an inherited
+# -k/-m/-x/--lf narrows the run, and a narrowed run must never write a cache entry every worktree
+# of this clone then trusts (#214).
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR PYTEST_ADDOPTS
+
+# Before anything runs: what the suite proves is the tree it started against, not whatever HEAD has
+# become seventeen minutes later, and not a tree plus uncommitted edits (#214).
+tested_tree_capture
+
+# One exit path for everything this run holds: the slot it took, the container it started, the
+# secret file, and -- only when pytest came back green -- the tested-tree entry that lets the next
+# push of this same tree skip the suite (#214). Killed or failed, this records nothing.
+# /bin/sh here is dash, which runs no EXIT trap on SIGTERM: without the signal traps a `kill`, a
+# timeout wrapper or a supervisor would leak both the slot and the container (measured, #214 review).
+secret_file=""
+container_name=""
+suite_green=""
+cleanup_ran=""
+cleanup() {
+    cleanup_status=$?
+    [ -z "$cleanup_ran" ] || return $cleanup_status
+    cleanup_ran=1
+    [ -z "$secret_file" ] || rm -f "$secret_file" || true
+    [ -z "$container_name" ] || docker rm -f -v "$container_name" >/dev/null 2>&1 || true
+    [ -z "$suite_lock_dir" ] || rmdir "$suite_lock_dir" 2>/dev/null || true
+    [ -z "$suite_green" ] || tested_tree_record || true
+    return $cleanup_status
+}
+trap 'cleanup; exit 1' INT TERM HUP
+trap cleanup EXIT
 
 # Before the postgres container: a broken portal/public/*.js fails here for free, without
 # paying the ~2min container-and-migrate cost that the python suite below needs.
@@ -14,12 +50,6 @@ tool/checks/js
 # retrieval: the morphological analyzer (kiwipiepy) analysis/retrieval needs. Without it the BM25
 # tests fail wholesale with ModuleNotFoundError, indistinguishable from "the dictionary was not loaded" (#28).
 uv sync --extra dev --extra retrieval --frozen
-
-# git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
-# temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
-# commit landed on a real branch during pre-push). The suite must see the same environment under
-# a hook as from a terminal.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
 
 if [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
@@ -37,10 +67,13 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
         printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
         exit 1
     fi
-    secret_file=$(mktemp)
+    # Our own leaked container from a killed run goes first, so it is not counted as somebody
+    # else's suite, and only then does this run queue for one of the host's three slots.
     # rm -v: removes the postgres image's anonymous volume too (without it every run leaks a ~1GB volume)
-    trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT
     docker rm -f -v "$name" >/dev/null 2>&1 || true
+    suite_lock_acquire "$port"
+    secret_file=$(mktemp)
+    container_name=$name
     docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
         -e POSTGRES_DB=fleet --tmpfs /var/lib/postgresql -p "$port":5432 "$image" >/dev/null
     for _ in $(seq 1 60); do
@@ -88,4 +121,7 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
 fi
 
 printf '→ pytest\n'
+# Straight to the terminal, colour and stderr intact: nothing reads pytest's output, since what the
+# cleanup records is the tree and the time, not a count (#214 review).
 uv run pytest
+suite_green=1
