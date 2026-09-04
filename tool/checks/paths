@@ -1,7 +1,7 @@
 #!/bin/sh
 # Both repositories are public, so a machine path in a tracked file is published the moment it is
 # committed. Only staged additions are examined: history and files nobody touches are not this
-# check's business, and the reference slices that still carry such paths are on their way out.
+# check's business. The reference slices that carried such paths are gone (fork #9).
 set -e
 hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/paths' | grep -E '^\+[^+]' | grep '/home/' || true)
 [ -z "$hits" ] && exit 0

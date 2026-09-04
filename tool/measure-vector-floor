@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""벡터 검색에 유사도 하한선을 **둘 수 있는지** 우리 코퍼스에서 잰다 (포크 #48, ydc `vector_threshold.py`).
+
+`analysis/retrieval/vectors.py` 의 `search` 에는 하한선이 없다 -- 코사인으로 정렬해 상위 k 를 그대로
+낸다. 코퍼스에 없는 것을 물어도 10건이 나오고 그게 근거로 인쇄된다. 그렇다고 "하한선이 있으면 좋겠다"
+로 넣으면 안 된다: **e5 코사인은 좁은 띠에 뭉쳐 있고**(문서-문서가 아니라 질의-문서다) 분포가 실제로
+갈리지 않으면 하한선은 무관한 결과를 통과시키면서 맞는 결과를 자르는 쪽으로만 작동한다.
+
+**판정 기준 셋은 재기 전에 정해져 있다**(이슈 #48 본문 = ydc 가 미리 정한 것 그대로). 결과를 보고
+기준을 만드는 것이 이 측정이 막으려는 일이라, 기준은 `KEEP`·`CUT` 두 상수와 `verdict` 한 함수에만 있고
+`tests/retrieval/test_vector_floor.py` 가 그 뜻을 붙든다.
+
+    분리가 된다   가짜 질의의 최고 코사인 < 진짜 질의의 최저 코사인
+    쓸 수 있다    겹치더라도 정탐을 KEEP 이상 남기는 문턱에서 오탐을 CUT 이상 자른다
+    못 쓴다       위 둘 다 아니다
+
+**진짜 질의는 고르지 않는다** -- `cosmai retrieval eval --mode literal` 이 쓰는 그 주제 별칭이고, 정본은
+`needs.aspect_lexicon` 의 활성 버전이라 DB 에서 읽는다. **가짜 질의는 코퍼스에 없다는 것을 매번
+확인한다**: 하나라도 실제로 있으면 그것은 가짜가 아니고, 그 표본 위의 수는 믿을 것이 못 된다(종료 코드 1).
+
+재는 값은 질의마다 **최고 코사인**(top-1)이다. 저장소가 L2 정규화돼 있어 `vectors.search` 가 주는
+거리에서 `1 - 거리` 로 되돌린다.
+
+두 부분의 무거운 의존이 **서로 다르다.** `cosine` 은 벡터 저장소와 인코더(`embed` extra)를 열고,
+`df` 는 BM25 색인을 연다(캐시가 없으면 십수 분). 그래서 따로 부를 수 있다.
+
+    uv run --extra retrieval --extra embed tool/measure-vector-floor            # 둘 다
+    uv run --extra retrieval --extra embed tool/measure-vector-floor --json
+    uv run --extra retrieval tool/measure-vector-floor --part df                # 인코더도 GPU 도 안 쓴다
+
+질의 73개를 CPU 로 재는 데 11초라 기본 장치는 `cpu` 다 -- 공유 GPU 를 잡을 이유가 없다.
+
+종료 코드: 0 답이 계산됐다 · 1 표본이 가짜가 아니다(코퍼스에 실제로 있다 -- 이 산출을 믿지 마라) ·
+2 막힘(벡터 저장소를 못 읽는다 · 인코더가 없다 · 활성 주제 사전이 없다 -- `contracts/entrypoints.md`
+§검색 의 blocked 와 같은 자리다).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from analysis.retrieval import eval as retrieval_eval  # noqa: E402
+from analysis.retrieval import grounding, topics, vectors  # noqa: E402
+
+# 코퍼스에 없는 성분명처럼 생긴 말. ydc `vector_threshold.py` v0.3.0 의 목록 **그대로**다 -- 우리가 다시
+# 지으면 그 짓는 규칙이 또 하나의 손잡이가 된다. 실제 성분명처럼 보이도록 접미사(`-사이드`·`-오일`·
+# `추출물`)를 붙였고, 라틴·키릴 표기를 섞은 것은 한글만으로는 인코더의 문자 편향을 못 보기 때문이다.
+FAKE = (
+    "퀀텀펩타이드사이드",
+    "하이드로실록산잔텀",
+    "메가비타플렉소사이드",
+    "젤라토프로틴추출물",
+    "네오콜라제닌오일",
+    "울트라세라마이덤",
+    "포토리포좀아쿠아",
+    "바이오크리스탈렌",
+    "трансдермалин",
+    "zylophosphatide",
+    "neocryolipide",
+    "hydraxanthenol",
+)
+KEEP = 0.90  # 문턱이 남겨야 하는 정탐 비율
+CUT = 0.50  # 그 문턱이 잘라야 하는 오탐 비율
+YDC_TRIAL = 0.865  # ydc 가 표본 6개로 임시로 넣었던 값. 근거가 약하다는 것이 이 측정의 출발점이다
+ROUTING_TOOL = ROOT / "tool" / "measure-query-routing"
+# 게이트가 쓰는 규칙 말고, 고르며 버린 갈래들. 값은 "df 0 을 근거로 볼 최소 토큰 길이"이고 None 은
+# ydc 초판의 "토큰의 df 가 전부 0" 이다.
+DISCARDED = {"all_zero": None, "any_len3": 3}
+SEPARATED = "분리가 된다"
+USABLE = "쓸 수 있다"
+UNUSABLE = "못 쓴다"
+
+
+def presence(conn, names: tuple[str, ...]) -> dict[str, int]:
+    """이름마다 그 말이 든 청크 수. **한 번의 훑기로 센다** -- 이름마다 물으면 없는 이름은 매번 전량
+    훑기이고, 그 열두 번이 statement_timeout(30초) 안에 든다는 보장이 없다."""
+    counted = ", ".join("count(*) FILTER (WHERE text LIKE %s)" for _ in names)
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT {counted} FROM retrieval_chunk", tuple(f"%{name}%" for name in names))  # noqa: S608
+        row = cur.fetchone() or ()
+    conn.commit()  # 뒤이어 1.2GB 행렬과 모델을 연다 -- 트랜잭션을 열어 둔 채로 나가지 않는다
+    return dict(zip(names, (int(n) for n in row), strict=True))
+
+
+def top_cosine(store, encoder, queries: list[str]) -> list[tuple[str, float]]:
+    """(질의, 최고 코사인). `search` 가 주는 것은 거리라 `1 - 거리` 로 되돌린다."""
+    from analysis.retrieval import embed
+
+    found = []
+    for query in queries:
+        hits = vectors.search(store, embed.encode_query(query, store=store, encoder=encoder), top=1)
+        found.append((query, 1.0 - hits[0][1] if hits else 0.0))
+    return found
+
+
+def highest_keeping(real: list[float], keep: float = KEEP) -> float:
+    """정탐을 `keep` 이상 남기는 **가장 높은** 문턱. 문턱은 언제나 실측값 하나다 -- 값 사이의 수를
+    고르면 그 고르는 규칙이 손잡이가 된다."""
+    best = min(real)
+    for candidate in sorted(real):
+        if sum(1 for score in real if score >= candidate) / len(real) >= keep:
+            best = candidate
+    return best
+
+
+def verdict(real: list[float], fake: list[float]) -> tuple[str, float | None]:
+    """미리 정한 기준으로 판정한다. **결과를 보고 기준을 만들지 않는다.**"""
+    if not real or not fake:
+        return ("측정 불가", None)
+    if max(fake) < min(real):
+        # 겹치지 않으면 문턱은 두 분포 사이 어디든 되므로 가운데를 준다.
+        return (SEPARATED, (max(fake) + min(real)) / 2)
+    threshold = highest_keeping(real)
+    cut = sum(1 for score in fake if score < threshold) / len(fake)
+    return (USABLE if cut >= CUT else UNUSABLE, threshold)
+
+
+def spread(scores: list[float]) -> dict:
+    """사분위는 ydc 가 쓴 자리 그대로 -- 보간하지 않고 정렬한 목록의 자리를 집는다."""
+    ordered = sorted(scores)
+    return {
+        "n": len(ordered),
+        "min": ordered[0],
+        "p25": ordered[len(ordered) // 4],
+        "median": statistics.median(ordered),
+        "p75": ordered[3 * len(ordered) // 4],
+        "max": ordered[-1],
+    }
+
+
+def at(threshold: float, real: list[float], fake: list[float]) -> dict:
+    """문턱 하나가 무엇을 자르는가. 자르는 쪽과 남기는 쪽을 함께 낸다 -- 차단 수만 보면 좋아 보인다."""
+    return {
+        "threshold": threshold,
+        "real_lost": sum(1 for score in real if score < threshold),
+        "real": len(real),
+        "fake_blocked": sum(1 for score in fake if score < threshold),
+        "fake": len(fake),
+    }
+
+
+def band_of(rows: list[tuple[str, float]], *, low: bool) -> dict | None:
+    """분포 한 벌과 그 가장자리 다섯. **표본이 비면 None 이다** -- 없는 표본 위에 분위수를 지어내지 않는다."""
+    scores = [score for _query, score in rows]
+    if not scores:
+        return None
+    edge = sorted(rows, key=lambda row: row[1] if low else -row[1])[:5]
+    return {**spread(scores), "lowest" if low else "highest": edge}
+
+
+def csv_dictionary() -> topics.Topics:
+    """적재 원본 CSV 한 벌. `cosmai lexicon load` 가 쓰는 그 변환을 타되 **프로세스에 세우지는 않는다** --
+    이 도구가 재는 정본은 활성 사전이고, 이쪽은 그 활성 사전과 맞대는 상대다."""
+    from cosmai.cli import _csv_rows
+    from db.lexicon import ASPECT_COLUMNS
+
+    aspect, pattern, extra = (ASPECT_COLUMNS.index(column) for column in ("aspect", "pattern", "extra"))
+    rows = _csv_rows("aspect", str(topics.DICTIONARY_CSV))
+    return topics.from_rows([(str(row[aspect]), str(row[pattern]), row[extra]) for row in rows], 1)
+
+
+def literal_queries(dictionary: topics.Topics) -> list[str]:
+    """`retrieval eval --mode literal` 이 쓰는 그 질의. 사람이 고르지 않는다."""
+    return [query for _topic, query in retrieval_eval.queries("literal", dictionary)]
+
+
+def same_as_csv(queries: list[str]) -> dict:
+    """활성 사전의 질의가 적재 원본 CSV 의 것과 같은가. 계약이 §검색 실측 과 이 표를 잇는 근거이고,
+    사전 판본이 갈린 뒤로는 **이것이 맞댈 수 있는 유일한 짝**이다(옛 버전 행은 DB 에 없다)."""
+    from_csv = literal_queries(csv_dictionary())
+    return {"same": from_csv == queries, "csv": len(from_csv), "active": len(queries)}
+
+
+def measure_cosine(conn, store, device: str | None) -> dict:
+    from analysis.retrieval import embed
+
+    dictionary = topics.use_active(conn)
+    real_queries = literal_queries(dictionary)
+    found = presence(conn, FAKE)
+    encoder = embed.load_encoder(store.model, device)
+    real = top_cosine(store, encoder, real_queries)
+    fake = top_cosine(store, encoder, [name for name in FAKE if not found[name]])
+    real_scores = [score for _query, score in real]
+    fake_scores = [score for _query, score in fake]
+    kind, threshold = verdict(real_scores, fake_scores)
+    band = band_of(real, low=True)
+    measured = {
+        "store": store.stamp,
+        "dictionary": dictionary.version,
+        "csv_queries": same_as_csv(real_queries),
+        "present": {name: count for name, count in found.items() if count},
+        "real": band,
+        "fake": band_of(fake, low=False),
+        "verdict": kind,
+    }
+    if not (band and fake_scores):
+        # 한쪽 표본이 비면 판정도 겹침도 지어내는 것이다 -- 가짜가 다 코퍼스에 있는 경우가 그 자리이고,
+        # `present` 가 무엇 때문인지 말하며 종료 코드 1 이 이 산출을 믿지 말라고 말한다.
+        return measured
+    return {
+        **measured,
+        "overlap": max(fake_scores) >= min(real_scores),
+        "at_threshold": at(threshold, real_scores, fake_scores) if threshold else None,
+        "at_ydc_trial": at(YDC_TRIAL, real_scores, fake_scores),
+        # 겹침의 크기. "겹친다"만으로는 스치는 것과 뭉쳐 있는 것이 같아 보인다.
+        "real_below_fake_max": sum(1 for score in real_scores if score < max(fake_scores)),
+        "fake_inside_real_quartiles": sum(1 for score in fake_scores if band["p25"] <= score <= band["p75"]),
+    }
+
+
+def frames() -> tuple[str, ...]:
+    """문형 열 개. **정본은 #47 의 도구다** -- 두 벌이 되면 갈리고, 그러면 이 표본이 "문형은 성분 신호를
+    내지 않는다"는 그쪽의 확인을 물려받지 못한다."""
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+
+    spec = spec_from_loader(
+        "measure_query_routing", SourceFileLoader("measure_query_routing", str(ROUTING_TOOL))
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - 파일이 없으면 아래에서 막힌다
+        raise FileNotFoundError(ROUTING_TOOL)
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return tuple(module.FRAMES)
+
+
+def zero_df(query: str, index, minimum: int | None) -> bool:
+    """버린 갈래가 이 질의를 막는가. `minimum` 이 None 이면 ydc 초판의 "전부 0" 이다."""
+    from analysis.retrieval import bm25
+
+    frequency = {term: len(index.postings.get(term, ())) for term in set(bm25.tokenize(query))}
+    if not frequency:
+        return False  # 토큰이 없으면 어느 갈래도 df 로 판정하지 않는다
+    if minimum is None:
+        return max(frequency.values()) == 0
+    return any(not df and len(term) >= minimum for term, df in frequency.items())
+
+
+def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
+    """규칙마다, 표본마다 **막힌 질의 수**. 쓰는 규칙의 줄은 `grounding.check` 자신이 낸다 -- 여기서
+    다시 적으면 계약의 표가 구현이 아니라 그 사본을 재게 된다."""
+    from analysis.retrieval import pipeline
+
+    dictionary = topics.use_active(conn)
+    index, _origin = pipeline.load_index(conn, sources)
+    real = literal_queries(dictionary)
+    shapes = frames()
+    samples = {
+        "real_alias": real,
+        "real_sentence": [frame.format(alias=alias) for alias in real for frame in shapes],
+        "fake_name": list(FAKE),
+        "fake_sentence": [frame.format(alias=name) for name in FAKE for frame in shapes],
+    }
+    rules: dict[str, dict[str, int]] = {name: {} for name in ("all_zero", "any_len3", "in_use")}
+    for sample, queries in samples.items():
+        for name, minimum in DISCARDED.items():
+            rules[name][sample] = sum(1 for query in queries if zero_df(query, index, minimum))
+        rules["in_use"][sample] = sum(1 for query in queries if not grounding.check(query, index).ok)
+    return {
+        "dictionary": dictionary.version,
+        "csv_queries": same_as_csv(real),
+        "minimum_length": grounding.ZERO_DF_MINLEN,
+        "frames": len(shapes),
+        "sizes": {sample: len(queries) for sample, queries in samples.items()},
+        "rules": rules,
+        # 못 막는 가짜를 이름으로 낸다. 수만 내면 "몇 개는 새지" 로 읽히고 어느 성질이 새는지가 지워진다.
+        "unblocked_fakes": [name for name in FAKE if grounding.check(name, index).ok],
+    }
+
+
+def report_cosine(found: dict) -> None:
+    print(f"저장소 {found['store']} · 활성 주제 사전 v{found['dictionary']}")
+    same = found["csv_queries"]
+    verdict_csv = "같다" if same["same"] else "다르다"
+    print(f"  질의 {same['active']}개 · 적재 원본 CSV({same['csv']}개)와 {verdict_csv}")
+    if found["present"]:
+        print(f"[가짜가 아니다] 코퍼스에 실제로 있는 후보 {found['present']}")
+    for label, key, edge in (
+        ("진짜 질의 (주제 별칭)", "real", "lowest"),
+        ("가짜 질의 (없는 성분명)", "fake", "highest"),
+    ):
+        band = found[key]
+        if band is None:
+            print(f"\n{label} 최고 코사인  표본이 비었다 -- 분포를 낼 수 없다")
+            continue
+        print(
+            f"\n{label} 최고 코사인  n={band['n']}\n"
+            f"  최소 {band['min']:.4f} · 25% {band['p25']:.4f} · 중앙 {band['median']:.4f} "
+            f"· 75% {band['p75']:.4f} · 최대 {band['max']:.4f}"
+        )
+        print(f"  가장 {'낮은' if edge == 'lowest' else '높은'} 5개: ", end="")
+        print(" ".join(f"{query}={score:.3f}" for query, score in band[edge]))
+    print(f"\n판정: **{found['verdict']}**", end="")
+    if "overlap" not in found:
+        print(" -- 한쪽 표본이 비어 겹침도 문턱도 낼 수 없다")
+        return
+    print(f" · 겹침 {'있음' if found['overlap'] else '없음'}")
+    print(
+        f"  진짜 {found['real_below_fake_max']}/{found['real']['n']}개가 가짜 최고보다 낮고 "
+        f"· 가짜 {found['fake_inside_real_quartiles']}/{found['fake']['n']}개가 진짜의 사분위 안에 있다"
+    )
+    for label, line in (("정탐 90% 문턱", found["at_threshold"]), ("ydc 임시값", found["at_ydc_trial"])):
+        if not line:
+            continue
+        print(
+            f"  {label} {line['threshold']:.4f}: 진짜 {line['real_lost']}/{line['real']}개 잘림 "
+            f"· 가짜 {line['fake_blocked']}/{line['fake']}개 차단"
+        )
+
+
+def report_df(found: dict) -> None:
+    labels = {
+        "all_zero": "전부 0 (ydc 초판)",
+        "any_len3": "하나라도 0 · 길이 >= 3",
+        "in_use": f"하나라도 0 · 길이 >= {found['minimum_length']} (쓰는 규칙)",
+    }
+    same = found["csv_queries"]
+    print(
+        f"\n막힌 질의 수 · 활성 주제 사전 v{found['dictionary']} · 문형 {found['frames']}개 "
+        f"· 질의는 적재 원본 CSV 와 {'같다' if same['same'] else '다르다'}"
+    )
+    for name, label in labels.items():
+        counts = " · ".join(
+            f"{sample} {found['rules'][name][sample]}/{size}" for sample, size in found["sizes"].items()
+        )
+        print(f"  {label}\n      {counts}")
+    print(f"  못 막는 가짜: {found['unblocked_fakes']}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--vectors", default=None, help="벡터 저장소 경로. 기본값은 vectors.DEFAULT_STORE")
+    parser.add_argument("--device", default="cpu", help="인코더 장치. 기본값 cpu -- 질의 73개다")
+    parser.add_argument(
+        "--part",
+        choices=("all", "cosine", "df"),
+        default="all",
+        help="cosine 은 저장소와 인코더를, df 는 BM25 색인을 연다. 무거운 의존이 서로 다르다",
+    )
+    parser.add_argument("--json", action="store_true", help="테스트·보고가 읽는 형식")
+    args = parser.parse_args()
+
+    from cosmai.cli import _connect
+
+    try:
+        conn = _connect(None)
+    except (ValueError, LookupError) as refused:
+        print(refused, file=sys.stderr)
+        return 2
+    found: dict = {}
+    try:
+        with conn:
+            if args.part in ("all", "cosine"):
+                store = vectors.load(Path(args.vectors) if args.vectors else vectors.DEFAULT_STORE)
+                found["cosine"] = measure_cosine(conn, store, args.device)
+            if args.part in ("all", "df"):
+                found["df"] = measure_df(conn)
+    # 인코더가 없는 것(embed extra 미설치)은 실패가 아니라 막힘이다 -- load_encoder 가 무엇을 어떻게
+    # 깔아야 하는지 RuntimeError 로 말한다.
+    except (vectors.StoreMissing, topics.NoDictionary, RuntimeError) as blocked:
+        print(blocked, file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(found, ensure_ascii=False, indent=2))
+    else:
+        if "cosine" in found:
+            report_cosine(found["cosine"])
+        if "df" in found:
+            report_df(found["df"])
+    # 가짜가 아닌 것이 표본에 있었으면 뺀 뒤에도 이 수는 계약이 적은 표본 위의 수가 아니다.
+    return 1 if found.get("cosine", {}).get("present") else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

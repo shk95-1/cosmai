@@ -174,8 +174,18 @@ profile 뒤라 안 돈다. 선언과 크론탭의 어긋남은 `tests/test_pipel
 cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
   stage ∈ {link, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
-cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
+cosmai lexicon {load, activate} --kind <kind> --version <n>
+cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--against <n>]
 ```
+- **`lexicon diff` 는 적재 원본 CSV 를 DB 버전과 맞댈 수 있다**(포크 #62, `--csv`). 그전까지 이 명령은
+  **DB 버전끼리만** 비교했고 `--version` 이 필수였다 — 그래서 "레포의 CSV 가 지금 켜져 있는 사전인가"를
+  물을 길이 레포 안에 없었다(그 물음이 실제로 필요해진 자리는 `interfaces.md` §검색 실측 의 판본 되짚기다).
+  CSV 쪽은 `lexicon load` 가 타는 **그 변환**(`cosmai.cli._csv_rows`)을 그대로 타고, 양쪽 키·값은 **같은 SQL
+  식**으로 만든다 — 한쪽을 파이썬으로 다시 렌더하면 `extra` jsonb 의 키 순서 하나로 전 행이 "바뀜"이 된다.
+  `--against` 없으면 활성 버전이 상대다. **aspect 는 CSV 가 말하는 룰셋으로 좁혀 맞댄다**: 한 aspect 버전에는
+  룰셋이 여럿 살고(`formats.md` §aspect 사전의 ruleset) CSV 는 그중 하나의 적재 원본이라, 안 좁히면 다른
+  룰셋 전부가 "지워짐"으로 나온다. `--version` 과 `--csv` 를 함께 주면 blocked(2) — 어느 쪽이 그 판본인지
+  둘이 말하면 답이 둘이다. 종료 코드는 **갈렸다고 바뀌지 않는다**(0 = 답이 계산됐다).
 - T14: `extract` 는 단독 stage 가 아니다 — 후보만 만들고 아무 행도 쓰지 않아 멱등을 관측할 수 없다. 추출은 `polarity` 안에서 돈다(`Extractor` 프로토콜은 그대로).
 - B11: `eval aspect` 는 평가셋도 기준선도 0행이라 뺐다. 되살리려면 평가셋 + `interfaces.md` 기준선 표의 행이 같은 PR 에 온다.
 - 모든 단계는 **자연키 upsert** 로 멱등. 재실행은 같은 결과를 만든다.
@@ -286,6 +296,322 @@ cosmai lexicon {load, diff, activate} --kind <kind> --version <n>
   반쪽 달은 규칙 실행이 배제하므로 아무도 메우지 않고, 한 번 말한 뒤로는 아무도 다시 말하지 않는다:
   그 달을 되찾는 길은 사람이 주인의 패스를 그 달에 다시 돌리는 것 하나뿐이고, 그때까지 남는 증거는 죽은
   run 의 note 에 계속 붙어 있는 `rewriting=` 표식이다.
+
+## 검색 (#28 → 포크 cosmai-import-ydc, upstream PR #59)
+```
+cosmai retrieval chunk  [--since <date>] [--source <s>]...
+cosmai retrieval search --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--vectors <path>]
+cosmai retrieval eval   --mode <m> [--engine <e>] [--source <s>]... [--out <csv>] [--vectors <path>]
+cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <path>]
+cosmai retrieval terms  [--source <s>]... [--top <n>]
+  source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
+  engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
+```
+- **주제 사전은 `needs.aspect_lexicon` 의 활성 버전이다**(`ruleset='retrieval-topic'`, 포크 #8). 그 별칭이
+  BM25 토큰 확장(Kiwi 사용자 단어 + 부분문자열 확장)과 평가 정답(`match_topics`)을 함께 정하므로, 사전을
+  바꾸는 길은 `cosmai lexicon load/diff/activate` 하나다 — 적재 원본은 `analysis/retrieval/dict/topics_v1.csv`.
+  aspect 버전 하나 = **모든 룰셋을 합친 aspect 사전 전체**라(`activate` 는 kind 단위로 켠다) 주제를 새
+  버전으로 올릴 때는 극성 쪽 CSV(`eval/lexicon/aspect_lexicon_v1.csv`)도 같은 버전으로 함께 적재한다.
+  **v3 적재는 아직 안 했다**(2026-08-27, 운영은 v2 가 활성) — 그전까지 검색이 보는 사전은 v2 이고, 레포의
+  적재 원본은 이미 v3 내용이라 그 둘이 갈려 있다. 켜는 순간 `선크림` 주제가 12,197 → 12,418 문서를 보게
+  되고 색인 캐시가 사전 지문으로 무효화된다(`pipeline.index_signature`).
+- **색인·추출 축에는 불용어 목록도 조사 목록도 두지 않는다**(포크 #37, ydc `lexicon.json` 처분). 그 축은
+  색인 토큰화(`bm25.tokenize`)와 `terms` 다 — 일반어는 lift 축이 걷어내고(`analysis/retrieval/terms.py`),
+  조사는 Kiwi 의 태그가 가른다: `KIWI_TAGS` 밖(조사 `J*`·어미 `E*`)을 버리고 한 글자 명사도 버려서, ydc
+  가 코퍼스 실측으로 검증한 조사 30개를 어간에 붙여도 토큰이 하나도 달라지지 않는다(실측 2026-08-26 ·
+  30/30 · `tests/retrieval/test_particles.py`). **질의 축은 이 문장이 정하지 않는다**(포크 #46): 질의를
+  서술하는 말은 df 로 갈리지 않아(ydc 실측 `소비자` 289 < `백탁` 338) 다른 근거가 필요하고, 그 판단은 그
+  이슈가 아래 두 항목에서 진다. 축이 어느 쪽이든 살아남는 것은 파일이 아니라 **버전을 받는 행**이다
+  (포크 #8) — 주제 표기는 위 사전(`ruleset='retrieval-topic'`), 브랜드 표기는 `needs.entity_lexicon`
+  (`formats.md` §사전 CSV).
+  `lexicon.json` 의 별칭 **9개가 다 판정됐다**(포크 #56): 셋(`썬크림`·`자외선차단제`·`코스알엑스`)은
+  이미 있었고, `선크림추천` 은 확장이 잡아 행이 필요 없으며, **셋**(`썬쿠션`·`썬스틱`·`sunscreen`)이 주제
+  사전 v3 의 행이 됐고, `올영`(df 5,583)과 `sunstick`(df 3)은 미등재다 — 앞은 정본이 `tier='stop'` 이라
+  행을 더해도 소비자가 없고, 뒤는 바닥(`terms.MIN_DOCS` 5) 아래이며 그 3편을 이미 `선크림` 이 본다.
+  같은 v3 가 #37 의 후보 7종도 판정해 `선에센스`·`선스프레이`·`속건조`·`파데프리` 넷을 더 올렸다. 판정
+  원장과 등재 기준 넷은 `formats.md` §주제 사전 v3 이고, 그 수를 다시 재 원장과 맞대는 길은
+  `tool/measure-lexicon-candidates` 다.
+- **질의 토큰화는 색인 토큰화와 갈린다**(포크 #46). 색인은 `bm25.tokenize`, 질의는 `bm25.tokenize_query`
+  — 같은 토큰화에 **질의 불용어 제거**만 얹은 것이고, `Index.search` 만 그쪽을 탄다. 색인에서 빼지 않는
+  이유는 그러면 `소비자` 를 직접 찾는 질의를 못 하게 되기 때문이다. 뺄 근거가 lift 도 idf 도 아닌 이유는
+  그 말들이 흔해서가 아니라 **질문을 서술하는 말이라 주제가 아니어서**다 — 통계로는 반대로 나온다(위의
+  `소비자` 289 < `백탁` 338). 그래서 통계가 아니라 판단이고, 판단이므로 **버전을 받는 행으로 산다**:
+  `needs.entity_lexicon` 의 `kind='stopword'` · `canonical='query'` 활성 버전이 정본이고, 고치는 길은
+  `cosmai lexicon load/diff/activate --kind stopword` 하나다(적재 원본은 주제 사전과 같은 자리의
+  `analysis/retrieval/dict/query_stopwords_v1.csv`). 그 kind 는 주제 사전과 **활성 버전이 따로**다 —
+  `entity_lexicon` 의 `activate` 는 kind 하나만 켜고 끄므로(`db/lexicon.py` `ENTITY_ACTIVATE`), 질의
+  불용어 개정과 aspect 사전 개정이 서로를 끄지 않는다. 버전 **번호표**는 그렇지 않다 —
+  `formats.md` §entity 사전의 `kind='stopword'` 가 그 한계와 포크 #58 을 적는다.
+- 그 목록에 걸리는 규칙 셋. (1) **질의가 전부 불용어면 지우지 않는다** — 토큰 0개는 결과 0건이고, 필러가
+  낀 순위보다 나쁘다. (2) **색인 캐시를 무효화하지 않는다**: `pipeline.index_signature` 는 이 목록을 물지
+  않고, 물어서도 안 된다 — 색인은 `tokenize` 그대로라 목록이 바뀌어도 같은 색인이 맞다. heldout 정답을
+  정하는 `eval.docs_with_tokens` 가 `tokenize_query` 가 아니라 `tokenize` 를 쓰는 것도 같은 이유다(정답
+  정의는 색인 축이다). (3) **활성 버전이 없으면 빈 목록이고 막힘이 아니다** — 주제 사전과 다른 자리다:
+  주제 사전이 없으면 정답이 0건이라 점수가 거짓이 되지만, 질의 불용어가 없는 검색은 이 목록 이전의 검색
+  그대로다. 그래서 `search` 는 뺀 토큰이 있을 때만 stderr 한 줄로 말하고 종료 코드를 바꾸지 않는다
+  (아래 커버리지 경고와 같은 자리). **v1 적재는 아직 안 했다**(2026-08-26) — 그전까지 `search` 가 보는
+  목록은 비어 있고, 위 규칙 셋은 적재·활성 뒤에야 관측된다.
+- **질의마다 엔진을 고르는 라우터는 두지 않는다**(포크 #47). `--engine` 은 사람이 준 값 그대로 간다.
+  ydc `v0.3.0` 의 규칙 라우터(`rag/router.py`)를 승격하지 않았고 그 근거 — 신호 넷 중 둘의 원천이 없어 갈래 둘이 막힌다 ·
+  **성분명 판정의 정본이 토크나이저 사전이 아니다** · 우리 사전 위의 오라우팅 실측 — 은 `interfaces.md`
+  §질의 라우팅 이 진다. 새 하위명령도 새 종료 코드도 늘지 않는다.
+- **벡터 검색에 유사도 하한선을 두지 않는다**(포크 #48). `--engine vector`·`hybrid` 는 코사인이 얼마든
+  상위 `--top` 을 채운다 — 넣지 **않기로 한** 것이고, 진짜 질의(주제 별칭 **61개** — 그 실측이 선 활성
+  사전 v2 의 표본이다. 오늘 활성인 v3 는 63개이고, 다시 재기 전까지 그 표는 v2 판본의 기록이다)와 코퍼스에
+  없는 성분명의 최고 코사인 분포가 갈리지 않는다는 실측이 그 근거다(`interfaces.md` §벡터 하한선). ydc `v0.3.0` 의
+  `vector_threshold.py` 를 승격하지 않았고, 새 옵션도 새 종료 코드도 늘지 않는다.
+- **대신 근거 없는 질의를 청크빈도로 막는다 — `vector`·`hybrid` 에만**(포크 #48,
+  `analysis/retrieval/grounding.py`). 길이 4 이상인 질의 토큰 중 빈도가 0 인 것이 있으면 `search` 는 순위를
+  매기지 않고 stderr 한 줄 + 결과 0건으로 답한다 — 코퍼스가 그 이름을 한 번도 말한 적이 없다는 뜻이라,
+  결과가 나와도 그 이름과 무관한 문서다.
+  **종료 코드는 이미 있는 `1`(결과 없음)이고 새 코드가 늘지 않는다.**
+  토큰이 0개인 질의(`톤 업`·키릴 표기)는 빈도로 판정하지 않고 통과시킨다 — 막으면 벡터가 유일하게
+  답하는 자리를 막는다.
+- **`bm25` 의 동작은 이 이슈 전과 같다.** 어휘 검색은 빈도 0 인 낱말을 idf 0 으로 무시하고 **남은 낱말로
+  답하므로**, 게이트를 걸면 "진짜 주제 + 코퍼스에 아직 없는 신제품 이름" 질의에서 예전에 나오던 부분 답이
+  0건이 된다. 그 손해는 아무도 재지 않았고(질의 로그가 없다), 재지 않은 손해를 감수할 이유가 없다.
+- 그래서 **`--engine vector` 도 BM25 색인을 연다**(게이트가 보는 빈도가 거기 있다). `bm25`·`hybrid` 가
+  이미 내던 비용을 vector 쪽도 내게 된 것이고, 그 대가로 코퍼스에 없는 이름이 상위 k 를 채워 근거로
+  인쇄되는 일이 없어진다. 캐시가 있으면 피클 한 벌, 없으면 38만 청크를 형태소 분석하는 십수 분인데 —
+  **캐시는 `--source` 조합마다 따로다**(`pipeline.index_signature` 가 `sources` 를 문다). 좁혀 쓰는 vector
+  검색은 지금까지 색인을 연 적이 없으므로 그 조합의 캐시가 존재한 적이 없고, **첫 호출이 무조건 십수
+  분**이다. 벡터 파일이 없는 호스트는 그 비용을 치른 **뒤에야** blocked(2)를 본다 — 게이트가 저장소보다
+  앞이다. `retrieval eval` 은 이 게이트를 타지 않는다 — 타더라도 주제 별칭 61개 중 막히는 것이 0개다
+  (`interfaces.md` §벡터 하한선. 위와 같은 v2 판본의 표본이고, v3 가 더한 두 별칭은 아직 이 축으로 재지 않았다).
+- **`--source` 는 후보를 좁힐 뿐 소스별 몫을 주지 않는다**(포크 #54). 좁힌 뒤에도 답은 남은 것 중 전역
+  상위 k 다. ydc 는 소스마다 따로 뽑아 합치지만(색인의 92%가 짧은 댓글이라 `mfds` 가 293위로 밀렸다) 우리
+  코퍼스에는 그 쏠림이 없다 — 지배 소스는 색인의 75.64% 인데 상위 10 은 71.11% 만 가져가고, 색인 6.06% 인
+  `commerce_review` 가 상위 10 의 21.03% 다. 실측과 판정 기준은 `interfaces.md` §소스별 분배, 재는 길은
+  `tool/measure-source-mix` 다.
+- `terms` 는 그 사전이 **못 잡는** 고빈도 명사와 사전 표기의 등장 문서 수를 stdout 표 두 개로 낸다 —
+  사람이 읽고 위 CSV 를 고치는 재료다. 파일로 떨구지 않는다: 매일 자라는 코퍼스의 스냅숏이라 레포에
+  두면 낡고, 무엇보다 두 번째 사전으로 오해된다. 남기려면 리다이렉트한다.
+- `chunk` 만 쓰기다(`needs.retrieval_chunk`). 나머지 넷은 그 표와 파일을 읽는다. 원천은 다른 스키마이고
+  `db/grants/needs_runtime_reader.sql` 의 SELECT 로만 닿는다 — 수집기가 자기 스키마에만 쓴다는 규칙의 반대편이다.
+- 멱등: `chunk` 는 `text_md5` 가 같은 행을 건드리지 않는다(재실행 = 변경 0). `embed` 는 전량 재인코딩이다.
+- `chunk` 의 **삭제 판정은 이번 실행이 훑은 범위 안에서만 선다**(포크 #23). 짧아진 문서의 꼬리와 본문이
+  통째로 빈 문서의 청크는 언제나 지운다 — 근거가 훑은 문서 자체에 있다. 원천에서 **행이 사라진** 문서는
+  `--since` 없는 전량 실행에서만 지운다: 증분 실행에서 "안 나왔다"는 "범위 밖이라 안 봤다"와 구분되지
+  않는다. 훑어서 문서가 0건인 소스도 같은 이유로 제외한다("다 사라졌다"와 "못 읽었다"가 같아 보인다).
+  건너뛴 것은 실행 note 가 말한다.
+- **`--vectors` 는 세 하위명령에서 같은 뜻이다**(벡터 저장소 경로). `--out` 은 `eval` 에서만 쓰고 점수 CSV 를 뜻한다.
+- **기본 `--engine bm25` 는 literal 용도 기준이다** — heldout 에서 bm25 는 P@10 0.000·Hit 0%, vector 는
+  0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다(여섯 줄 전부는 `contracts/interfaces.md`
+  §검색 실측). 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
+- 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음 — 근거 없는 질의가 막힌 것도 여기다, `eval` 의 채점된 질의 0개와
+  `terms` 의 훑은 문서 0건 — 둘 다 청크가 비었다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수
+  없음 — 파일이 없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이
+  행렬과 어긋난 것이 같은 자리다, **활성 주제 사전 없음** — `cosmai lexicon load/activate` 를 아직 안
+  돌렸다는 뜻이라 실패가 아니라 막힘이다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
+- **커버리지 경고는 stderr 로 나가고 종료 코드를 바꾸지 않는다** — `search`·`eval` 의 vector·hybrid 는 저장소가
+  덮는 청크 수와 매니페스트 `chunked_at_max` 를 BM25 캐시 키와 **같은 질의**(`count(*)`·`max(chunked_at)`)와
+  대조하고, 어긋나면 한 줄을 찍고 계속한다 — 멈추면 옛 코퍼스를 일부러 검색하는 정상 용법까지 막힌다.
+  `eval` 은 같은 줄을 CSV `note` 열과 stdout 요약에 싣는다(어느 코퍼스 위의 점수인지). `chunked_at_max` 는
+  **필수 키가 아니다** — 없으면 개수만 대조하고 그 사실을 경고한다(거부하면 그 키 이전에 구운 저장소로 도는
+  검색이 통째로 멈춘다). 어긋남을 고치는 것은 `embed` 전량 재인코딩이다.
+- **평가 행은 저장소 판본을 어긋나지 않아도 싣는다** (포크 #49). `eval` 의 vector·hybrid 는 매니페스트의
+  `model`·`revision`·벡터 수·`chunked_at_max` 를 CSV `store` 열과 stdout 요약 한 줄에 싣는다 — 바로 위
+  커버리지 경고와 **축이 다르다**: 그쪽은 어긋날 때만 말하므로 정상일 때는 판본이 아무 데도 안 남고, 그
+  자리가 ydc 에서 "1차 → 2차" 로 라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 사고다(`v0.3.0` 은
+  산출 파일명에 판본을 붙여 고쳤다 — 우리는 파일이 아니라 행으로 내므로 같은 자리가 행이다).
+  **판본 없는 행은 나올 수 없다**: 저장소를 못 열면 그 실행이 통째로 blocked(2)이고, `model` 이 빈
+  저장소는 `load` 가 거절한다(위 blocked 항목). bm25 행은 비어 있다 — 저장소를 열지 않으니 지어낼 판본이
+  없다. 이 열은 종료 코드를 바꾸지 않는다.
+- **평가 행은 주제 사전 판본도 스스로 적는다** (포크 #62). `eval` 은 그 실행이 실제로 읽은 활성 사전의
+  `ruleset`·`version`·주제 수·별칭 수·**내용 지문**을 CSV `dictionary` 열과 stdout 요약 한 줄에 싣는다.
+  바로 위 저장소 판본과 **축이 다르고, 채우는 행의 집합도 다르다**: `store` 는 저장소를 여는 vector·hybrid
+  에만 있지만 `dictionary` 는 **세 엔진 전부**에 있다 — 정답(`match_topics`)도 질의(주제 별칭)도 사전이
+  만들므로 저장소를 안 여는 bm25 행도 사전 위에 서 있다. 번호표만 싣지 않는 이유는 **켜져 있는 버전에 행을
+  더할 수 있어서**다(같은 이유로 `pipeline.index_signature` 도 번호와 지문을 함께 문다). 별칭 수는 `ko`+`latin`
+  만 센다 — `mfds_inci` 는 매칭에도 질의에도 쓰이지 않아 함께 세면 한 낱말이 두 축을 말한다.
+  **판본 없는 행은 나올 수 없다**: 활성 사전이 없으면 그 실행이 통째로 blocked(2)다(위 blocked 항목).
+  이 열은 종료 코드를 바꾸지 않는다. 판본을 다시 찍는 길은 `tool/show-lexicon-stamp` 다.
+- **벡터는 파일이다** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector 는 #28 단계 4b 로 미뤘다.
+  BM25 색인도 `var/retrieval/bm25/index-<sha16>.pkl` 로 캐시한다(키 = 청크 수 + 최신 `chunked_at` + Kiwi
+  사전 두 벌의 해시 + **활성 주제 사전의 버전과 내용 지문**). 주제 사전이 파일이 아니게 된 뒤로 파일 해시만
+  거는 키는 주제 변경을 놓친다 — 버전 번호만으로도 모자란다(켜져 있는 버전에 행을 더할 수 있다).
+  둘 다 `var/` 라 레포에 들어가지 않고, 지워도 다시 만들어진다.
+- **`embed` 는 크론이 아니라 사람이 GPU 호스트에서 돌린다.** 그래서 `sentence-transformers`·`torch` 는 `embed`
+  extra 에만 있고 `stack/Dockerfile` 에도 `tool/checks/test` 에도 들어가지 않는다 — 테스트는 이미지가 싣는
+  집합에서 돌아야 한다. 실행은 `uv run --extra retrieval --extra embed cosmai retrieval embed …` 로 한다.
+  `uv sync --extra embed` 로 깔아 두면 다음 `tool/checks/test` 가 지운다(그게 맞는 동작이다).
+- `analyze all` 과 같은 이유로 크론 간격 규칙에서 제외된다 — 외부 fetch 가 없는 DB·파일 전용 작업이다.
+
+## 분기 시계열 (포크 #5, ydc `trend.py` 승격)
+```
+cosmai trend quarter [--url <url>]
+```
+- 활성 코퍼스 스냅샷(`corpus_snapshot.active`)과 활성 패널 명부(`panel_channel` 의 활성 판본)를 읽어
+  `needs.metrics_topic_quarter` 를 쓴다. **스냅샷도 명부도 인자가 아니다** — 고르는 길이 둘이면 분모도
+  둘이 되고, 활성 판본을 고르는 자리는 `db/corpus.active_snapshot` 과 `db/seed/panel.active_version`
+  하나씩이다(후자는 활성 판본이 둘이면 답 대신 멈춘다).
+- 모집단은 매니페스트 규칙 그대로다: `content_type='video_long'` · `panel_role='product'` ·
+  `topic_id='선크림'` 언급이 있는 영상, 그리고 그 영상들에 달린 댓글. 산출 행의 `scope` 는
+  `metrics_need.scope` 와 같은 어휘(`선블록`)이고 `content_type` 은 `long_form` 이다.
+- **한 실행이 그 (run, scope, 명부) 의 행을 통째로 다시 쓴다.** 부분 갱신이 아닌 것이 격자를 조밀하게
+  지키는 방법이다 — 재실행은 같은 `run_id`(note 로 찾는다)에 같은 행을 낸다.
+- 쓰고 나서 `needs.metrics_topic_quarter_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면
+  종료 코드 **1**(partial)이고 stdout 이 그 줄을 싣는다 — 표는 섰지만 그 표의 뜻이 계약과 다르다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, **활성 명부 없음**·**활성 스냅샷
+  없음**, 모집단이 비어 산출할 행이 없음 — 셋 다 `db/seed --only panel`·`db/corpus load` 를 아직 안
+  돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `analysis_run.versions.metric` 이 그 행들의 정의 판본을 든다 (`versioning.md`).
+
+## 판정 (포크 #40, ydc `judge.py` 승격)
+```
+cosmai trend judge [--url <url>]
+```
+- `cosmai trend quarter` 가 낸 **그 run 의** `needs.metrics_topic_quarter` 행을 읽어
+  `needs.topic_quarter_judgement` 를 쓴다. run 은 `quarter` 와 **같은 길**로 찾는다(활성 스냅샷·활성
+  명부에서 만든 note) — 인자가 없는 이유도 같다. 지표 행이 없으면 판정할 것이 없다.
+- **지표를 다시 계산하지 않는다.** 판정 기준(`TAU`·가중치·유형 이름)은 팀 합의로 바뀌고, 그때 지표를
+  다시 세지 않아도 되도록 두 단계를 갈라 둔 것이 ydc 의 설계이고 이 명령이 그것을 그대로 받는다.
+- 한 실행이 그 (run, scope, 명부) 의 판정 행을 통째로 다시 쓴다 — 부분 갱신이 아닌 것이 지표 행과의
+  1:1 을 지키는 방법이다.
+- 쓰고 나서 `needs.topic_quarter_judgement_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
+  코드 **1**(partial)이고 stdout 이 그 줄을 싣는다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
+  지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `analysis_run.versions.judgement` 가 그 행들의 정의 판본을 든다 (`versioning.md`).
+
+## 민감도·후향 검증 (포크 #41, ydc `panel_sensitivity.py`·`backtest.py`·`spam_ad_flags.py` 승격)
+```
+cosmai trend sensitivity [--url <url>]
+```
+- `cosmai trend quarter` 가 낸 **그 run 의** 결론이 세 선택에 흔들리는지 묻는다: 패널 구성(product 만 대 43채널
+  전부) · 컷오프(과거 분기까지만 알던 것처럼 다시 셈) · 광고·협찬 표시(빼고 다시 셈). run 은 `quarter`·`judge`
+  와 **같은 길**로 찾는다(활성 스냅샷·활성 명부에서 만든 note) — 인자가 없는 이유도 같다.
+- **아무것도 쓰지 않는다.** 세 측정이 만드는 행은 반사실 모집단의 것이고 022 의 `panel_role` 어휘에도
+  `analysis_run` 에도 자리가 없다(`interfaces.md` §민감도). 답은 표가 아니라 stdout 이고, 읽기 전용이라 운영 DB 에
+  그대로 돌린다. 저장된 표가 그대로인 것은 `tests/test_sensitivity_pipeline.py` 가 지문으로 붙든다.
+- 기저는 다시 세고, 그 기저가 저장된 `metrics_topic_quarter` 행과 다르면 그 사실(`baseline_drift`)이 먼저 나온다 —
+  그때 이 명령의 모든 차이는 뜻이 없다.
+- 종료 코드: **0 ok — 답이 계산됐다** · 1 partial(**이 산출을 믿지 마라** — `baseline_drift`, 또는 방향성 판정
+  사례가 둘 미만이라 후향 검증이라 부를 것이 없다(`thin_backtest`)) · 2 blocked(연결 거절, 활성 명부·스냅샷·주제
+  사전 없음, **그 run 에 지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
+  막힘이다. 코퍼스가 비었는데 지표 행만 남아 창이 설 분기가 없는 것(`ShortHistory`)도 같은 자리다).
+- **"결론이 흔들린다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이지 실행의 실패가 아니고,
+  이 파일 맨 위의 공통 규약(`0 ok · 1 partial(일부 실패·절단) · 2 blocked`)에서 1 은 "산출이 온전하지 않다"는
+  뜻이다. 흔들림은 종료 코드가 아니라 `note` 의 `panel_flips=`·`ad_flips=` 와 세 표가 싣는다 — 전량에서 흔들림은
+  평상 상태라(광고·협찬을 빼면 19셀에서 유형이 바뀐다) 1 로 내면 `set -e` 셸·make·CI 한 줄이 정상 실행을 실패로
+  읽는다. 출처인 ydc 도 같은 자리다: `panel_sensitivity.py`·`spam_ad_flags.py` 는 언제나 0 이고 `backtest.py` 만
+  사례 2건 미만에 1 을 쓴다.
+- 크론에 걸어도 안전하다(읽기 전용 · 0 이 평상 상태). 다만 답이 바뀌는 것은 코퍼스나 명부가 바뀔 때라, 지금은
+  사람이 한 번 물어 이슈에 남긴다.
+- **아래 §근거·카드 의 `cards` 도 같은 자리다** — "규칙에 걸린 셀이 없다"는 발견이지 실패가 아니다.
+
+## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
+```
+cosmai trend evidence [--url <url>]
+cosmai trend cards --quarter <q> [--url <url>]
+```
+- `evidence` 는 `cosmai trend judge` 가 판정한 **그 run 의** 셀에 붙는 근거 댓글을
+  `needs.topic_quarter_evidence` 에 쓴다. run 을 찾는 길은 `quarter`·`judge` 와 같은 note 하나이고,
+  그래서 인자도 `--url` 하나다.
+- **모집단은 지표를 세운 그 술어다** — `analysis/trend/pipeline.py` 의 `POPULATION` CTE 를 그대로 든다.
+  근거만 다른 모집단에서 고르면 카드의 발화와 카드의 숫자가 다른 분모 위에 선다.
+- **후보를 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다.** 근거는 판정과 달리 코퍼스를 훑는 단계라
+  `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에 그대로 걸린다 — 커서를 연 채 접으면
+  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이고,
+  전량에서 후보 15,602행 · 0.52s · 73MB 로 실제로 재 봤다 (`interfaces.md` §근거 "전량 실측").
+- 한 실행이 그 (run, scope, 명부) 의 근거 행을 통째로 다시 쓴다 — 부분 갱신이면 자리(rank)의 사다리가
+  조용히 구멍 난다.
+- 쓰고 나서 `needs.topic_quarter_evidence_violation` 에 그 run 을 되묻는다. 뷰가 무엇이든 말하면 종료
+  코드 **1**(partial)이고 stdout 이 그 줄을 싣는다.
+- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
+  판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- `cards` 는 **아무것도 쓰지 않는다.** 위 세 표를 읽어 마크다운 카드 묶음을 stdout 으로 낸다. 파일로
+  떨구지 않는 것은 `retrieval terms` 와 같은 이유다(자라는 코퍼스의 스냅숏이라 레포에 두면 낡는다) —
+  남기려면 리다이렉트한다. `--quarter` 는 필수다: 카드는 "이번 분기에 이 주제를 더 볼지"를 담당자가
+  정하는 단위라 분기가 없으면 물음이 서지 않는다.
+- `cards` 의 종료 코드: **0 ok — 카드가 계산됐다(0장이어도 그렇다)** · 1 partial(**규칙에 걸렸는데 근거
+  원문이 없어 카드로 서지 못한 셀이 있다** — 그것만이 잘린 산출이다) · 2 blocked(연결 거절, 그 run 에 판정
+  행이 없음, 그 분기가 이 run 의 격자에 없음 — 뒤의 둘은 메시지가 갈라 말한다).
+- **"규칙에 걸린 셀이 없다"는 1 이 아니다.** 그것은 규칙이 다 돌고 나온 정상적으로 계산된 답이고, 이 파일
+  맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 바로 위 §민감도 의 "흔들린다는 1 이 아니다"와
+  **같은 자리, 같은 문장**이다. 실측으로도 그렇다: 표본 골든 11분기 중 **8분기가 0장**이라 1 로 내면 평상
+  상태의 73%가 실패로 읽히고, `cards` 는 사람이 한 번 치는 탐색 명령이 아니라 `quarter → judge → evidence
+  → cards` 의 마지막 칸이라 `set -e` 셸·make·크론이 그 줄에서 멈춘다(upstream #55 의 착수 조건이 "S6 자동
+  소비자"다). 몇 장인지는 종료 코드가 아니라 stderr 의 `note` 가 싣는다.
+- **stdout 은 마크다운 산출물뿐이다.** `note` 와 잘린 셀 줄은 stderr 로 나간다 — 리다이렉트한 `.md` 안에
+  `trend cards run=…` 이 남지 않아야 그 파일이 그대로 문서다.
+- `analysis_run.versions.evidence` 가 근거 행들의 정의 판본을 든다 (`versioning.md`). 카드는 행을 만들지
+  않으므로 판본을 남기지 않는다 — 그 카드가 어느 정의의 근거를 실었는지는 읽은 run 의 이 키가 답한다.
+
+## 대조 (포크 #7, ydc `source_composition.py`·`commerce_crosscheck.py`·`cross_source.py` 승격)
+```
+cosmai trend crosscheck [--url <url>]
+```
+- 네 소스를 나란히 놓고 어긋나는 자리를 찾는다: 구성(같은 사전으로 소스마다 주제 구성비) · 평가(커머스
+  플랫폼의 속성 평가 대 그 run 의 판정) · 성분(성분 담론 셋과 성분 키 감사). 합산하지 않는다 —
+  분모가 소스마다 다르다(`interfaces.md` §대조).
+- **아무것도 쓰지 않는다.** 세 답의 행은 (주제) 또는 (성분) 하나가 키인데 022 의 분기 입자는 여덟 칸이
+  키이고, 커머스 쪽에는 그중 분기도 명부도 없다. 답은 표가 아니라 stdout 이고, 읽기 전용이라 운영 DB 에
+  그대로 돌린다. 저장된 표가 그대로인 것은 `tests/test_crosscheck_pipeline.py` 가 지문으로 붙든다.
+- run 은 `quarter`·`judge`·`sensitivity` 와 **같은 길**로 찾는다(활성 스냅샷·활성 명부에서 만든 note) —
+  인자가 `--url` 하나인 이유도 같다. 대조하는 분기는 그 run 격자의 **마지막에서 두 번째**다(마지막은
+  판정이 `미확정(진행 중)` 으로 두는 진행 중 분기라 과소 집계된다).
+- 청크 색인을 한 번 훑는다 — 전량 381,950청크 48MB **11.3초**로 실제로 재 봤다(2026-08-27, 키셋 2만 행
+  페이지에 페이지마다 커밋). 한 흐름으로 훑으면 `needs_runtime` 의 `transaction_timeout`(60초)에 걸리므로
+  `analysis/retrieval/eval.py` 의 `gold_from_chunks` 와 같은 방식을 쓴다.
+- 종료 코드: **0 ok — 대조표가 계산됐다** · 1 partial(**이 산출을 믿지 마라** — 성분 키가 사람이 한 번
+  읽어 금지한 성분명을 잡았거나(`key_mismatch`, §대조 의 `시카` 사고가 이 자리다), 커머스
+  `topic_group` 이 가리키는 우리 주제가 활성 사전에 없다(`group_map_drift`)) · 2 blocked(연결 거절, 활성
+  명부·스냅샷·주제 사전 없음, **그 스냅샷·명부에 지표 run 이 없음**(`cosmai trend quarter` 를 아직 안
+  돌렸다), **그 run 에 판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
+  막힘이다. 청크가 비었거나(`cosmai retrieval chunk`) 랭킹에 선케어 제품이 없는 것
+  (`cosmai collect commerce`)도 같은 자리다 — 대조할 소스가 아직 없다). **여덟 갈래 전부** 코드의
+  `NoPopulation`·`NoCrosscheck`·`NoDictionary` 셋 중 하나이고, 메시지가 어느 것인지 갈라 말한다.
+- **"소스가 어긋난다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이지 실행의 실패가
+  아니고, 이 파일 맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 위 §민감도 의 "흔들린다는
+  1 이 아니다", §근거·카드 의 "규칙에 걸린 셀이 없다는 1 이 아니다"와 **같은 자리, 같은 문장**이다. 실측
+  으로도 그렇다: 전량에서 13주제 중 어긋남 해석이 붙는 주제가 여럿이라(예: `백탁` 커머스 9.80% 대 댓글
+  1.55%) 1 로 내면 평상 상태가 실패로 읽힌다. 어긋남은 종료 코드가 아니라 표의 `reading` 열과 `note` 가
+  싣는다.
+- **근거가 얇은 것도 1 이 아니다.** 속성 평가 제품이 `MIN_PRODUCTS`(5) 미만인 주제는 해석을 쓰지 않고
+  `note` 의 `thin=` 가 센다. 얇다는 것은 계산된 답이지 잘린 산출이 아니다.
+- 크론에 걸어도 안전하다(읽기 전용 · 0 이 평상 상태). 다만 답이 바뀌는 것은 코퍼스나 수집이 바뀔 때라,
+  지금은 사람이 한 번 물어 이슈에 남긴다.
+
+## 홀드아웃 (포크 #51, ydc `holdout_commerce.py` 승격)
+```
+cosmai trend holdout [--url <url>]
+```
+- **새로 쌓인 커머스 리뷰로 기존 결론을 되묻는다 — 숫자를 갈아치우지 않는다.** 같은 모집단(§대조 의
+  선케어 랭킹 술어)의 리뷰를 두 팔로 가르고 같은 코드로 센다: 청크 색인에 있는 리뷰(`seen`, 우리가 본
+  것)와 없는 리뷰(`holdout`, **한 번도 안 본 것**). 갈리면 왜 갈리는지를 창·플랫폼 구성·제품 바스켓
+  셋으로 갈라 잰다(`interfaces.md` §홀드아웃).
+- **인자가 `--url` 하나인 이유**: 컷오프가 날짜가 아니라 `needs.retrieval_chunk` 의 커머스 `doc_id`
+  명부다 — 고르는 길이 둘이면 분모도 둘이 된다(`quarter`·`judge`·`crosscheck` 와 같은 규약). ydc 는
+  `--cutoff` 를 받았지만 그 레포에는 "무엇을 봤는가" 가 행으로 없었다.
+- **아무것도 쓰지 않는다.** 이 답의 행은 (팔, 주제)가 키인데 `팔` 의 경계가 청크 색인이라 `cosmai
+  retrieval chunk` 가 돌 때마다 움직인다(오늘의 홀드아웃이 내일의 기존이다). 답은 표가 아니라 stdout
+  이고, 읽기 전용이라 운영 DB 에 그대로 돌린다. 저장된 표가 그대로인 것은
+  `tests/test_holdout_pipeline.py` 가 지문으로 붙든다.
+- **네 읽기(커머스 청크 명부 · 리뷰 키 명부 · 빈 본문 수 · 모집단)는 한 트랜잭션 스냅샷
+  (`REPEATABLE READ`) 안에서 한다.** 밖에 두면 수집기가 도는 동안 그 넷이 서로 다른 모집단을 가리켜
+  `seen + holdout + empty` 가 어떤 모집단의 크기도 아니게 된다. ydc 가 손으로 얹은 정지·전순서
+  정렬·행수 대조 셋이 여기서 각각 어디로 가는지는 `interfaces.md` §홀드아웃 의 표가 든다 — 그 셋을
+  그대로 옮기면 이 자리에서는 항등식이라 검사가 아니다.
+- 종료 코드: **0 ok — 답이 계산됐다(재현되지 않아도 그렇다)** · 1 partial(**이 산출을 믿지 마라** —
+  원천 리뷰가 없는 커머스 청크가 있다(`chunk_orphan`). 청크에는 외래키가 없으므로(020) 그때 기존 팔은
+  분석이 실제로 본 그 팔이 아니다) · 2 blocked(연결 거절, 활성 주제 사전 없음, 랭킹에 선케어 제품이
+  없음(`cosmai collect commerce`), 커머스 청크가 하나도 없음 — **기준 시점 자체가 없다는 뜻이라**
+  `cosmai retrieval chunk` 를 돌려라, 선케어 모집단 안에 청크가 있는 리뷰가 하나도 없음 — 비교할 기존
+  팔이 없다, **안 본 리뷰가 하나도 없음** — 되물을 새 표본이 아직 없다). **여섯 갈래 전부** 코드의
+  `NoHoldout`·`NoDictionary` 둘 중 하나이고, 메시지가 어느 것인지 갈라 말한다.
+- **"재현되지 않는다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이고, 이 파일 맨 위의
+  공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 위 §민감도 의 "흔들린다는 1 이 아니다", §대조 의
+  "어긋난다는 1 이 아니다"와 **같은 자리, 같은 문장**이다. 출처인 ydc 의 `report` 도 언제나 0 을 낸다.
+  어느 갈래인지(`재현`·`순위 재현`·`순위 변동`·`순위 없음`)는 `note` 와 표가 싣는다.
+- **표본이 얇은 것도 1 이 아니다.** 기존 팔의 문서 수가 `MIN_MENTIONS`(5) 미만인 주제는 순위를 갖지
+  않고(`-`) `note` 의 `ranked=` 가 몇 주제가 순위를 갖는지 센다.
+- **크론에 걸지 않는다. 위 §대조 의 "0 이 평상 상태" 가 이 명령에서는 거짓이다.** 읽기 전용인 것은 같지만
+  평상 상태가 종료 코드 하나로 서지 않는다: `cosmai retrieval chunk` 가 돌면 홀드아웃이 통째로 기존 팔로
+  넘어가 **그 직후의 평상 상태는 `2`(`no unseen sample`)** 이고, 커머스 수집기가 다시 쌓을 때까지 그렇다.
+  종료 코드로 알람을 보는 크론은 그 구간을 실패로 읽는다. `stack/crontab.d/` 에 `retrieval chunk` 를 도는
+  줄은 **없으므로**(2026-08-27 실측) 오늘의 위험은 크론이 아니라 **손 순서**다 — 되묻기 전에 청킹부터
+  돌리면 물음 자체가 사라진다. 이 명령은 사람이 한 번 물어 이슈에 남긴다.
 
 ## 스케줄 (stack/crontab.d/, UTC)
 commerce 줄의 규칙은 "분 0 회피"가 아니라 **인접한 두 줄의 간격이 앞 줄의 소요보다 넓다**이다. 그 소요는

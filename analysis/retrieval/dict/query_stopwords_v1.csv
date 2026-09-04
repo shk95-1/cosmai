@@ -1,0 +1,14 @@
+kind,canonical,surface,tier,source,note
+stopword,query,소비자,,ydc-v0.3.0,물음의 대상. ydc 코퍼스 df 289 로 백탁 338 보다 오히려 희귀해 idf 로는 안 걸린다
+stopword,query,사람,,ydc-v0.3.0,물음의 대상
+stopword,query,사람들,,ydc-v0.3.0,물음의 대상. 지금은 도달하지 않는다 — Kiwi 가 `사람들` 을 `사람` 으로 준다(실측 2026-08-26)
+stopword,query,반응,,ydc-v0.3.0,물음이 요구하는 것
+stopword,query,의견,,ydc-v0.3.0,물음이 요구하는 것
+stopword,query,얘기,,ydc-v0.3.0,물음이 요구하는 것
+stopword,query,이야기,,ydc-v0.3.0,물음이 요구하는 것
+stopword,query,언급,,ydc-v0.3.0,물음이 요구하는 것
+stopword,query,대하,,ydc-v0.3.0,물음의 문형 — `…에 대해서` 의 어간
+stopword,query,관하,,ydc-v0.3.0,물음의 문형 — `…에 관해서` 의 어간
+stopword,query,뭐라,,ydc-v0.3.0,물음의 문형. 지금은 도달하지 않는다 — Kiwi 가 `뭐라고` 를 `하` 로 준다(실측 2026-08-26)
+stopword,query,어떻,,ydc-v0.3.0,물음의 문형 — `어떻게`·`어떤` 의 어간
+stopword,query,관련,,ydc-v0.3.0,물음의 문형 — `… 관련해서`. ydc 는 목록 앞쪽(일반어)에 두었지만 질의에 같이 적용했고 근거 예시가 이것을 뺀다

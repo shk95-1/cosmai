@@ -1,0 +1,69 @@
+{
+  "produced_by": "to_common_schema.py",
+  "source_runs": [
+    "run_20260819T053057Z",
+    "run_20260819T054559Z"
+  ],
+  "table_counts": {
+    "document.csv": 12,
+    "mention.csv": 9,
+    "channel.csv": 3
+  },
+  "documents_by_content_type": {
+    "video_long": 4,
+    "video_short": 1,
+    "video_unknown": 1,
+    "comment": 6
+  },
+  "text_rule": "영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.",
+  "rules": [
+    "유일키는 source + source_item_id 다. doc_id 는 그 둘을 콜론으로 이은 값이다.",
+    "분기는 저장하지 않는다. published_at 의 연·월로 달력 분기를 만든다(수집 13,979편 전부 analysis_month 와 일치함을 확인).",
+    "댓글은 published_at 이 자기 시각이므로 분기 판정에 쓰지 않는다. parent_item_id 로 부모 영상에 조인해 부모의 분기에 배정한다.",
+    "트렌드 판정 분모는 content_type = video_long 만 쓴다. video_short 는 별도 계열, video_unknown 은 양쪽에서 제외한다.",
+    "판정·보고 모집단은 channel.panel_role = product 로 한정한다.",
+    "선크림 모집단 필터는 topic_id = 선크림(trend_use = false)으로 만든다.",
+    "mention 은 주제 15개 전부를 담는다. 판정용 13개는 trend_use = true 로 필터한다.",
+    "행을 지우지 않는다. 품질 문제는 quality_flags 로 표시한다(empty_text, duplicate_in_parent).",
+    "언급량 집계에서는 quality_flags 가 빈 문서만 센다. duplicate_in_parent 는 같은 영상 안 복붙이라 반응 1건으로 보지 않는다.",
+    "댓글은 주제 사전에 걸린 영상만 수집했다. 전체 영상에 대한 댓글 분모는 존재하지 않는다.",
+    "태그를 판정 텍스트에 포함할지는 미결이다. 포함하면 선크림 장문이 962 → 1,019편이 되고 모든 composition 이 움직인다."
+  ],
+  "reproduces": {
+    "선크림_장문_product": 2,
+    "그_영상_댓글_전체": 3,
+    "그_영상_댓글_중복제외": 2
+  },
+  "source_run_manifests": [
+    {
+      "run_id": "run_20260819T053057Z",
+      "collected_at": "2026-08-19T05:30:57Z",
+      "limitations": [
+        "모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).",
+        "패널 밖 신규 채널·신규 브랜드의 등장은 관측되지 않는다.",
+        "조회수·좋아요는 collected_at 시점 스냅샷이다.",
+        "업로드 플레이리스트 최신순 가정에 기반해 cutoff에서 조기 종료한다.",
+        "댓글은 주제 사전에 걸린 영상만 받는다. 전체 영상의 댓글 분모는 존재하지 않는다.",
+        "댓글 published_at은 댓글 자체 시각이다. 분기 귀속은 video_id로 부모 영상에 붙인다.",
+        "댓글은 계속 쌓이므로 최근 분기는 구조적으로 과소 집계된다.",
+        "order=relevance는 유튜브 비공개 알고리즘이며 좋아요 순이 아니다."
+      ],
+      "method": "channel_uploads_panel"
+    },
+    {
+      "run_id": "run_20260819T054559Z",
+      "collected_at": "2026-08-19T05:45:59Z",
+      "limitations": [
+        "모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).",
+        "패널 밖 신규 채널·신규 브랜드의 등장은 관측되지 않는다.",
+        "조회수·좋아요는 collected_at 시점 스냅샷이다.",
+        "업로드 플레이리스트 최신순 가정에 기반해 cutoff에서 조기 종료한다.",
+        "댓글은 주제 사전에 걸린 영상만 받는다. 전체 영상의 댓글 분모는 존재하지 않는다.",
+        "댓글 published_at은 댓글 자체 시각이다. 분기 귀속은 video_id로 부모 영상에 붙인다.",
+        "댓글은 계속 쌓이므로 최근 분기는 구조적으로 과소 집계된다.",
+        "order=relevance는 유튜브 비공개 알고리즘이며 좋아요 순이 아니다."
+      ],
+      "method": "channel_uploads_panel"
+    }
+  ]
+}
