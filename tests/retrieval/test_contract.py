@@ -60,8 +60,30 @@ def test_the_exit_code_contract_covers_every_retrieval_subcommand():
     """계약이 덮지 않는 하위명령은 종료 코드가 구현에만 있다 -- `eval` 의 "질의 0개 -> 1"(cli.py)과
     `embed` 의 "언제나 0" 이 그랬다(#17 S6)."""
     bullet = _exit_code_bullet()
-    for action in ("chunk", "search", "eval", "embed", "terms"):
+    for action in ("chunk", "search", "eval", "embed", "terms", "ask"):
         assert f"`{action}`" in bullet, action
+
+
+def test_the_index_axis_sentence_credits_the_tokenizer_and_idf_not_lift():
+    """fork #59: the contract once said lift removes general terms on the index axis. lift runs only in the
+    `terms` report and never touches BM25 scoring; what drops those words is the tokenizer (13) and idf (16),
+    the contrast tests/retrieval/test_query_stopwords.py counts. The sentence must say that, and must not
+    contradict the query-axis sentence, which says neither lift nor idf is the ground there."""
+    section = "\n".join(_search_section())
+    assert "never touches" in section and "BM25 scoring" in section
+    assert "13" in section and "16" in section and "idf" in section
+    assert "lift removes" not in section and "removed by the lift" not in section
+
+
+def test_the_contract_does_not_claim_which_lexicon_version_is_active():
+    """fork #63: a version name in prose goes stale (it said v2 while v3 was active). The active version is
+    read from the DB at run time and printed by every run; the contract may record a dated measurement but
+    must not assert the current state."""
+    section = "\n".join(_search_section())
+    assert "is not a sentence in this file" in section
+    assert "tool/show-lexicon-stamp" in section
+    for stale in ("is active in production", "v2 is active", "not loaded v3"):
+        assert stale not in section, stale
 
 
 def test_the_search_baseline_table_carries_every_mode_and_engine():
