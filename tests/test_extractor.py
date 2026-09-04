@@ -1,4 +1,5 @@
-"""RuleExtractor: 문장 분할·후보 표지·바람 분류. 문장은 평가셋 tune 셋에서 그대로 옮겼다."""
+"""RuleExtractor: sentence splitting, candidate markers, wish classes. The sentences are carried over from the
+tune set of the evaluation set."""
 
 from __future__ import annotations
 
@@ -186,6 +187,7 @@ def test_format_and_attribute_stay_empty_while_those_lexicon_kinds_have_no_rows(
 
 
 def test_the_rule_extractor_is_the_contract_protocol():
-    """candidates 의 lexicon_category 는 기본값이 있는 추가 인자다 — Protocol 호출은 그대로 맞는다."""
+    """The lexicon_category of candidates is an extra argument with a default -- the Protocol call still
+    matches."""
     found: Extractor = RuleExtractor()
     assert found.version == "rule-v2.3"

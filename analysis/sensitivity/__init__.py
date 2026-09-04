@@ -1,15 +1,18 @@
 """민감도·후향 검증 셋 — `contracts/interfaces.md` §민감도 가 정본이다 (포크 #41).
 
-규칙의 출처는 ydc `analysis/slices/ydc/panel_sensitivity.py` · `backtest.py` · `spam_ad_flags.py`(v0.2)
-이고, 슬라이스를 import 하지 않고 옮겨 적었다 (`analysis/trend/` · `analysis/judge/` 가 쓴 방식).
+The rules come from ydc `analysis/slices/ydc/panel_sensitivity.py` · `backtest.py` · `spam_ad_flags.py`
+(v0.2) and were written over rather than imported from the slices (the way `analysis/trend/` and
+`analysis/judge/` did it).
 
-셋 다 **지표를 새로 만들지 않는다**: 같은 `analysis.trend` 수식과 같은 `analysis.judge` 규칙을 모집단만
-바꿔 다시 돌려, 결론이 그 선택에 흔들리는지를 잰다. 그래서 이 모듈이 다루는 것은 언제나 **반사실
-모집단**이고, 그 행들은 저장되지 않는다 -- `panel_role='product+expert'` 도 "광고 영상을 뺀 산출"도
-022 의 닫힌 어휘와 `analysis_run` 에 자리가 없다.
+All three **make no new metrics**: they rerun the same `analysis.trend` formulas and the same
+`analysis.judge` rules with only the population changed, and measure whether the conclusion wobbles on that
+choice. So what this module handles is always a **counterfactual population**, and those rows are not stored
+-- neither `panel_role='product+expert'` nor "the output with the ad videos removed" has a place in the
+closed vocabulary of 022 or in `analysis_run`.
 
-이 모듈도 DB 를 모른다: 문서 한 벌(`Population`)을 받아 행을 낼 뿐이라, 같은 코드가 코퍼스 표에서도 원
-수집 CSV 에서도 돌고 그 자리가 ydc 산출본과의 1:1 대조가 성립하는 자리다.
+This module knows no DB either: it takes one set of documents (`Population`) and emits rows, so the same code
+runs on the corpus tables and on the raw collection CSV, and that is where the 1:1 comparison with the ydc
+output stands.
 """
 
 from __future__ import annotations
@@ -42,14 +45,16 @@ from analysis.types import (
 
 # 뒤집힘으로 셀 최소 폭(%p). 부호만 보면 0 근처를 오가는 셀이 전부 뒤집힘으로 잡힌다 (계약 §민감도).
 MATERIAL_PP = 0.5
-# 패널 어휘. 022 는 둘만 알고, 둘을 합친 반사실 모집단의 이름은 저장되지 않으므로 여기 산다.
+# The panel vocabulary. 022 knows only the two, and the name of the counterfactual population that joins them
+# is not stored, so it lives here.
 PRODUCT = "product"
 EXPERT = "expert"
 ALL_ROLES: tuple[str, ...] = (PRODUCT, EXPERT)
 ALL_ROLES_LABEL = "product+expert"
 
-# 후향 검증의 두 구간 길이(분기). 창 길이가 `persistence` 의 것과 같은 4인 것은 계절성이다 -- 직전·이후
-# 둘 다 네 분기를 다 담아야 여름 효과가 상쇄된다.
+# The lengths of the two backtest windows (quarters). The window length being 4, the same as `persistence`,
+# is seasonality -- both the previous and the following window have to hold four full quarters for the summer
+# effect to cancel.
 HORIZON = WINDOW_QUARTERS
 LOOKBACK = WINDOW_QUARTERS
 # 방향이 있는 유형만 검증한다. `지속 인기`·`채널 확산` 은 방향 예측이 아니라 상태 서술이라 뺀다 --
@@ -72,7 +77,8 @@ PROMO_COMMENT = "promo_comment"
 ALL_FLAGGED = "all_flagged"
 VARIANTS = (AD_VIDEO, CREATOR_COMMENT, PROMO_COMMENT, ALL_FLAGGED)
 
-# 신고 필드가 놓치는 협찬을 설명란 문구로 잡는다. `ppl` 은 경계를 둔다 -- 없으면 `apple` 이 걸린다.
+# Sponsorship the disclosure field misses is caught by the wording of the description. `ppl` is given
+# boundaries -- without them `apple` matches.
 AD_RE = re.compile(
     r"유료\s*광고|협찬|광고\s*포함|#\s*광고|\bppl\b|제공\s*받|지원\s*받|무상\s*제공"
     r"|sponsor|paid\s+partnership|제작\s*지원",
@@ -83,48 +89,53 @@ PROMO_RE = re.compile(
     r"|공동\s*구매|공구\s*링크|오픈\s*채팅|라이브\s*마켓|할인\s*코드|쿠폰\s*코드",
     re.I,
 )
-# 수집기가 댓글 작성자에 다는 해시와 같은 식이어야 한다 -- 다르면 운영자 댓글이 조용히 0건이 된다.
+# It has to be the same formula as the hash the collector attaches to a comment author -- different, and
+# operator comments quietly become 0.
 CREATOR_HASH_PREFIX = "youtube:"
 CREATOR_HASH_LENGTH = 24
 
 
 class ShortHistory(LookupError):
-    """분기가 하나도 없다. 두 창(직전 4 · 최근 4)이 설 자리가 없으므로 0 을 내는 대신 멈춘다."""
+    """There is not one quarter. The two windows (previous 4 · recent 4) have nowhere to stand, so it stops
+    instead of emitting 0."""
 
 
 def creator_hash(channel_id: str) -> str:
-    """`author_channel_hash` 를 채널 id 에서 되만든다 -- 추정이 아니라 정확한 매칭이다."""
+    """Rebuilds `author_channel_hash` from the channel id -- an exact match rather than a guess."""
     digest = hashlib.sha256(f"{CREATOR_HASH_PREFIX}{channel_id}".encode()).hexdigest()
     return digest[:CREATOR_HASH_LENGTH]
 
 
 @dataclass(frozen=True)
 class Video:
-    """모집단에 든 장문 영상 한 편. `panel_role` 이 행에 있는 것이 패널 민감도가 서는 자리다."""
+    """One long video in the population. `panel_role` being on the row is where the panel sensitivity
+    stands."""
 
     item_id: str
     channel_id: str
     panel_role: str
     quarter: str
     topics: tuple[str, ...]
-    declared: bool  # 유튜버 자체 신고(has_paid_product_placement). 누락이 있다 (TEAM_DECISIONS §9)
-    matched: bool  # 설명란 문구가 걸렸다
+    declared: bool  # the uploader's own report (has_paid_product_placement). It has gaps (TEAM_DECISIONS §9)
+    matched: bool  # the description wording matched
 
     @property
     def ad(self) -> bool:
-        """둘의 **합집합**이다. 전량 실측 신고 254편 · 문구 407편 중 문구만 걸리는 것이 200편이 넘는다."""
+        """The **union** of the two. Measured over the whole set, 254 disclosed and 407 matched, and over 200
+        are matched by wording alone."""
         return self.declared or self.matched
 
 
 @dataclass(frozen=True)
 class Reaction:
-    """한 영상 안에서 정규화 뒤 같은 텍스트인 댓글 묶음. 제외는 묶음 단위다 -- 복붙 한 쪽만 빼면
-    `unique_ratio` 의 분자와 분모가 다른 모집단을 세게 된다 (ydc 의 `(video_id, text)` 키와 같다)."""
+    """A group of comments with the same text after normalization inside one video. Exclusion is per group --
+    dropping only one side of a copy-paste makes the numerator and the denominator of `unique_ratio` count
+    different populations (the same as ydc's `(video_id, text)` key)."""
 
     parent_item_id: str
     digest: str
-    counted: int  # quality_flags 가 빈 문서 수. 언급 수와 분기 문서 수의 몫
-    documents: int  # 복붙까지 센 문서 수. `unique_ratio` 분모의 몫
+    counted: int  # documents whose quality_flags is empty. The share for mentions and quarter documents
+    documents: int  # documents counted including copy-paste. The share for the `unique_ratio` denominator
     topics: tuple[str, ...]
     creator: bool
     promo: bool
@@ -136,8 +147,8 @@ class Reaction:
 
 @dataclass(frozen=True)
 class Population:
-    """한 스냅샷의 두 계열. 반사실은 전부 이 한 벌 위에서 걸러 만든다 -- 변형마다 다시 읽으면 변형
-    사이의 차이에 읽은 시점의 차이가 섞인다."""
+    """The two series of one snapshot. Every counterfactual is filtered out of this one set -- reading again
+    per variant would mix the difference of reading times into the difference between variants."""
 
     videos: tuple[Video, ...]
     reactions: tuple[Reaction, ...]
@@ -145,7 +156,8 @@ class Population:
 
 @dataclass(frozen=True)
 class Frame:
-    """반사실 행이 무엇의 반사실인지 적는 자리. 저장되지 않으므로 022 의 CHECK 을 지지 않는다."""
+    """Where a counterfactual row records what it is a counterfactual of. It is not stored, so it does not
+    carry the CHECK of 022."""
 
     run_id: int
     scope: str
@@ -156,9 +168,9 @@ class Frame:
 @dataclass(frozen=True)
 class Backtest:
     rows: tuple[BacktestRow, ...]
-    cutoffs: tuple[tuple[str, str], ...]  # (자른 분기 C, 판정 대상 T = C 직전 분기)
-    base_rate: float  # 판정과 무관하게 이후 4분기 평균이 직전 4분기보다 높은 셀의 비율(%)
-    base_level_rate: float  # 같은 것을 기준 B(판정 분기를 뺀 직전 구간)로 잰 값
+    cutoffs: tuple[tuple[str, str], ...]  # (the cut quarter C, the judged quarter T = the quarter before C)
+    base_rate: float  # share (%) of cells whose next 4 quarters beat the previous 4, judged or not
+    base_level_rate: float  # the same against baseline B (previous window minus the judged quarter)
     base_cells: int
 
 
@@ -169,24 +181,27 @@ class AdSensitivity:
     ad_videos: int
     declared: int
     matched: int
-    comments: int  # 복붙까지 센 댓글 문서 수
-    creator_comments: int  # 운영자 댓글 **묶음** 수
+    comments: int  # comment documents counted including copy-paste
+    creator_comments: int  # the number of operator comment **groups**
     promo_comments: int
-    lost_cells: Mapping[str, int]  # 변형 -> 표본 미달로 판정이 사라진 셀 수
+    lost_cells: Mapping[str, int]  # variant -> cells whose judgement disappeared for want of sample
 
 
 def previous_quarter(quarter: str) -> str:
-    """달력에서 하나 앞. 관측 목록의 앞이 아니다 -- 빠진 분기가 창을 조용히 늘린다."""
+    """One step back on the calendar. Not one step back in the observed list -- a missing quarter would
+    quietly widen the window."""
     year, index = int(quarter[:4]), int(quarter[5])
     return f"{year}Q{index - 1}" if index > 1 else f"{year - 1}Q4"
 
 
 def calendar_windows(quarters: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """(직전 4분기, 최근 4분기). 마지막 분기는 진행 중이라 두 창 밖이다 (`analysis.judge` 의 `미확정`).
+    """(the previous 4 quarters, the recent 4 quarters). The last quarter is in progress and outside both
+    windows (the in-progress label of `analysis.judge`).
 
-    ydc 는 이 여덟을 달력값으로 박아 뒀다(`PRIOR`·`RECENT`). 여기서 유도하는 것은 그 목록이 이 코퍼스에
-    묶인 상수이기 때문이고, 유도해도 같은 여덟 분기가 나온다. **관측 목록의 인덱스가 아니라 달력으로
-    세는 것**이 뜻이다: 언급이 없어 행이 빠진 분기도 창의 한 칸을 차지해 0 으로 들어가야 한다.
+    ydc nailed these eight down as calendar values (`PRIOR` · `RECENT`). They are derived here because that
+    list is a constant tied to this corpus, and deriving it gives the same eight quarters. The point is
+    **counting by the calendar rather than by the index of the observed list**: a quarter whose row is missing
+    for want of mentions still takes a slot in the window and enters as 0.
     """
     if not quarters:
         raise ShortHistory("the population has no quarter; the two windows have nowhere to stand")
@@ -206,7 +221,8 @@ def _kept(
     cutoff: str | None = None,
     drop_videos: frozenset[str] = frozenset(),
 ) -> list[Video]:
-    """반사실 하나의 영상 모집단. 영상이 빠지면 그 영상의 댓글도 함께 빠진다 (분기 귀속이 부모다)."""
+    """The video population of one counterfactual. When a video drops, its comments drop with it (the quarter
+    is attributed to the parent)."""
     return [
         video
         for video in population.videos
@@ -228,7 +244,8 @@ def _video_counts(videos: Sequence[Video]) -> tuple[Counts, VideoPanel]:
             key = (topic, video.quarter)
             mentions[key] += 1
             per_channel[key][video.channel_id] = per_channel[key].get(video.channel_id, 0) + 1
-    # 영상은 한 문서가 한 번만 세어지므로 중복 포함 언급 수가 언급 수와 같다 -- unique_ratio 는 1 이다.
+    # A video counts one document once, so the duplicate-inclusive mention count equals the mention count --
+    # unique_ratio is 1.
     return (
         Counts(
             dict(documents),
@@ -260,7 +277,8 @@ def _comment_counts(
         documents[parent.quarter] += reaction.counted
         for topic in reaction.topics:
             key = (topic, parent.quarter)
-            # 중복 포함 분모는 복붙까지 세고 분자는 세지 않는다 (코퍼스 규칙 9).
+            # The duplicate-inclusive denominator counts copy-paste and the numerator does not (corpus rule
+            # 9).
             raw[key] += reaction.documents
             if reaction.counted:
                 mentions[key] += reaction.counted
@@ -276,7 +294,8 @@ def counts(
     drop_videos: frozenset[str] = frozenset(),
     drop_reactions: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[dict[str, Counts], VideoPanel, list[str]]:
-    """한 반사실의 셈 두 벌과 영상 채널 분포, 그리고 그 산출의 분기 축(영상 기준)."""
+    """The two count sets of one counterfactual, the channel distribution of the videos, and the quarter axis
+    of that output (measured on the videos)."""
     videos = _kept(population, roles=roles, cutoff=cutoff, drop_videos=drop_videos)
     video_counts, panel = _video_counts(videos)
     comment_counts = _comment_counts(videos, population.reactions, drop_reactions)
@@ -297,7 +316,8 @@ def metrics(
     drop_videos: frozenset[str] = frozenset(),
     drop_reactions: frozenset[tuple[str, str]] = frozenset(),
 ) -> list[MetricsTopicQuarterRow]:
-    """한 반사실의 지표 행 한 벌. 수식은 `analysis.trend` 것 그대로다 -- 여기서 다시 쓰지 않는다."""
+    """One set of metric rows of one counterfactual. The formulas are `analysis.trend`'s as they are -- they
+    are not written again here."""
     made_counts, panel, _quarters = counts(
         population,
         roles=roles,
@@ -308,8 +328,9 @@ def metrics(
     label = roles[0] if len(roles) == 1 else "+".join(roles)
     made: list[MetricsTopicQuarterRow] = []
     for source in (VIDEO, COMMENT):
-        # 문서가 한 편도 없는 계열은 분기 축이 없다 -- 0 행이 맞고, 0 을 채운 격자는 없는 관측을
-        # 관측된 0 으로 만든다 (`analysis.trend.rows` 의 기준선이 그 0 들 위에서 정해진다).
+        # A series with not one document has no quarter axis -- 0 rows is right, and a grid filled with 0
+        # turns an absent observation into an observed 0 (the baseline of `analysis.trend.rows` is settled on
+        # those zeros).
         if not made_counts[source].documents:
             continue
         made.extend(
@@ -334,7 +355,8 @@ def verdicts(made: Sequence[MetricsTopicQuarterRow]) -> dict[tuple[str, str, str
 
 
 def _share(counted: Counts, topics: Sequence[str], window: Sequence[str]) -> dict[str, float]:
-    """구간 안 주제 간 구성비(%). 분모는 그 구간 전체 주제 언급 수의 합이다."""
+    """The share (%) among topics inside the window. The denominator is the sum of all topic mentions in that
+    window."""
     total = sum(counted.mentions.get((topic, quarter), 0) for topic in topics for quarter in window)
     if not total:
         return dict.fromkeys(topics, 0.0)
@@ -349,7 +371,8 @@ def _quarters_ok(counted: Counts, topic: str, quarters: Sequence[str]) -> int:
 
 
 def panel_sensitivity(population: Population, topics: Sequence[str]) -> list[PanelSensitivityRow]:
-    """패널 구성이 결론을 바꾸는가 -- product 만인 산출과 43채널 전부인 산출을 나란히 돌린다.
+    """Does the panel composition change the conclusion -- the product-only output and the all-43-channel
+    output are run side by side.
 
     개별 채널을 옮기는 대신 선택 자체의 영향을 재는 것은, ydc 가 재분류를 시도해 **텍스트 지표로는 두
     집단이 구분되지 않는다**는 것을 실측했기 때문이다 (계약 §민감도).
@@ -374,10 +397,12 @@ def panel_sensitivity(population: Population, topics: Sequence[str]) -> list[Pan
                     quarters_ok_all=_quarters_ok(all_counts[source], topic, all_quarters),
                     delta_product_pp=round(product, 2),
                     delta_all_pp=round(every, 2),
-                    # 차이는 반올림 전 값끼리 뺀다 -- 두 반올림의 차는 계약이 정한 자리수보다 거칠다.
+                    # The difference is taken between the unrounded values -- the difference of two roundings
+                    # is coarser than the decimal places the contract fixed.
                     difference_pp=round(every - product, 2),
-                    # 충족 분기가 절반 미만이면 애초에 판정 대상이 아니다. ydc 는 13분기 산출에서 이
-                    # 문장을 7 로 박아 뒀고, 여기서는 같은 문장을 관측 분기 수에서 유도한다.
+                    # Below half the quarters qualifying, it is not judged at all. ydc nailed this sentence
+                    # to 7 on a 13-quarter output; here the same sentence is derived from the observed
+                    # quarter count.
                     sample_ok=2 * ok_product > len(base_quarters),
                 )
             )
@@ -385,7 +410,8 @@ def panel_sensitivity(population: Population, topics: Sequence[str]) -> list[Pan
 
 
 def flipped(made: Sequence[PanelSensitivityRow]) -> list[PanelSensitivityRow]:
-    """판정 대상 셀 중 **방향이 실제로 뒤집힌** 것. 한쪽이라도 `MATERIAL_PP` 만큼 움직인 경우만 센다."""
+    """The judged cells whose **direction actually flipped**. Only a move of at least `MATERIAL_PP` on one
+    side is counted."""
     return [
         row
         for row in made
@@ -400,7 +426,7 @@ def next_quarters(quarters: Sequence[str], cutoff: str, count: int) -> list[str]
 
 
 def prior_quarters(quarters: Sequence[str], cutoff: str, count: int) -> list[str]:
-    """자르는 분기의 값은 직전 구간에 **든다**. 이후 구간에는 들지 않는다."""
+    """The value of the cut quarter **is in** the previous window. It is not in the following one."""
     return [quarter for quarter in quarters if quarter <= cutoff][-count:]
 
 
@@ -417,12 +443,14 @@ def backtest(
     frame: Frame,
     base: Sequence[MetricsTopicQuarterRow],
 ) -> Backtest:
-    """과거 분기 C 까지만 알던 것처럼 다시 세어 직전 분기 T 를 판정하고, C 이후 4분기를 본다.
+    """Recount as if only up to the past quarter C was known, judge the previous quarter T, and look at the 4
+    quarters after C.
 
-    자르는 것이 핵심이다: `persistence` 의 기준선이 **전 기간 중앙값**이라, 자르지 않고 과거를 판정하면
-    아직 오지 않은 분기를 보고 기준선을 정한 셈이 된다. `velocity_yoy` 는 전년 동분기만 쓰므로 누출이 없다.
-    T 가 아니라 C 로 자르는 것은 판정이 마지막 분기를 `미확정(진행 중)` 으로 두기 때문이다 -- T 를
-    판정하려면 C = T 다음 분기까지 데이터가 있어야 하고, 운영도 그렇게 돈다.
+    The cut is the point: the baseline of `persistence` is the **median over the whole period**, so judging
+    the past without cutting means the baseline was set looking at quarters that had not arrived.
+    `velocity_yoy` uses only the same quarter a year earlier, so it leaks nothing. Cutting at C rather than T
+    is because the judgement leaves the last quarter in progress -- judging T needs data up to C = the quarter
+    after T, and production runs that way too.
     """
     full = {(row.source, row.topic_key, row.quarter): float(row.composition or 0.0) for row in base}
     quarters = sorted({row.quarter for row in base})
@@ -459,7 +487,8 @@ def backtest(
                     at_cutoff.get((row.source, row.topic_key), 0.0),
                 )
             )
-        # 기저율. 적중률만 내는 후향 검증은 검증이 아니라 홍보다 -- 판정과 무관한 셀의 비율을 함께 낸다.
+        # The base rate. A backtest that emits only a hit rate is promotion rather than validation -- the
+        # share of cells unrelated to the judgement is emitted with it.
         for source in (VIDEO, COMMENT):
             for topic in topics:
                 before = _mean(full, source, topic, before_window)
@@ -493,7 +522,7 @@ def outcome(
     elif trend_type in DOWN_TYPES:
         expected, hit, level = FALL_HELD, after < before, after < excluded
     else:
-        # 피크는 "그 분기보다 낮아졌는가"라 두 기준이 같은 질문이 된다.
+        # A peak asks "did it fall below that quarter", so the two baselines become the same question.
         expected, hit, level = PEAK_GONE, after < at_cutoff, after < at_cutoff
     return BacktestRow(
         cutoff=target,
@@ -514,7 +543,7 @@ def outcome(
 def flags(
     population: Population,
 ) -> tuple[frozenset[str], frozenset[tuple[str, str]], frozenset[tuple[str, str]]]:
-    """(광고·협찬 영상 id, 운영자 댓글 묶음 키, 홍보 댓글 묶음 키)."""
+    """(ad and sponsored video ids, operator comment group keys, promotional comment group keys)."""
     return (
         frozenset(video.item_id for video in population.videos if video.ad),
         frozenset(r.key for r in population.reactions if r.creator),
@@ -528,7 +557,8 @@ def ad_sensitivity(
     frame: Frame,
     base: Sequence[MetricsTopicQuarterRow],
 ) -> AdSensitivity:
-    """광고·협찬 표시를 빼도 결론이 같은가 -- 표시만 하고 쓰지 않으면 아무도 안 읽는 컬럼이 된다."""
+    """Is the conclusion the same with the ad and sponsorship marks removed -- a column that is only marked
+    and never used is a column nobody reads."""
     ad, creator, promo = flags(population)
     _prior, recent = calendar_windows(sorted({row.quarter for row in base}))
     kept_videos = _kept(population, roles=(PRODUCT,))
@@ -554,8 +584,8 @@ def ad_sensitivity(
         now = verdicts(
             metrics(population, topics, frame, drop_videos=drop_videos, drop_reactions=drop_reactions)
         )
-        # 표본이 줄어 판정이 사라진 것과 유형이 뒤집힌 것을 나눈다. 섞으면 "제외하니 결론이 다 바뀐다"로
-        # 보이는데 실은 대부분 표본 미달이다.
+        # A judgement lost to a shrunken sample is kept apart from a type that flipped. Mixed, it looks like
+        # "excluding them changes every conclusion" when most of it is simply too little sample.
         flips: dict[tuple[str, str], int] = defaultdict(int)
         gone = 0
         for cell, kind in was.items():

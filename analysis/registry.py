@@ -1,4 +1,5 @@
-"""task → 구현체. 후속 유닛(#2·#3·#4·#6)이 자기 모듈의 register_implementations() 에서 자기 구현을 꽂는다."""
+"""task -> implementation. A following unit (#2 · #3 · #4 · #6) plugs its own implementation in from its
+module's register_implementations()."""
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ __all__ = [
     "register_factory",
 ]
 
-# contracts/entrypoints.md. B11: aspect 는 평가셋도 기준선도 0행이라 빠졌다.
+# contracts/entrypoints.md. B11: aspect has 0 rows in both the evaluation set and the baseline, so it is out.
 TASKS = ("polarity", "wish_class", "brand_link", "product_match")
 
 # 구현체를 등록하는 모듈 경로. 유닛은 여기에 자기 줄 하나만 더한다 — cli.py 에 import 를 끼워 넣으면

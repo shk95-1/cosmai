@@ -19,8 +19,8 @@ from analysis.judge import DIFFUSING, SPIKE, STICKY, SURGE, UNJUDGED
 from analysis.types import TopicQuarterJudgementRow
 
 # 보고서의 손잡이이지 적합된 값이 아니다 -- 근거가 팀 합의뿐이라는 것을 계약 §기회 카드 가 적는다.
-GAP_PRODUCT_GAP = 2.0  # 제품 공백으로 볼 최소 갭(%p)
-SATURATED_COMPOSITION = 15.0  # 포화로 볼 최소 댓글 구성비(%)
+GAP_PRODUCT_GAP = 2.0  # the smallest gap (%p) counted as a product gap
+SATURATED_COMPOSITION = 15.0  # the smallest comment share (%) counted as saturated
 
 EXPRESSION_GAP = "표현 공백"
 PRODUCT_GAP = "제품 공백 기회"
@@ -30,8 +30,9 @@ SATURATED = "포화 시장"
 UPSTREAM_RESEARCH = "선행 연구 기회"
 # 규칙이 걸리는 순서다. 위에서 먼저 걸리면 끝난다 -- 순서 자체가 정의인 것은 §판정 과 같다.
 CARD_TYPES = (EXPRESSION_GAP, PRODUCT_GAP, VERIFIED_GROWTH, FAD_RISK, SATURATED, UPSTREAM_RESEARCH)
-# 어휘에서 지우지 않는 것은 그 입력이 오는 날 규칙이 그대로 서기 때문이다. 없는 입력을 0 으로 깔면
-# 그 유형이 조용히 영원히 안 나온다 (`W_EVIDENCE` 의 넷째 항을 0 으로 깔지 않은 것과 같은 문장).
+# It is not deleted from the vocabulary because the rule stands as it is the day that input arrives. Laying a
+# missing input down as 0 makes that type quietly never appear (the same sentence as not laying the fourth
+# term of `W_EVIDENCE` down as 0).
 UNAVAILABLE: Mapping[str, str] = {
     EXPRESSION_GAP: "제품 전성분 축(ydc ingredient_axis.py)의 원천이 이 레포에 없다",
     UPSTREAM_RESEARCH: "논문 계열 데이터가 아직 없다 -- ydc 에서도 미도착으로 보류다",
@@ -50,14 +51,14 @@ GENERIC_ALIAS: Mapping[str, frozenset[str]] = {
     "지속력_워터프루프": frozenset({"지속"}),
 }
 UNDERCOUNTED = "최근 분기는 댓글이 계속 쌓이므로 구조적으로 과소 집계된다"
-# 인용 한 건의 표시 길이. 카드 한 장이 화면 하나에 들어가야 판단의 단위가 된다.
+# The display length of one quotation. One card has to fit one screen to be a unit of judgement.
 QUOTE_CHARS = 220
 SINGLE_SOURCE = "단일 소스 판정 — 플랫폼 간 교차 확인 없음"
 
 
 @dataclass(frozen=True)
 class Quote:
-    """카드에 실리는 발화 하나. 뷰 `topic_quarter_evidence_quote` 한 행이 그대로 이것이다."""
+    """One utterance carried on a card. One row of the view `topic_quarter_evidence_quote` is exactly this."""
 
     rank: int
     like_count: int
@@ -68,7 +69,8 @@ class Quote:
 
 @dataclass(frozen=True)
 class CellFacts:
-    """한 (주제, 분기) 가 든 것. 판정 두 행(댓글·영상)과 그 셀의 지표 몇 칸이다."""
+    """What one (topic, quarter) holds. Two judgement rows (comment and video) and a few metric columns of
+    that cell."""
 
     topic_key: str
     quarter: str
@@ -106,7 +108,7 @@ class Card:
     video_type: str = ""
     comment_composition_pct: float = 0.0
     video_composition_pct: float = 0.0
-    gap_pp: float = 0.0  # 언제나 값이다 -- 한쪽 source 에 행이 없으면 0 으로 읽는다 (`_gap`)
+    gap_pp: float = 0.0  # always a value -- with no row on one source it reads as 0 (`_gap`)
     velocity_yoy: float | None = None
     evidence_strength: float | None = None
     mentions: int | None = None
@@ -117,7 +119,8 @@ def _type_of(row: TopicQuarterJudgementRow | None) -> str:
 
 
 def _gap(facts: CellFacts) -> float:
-    """갭이 없는 셀은 0 으로 읽는다 -- 한쪽 source 에 행이 없다는 뜻이고, 그때 갭 규칙은 서지 않는다."""
+    """A cell with no gap reads as 0 -- it means one source has no row, and then the gap rule does not
+    stand."""
     for row in (facts.comment, facts.video):
         if row is not None and row.gap_pp is not None:
             return float(row.gap_pp)
@@ -129,7 +132,7 @@ def _percent(value: float | None) -> float:
 
 
 def classify(facts: CellFacts) -> tuple[str, str] | None:
-    """(카드 유형, 배정 근거). 어느 규칙에도 안 걸리면 None -- 카드로 만들지 않는다."""
+    """(card type, the ground for assigning it). None if no rule matches -- then no card is made."""
     gap = _gap(facts)
     comment_type, video_type = _type_of(facts.comment), _type_of(facts.video)
     composition = _percent(facts.comment_composition)
@@ -152,8 +155,9 @@ def classify(facts: CellFacts) -> tuple[str, str] | None:
 
 
 def strength(kind: str, facts: CellFacts) -> float:
-    """유형을 정한 근거가 곧 그 카드의 세기다. 전부 `opportunity_score` 로 줄을 세우면 점수가 NULL 인
-    셀의 카드가 언제나 밀리는데, 그 카드는 점수가 아니라 갭으로 서는 것이다."""
+    """The ground that set the type is the strength of that card. Ordering everything by
+    `opportunity_score` always pushes back the cards of cells whose score is NULL, and those cards stand on
+    the gap rather than on a score."""
     if kind == PRODUCT_GAP:
         return round(abs(_gap(facts)), 2)
     for row in (facts.comment, facts.video):
@@ -163,7 +167,8 @@ def strength(kind: str, facts: CellFacts) -> float:
 
 
 def limits(facts: CellFacts, quotes: Sequence[Quote]) -> list[str]:
-    """한계를 카드 안에 넣는다 (설계 원칙 4). 표본 부족·단일 소스·과소 집계를 숨기지 않는다."""
+    """The limits go inside the card (design principle 4). A thin sample, a single source and
+    under-aggregation are not hidden."""
     made: list[str] = []
     for label, row in (("댓글", facts.comment), ("영상 설명", facts.video)):
         if row is None:
@@ -184,7 +189,8 @@ def limits(facts: CellFacts, quotes: Sequence[Quote]) -> list[str]:
 
 
 def alias_rank(entries: Iterable[Mapping[str, object]]) -> dict[str, dict[str, int]]:
-    """주제 -> {별칭: 순서}. 사전은 구체적인 것부터 적혀 있고 그 순서가 곧 구체성이다 (포크 #8)."""
+    """topic -> {alias: order}. The dictionary is written from the specific down, and that order is
+    specificity (fork #8)."""
     made: dict[str, dict[str, int]] = {}
     for entry in entries:
         terms = [*(entry.get("ko") or []), *(entry.get("latin") or [])]  # type: ignore[misc]
@@ -206,7 +212,7 @@ def build(
     alias_rank: Mapping[str, Mapping[str, int]],
     top: int = TOP_PER_CELL,
 ) -> Deck:
-    """규칙에 걸린 셀마다 카드 하나, 그다음 유형마다 가장 센 것 하나만 남긴다."""
+    """One card per cell the rules matched, then only the strongest one per type is kept."""
     made: list[Card] = []
     unquoted: list[tuple[str, str]] = []
     for facts in cells:
@@ -219,8 +225,8 @@ def build(
             key=lambda quote: quote_order(facts.topic_key, quote, alias_rank),
         )[:top]
         if not picked:
-            # 근거 원문이 없으면 카드로 만들지 않는다(설계 원칙 3). 조용히 넘기지는 않는다 -- 규칙이
-            # 골라 낸 셀이 산출에서 빠진 것이라, 그 사실이 종료 코드까지 간다.
+            # With no evidence text no card is made (design principle 3). It is not passed over quietly --
+            # a cell the rules picked has dropped out of the output, and that fact reaches the exit code.
             unquoted.append((facts.topic_key, facts.quarter))
             continue
         score = next(
@@ -252,7 +258,7 @@ def build(
             )
         )
 
-    # 유형이 겹치지 않게 고른다. 같은 유형 카드 셋은 데모에서 한 장과 같다.
+    # Types are chosen without repeating. Three cards of the same type are one card in a demo.
     picked_cards: list[Card] = []
     seen: set[str] = set()
     for card in sorted(made, key=lambda card: (-card.strength, card.topic_key)):
@@ -264,7 +270,8 @@ def build(
 
 
 def render(made: Sequence[Card], quarter: str) -> str:
-    """마크다운 한 장. 요약 문장 자리에 근거 원문을 그대로 싣는 것이 LLM 을 쓰지 않는다는 말이다."""
+    """One markdown page. Carrying the evidence text as it is where a summary sentence would go is what "no
+    LLM is used" means."""
     out = [
         f"# R&D Opportunity Card — {quarter}",
         "",
@@ -274,7 +281,7 @@ def render(made: Sequence[Card], quarter: str) -> str:
     ]
     for i, card in enumerate(made, 1):
         mentions = card.mentions if card.mentions is not None else "—"
-        # 0.0 은 "값이 없다"가 아니라 "근거가 바닥이다"라는 다른 말이다.
+        # 0.0 is not "there is no value" but "the evidence is at the floor", which is a different statement.
         strength_of = card.evidence_strength if card.evidence_strength is not None else "—"
         out += [
             f"## {i}. {card.topic_key} — {card.card_type}",

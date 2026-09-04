@@ -1,4 +1,5 @@
-"""원천 행 → TextUnit. 시간 규칙과 카테고리 유도는 contracts/formats.md 가 정본이다."""
+"""A source row -> a TextUnit. The time rules and the category derivation are canonical in
+contracts/formats.md."""
 
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ def as_day(value: datetime | date | None) -> date | None:
 
 
 def leaf(category: str | None) -> str:
-    """사이트 카테고리는 ' > ' 로 이어진 경로다 — 사전 키는 그 마지막 조각이다."""
+    """A site category is a path joined by ' > ' -- the dictionary key is its last piece."""
     return (category or "").split(LEAF_SEPARATOR)[-1].strip()
 
 
@@ -57,7 +58,8 @@ class CategoryRule:
 
 @dataclass(frozen=True)
 class CategoryMap:
-    """needs.category_map (A18). 사이트 카테고리 leaf → 없으면 제품명 정규식 → 그래도 없으면 없음."""
+    """needs.category_map (A18). The leaf of the site category -> failing that a product-name regex -> failing
+    that, nothing."""
 
     exact: Mapping[tuple[str, str], str]
     keywords: tuple[CategoryRule, ...]
@@ -65,7 +67,8 @@ class CategoryMap:
     def lexicon_category(self, site: str, category: str | None, product_name: str | None) -> str | None:
         found = leaf(category)
         if found:
-            # 표에 없는 leaf 는 항등이다 (formats.md) — 사전이 그 이름으로 카테고리 행을 가질 수 있다.
+            # A leaf not in the table is the identity (formats.md) -- the dictionary can hold a category row
+            # under that name.
             return self.exact.get((site, found)) or self.exact.get((ANY_SITE, found)) or found
         if not product_name:
             return None
@@ -81,7 +84,7 @@ def load_category_map(conn: psycopg.Connection[Any]) -> CategoryMap:
         rows: Sequence[Sequence[Any]] = cur.fetchall()
     return CategoryMap(
         exact={(r[0], r[1]): r[2] for r in rows if r[3] == "rank_snapshot"},
-        # 정규식은 서로 겹치므로 priority 오름차순으로 먼저 맞는 것이 이긴다 (SQL 의 ORDER BY).
+        # The regexes overlap, so in ascending priority the first match wins (the ORDER BY of the SQL).
         keywords=tuple(CategoryRule(r[0], re.compile(r[1]), r[2]) for r in rows if r[3] == "name_keyword"),
     )
 
@@ -99,7 +102,7 @@ def review_unit(
 ) -> TextUnit:
     """리뷰는 일 단위다. written_at 이 NULL 이면 captured_at 으로 폴백한다 (formats.md §시간)."""
     day = as_day(written_at) or as_day(captured_at)
-    assert day is not None  # captured_at 은 NOT NULL 이다 (contracts/ddl/current/app.trend_radar.sql)
+    assert day is not None  # captured_at is NOT NULL (contracts/ddl/current/app.trend_radar.sql)
     return TextUnit(
         src="review",
         site=source,
@@ -124,10 +127,11 @@ def comment_unit(
     channel_id: str | None = None,
     view_count: int | None = None,
 ) -> TextUnit:
-    """댓글 시각은 상대시간 복원이라 해상도가 낮다. 폴백은 수집 시각이고 그때는 일 단위다."""
+    """A comment timestamp is restored from relative time, so its resolution is low. The fallback is the
+    collection time and that is at day resolution."""
     published = as_day(published_at)
     day = published or as_day(first_seen_at)
-    assert day is not None  # first_seen_at 은 NOT NULL 이다 (contracts/ddl/current/app.tubedepth.sql)
+    assert day is not None  # first_seen_at is NOT NULL (contracts/ddl/current/app.tubedepth.sql)
     return TextUnit(
         src="yt_comment",
         site="youtube",
