@@ -1,27 +1,27 @@
-// 운영 관제 페이지의 판단 부분 — 순수 함수만. DOM 도 fetch 도 없어 portal/test 가 그대로 잰다
-// (query/screens/render 와 같은 분리, tool/checks/js).
+// The judgement half of the ops screen — pure functions only. No DOM, no fetch, so portal/test can measure it directly
+// (the same split as query/screens/render, tool/checks/js).
 //
-// 판정 자체는 여기 없다. needs.pipeline_health 뷰가 freshness 와 last_run_status 를 이미 정해서
-// 준다(#138) — 화면이 다시 판정하면 tool/status 나 알림과 답이 갈린다. 여기가 하는 것은 그
-// 판정을 *사람이 읽는 순서*로 놓는 일이다.
+// The judgement itself does not live here. The needs.pipeline_health view already decides freshness and
+// last_run_status and hands them over (#138) — if the screen judged again, it could disagree with tool/status
+// or alerting. What this file does is arrange that judgement in *the order a person reads it*.
 
-// 심각도와 색은 severity.js 가 진다 -- 구조 지도(#143)가 같은 함수를 부른다. 두 화면이 같은
-// 단계를 다른 색으로 보이면 둘 다 못 믿게 된다. 여기서 다시 내보내는 것은 이미 이 모듈을
-// 부르고 있는 화면과 테스트를 위해서다.
+// Severity and color are carried by severity.js -- the structure map (#143) calls the same functions. If two
+// screens showed the same stage in different colors, neither could be trusted. Re-exporting here is only for
+// the screens and tests that are already calling this module.
 export { severityOf, severityClass } from './severity.js';
 import { severityOf } from './severity.js';
 
-// 배너와 '문제만 모은 덩어리'가 세는 집합. 배너가 답하는 질문은 "지금 무엇이 막혔나" 이므로
-// 여기 드는 것은 둘뿐이다: 안 돌고 있다 · 마지막 run 이 통째로 실패했다.
+// The set the banner and the "problems-only" bundle count. Since the question the banner answers is "what is
+// stuck right now," only two things belong here: it is not running · the last run failed outright.
 //
-// never 와 disabled 는 안 든다 -- never 는 아직 안 돈 단계(naver datalab·blog)의 정직한
-// 표시이지 고장이 아니고, 항상 빨간 대시보드는 아무도 안 보게 된다(#138).
+// never and disabled are not included -- never is the honest mark of a stage that has not run yet (naver
+// datalab·blog), not a failure, and a dashboard that is always red is one nobody looks at anymore (#138).
 //
-// partial 도 안 든다(#156). commerce:product 는 4일 중 3일이 partial 이면서 89 중 84~86 을
-// 걷는다 -- 그것을 막힌 단계로 세면 배너가 매일 빨갛고, #154 가 뷰에서 없앤 함정이 화면에서
-// 한 칸 위로 옮겨질 뿐이다. 사라지지는 않는다: severityOf 가 '주의' 로 두어 행이 눈에 띄고
-// failed 건수는 요청 통계에 남는다. 실패 *비율* 이 크면 배너에 서야 한다는 것은 맞지만, 그
-// 문턱을 정할 실측이 아직 없다 -- 별건.
+// partial is not included either (#156). commerce:product is partial 3 days out of 4 while still collecting
+// 84-86 of 89 -- counting that as a stuck stage would turn the banner red every day, and the trap #154 removed
+// from the view would just move up one level to the screen. It does not disappear, though: severityOf marks it
+// warning so the row still stands out, and the failed count stays in the request stats. It is true that a large
+// failure *rate* should raise the banner, but there is no measurement yet to set that threshold -- a separate issue.
 const BAD_FRESHNESS = new Set(['stalled', 'late']);
 const BAD_STATUS = new Set(['failed']);
 
@@ -33,23 +33,23 @@ export function problems(rows) {
   return sortByWorst((rows || []).filter(isProblem));
 }
 
-// 배너 한 줄이 세는 수. 화면 전체에서 이 수와 '문제 덩어리'의 행 수가 달라지면 둘 중 하나가
-// 거짓말이므로, 같은 술어(isProblem)를 두 자리가 나눠 쓴다.
+// The number the banner's one line counts. If this number and the problem bundle's row count ever diverge
+// anywhere on screen, one of them is lying, so both places share the same predicate (isProblem).
 export function problemCount(rows) {
   return problems(rows).length;
 }
 
-// 두 값 중 나쁜 쪽. 화면은 이것으로 색을 고르되 두 값을 **둘 다** 표시한다 -- 하나로 접으면
-// "3일 전에 실패한 뒤로 죽어 있다" 와 "방금 실패했지만 아직 주기 안" 이 같아 보인다(#138).
+// The worse of the two values. The screen picks its color from this but displays **both** values -- collapsing
+// them into one would make "dead since it failed 3 days ago" look the same as "just failed but still inside the interval" (#138).
 export function sortByWorst(rows) {
-  // stage_key 로 동률을 깬다 -- 같은 심각도의 행 순서가 응답 순서에 따라 흔들리면 매일 아침
-  // 같은 화면이 다르게 보인다.
+  // Ties are broken by stage_key -- if rows of the same severity shifted order with the response order, the same
+  // screen would look different every morning.
   return [...(rows || [])].sort(
     (a, b) => severityOf(a) - severityOf(b) || (a.stage_key < b.stage_key ? -1 : a.stage_key > b.stage_key ? 1 : 0),
   );
 }
 
-// 팔의 순서는 고정이다. 행 수나 심각도로 팔을 재정렬하면 매일 다른 자리를 봐야 한다.
+// The order of arms is fixed. Reordering arms by row count or severity would put them in a different spot every day.
 export const ARM_ORDER = ['commerce', 'youtube', 'naver', 'analyze'];
 
 export function byArm(rows) {
@@ -59,30 +59,30 @@ export function byArm(rows) {
     .filter((g) => g.rows.length > 0);
 }
 
-// 선언상 안 도는 것. 목록에서 사라지는 것과 조용히 안 도는 것은 다르므로 따로 낸다.
+// Declared not to run. Disappearing from the list and quietly not running are different, so this is separated out.
 export function disabled(rows) {
   return sortByWorst((rows || []).filter((r) => r.freshness === 'disabled'));
 }
 
 const MINUTE = 60, HOUR = 3600, DAY = 86400;
 
-// 절대시각은 부제로 남기고 본문은 상대시각이다 -- "2026-08-24 03:00 UTC" 는 늦었는지를 사람이
-// 계산하게 만든다. 기준 TZ 는 #89 가 정하고, 그때 이 자리의 절대시각 표기도 함께 고친다.
+// The absolute time stays as a subtitle while the main text is relative -- "2026-08-24 03:00 UTC" leaves it to a
+// person to work out whether it is late. The reference TZ is decided by #89, and this spot's absolute-time wording changes with it then.
 export function relativeTime(at, now) {
   if (!at) return '—';
   const seconds = Math.floor((now.getTime() - new Date(at).getTime()) / 1000);
-  if (seconds < 0) return '방금';           // 시계 어긋남을 미래로 그리지 않는다
+  if (seconds < 0) return '방금';           // a clock skew is never drawn as the future
   if (seconds < MINUTE) return `${seconds}초 전`;
   if (seconds < HOUR) return `${Math.floor(seconds / MINUTE)}분 전`;
   if (seconds < DAY) return `${Math.floor(seconds / HOUR)}시간 전`;
   return `${Math.floor(seconds / DAY)}일 전`;
 }
 
-// 사람이 읽는 주기. PostgREST 는 interval 을 'HH:MM:SS' 나 'N days' 같은 문자열로 준다.
+// A human-readable interval. PostgREST hands back an interval as a string like 'HH:MM:SS' or 'N days'.
 export function describeInterval(text) {
   if (!text) return '—';
   const iso = /^(?:(\d+) days?\s*)?(?:(\d+):(\d+):(\d+))?$/.exec(String(text).trim());
-  if (!iso) return String(text);            // mon 처럼 우리가 모르는 모양은 그대로 보여준다
+  if (!iso) return String(text);            // a shape we don't recognize, like mon, is shown as-is
   const [, days, hours, minutes] = iso;
   if (days) return Number(days) === 1 ? '매일' : `${days}일마다`;
   if (hours && Number(hours) > 0) return Number(hours) === 1 ? '매시' : `${Number(hours)}시간마다`;

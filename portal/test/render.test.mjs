@@ -14,7 +14,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const needFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_need.sample.json'), 'utf8'));
 const wishFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_wish.sample.json'), 'utf8'));
 
-// app.js 가 하는 것과 같은 필터: 최신 run · 카테고리 합(product_ref='', month='').
+// The same filter app.js applies: latest run · category sum (product_ref='', month='').
 function categoryRowsForLatestRun(rows, scope) {
   const runId = latestRunId(rows);
   return rows.filter((r) => r.run_id === runId && r.product_ref === '' && r.month === '' && r.scope === scope);
@@ -75,7 +75,7 @@ test('renderTopBars on an empty list renders an empty chart, not a crash', () =>
   assert.deepEqual(svg.match(/<rect/g), null);
 });
 
-// ---- 화면 4: 산점도 ------------------------------------------------------
+// ---- Screen 4: scatter ------------------------------------------------------
 
 const SCATTER = { xKey: 'persist_month_ratio', yKey: 'persist_product_ratio', sizeKey: 'unresolved', xLabel: '지속 월 비율', yLabel: '확산 제품 비율' };
 
@@ -89,8 +89,8 @@ test('renderScatter: 비율이 있는 need_key 만큼 점을 찍는다', () => {
   assert.match(svg, /확산 제품 비율/);
 });
 
-// 분모(persist_months_total)가 0 이면 비율이 없다 — 0 으로 눕혀 왼쪽 아래에 찍으면
-// "지속되지 않는 니즈"라는 거짓 신호가 된다. 그 점은 아예 그리지 않는다.
+// When the denominator (persist_months_total) is 0 there is no ratio — flattening it to 0 and plotting it
+// at the bottom left would become the false signal "a need that never persists." That point is never drawn at all.
 test('renderScatter: 분모 0 인 행은 점이 되지 않는다', () => {
   const rows = needCharacterRows(needFixture, 2, '쿠션');
   const svg = renderScatter(rows, SCATTER);
@@ -111,10 +111,10 @@ test('renderScatter escapes need_key text', () => {
   assert.match(svg, /&lt;script&gt;/);
 });
 
-// 점이 많으면 라벨이 서로 덮는다 — 이미 놓인 라벨 상자와 겹치는 라벨은 생략하고
-// (#122: y=1 근처에 7 개가 몰려 서로 덮었다) 이름은 <title>(호버)로 전부 남긴다.
-// 한 자리에 20 개가 겹치면 그 점의 좌우 두 자리만 비어 있다 — 셋째부터는 어느 쪽에
-// 놓아도 이미 놓인 상자와 겹치므로 생략된다.
+// With many points, labels overlap each other — a label that would overlap an already-placed label box is skipped
+// (#122: 7 clustered near y=1 overlapped each other), and every name still remains in <title> (on hover).
+// When 20 points overlap in one spot, only the two slots to that point's left and right are free — the third onward
+// overlaps an already-placed box on either side, so it is skipped.
 test('renderScatter: 한 자리에 몰린 점은 좌우 두 개만 라벨하고 title 은 전부 남는다', () => {
   const rows = Array.from({ length: 20 }, (_, i) => ({
     need_key: `n${i}`, persist_month_ratio: 0.5, persist_product_ratio: 0.5, unresolved: i / 20,
@@ -126,8 +126,8 @@ test('renderScatter: 한 자리에 몰린 점은 좌우 두 개만 라벨하고 
   assert.match(svg, /class="viz-point-label"[^>]*>n19</);
 });
 
-// 반대쪽 극단: 서로 떨어진 점은 전부 라벨을 받아야 한다 — 탐욕 배치가 겹침이 없는
-// 자리까지 버리면 화면이 그냥 비어 보인다.
+// The opposite extreme: points spread apart must all get a label — greedy placement must never drop a spot
+// that has no overlap, or the screen would just look empty.
 test('renderScatter: 흩어진 점은 전부 라벨을 받는다', () => {
   const rows = [0.1, 0.35, 0.6, 0.85].map((y, i) => ({
     need_key: `n${i}`, persist_month_ratio: 0.2, persist_product_ratio: y, unresolved: 1,
@@ -143,9 +143,9 @@ test('renderScatter: 행이 없어도 축은 그린다', () => {
 });
 
 
-// ---- #122 판 폭·축·툴팁·표 포맷 --------------------------------------------
+// ---- #122 panel width · axis · tooltip · table format --------------------------------------------
 
-// <rect …/> 의 속성을 뽑는다 — 좌표 계산이 맞는지 문자열 매칭으로 보기 어려워서다.
+// Extracts <rect …/>'s attributes — because whether the coordinate math is right is hard to see via string matching.
 function rects(svg) {
   return [...svg.matchAll(/<rect ([^>]*)\/>/g)].map(([, attrs]) => Object.fromEntries(
     [...attrs.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]),
@@ -154,8 +154,8 @@ function rects(svg) {
 
 const BARS = Array.from({ length: 8 }, (_, i) => ({ need_key: `n${i}`, neg: 10 - i, pos: i, unresolved: 10 - i }));
 
-// #122: viewBox 폭이 판의 실제 폭과 다르면 svg.viz-root{width:100%} 가 그 비율만큼
-// 글자까지 늘린다(실측 3.29배). 폭은 판마다 다르므로 렌더 옵션이어야 한다.
+// #122: when the viewBox width differs from the panel's actual width, svg.viz-root{width:100%} enlarges the
+// text by that same ratio too (measured 3.29x). Since width differs by panel, it must be a render option.
 test('판 폭은 렌더 옵션이다 — 전체폭 960, 작은 판 420', () => {
   assert.equal(CHART_W_WIDE, 960);
   assert.equal(CHART_W_SMALL, 420);
@@ -165,17 +165,17 @@ test('판 폭은 렌더 옵션이다 — 전체폭 960, 작은 판 420', () => {
   assert.match(renderTopBars([{ value: 'a', mentions: 1 }], { width: CHART_W_WIDE }), /viewBox="0 0 960 /);
 });
 
-// 두 줄짜리 그룹 막대는 need_key 하나가 세로 58px 을 먹어 판이 3,323px 이 됐다(#122).
-// neg 왼쪽 / pos 오른쪽 한 행 대칭이면 같은 정보가 절반 높이에 들어간다.
+// A two-row grouped bar had one need_key eating 58px vertically, making the panel 3,323px (#122).
+// With neg left / pos right symmetric on one row, the same information fits in half the height.
 test('renderDivergingBars: neg 와 pos 가 한 행에서 가운데 축을 두고 마주 본다', () => {
   const svg = renderDivergingBars([{ need_key: 'a', neg: 10, pos: 5 }], { width: CHART_W_WIDE });
   const [neg, pos] = rects(svg);
   assert.equal(neg.class, 'bar-neg');
   assert.equal(pos.class, 'bar-pos');
-  assert.equal(neg.y, pos.y); // 같은 행
-  // neg 는 축에서 왼쪽으로, pos 는 오른쪽으로 — 두 막대가 축에서 만난다.
+  assert.equal(neg.y, pos.y); // the same row
+  // neg extends left from the axis, pos right — the two bars meet at the axis.
   assert.equal(Number(neg.x) + Number(neg.width), Number(pos.x));
-  assert.equal(Number(neg.width), 2 * Number(pos.width)); // 10 대 5
+  assert.equal(Number(neg.width), 2 * Number(pos.width)); // 10 to 5
 });
 
 test('renderDivergingBars: 높이가 행당 한 줄이다', () => {
@@ -185,7 +185,7 @@ test('renderDivergingBars: 높이가 행당 한 줄이다', () => {
   assert.equal(h(four) - h(one), 3 * 28);
 });
 
-// 값 라벨이 막대마다 붙으면 판이 표가 된다 — 상위 5 개만 적고 나머지는 호버(<title>).
+// If a value label were attached to every bar the panel would become a table — only the top 5 are written, the rest are hover-only (<title>).
 test('막대 판: 값 라벨은 상위 5 개까지, <title> 은 막대마다 붙는다', () => {
   for (const svg of [
     renderMagnitudeBars(BARS, { key: 'unresolved' }),
@@ -194,10 +194,10 @@ test('막대 판: 값 라벨은 상위 5 개까지, <title> 은 막대마다 붙
     assert.equal((svg.match(/class="viz-value"/g) || []).length, 5);
     assert.equal((svg.match(/<title>/g) || []).length, 8);
   }
-  // 발산 막대에서 "상위 5 개"는 need_key 5 행이다 — 한쪽만 적으면 없는 값으로 읽힌다.
+  // In the diverging bars, "top 5" means 5 need_key rows — writing only one side would read as a missing value.
   const div = renderDivergingBars(BARS, { width: CHART_W_WIDE });
   assert.equal((div.match(/class="viz-value"/g) || []).length, 10);
-  assert.equal((div.match(/<title>/g) || []).length, 16); // neg·pos 각각
+  assert.equal((div.match(/<title>/g) || []).length, 16); // neg·pos each
 });
 
 test('막대 판: 0 과 최대 눈금, 옅은 세로 그리드 하나', () => {
@@ -213,8 +213,8 @@ test('발산 막대: 눈금은 최대·0·최대 세 개다', () => {
   assert.equal((svg.match(/class="viz-axis"/g) || []).length, 1);
 });
 
-// 행이 0 이면 테두리만 남은 빈 판이 된다(#122: 화면 2 의 format·attribute, 화면 4 의 둘).
-// 화면 4 의 유튜브 판이 쓰던 .empty-note 를 렌더 쪽으로 옮겨 판마다 쓴다.
+// Zero rows leaves an empty panel with only a border (#122: screen 2's format·attribute, screen 4's two).
+// The .empty-note screen 4's YouTube panel used was moved into render and is now used by every panel.
 test('빈 행 + empty 문구 = 빈 SVG 가 아니라 .empty-note', () => {
   for (const svg of [
     renderTopBars([], { empty: '값 없음' }),
@@ -227,10 +227,10 @@ test('빈 행 + empty 문구 = 빈 SVG 가 아니라 .empty-note', () => {
   assert.match(renderTopBars([], { empty: '<b>x</b>' }), /&lt;b&gt;/);
 });
 
-// ---- 표 셀 포맷 ------------------------------------------------------------
+// ---- Table cell format ------------------------------------------------------------
 
-// app.js 가 textContent = r[c] 라 0.891304347826087 이 그대로 나왔다(#122).
-// CSV 는 원시값이 정본이므로 이 포맷은 화면에만 쓴다.
+// app.js used textContent = r[c], so 0.891304347826087 came out verbatim (#122).
+// The CSV is the source of truth on raw values, so this format is used on screen only.
 test('formatCell: 비율·퍼센트·정수를 컬럼별로 다르게 적는다', () => {
   assert.equal(formatCell('unresolved', 0.891304347826087), '0.89');
   assert.equal(formatCell('low_share', 0.005565862981767), '0.01');
@@ -238,7 +238,7 @@ test('formatCell: 비율·퍼센트·정수를 컬럼별로 다르게 적는다'
   assert.equal(formatCell('neg', 101860), '101,860');
   assert.equal(formatCell('mentions', 12), '12');
   assert.equal(formatCell('need_key', '기타불만'), '기타불만');
-  assert.equal(formatCell('product_ref', '101473'), '101473'); // id 에 천단위는 거짓말이다
+  assert.equal(formatCell('product_ref', '101473'), '101473'); // a thousands separator on an id would be a lie
   assert.equal(formatCell('unresolved', null), '');
   assert.equal(formatCell('unresolved', ''), '');
 });
@@ -259,8 +259,8 @@ test('cellKind·isNumericCell: 숫자 셀만 우측 정렬 대상이다', () => 
 });
 
 
-// 화면 3 의 라벨은 '브랜드 · 제품명' 이라 96px 자리로는 넘친다 — 라벨 자리 폭도,
-// 툴팁이 읽을 컬럼도 판이 정한다(자른 라벨과 전체 이름이 다른 컬럼에 있어서다).
+// Screen 3's label is 'brand · product name', overflowing the 96px slot — both the label slot's width and
+// the column the tooltip reads are decided by the panel (since the truncated label and the full name live in different columns).
 test('renderMagnitudeBars: labelW 로 라벨 자리를 넓히고 titleKey 로 툴팁을 따로 준다', () => {
   const rows = [{ product_short: '메디힐 · 티트…', product: '메디힐 · 티트리 임팩트인 밸런싱 마스크', unresolved: 1 }];
   const svg = renderMagnitudeBars(rows, {
@@ -271,10 +271,10 @@ test('renderMagnitudeBars: labelW 로 라벨 자리를 넓히고 titleKey 로 �
   assert.match(svg, /class="viz-label">메디힐 · 티트…</);
 });
 
-// ---- 화면 5: 기간(월) 축 (#130) --------------------------------------------
+// ---- Screen 5: period (month) axis (#130) --------------------------------------------
 
-// 월 축은 새 렌더러를 만들지 않는다 — 크기 하나를 라벨 축에 걸어 그리는 판은 이미
-// renderMagnitudeBars 다. 라벨 축만 need_key 에서 month 로 돌린다.
+// The month axis creates no new renderer — the panel that draws one measure against a label axis is already
+// renderMagnitudeBars. Only the label axis is switched from need_key to month.
 test('renderMagnitudeBars: labelKey 를 month 로 돌리면 월별 막대가 된다 (#130)', () => {
   const rows = [
     { month: '2026-06', neg: 30 }, { month: '2026-07', neg: 0 }, { month: '2026-08', neg: 63 },
@@ -284,15 +284,15 @@ test('renderMagnitudeBars: labelKey 를 month 로 돌리면 월별 막대가 된
     [...svg.matchAll(/class="viz-label">([^<]*)</g)].map(([, m]) => m),
     ['2026-06', '2026-07', '2026-08'],
   );
-  // 0 건인 달은 폭 0 인 막대로 남는다 — 행째 빠지면 "그 달이 아예 없다"로 읽힌다.
+  // A month with 0 stays as a zero-width bar — dropping the row entirely would read as "that month doesn't exist at all."
   const bars = rects(svg);
   assert.equal(bars.length, 3);
   assert.equal(bars[1].width, '0');
-  assert.equal(bars[2].width, String(CHART_W_WIDE - 96 - 56)); // 최댓값(63)이 판을 채운다
+  assert.equal(bars[2].width, String(CHART_W_WIDE - 96 - 56)); // the max value (63) fills the panel
 });
 
-// 월 행이 하나도 없는 니즈는 빈 판이 아니라 문구다 — 이 자리에서 "0 건"과 "월 행 없음"이
-// 같은 그림이 되면 화면이 없는 사실을 주장한다.
+// A need with no month rows at all is wording, not an empty panel — if "0 items" and "no month rows"
+// looked the same here, the screen would be asserting a fact that does not exist.
 test('renderMagnitudeBars: 월 행이 없으면 문구다 (#130)', () => {
   assert.match(
     renderMagnitudeBars([], { key: 'neg', labelKey: 'month', empty: '이 니즈의 월 행이 없음' }),

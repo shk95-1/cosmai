@@ -1,19 +1,19 @@
-// PostgREST 요청 조립과 응답 파싱의 순수 함수들. DOM·fetch 를 만지지 않아서
-// node --test 로 그대로 검증된다 (data-portal/public/query.js 의 같은 이유).
-// 화면 배선은 app.js 의 몫이다.
+// Pure functions for assembling PostgREST requests and parsing responses. Since they never touch DOM·fetch
+// they are verified directly with node --test (the same reason as data-portal/public/query.js).
+// Wiring the screens is app.js's job.
 
-// PGRST_DB_MAX_ROWS 와 같은 값 — 한 응답의 상한. CSV 내려받기가 이 크기로
-// offset 을 옮기며 이어 읽는다.
+// The same value as PGRST_DB_MAX_ROWS — the cap on one response. The CSV download follows it,
+// moving offset by this size and continuing to read.
 export const PAGE_SIZE = 1000;
 
-// PostgREST 문법의 쿼리스트링을 만든다. 앞의 '?' 는 붙이지 않는다.
-// order 를 항상 붙이는 것이 핵심: 정렬 없이 offset 을 옮기면 페이지 사이에
-// 행이 중복되거나 빠진다 (DB 가 순서를 보장하지 않는다).
+// Builds a query string in PostgREST syntax. The leading '?' is not attached.
+// Always attaching order is the key point: moving offset without a sort makes rows duplicate or
+// go missing between pages (the DB gives no order guarantee).
 //
-// 빈 값의 필터는 기본적으로 버린다 — 아무것도 안 고른 셀렉트가 필터로 둔갑하지
-// 않게 하려는 것이다. 다만 metrics_need 의 카테고리 합 행은 product_ref 가 실제로
-// 빈 문자열이라 'product_ref=eq.' 가 유일한 필터다(#109) — 그 자리는 allowEmpty 로
-// "빈 값을 값으로 쓰겠다"고 밝힌다.
+// A filter with an empty value is dropped by default — this is to keep a select that picked nothing
+// from masquerading as a filter. But metrics_need's category-sum rows genuinely have product_ref as an
+// empty string, so 'product_ref=eq.' is the only filter that picks them (#109) — that spot declares
+// "the empty value is being used as a value" via allowEmpty.
 export function buildQuery({ select, filters, order, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (select && select.length > 0) params.append('select', select.join(','));
@@ -28,29 +28,29 @@ export function buildQuery({ select, filters, order, limit, offset } = {}) {
   return params.toString();
 }
 
-// metrics_need 는 축이 셋이다 — 카테고리 합(화면 1·4) · 제품 축(화면 3) · 월 축(화면 5).
-// 셋의 스펙이 app.js 의 지역 상수가 아니라 여기 있는 이유는 둘 다 "스펙 사이의 관계" 라서다.
+// metrics_need has three axes — category sum (screen 1·4) · product axis (screen 3) · month axis (screen 5).
+// The spec for the three lives here rather than as a local constant in app.js because both of the following are "relations between specs."
 //
-// 하나는 배타성이다: 축 하나를 더하면 나머지 둘의 필터가 같이 좁혀져야 한다. 월 행이 얹힌
-// 뒤 month=eq. 가 빠진 질의는 제 몫의 두 배를 받는다(#130, 실측 7,219행 → 대략 14,000).
-// 다른 하나는 select 가 screens.js 의 소비 함수와 맺는 계약이다: PostgREST 는 select 에
-// 적은 컬럼만 JSON 에 담으므로, 거르는 쪽이 보는 컬럼이 select 에 없으면 그 키는 응답에
-// 아예 없고 비교는 언제나 거짓이 된다 — 화면이 통째로 빈다. 스펙이 순수 모듈에 있어야
-// 테스트가 select 와 소비 함수를 한자리에서 맞춰 볼 수 있다(#130 수정 라운드).
+// One is exclusivity: adding one axis means the other two's filters must narrow along with it. A query
+// missing month=eq. after the month rows were added receives double its share (#130, measured 7,219 rows → roughly 14,000).
+// The other is the contract select makes with screens.js's consuming functions: PostgREST puts only the
+// columns listed in select into the JSON, so if a column the filtering side reads is missing from select, that
+// key is entirely absent from the response and the comparison is always false — the screen ends up empty. The
+// spec must live in a pure module so a test can check select and the consuming functions against each other in one place (#130 fix round).
 //
-// order 는 metrics_need 의 PK 전체(001_needs.sql) — run_id 만으로는 동률이 흔해 offset
-// 페이징 중 행이 빠지거나 겹칠 수 있다(이 파일 머리말과 같은 이유).
+// order is metrics_need's full PK (001_needs.sql) — run_id alone ties often enough that rows can be
+// dropped or duplicated during offset paging (the same reason as this file's header).
 const NEED_ORDER = 'run_id.desc,scope,need_key,month,product_ref';
 
-// 운영 관제(#139)가 읽는 단 하나의 표 -- needs.pipeline_health. 판정(freshness·last_run_status)은
-// 뷰가 이미 끝냈으므로 화면은 받아서 놓기만 한다.
+// The single table ops (#139) reads -- needs.pipeline_health. The judgement (freshness·last_run_status) is
+// already done by the view, so the screen only receives it and lays it out.
 //
-// select 가 소비 함수가 거르는 컬럼을 빠짐없이 담아야 한다는 규칙은 여기서도 같다: PostgREST 는
-// select 에 적은 컬럼만 JSON 에 담으므로, ops.js 의 isProblem 이 보는 freshness·last_run_status 나
-// byArm 이 보는 arm 이 빠지면 그 비교가 언제나 거짓이 되고 화면이 통째로 빈다(#130 이 데인 자리).
+// The same rule applies here that select must carry every column the consuming function filters on: PostgREST
+// puts only the columns listed in select into the JSON, so if freshness·last_run_status, which ops.js's
+// isProblem reads, or arm, which byArm reads, is missing, that comparison is always false and the screen ends up empty (the spot #130 got burned by).
 //
-// 필터도 정렬도 서버에 맡기지 않는다 -- 행이 선언된 단계 수(지금 14)뿐이라 한 페이지에 들어오고,
-// 순서는 ops.js 의 순수 함수가 심각도로 정한다. 서버 정렬을 섞으면 그 판단이 두 자리로 갈린다.
+// Neither the filter nor the sort is left to the server -- there are only as many rows as declared stages
+// (14 right now), so they fit on one page, and order is decided by severity in ops.js's pure functions. Mixing in server sort would split that judgement across two places.
 export const OPS_QUERY = {
   select: [
     'stage_key', 'arm', 'dataset', 'enabled', 'expected_interval',
@@ -60,12 +60,12 @@ export const OPS_QUERY = {
   order: 'stage_key',
 };
 
-// 구조 지도(#142)가 읽는 둘. 엣지가 노드까지 진다(#141 -- 노드 표를 두지 않는 것이 설계다).
-// 단계 표를 따로 받는 것은 arm 과 enabled 때문이다: 그림이 팔로 색을 나누고, 꺼진 단계를
-// 회색으로 두려면 그 둘이 필요하다. 엣지만으로는 알 수 없다.
+// The two the structure map (#142) reads. Edges carry the nodes too (#141 -- not having a node table is the design).
+// The stage table is fetched separately for arm and enabled: the picture splits color by arm, and greying
+// out a disabled stage needs both of those. Edges alone cannot tell.
 //
-// 정렬을 서버에 맡긴다 -- 여기서는 페이지 경계를 안정시키는 것이 목적이고, 그림의 순서는
-// map.js 의 순수 함수가 계층으로 정한다.
+// Sorting is left to the server -- the goal here is only to keep page boundaries stable, and the picture's
+// order is decided by layer in map.js's pure functions.
 export const MAP_QUERIES = {
   edge: {
     select: ['from_key', 'from_kind', 'to_key', 'to_kind', 'note'],
@@ -75,27 +75,27 @@ export const MAP_QUERIES = {
     select: ['stage_key', 'arm', 'dataset', 'enabled'],
     order: 'stage_key',
   },
-  // 상태를 그림에 얹는다(#143). 판정은 뷰가 이미 끝냈으므로 두 컬럼만 받으면 된다 --
-  // 색을 고르는 severity.js 가 보는 것이 그 둘뿐이다.
+  // Puts status on the picture (#143). The judgement is already done by the view, so only two columns need to be fetched --
+  // those two are all severity.js, which picks the color, ever looks at.
   health: {
     select: ['stage_key', 'freshness', 'last_run_status'],
     order: 'stage_key',
   },
 };
 
-// 계보 드릴다운(#144)이 읽는 뷰 둘. 필터는 여기 없다 — 어느 칸에서 눌렀느냐가 정하므로
-// lineage.js 의 순수 함수가 만들고, 여기는 select 와 정렬만 진다.
+// The two views the lineage drilldown (#144) reads. The filter does not live here — since it is decided by
+// which cell was clicked, it is built by lineage.js's pure functions, and this file only carries select and order.
 //
-// 정렬은 서버에 맡긴다. 한 칸의 언급이 1,000행(PGRST_DB_MAX_ROWS)을 넘는 것이 예사라
-// offset 페이징이 필수인데, 정렬 없이 offset 을 옮기면 페이지 사이에서 행이 겹치거나 빠진다
-// (이 파일 머리말과 같은 이유). mention_id 는 need_mention·wish_mention 의 PK 이고,
-// (doc_key, candidate_rank) 는 collection_lineage 안에서 한 문서의 후보를 유일하게 짚는다.
+// Sorting is left to the server. One cell having more than 1,000 mentions (PGRST_DB_MAX_ROWS) is routine, so
+// offset paging is required, and moving offset without a sort makes rows overlap or go missing between pages
+// (the same reason as this file's header). mention_id is need_mention·wish_mention's PK, and
+// (doc_key, candidate_rank) uniquely points to one document's candidate within collection_lineage.
 //
-// select 가 소비 함수가 보는 컬럼을 빠짐없이 담아야 한다는 규칙은 여기서도 같다: PostgREST 는
-// select 에 적은 컬럼만 JSON 에 담으므로, lineage.js 의 documentFilters 가 보는 doc_parent 나
-// groupByDocument 가 보는 match 가 빠지면 그 비교가 언제나 거짓이 되고 화면이 통째로 빈다(#130).
+// The same rule applies here that select must carry every column a consuming function reads: PostgREST
+// puts only the columns listed in select into the JSON, so if doc_parent, which lineage.js's documentFilters
+// reads, or match, which groupByDocument reads, is missing, that comparison is always false and the screen ends up empty (#130).
 //
-// 원문 컬럼(sentence·body·text)은 애초에 뷰에 없다 — 나가는 것은 120자 발췌뿐이다(사용자 결정).
+// The source-text columns (sentence·body·text) are not in the view to begin with — only the 120-character excerpt ever goes out (user decision).
 export const LINEAGE_QUERIES = {
   mention: {
     select: [
@@ -119,8 +119,8 @@ export const LINEAGE_QUERIES = {
 };
 
 export const NEED_QUERIES = {
-  // 화면 1·4: 카테고리 합 행. product_ref·month 가 실제로 빈 문자열이라 두 eq.(allowEmpty)
-  // 가 그것을 고르는 유일한 필터다(#109, #130).
+  // Screens 1·4: category-sum rows. product_ref·month are genuinely empty strings, so the two eq.(allowEmpty)
+  // filters are the only ones that pick them (#109, #130).
   category: {
     select: [
       'run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved',
@@ -135,7 +135,7 @@ export const NEED_QUERIES = {
     ],
     order: NEED_ORDER,
   },
-  // 화면 3: 제품 축 행만 — 합 행을 같이 받으면 상위 20 이 카테고리로 채워진다.
+  // Screen 3: product-axis rows only — receiving the sum rows too would fill the top 20 with category rows.
   product: {
     select: ['run_id', 'scope', 'need_key', 'month', 'product_ref', 'neg', 'pos', 'unresolved'],
     filters: [
@@ -144,11 +144,11 @@ export const NEED_QUERIES = {
     ],
     order: NEED_ORDER,
   },
-  // 화면 5: 월 행만 — 위의 둘과 정확히 겹치지 않는 반대편이다. 분모·persist_* 는 월 행에서
-  // NULL 이라 받지 않는다(#129 의 결정: 그 달의 분모라는 것이 존재하지 않는다).
-  // product_ref 는 값이 늘 빈 문자열이지만 반드시 받는다 — screens.js 의 monthRowsOf 가
-  // 그것으로 거르는데, select 에 없으면 응답 행에 키가 없어 그 비교가 언제나 거짓이 되고
-  // 화면 5 가 어떤 scope 에서도 "월 행이 없음" 만 낸다(#130 수정 라운드).
+  // Screen 5: month rows only — the exact complement of the two above. denominator·persist_* are NULL on
+  // month rows and are not fetched (#129's decision: there is no such thing as that month's denominator).
+  // product_ref's value is always an empty string but it is still fetched — screens.js's monthRowsOf filters
+  // on it, and if it were missing from select the response row would have no such key, making that comparison
+  // always false and screen 5 would print "no month rows" for every scope (#130 fix round).
   month: {
     select: [
       'run_id', 'scope', 'need_key', 'month', 'product_ref',
@@ -158,13 +158,13 @@ export const NEED_QUERIES = {
       { column: 'month', op: 'neq', value: '', allowEmpty: true },
       { column: 'product_ref', op: 'eq', value: '', allowEmpty: true },
     ],
-    // 이 질의에서 product_ref 는 늘 빈 값이라 앞의 넷이 곧 PK 다.
+    // In this query product_ref is always empty, so the first four are the PK.
     order: 'run_id.desc,scope,need_key,month',
   },
 };
 
-// 'Content-Range: 0-999/65646' 의 슬래시 뒤가 전체 개수다. '*' 이면 서버가
-// 세지 않은 것(Prefer: count=exact 가 빠졌다는 뜻)이라 개수를 모른다(null).
+// The total count is what follows the slash in 'Content-Range: 0-999/65646'. '*' means the server
+// did not count (meaning Prefer: count=exact was missing), so the count is unknown (null).
 export function parseContentRange(header) {
   if (!header) return null;
   const total = String(header).split('/')[1];
@@ -173,8 +173,8 @@ export function parseContentRange(header) {
   return Number.isFinite(n) ? n : null;
 }
 
-// 그 응답이 실제로 담은 행 수. CSV 를 줄 수로 세면 개행 포함 값에서 어긋나므로
-// 서버가 세어 보낸 이 숫자만 믿는다.
+// The number of rows the response actually carried. Counting the CSV by line would drift on a value
+// containing a newline, so only this number the server counted and sent is trusted.
 export function rangeLength(header) {
   if (!header) return 0;
   const range = String(header).split('/')[0];
@@ -184,9 +184,9 @@ export function rangeLength(header) {
   return end - start + 1;
 }
 
-// 다음 페이지의 offset, 더 받을 것이 없으면 null. 서버가 이번 페이지에서
-// 실제로 보낸 행 수(rangeLength)와 전체 개수(parseContentRange)로 판단한다 —
-// '*'(개수 모름)일 때도 이번 페이지가 PAGE_SIZE 보다 짧으면 마지막 페이지다.
+// The next page's offset, or null when there is nothing left to fetch. Decided from the row count the
+// server actually sent this page (rangeLength) and the total count (parseContentRange) —
+// even when it is '*' (count unknown), if this page came back shorter than PAGE_SIZE it is the last page.
 export function nextPageOffset(offset, header) {
   const got = rangeLength(header);
   if (got === 0) return null;
@@ -197,7 +197,7 @@ export function nextPageOffset(offset, header) {
   return next;
 }
 
-// CSV 페이지를 이어붙인다. 두 번째 페이지부터는 헤더 줄을 버린다.
+// Appends CSV pages together. From the second page on, the header line is dropped.
 export function appendCsvPage(accumulated, page, isFirst) {
   if (isFirst) return page;
   const newline = page.indexOf('\n');
@@ -208,9 +208,9 @@ export function appendCsvPage(accumulated, page, isFirst) {
   return accumulated + sep + body;
 }
 
-// #87: 'analysis_run' 이 anon 화이트리스트에 들어온 뒤로 "최신 run" 판정은
-// screens.js의 latestRuns/okRunsByRecency(analysis_run.finished_at·status)가 한다.
-// 이 함수는 run_id 최댓값이 필요한 범용 자리(테스트 픽스처 등)에만 남는다.
+// #87: since 'analysis_run' entered the anon whitelist, the "latest run" judgement is made by
+// screens.js's latestRuns/okRunsByRecency (analysis_run.finished_at·status).
+// This function remains only for general spots that need the max run_id (test fixtures, etc).
 export function latestRunId(rows) {
   let max = null;
   for (const r of rows || []) {
@@ -220,9 +220,9 @@ export function latestRunId(rows) {
   return max;
 }
 
-// analysis_run 행 중 끝난 것(status='ok', finished_at 있음)만 최근순으로 정렬한다.
-// 손으로 돌린 aggregate 는 note 로 기존 run 을 재사용해 더 작은 run_id 를 쓸 수 있어
-// (analysis/aggregate/pipeline.py의 _run_id) run_id 크기로는 "최신"을 못 고른다(#87).
+// Sorts, most recent first, only the analysis_run rows that finished (status='ok', finished_at present).
+// A manually-run aggregate can reuse an existing run via note and end up with a smaller run_id
+// (analysis/aggregate/pipeline.py's _run_id), so run_id's magnitude cannot pick "latest" (#87).
 export function okRunsByRecency(runs) {
   return (runs || [])
     .filter((r) => r && r.status === 'ok' && r.finished_at)
@@ -230,7 +230,7 @@ export function okRunsByRecency(runs) {
     .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at));
 }
 
-// need_key/product_ref 등 정렬 가능한 표 정렬. 원본 배열은 건드리지 않는다.
+// Sorts a table on a sortable column such as need_key/product_ref. The original array is not touched.
 export function sortRows(rows, key, dir = 'desc') {
   const sign = dir === 'asc' ? 1 : -1;
   return [...(rows || [])].sort((a, b) => {
@@ -243,10 +243,10 @@ export function sortRows(rows, key, dir = 'desc') {
   });
 }
 
-// mentions 를 dimKey(format|attribute|brand) 값별로 합산해 상위 n개를 낸다.
-// 빈 문자열(marginal 아님을 나타내는 다른 축이 채워진 행)은 그 축의 "값 없음"이라
-// 제외한다 — 계약 판정 #7(교차표 marginal 과 PK 충돌)의 이중 계산을 피하려면
-// 정식 marginal 질의가 필요하지만, 1차 화면은 근사 상위 목록으로 충분하다.
+// Sums mentions per dimKey (format|attribute|brand) value and returns the top n.
+// An empty string (a row where a different axis is filled, meaning this one is not marginal) is treated as
+// "no value" for this axis and excluded — avoiding the double-counting in contract check #7 (the cross-tab
+// marginal vs. PK conflict) would need a proper marginal query, but the first-cut screen is well served by an approximate top list.
 export function topByDimension(rows, dimKey, n = 5) {
   const sums = new Map();
   for (const r of rows || []) {
@@ -260,7 +260,7 @@ export function topByDimension(rows, dimKey, n = 5) {
     .slice(0, n);
 }
 
-// 화면이 내려받는 CSV 파일의 이름 — 화면(screen)·scope·시각으로 구분한다.
+// The name of the CSV file the screen downloads — distinguished by screen · scope · time.
 export function buildFileName(screen, scope, ext, now) {
   const p = (x) => String(x).padStart(2, '0');
   const stamp =
@@ -272,28 +272,28 @@ export function buildFileName(screen, scope, ext, now) {
 
 const BOM = '﻿';
 
-// 저장할 CSV 본문에 UTF-8 BOM 을 앞에 둔다 — Excel 이 시스템 코드페이지(CP949)로
-// 읽어 한글을 깨뜨리는 것을 막는 유일한 신호다(BOM 없는 파일은 CP949로 읽힌다).
+// Puts a UTF-8 BOM at the front of the CSV body to save — the only signal that stops Excel from reading it
+// with the system codepage (CP949) and mangling the Korean (a file with no BOM is read as CP949).
 export function fileBody(text) {
   return text.startsWith(BOM) ? text : BOM + text;
 }
 
-// 값 하나를 CSV 필드로 이스케이프한다. 콤마·따옴표·개행이 있으면 따옴표로 감싼다.
+// Escapes one value as a CSV field. Wrapped in quotes when it contains a comma·quote·newline.
 function csvField(v) {
   if (v === null || v === undefined) return '';
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-// 행 배열을 CSV 텍스트로 만든다 — columns 의 순서가 곧 헤더 순서다.
+// Turns a row array into CSV text — the order of columns is the header order.
 export function rowsToCsv(rows, columns) {
   const header = columns.map(csvField).join(',');
   const body = (rows || []).map((r) => columns.map((c) => csvField(r[c])).join(','));
   return [header, ...body].join('\n');
 }
 
-// 자주 만나는 PostgREST 오류에 한 줄 안내를 덧붙인다. 원문은 지우지 않는다 —
-// 안내는 도움일 뿐, 진단의 근거는 서버가 보낸 말이다.
+// Adds a one-line hint to PostgREST errors that come up often. The original text is not erased —
+// the hint is only a help; the basis for diagnosis is what the server said.
 const ERROR_HINTS = {
   '42501': '권한이 없는 테이블입니다 (익명에 노출되지 않았습니다).',
   '42703': '없는 컬럼입니다.',

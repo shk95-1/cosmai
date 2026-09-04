@@ -1,14 +1,14 @@
-// 구조 지도의 판단 부분 — 순수 함수만 (#142). DOM 도 fetch 도 없어 portal/test 가 그대로 잰다.
+// The judgement half of the structure map — pure functions only (#142). No DOM, no fetch, so portal/test can measure it directly.
 //
-// 그림은 선언에서 나온다. needs.pipeline_edge 가 노드와 엣지를 진다(#141) — 좌표를 손으로 잡지
-// 않는 이유는 엣지를 하나 더했을 때 그림이 저절로 따라와야 하기 때문이다.
+// The picture comes from a declaration. needs.pipeline_edge carries the nodes and edges (#141) — coordinates
+// are not set by hand because adding one more edge must make the picture follow along on its own.
 //
-// 이 그래프는 DAG 가 아니다. analyze:all 이 need_mention 을 *쓰고 또 읽는다* — 추출이 쓰고
-// 집계가 같은 run 안에서 다시 읽는다. 사실이므로 지우지 않는다: 읽기 엣지를 빼면 계보가 한쪽으로만
-// 흘러 지표에서 수집분으로 거꾸로 못 탄다(#144). 대신 레이아웃이 그것을 감당한다 — 계층 계산에서
-// 되먹임 엣지를 빼고, 그림에서는 다른 모양으로 되돌아오게 그린다.
+// This graph is not a DAG. analyze:all both *writes and reads* need_mention — extraction writes it and
+// aggregation reads it again within the same run. Since that is a fact, it is not erased: dropping the read
+// edge would make lineage flow only one way, unable to trace back from metrics to the collection (#144).
+// The layout absorbs it instead — the feedback edge is excluded from the layer calculation and drawn coming back in a different shape.
 
-/** 노드 키 전부. 엣지에서만 뽑는다 — 노드 표가 없다는 것이 #141 의 설계다. */
+/** All node keys. Extracted from edges only — having no node table is #141's design. */
 export function nodesOf(edges) {
   const kinds = new Map();
   for (const e of edges || []) {
@@ -18,10 +18,10 @@ export function nodesOf(edges) {
   return [...kinds].map(([key, kind]) => ({ key, kind })).sort((a, b) => (a.key < b.key ? -1 : 1));
 }
 
-/** DFS 로 되먹임(back) 엣지를 고른다. 계층 계산에서 뺄 것들이다.
+/** Picks the feedback (back) edges via DFS. These are what the layer calculation excludes.
  *
- * 방문 순서를 키 정렬로 고정한다 — 순서가 응답에 좌우되면 같은 데이터가 매번 다른 엣지를
- * 되먹임으로 고르고, 그림이 새로고침마다 바뀐다.
+ * The visit order is fixed by key sort — if the order depended on the response, the same data would pick a
+ * different edge as feedback each time, and the picture would change on every refresh.
  */
 export function feedbackEdges(edges) {
   const out = new Map();
@@ -34,10 +34,10 @@ export function feedbackEdges(edges) {
   const nodes = nodesOf(edges);
   const back = [];
 
-  // 먼저 2-사이클을 읽기 쪽으로 끊는다. 단계가 같은 표를 쓰고 또 읽으면(analyze:all 과
-  // need_mention) 어느 쪽을 끊든 사이클은 풀리지만 뜻이 다르다: 쓰기를 끊으면 그 단계가 제
-  // 산출보다 뒤 열에 서서 "지표 다음에 도는 것" 처럼 보인다(실측에서 analyze:polarity_missing 이
-  // 그렇게 섰다). 흐름의 등뼈는 쓰기이므로 읽기를 되먹임으로 돌린다.
+  // First, break any 2-cycle on the read side. When a stage both writes and reads the same table (analyze:all and
+  // need_mention), the cycle resolves either way it is cut, but the meaning differs: cutting the write puts that stage
+  // behind its own output column, reading as "something that runs after the metrics" (in practice analyze:polarity_missing
+  // landed there that way). Since the write is the backbone of the flow, the read is turned into the feedback edge instead.
   const pairs = new Set((edges || []).map((e) => `${e.from_key}|${e.to_key}`));
   const cut = new Set();
   for (const e of edges || []) {
@@ -57,19 +57,19 @@ export function feedbackEdges(edges) {
     for (const e of out.get(key) || []) {
       if (cut.has(`${e.from_key}|${e.to_key}`)) continue;
       const c = color.get(e.to_key);
-      if (c === GREY) back.push(e); // 회색으로 돌아왔다 = 남은 사이클을 닫는 엣지
+      if (c === GREY) back.push(e); // coming back to grey = an edge closing a remaining cycle
       else if (c === WHITE) visit(e.to_key);
     }
     color.set(key, BLACK);
   };
-  // 뿌리(아무것도 안 먹는 노드)부터 돌고, 거기서 닿지 않는 덩어리는 키 순서로 잇는다.
+  // Starts from the roots (nodes nothing feeds into), and any cluster it does not reach from there is joined in key order.
   for (const n of [...roots, ...nodes]) if (color.get(n.key) === WHITE) visit(n.key);
   return back;
 }
 
-/** 노드마다 계층(열 번호). 되먹임 엣지를 뺀 그래프에서 가장 긴 경로의 길이다.
+/** Each node's layer (column number). The length of the longest path in the graph with feedback edges removed.
  *
- * 가장 긴 경로를 쓰는 이유: 짧은 쪽으로 배정하면 엣지가 여러 열을 건너뛰어 선이 그림을 가로지른다.
+ * Why the longest path is used: assigning the shorter one would have edges skip several columns, cutting lines across the picture.
  */
 export function layers(edges) {
   const back = new Set(feedbackEdges(edges).map((e) => `${e.from_key} ${e.to_key}`));
@@ -80,7 +80,7 @@ export function layers(edges) {
   const depth = new Map();
   const resolve = (key, seen = new Set()) => {
     if (depth.has(key)) return depth.get(key);
-    if (seen.has(key)) return 0; // 방어: 되먹임을 뺐으므로 여기 오지 않는다
+    if (seen.has(key)) return 0; // guard: feedback edges were removed, so this should never be reached
     seen.add(key);
     const parents = incoming.get(key) || [];
     const value = parents.length === 0 ? 0 : Math.max(...parents.map((p) => resolve(p, seen) + 1));
@@ -89,10 +89,10 @@ export function layers(edges) {
   };
   for (const n of nodesOf(edges)) resolve(n.key);
 
-  // 들어오는 엣지가 없는 노드는 제 산출 바로 앞으로 당긴다. 2-사이클의 읽기를 끊고 나면
-  // analyze:polarity_missing 처럼 "쓰기만 남은" 단계가 뿌리가 되어 수집기 옆(0열)에 서는데,
-  // 그것은 뜻이 아니다 -- 그 단계는 제가 채우는 표 바로 앞에 있어야 읽힌다. 오른쪽으로만
-  // 옮기고 자식보다 앞을 지키므로 다른 노드의 계층을 흔들지 않는다.
+  // A node with no incoming edge is pulled to right before its own output. Once a 2-cycle's read edge is cut,
+  // a "write-only-left" stage like analyze:polarity_missing becomes a root and lands next to the collector (column 0),
+  // which is not the meaning -- that stage must read as standing right before the table it fills. It is only moved
+  // rightward and kept ahead of its children, so it never disturbs another node's layer.
   const children = new Map(nodesOf(edges).map((n) => [n.key, []]));
   for (const e of forward) children.get(e.from_key).push(e.to_key);
   for (const n of nodesOf(edges)) {
@@ -105,7 +105,7 @@ export function layers(edges) {
   return depth;
 }
 
-/** 열마다 노드를 담아 돌려준다. 열 안 순서는 키 정렬 — 안정성이 먼저다. */
+/** Returns nodes bucketed by column. Order within a column is key sort — stability comes first. */
 export function columns(edges) {
   const depth = layers(edges);
   const width = Math.max(0, ...depth.values()) + 1;
@@ -116,7 +116,7 @@ export function columns(edges) {
 
 export const NODE_W = 190, NODE_H = 34, COL_GAP = 90, ROW_GAP = 14, PAD = 20;
 
-/** 노드 키에서 {x, y, w, h}. 좌표를 순수 함수가 내므로 테스트가 겹침을 물을 수 있다. */
+/** {x, y, w, h} from a node key. Since a pure function produces the coordinates, a test can ask about overlap. */
 export function positions(edges) {
   const out = new Map();
   columns(edges).forEach((column, index) => {
@@ -132,7 +132,7 @@ export function positions(edges) {
   return out;
 }
 
-/** 판의 크기. 가장 긴 열이 높이를 정한다. */
+/** The canvas size. The longest column decides the height. */
 export function canvasSize(edges) {
   const cols = columns(edges);
   const rows = Math.max(1, ...cols.map((c) => c.length));
@@ -142,7 +142,7 @@ export function canvasSize(edges) {
   };
 }
 
-/** 사람이 읽는 라벨. 저장소는 스키마를 남긴다 — 같은 이름이 두 스키마에 있을 수 있다. */
+/** The human-readable label. A store keeps its schema — the same name can exist in two schemas. */
 export function labelOf(node) {
   return node.kind === 'stage' ? node.key.replace(':', ' / ') : node.key;
 }
