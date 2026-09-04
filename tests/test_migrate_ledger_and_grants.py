@@ -27,6 +27,7 @@ WHITELIST = [
 NOT_WHITELISTED = [
     "need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member",
     "panel_roster", "panel_channel", "metrics_topic_quarter",
+    "mfds_snapshot", "mfds_registration",
 ]  # fmt: skip
 
 

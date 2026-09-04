@@ -1,0 +1,11 @@
+company,expected,why
+(주)정산생명공학,정산생명공학,the bracketed corporate form is the commonest spelling in the ledger
+주식회사 코스알엑스,코스알엑스,the spelled-out corporate form plus the space it leaves behind
+㈜LG생활건강,lg생활건강,NFKC folds the single-character form into the bracketed one before it is removed
+CJ올리브영 (주),cj올리브영,latin letters survive lower-cased
+"ABC Co., Ltd.",abc,the english corporate form and its punctuation
+클리오,클리오,a company with no corporate form is left alone
+Incospharm Corp,incospharm,the trailing boundary: unbounded `inc` would eat the head and leave `ospharm`
+INCELLDERM,incellderm,a company whose name merely starts with the letters of a corporate form
+Corporate Beauty,corporatebeauty,`corp` unbounded would leave `oratebeauty`
+주식회사올글로우코스메틱(Or Glow Cosmetics Corp.),올글로우코스메틱orglowcosmetics,a Korean and a latin corporate form in one name
