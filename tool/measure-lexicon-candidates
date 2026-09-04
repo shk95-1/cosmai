@@ -2,31 +2,37 @@
 """ydc `lexicon.json` 의 별칭 5종과 사전 후보 7종(+ #37 이 기각한 3종)을 코퍼스 위에서 다시 재고
 `contracts/formats.md` §주제 사전 v3 의 판정 원장과 맞댄다 (포크 #56).
 
-원장에 df 를 적어 두고 재는 길을 남기지 않으면 코퍼스가 자라는 순간 그 수는 조용히 거짓이 된다
-(#6 의 `tool/measure-evidence-fixture` · #7 의 `tool/measure-crosscheck-keys` 와 같은 자리).
+Writing df into the ledger without leaving the way to measure it makes that number quietly false the
+moment the corpus grows (the same place as `tool/measure-evidence-fixture` in #6 and
+`tool/measure-crosscheck-keys` in #7).
 
-**세는 규칙은 사전의 매칭 규칙 그대로다** -- `ko` 는 부분문자열(대소문자 무시), `latin` 은 경계 매칭이다
-(`analysis/retrieval/topics.py`). 두 규칙을 섞으면 수가 갈린다: `sunscreen` 은 부분문자열로 81 이고 경계로
-76 이며, 그 차이 다섯은 복수형 `sunscreens` 다. 사전은 경계로 매칭하므로 원장의 수는 76 이다.
+**The counting rule is exactly the dictionary's matching rule** -- `ko` is a substring (case
+insensitive) and `latin` is a boundary match (`analysis/retrieval/topics.py`). Mixing the two rules
+splits the number: `sunscreen` is 81 as a substring and 76 on boundaries, and those five of difference
+are the plural `sunscreens`. The dictionary matches on boundaries, so the ledger's number is 76.
 
-세 수를 낸다. **df 하나로는 등재를 정할 수 없기 때문이다** -- 이미 있는 별칭이 그 문서를 전부 보고
+Three numbers are given. **Because df alone cannot decide a listing** -- if an alias that is already
+there sees every one of those documents, the new row observes nothing
 있으면 새 행은 아무것도 관측하지 않는다(`톤업크림` 628 편 전부를 `톤업` 이 이미 본다).
 
-  df       그 표기가 나오는 문서 수
-  new      그 표기가 나오되 **그 행이 없으면 그 자리 주제가 못 보는** 문서 수 (= 행이 새로 관측하는 것)
-  unseen   그 표기가 나오되 **그 행들이 없으면 어느 주제에도 안 걸리는** 문서 수 (= 사전의 구멍)
+  df       the number of documents the surface appears in
+  new      documents where the surface appears but **the topic at that place cannot see it without this
+           row** (= what the row newly observes)
+  unseen   documents where the surface appears but **no topic catches it without these rows** (= a hole
+           in the dictionary)
 
-뒤 두 수의 기준 사전은 **원장의 표기를 전부 뺀 사전**이다. 적재 원본을 그대로 쓰면 등재한 뒤 `new` 가
-전부 0 이 되어 "이 행이 무엇을 관측하는가"를 다시 물을 수 없다.
+The baseline dictionary for the last two numbers is **the dictionary with every ledger surface taken
+out**. Using the load source as it is makes `new` all 0 after a listing, so "what does this row
+observe" can no longer be asked again.
 
-무엇이 빨간가(종료 코드 1 = 이 산출을 믿지 마라).
+What is red (exit code 1 = do not trust this output).
 
-  floor    등재한 표기가 `terms.MIN_DOCS` 아래로 내려갔다. 등재 근거가 무너진 것이다.
-  idle     등재한 표기의 `new` 가 0 인데 원장은 0 이 아니라고 적었다(또는 그 반대).
-  revived  미등재한 표기가 바닥을 넘고 `new` 도 생겼다. 다시 판정할 때다.
+  floor    a listed surface has fallen below `terms.MIN_DOCS`. The ground for listing it has collapsed.
+  idle     a listed surface has `new` 0 while the ledger wrote that it is not 0 (or the other way round).
+  revived  an unlisted surface passed the floor and gained `new` as well. Time to judge it again.
 
-    tool/measure-lexicon-candidates                        # 사람이 읽는 표
-    tool/measure-lexicon-candidates --json                 # 테스트가 읽는 형식
+    tool/measure-lexicon-candidates                        # the human-readable table
+    tool/measure-lexicon-candidates --json                 # the form the tests read
     tool/measure-lexicon-candidates --corpus <document.csv>
 """
 
@@ -48,16 +54,16 @@ from analysis.retrieval.terms import MIN_DOCS  # noqa: E402
 
 csv.field_size_limit(10**8)
 
-# 읽기 전용 인계본(STATE.md §3). 레포에 174M 를 복사하지 않으므로 경로를 인자로 받는다.
+# The read-only handover copy (STATE.md §3). 174M is not copied into the repo, so the path is an argument.
 CORPUS = Path("~/github_prj/Main/archive/yt-handoff/document.csv").expanduser()
 
 LISTED, HELD, REFUSED = "등재", "보류", "미등재"
-BRAND = "brand"  # 주제 사전이 아니라 needs.entity_lexicon 자리라는 표시
+BRAND = "brand"  # marks a place in needs.entity_lexicon rather than in the topic dictionary
 
 
 class Row:
-    """원장 한 줄. `df`·`new` 는 2026-08-26 판본(261,317 문서) 위에서 잰 값이고, 이 도구가 그것을
-    다시 재는 길이다."""
+    """One ledger row. `df`·`new` are values measured on the 2026-08-26 revision (261,317 documents), and
+    this tool is the way to measure them again."""
 
     def __init__(self, term: str, kind: str, place: str, verdict: str, df: int, new: int, why: str):
         self.term, self.kind, self.place = term, kind, place
@@ -65,7 +71,7 @@ class Row:
 
 
 LEDGER = (
-    # --- ydc lexicon.json 의 별칭 5종 (#37 1c 가 넘긴 것) ---
+    # --- the 5 aliases of ydc lexicon.json (handed over by #37 1c) ---
     Row("썬쿠션", "ko", "선크림", LISTED, 116, 83, "선쿠션의 다른 표기"),
     Row("썬스틱", "ko", "선크림", LISTED, 76, 40, "선스틱의 다른 표기"),
     Row("sunscreen", "latin", "선크림", LISTED, 76, 22, "선크림의 영문 표기. 부분문자열로 세면 81"),
@@ -79,7 +85,7 @@ LEDGER = (
         f"df 3 < MIN_DOCS {MIN_DOCS} 이고 그 3편은 이미 선크림이 본다",
     ),
     Row("올영", "ko", BRAND, REFUSED, 5583, 0, "올리브영이 tier='stop' 이라 행을 더해도 소비자가 없다"),
-    # --- #37 1b 가 남긴 사전 후보 7종 ---
+    # --- the 7 dictionary candidates #37 1b left ---
     Row(
         "속건조",
         "ko",
@@ -119,7 +125,7 @@ LEDGER = (
     ),
     Row("선에센스", "ko", "선크림", LISTED, 101, 49, "선세럼·선젤 옆의 제형 표기"),
     Row("선스프레이", "ko", "선크림", LISTED, 58, 30, "선세럼·선젤 옆의 제형 표기"),
-    # --- #37 이 이미 기각한 3종. 원장에 남는 이유는 되살아나면 보이라고 ---
+    # --- the 3 #37 already refused. They stay in the ledger so that a revival is visible ---
     Row(
         "모공막힘",
         "ko",
@@ -135,8 +141,9 @@ LEDGER = (
 
 
 def baseline(path: Path | None = None) -> topics.Topics:
-    """원장의 표기를 하나도 안 가진 사전. DB 를 안 쓰고 적재 원본을 읽는다 -- `tests/retrieval/conftest.py`
-    가 DB 없는 유닛에 쓰는 바로 그 길이라 사전이 두 벌이 되지 않는다."""
+    """The dictionary holding none of the ledger's surfaces. It uses no DB and reads the load source --
+    exactly the path `tests/retrieval/conftest.py` uses for the units with no DB, so the dictionary does
+    not become two copies."""
     from cosmai.cli import _csv_rows
     from db.lexicon import ASPECT_COLUMNS
 
@@ -151,7 +158,8 @@ def baseline(path: Path | None = None) -> topics.Topics:
 
 
 def _texts(corpus: Path):
-    """문서 본문만. 코퍼스를 여는 자리를 하나로 둔다 -- 둘이면 인코딩이나 열 이름이 갈릴 수 있다."""
+    """The document bodies only. There is one place that opens the corpus -- with two, the encoding or
+    the column name could diverge."""
     with corpus.open(encoding="utf-8-sig", newline="") as handle:
         for record in csv.DictReader(handle):
             yield record["text"] or ""
@@ -167,8 +175,8 @@ def matcher(row: Row):
 
 
 def measure(corpus: Path, known: topics.Topics) -> dict:
-    """한 번 훑어 세 수를 다 낸다 -- `known` 은 원장의 표기를 뺀 기준 사전이다. 26만 문서를 표기마다
-    다시 도는 것은 같은 파일을 열다섯 번 읽는 것이다."""
+    """All three numbers in one scan -- `known` is the baseline dictionary with the ledger surfaces taken
+    out. Walking 260k documents again per surface would be reading the same file fifteen times."""
     tests = [(row, matcher(row)) for row in LEDGER]
     df = {row.term: 0 for row in LEDGER}
     new = dict(df)
@@ -186,16 +194,18 @@ def measure(corpus: Path, known: topics.Topics) -> dict:
                 hits = set(topics.match_topics(text, include_excluded=True, dictionary=known))
             if not hits:
                 unseen[row.term] += 1
-            # 브랜드 자리의 표기는 주제 사전이 볼 일이 아니다 -- new 를 세면 축이 다른 수가 된다.
+            # A surface in the brand place is not the topic dictionary's business -- counting new there
+            # gives a number on another axis.
             if row.place != BRAND and row.place not in hits:
                 new[row.term] += 1
     return {"documents": documents, "df": df, "new": new, "unseen": unseen}
 
 
 def topic_documents(corpus: Path, before: topics.Topics, after: topics.Topics) -> dict:
-    """주제마다 (기준 사전, 그 사전 + 표기 하나) 의 등장 문서 수. 계약이 인용하는 12,197 -> 12,418 과
-    959 -> 2,021 이 나오는 자리다 -- 특히 뒤엣것은 등재 기준 3 이 딛고 선 유일한 수인데, 재는 길이
-    없으면 코퍼스가 자라는 순간 그 기준이 근거 없는 문턱이 된다."""
+    """Per topic, the document counts for (baseline dictionary, that dictionary + one surface). This is
+    where the 12,197 -> 12,418 and 959 -> 2,021 the contract quotes come from -- the latter especially is
+    the only number listing criterion 3 stands on, and without a way to measure it that criterion becomes
+    a groundless threshold the moment the corpus grows."""
     counts: dict[str, list[int]] = {e["topic"]: [0, 0] for e in after.entries}
     for text in _texts(corpus):
         for topic in topics.match_topics(text, include_excluded=True, dictionary=before):
@@ -206,7 +216,7 @@ def topic_documents(corpus: Path, before: topics.Topics, after: topics.Topics) -
 
 
 def with_terms(known: topics.Topics, rows: Sequence[Row]) -> topics.Topics:
-    """기준 사전에 원장의 표기 몇을 도로 얹는다."""
+    """Puts a few of the ledger's surfaces back onto the baseline dictionary."""
     wider = [
         (
             entry["topic"],
@@ -226,11 +236,13 @@ def with_terms(known: topics.Topics, rows: Sequence[Row]) -> topics.Topics:
 
 
 def misses(measured: dict) -> list[str]:
-    """원장이 코퍼스와 갈린 자리. 비어 있으면 원장을 그대로 믿어도 된다 (종료 코드 1 = 이 산출을 믿지 마라).
+    """Where the ledger diverged from the corpus. Empty means the ledger can be believed as it is (exit
+    code 1 = do not trust this output).
 
-    `count` 가 먼저 온다 -- 이 도구의 존재 이유가 원장의 수를 **다시 재 맞대는 것**이라, 대조 없이 사람이
-    읽는 표만 내면 원장은 아무 수나 적어도 초록이다(레포의 다른 measure-* 도 전부 정확 일치다). 그래서
-    **어느 행이든 수가 움직이면 걸린다** -- 판정이 무엇이든, 근거가 수든 아니든.
+    `count` comes first -- this tool exists to **measure the ledger's numbers again and compare them**, so
+    printing only a human-readable table without that comparison would leave the ledger green whatever
+    numbers it wrote (every other measure-* in the repo is an exact match too). So **any row whose numbers
+    moved is caught** -- whatever the verdict, whether or not its ground is a number.
 
     나머지 셋은 대조를 통과한 수 위에서 **그 행의 근거가 아직 서는지**를 묻는다. 근거가 수인 행에만
     걸린다: `보류`(모공막힘·화잘먹·비비크림)의 근거는 축과 표본이고 `올영` 의 근거는 tier='stop' 이라
@@ -241,17 +253,19 @@ def misses(measured: dict) -> list[str]:
     for row in LEDGER:
         df, new = measured["df"][row.term], measured["new"][row.term]
         if (df, new) != (row.df, row.new):
-            out.append(f"count   {row.term}: df {df}·new {new}, 원장은 {row.df}·{row.new}")
+            out.append(f"count   {row.term}: df {df}·new {new}, the ledger says {row.df}·{row.new}")
         if row.verdict == LISTED and df < MIN_DOCS:
-            out.append(f"floor   {row.term}: df {df} < {MIN_DOCS} — 등재 기준 1 이 무너졌다")
+            out.append(f"floor   {row.term}: df {df} < {MIN_DOCS} — listing criterion 1 has collapsed")
         if row.verdict == LISTED and new == 0 and row.new != 0:
-            out.append(f"idle    {row.term}: new 0 — 이 행이 매칭 축에서 관측하던 것이 없어졌다")
+            out.append(f"idle    {row.term}: new 0 — what this row observed on the matching axis is gone")
         # 미등재 근거가 수인 두 모양. 옛 판은 `row.new == 0` 인 행에만 걸어서 df 로 기각한 행
         # (케미컬 3·3 · olive영 0·0)이 구조적으로 안 걸렸다 -- 근거마다 그 근거를 문다.
         if row.verdict == REFUSED and row.df < MIN_DOCS <= df:
-            out.append(f"revived {row.term}: df {df} ≥ {MIN_DOCS} — 바닥으로 기각한 근거가 사라졌다")
+            out.append(
+                f"revived {row.term}: df {df} ≥ {MIN_DOCS} — the ground for refusing it on the floor is gone"
+            )
         if row.verdict == REFUSED and row.new == 0 < new and row.place != BRAND:
-            out.append(f"revived {row.term}: new {new} — 새로 보는 것이 없다던 근거가 사라졌다")
+            out.append(f"revived {row.term}: new {new} — the ground that it sees nothing new is gone")
     return out
 
 
@@ -260,11 +274,12 @@ def main(argv: list[str] | None = None) -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--corpus", type=Path, default=CORPUS, help="document.csv (default: %(default)s)")
-    parser.add_argument("--json", action="store_true", help="기계가 읽는 형식")
+    parser.add_argument("--json", action="store_true", help="The machine-readable form")
     parser.add_argument(
         "--topics",
         action="store_true",
-        help="표기가 아니라 주제 단위로 센다 — 계약이 인용하는 12,197->12,418 과 959->2,021 이 이 출력이다",
+        help="Counts per topic rather than per surface — the 12,197->12,418 and 959->2,021 the contract"
+        " quotes are this output",
     )
     args = parser.parse_args(argv)
 
@@ -297,8 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps({**measured, "misses": failures, "floor": MIN_DOCS}, ensure_ascii=False, indent=2))
         return 1 if failures else 0
-    print(f"문서 {measured['documents']:,} · 바닥 MIN_DOCS {MIN_DOCS}")
-    print(f"{'표기':12s} {'자리':18s} {'판정':6s} {'df':>7s} {'new':>6s} {'unseen':>7s}  근거")
+    print(f"documents {measured['documents']:,} · floor MIN_DOCS {MIN_DOCS}")
+    print(f"{'term':12s} {'place':18s} {'verdict':6s} {'df':>7s} {'new':>6s} {'unseen':>7s}  why")
     for row in LEDGER:
         print(
             f"{row.term:12s} {row.place:18s} {row.verdict:6s} "

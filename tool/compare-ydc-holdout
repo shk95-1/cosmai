@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
-"""홀드아웃을 다시 돌린다: ydc `holdout_commerce.py` 대 `cosmai trend holdout` (포크 #51).
+"""Re-runs the holdout: ydc's `holdout_commerce.py` against `cosmai trend holdout` (fork #51).
 
-승격 원본은 `v0.3.0` 의 `holdout_commerce.py` 다. 이 스크립트는 태그에서 그 파일을 꺼내 **손대지 않고
-그대로** 돌린 뒤(네트워크를 타지 않는 `--demo` 만), 상수와 규칙을 맞댄다 -- 읽는 것은 언제나 `--ydc` 가
-가리킨 ydc 체크아웃이다 (핀 사본 `analysis/slices/ydc/` 는 #9 가 지웠다). `tool/compare-ydc-crosscheck`
-와 같은 절차, 같은 이유다.
+The promoted source is `holdout_commerce.py` at `v0.3.0`. This script takes that file out of the tag,
+runs it **untouched** (only `--demo`, which takes no network) and then compares the constants and the
+rules -- what is read is always the ydc checkout `--ydc` points at (the pinned copy
+`analysis/slices/ydc/` was deleted by #9). Same procedure as `tool/compare-ydc-crosscheck`, for the
+same reason.
 
-맞대는 것 둘.
+Two things are compared.
 
-  상수   ydc 가 **함수 안에 리터럴로** 들고 있는 셋(`1.5` · `ra[:2]` · 옮기지 않은 `ra[-1]`)을 그 파일의
-         소스에서 직접 읽어 우리 상수와 맞댄다. 함수를 부를 수 없어(리터럴이다) 소스를 읽는 것이고,
-         안 그러면 "차이 0" 이 이 셋을 안 덮는데 그렇게 읽힌다.
-         **이 세 줄의 한계**: 양쪽을 bool 로 만들어 맞대므로 재는 것은 "같은 값인가" 가 아니라 "원본에
-         그 텍스트가 있고 우리 상수가 그 수인가" 다. ydc 가 `1.5` 를 다른 문법으로 적으면(예: `1.50`)
-         왼쪽이 거짓이 되어 DIFF 로 서지만, 그때 우리가 읽는 것은 **원본이 바뀌었다**이지 값이 갈렸다가
-         아니다. 리터럴을 상수로 올리지 않은 원본에서 이보다 더 재려면 소스를 파싱해야 한다.
-  규칙   ydc `rates` 에 같은 텍스트를 먹여 (건수, 비율)을 우리 셈과 맞댄다. **맞대는 것은 매처가 아니라
-         세는 법이다** -- 한 건에 여러 표현이 있어도 한 번인가, 분모가 그 팔의 리뷰 수인가. 매처 쪽
-         1:1(`count_terms`)은 #7 이 `tool/compare-ydc-crosscheck` 에서 이미 했고, 그 결과를 여기서
-         입력을 만드는 데 쓴다.
+  constants  the three ydc holds **as literals inside a function** (`1.5` · `ra[:2]` · the unported
+             `ra[-1]`) are read straight from that file's source and compared with our constants. The
+             source is read because the function cannot be called (they are literals), and without
+             that, "0 differences" reads as covering these three while it does not.
+             **The limit of these three lines**: both sides are turned into a bool before comparing, so
+             what is measured is not "is it the same value" but "is that text in the source and is our
+             constant that number". If ydc wrote `1.5` in another syntax (say `1.50`) the left side
+             becomes false and stands as a DIFF, but what we read then is **the source changed**, not
+             that the values diverged. Measuring more than this on a source that never lifted its
+             literals into constants would take parsing the source.
+  rules      the same texts are fed to ydc's `rates` and the (count, rate) compared with our count.
+             **What is compared is the way of counting, not the matcher** -- is one item counted once
+             even when it carries several expressions, is the denominator that arm's review count. The
+             1:1 on the matcher side (`count_terms`) was already done by #7 in
+             `tool/compare-ydc-crosscheck`, and its result is used here to build the input.
 
 **맞대지 않는 것 넷**은 조용히 빠지지 않고 아래 §선언 이 찍는다. 그 자리들은 승격이 답을 바꾼 자리이고
 (그 사정은 `contracts/interfaces.md` §홀드아웃), 조용히 빠지면 "차이 0" 이 그것들을 덮는 것처럼 읽힌다.
 
-돌리는 법 (인자는 그 자리에서 준다 -- 레포에 남의 머신 배치를 적지 않는다):
+How to run it (the arguments are given on the spot -- another machine's layout is not written into the repo):
 
     tool/compare-ydc-holdout --ydc ~/github_prj/Main/import/youtube-data-collector
 """
@@ -46,8 +51,8 @@ from analysis import crosscheck, holdout  # noqa: E402
 
 DEFAULT_TAG = "v0.3.0"
 AT = datetime(2026, 8, 20, tzinfo=UTC)
-# ydc 가 `demo()` 에 적어 둔 문장들 + 플랫폼이 갈리는 한 줄. 우리 원천으로는 그 입력을 재현할 수 없으므로
-# 출처가 자기 파일에 적어 둔 것을 그대로 든다.
+# The sentences ydc wrote into `demo()` + one line where the platform diverges. Our sources cannot
+# reproduce that input, so what the origin wrote into its own file is taken as it is.
 TEXTS = [
     "백탁이 심해요",
     "끈적이지 않아요",
@@ -56,16 +61,16 @@ TEXTS = [
     "눈시림이 심하고 따가워요",
 ]
 DECLARED = (
-    ("CUTOFF", "`captured_at < 2026-08-24` 라는 손으로 고른 날짜", "청크 색인의 커머스 `doc_id` 명부"),
-    ("BASE", "`100.106.220.24:3000` (그 머신의 PostgREST)", "공유DB 직접 (`--url`)"),
-    ("PLATFORMS", "세 이름을 상수로 박음", "두 팔에서 읽어 만든다 -- 소스는 는다"),
-    ("platform_of", "청크 본문 머리의 `[oliveyoung …]` 를 읽음", "`review.source` 열"),
+    ("CUTOFF", "a hand-picked date, `captured_at < 2026-08-24`", "the commerce `doc_id` roster of the index"),
+    ("BASE", "`100.106.220.24:3000` (that machine's PostgREST)", "the shared DB directly (`--url`)"),
+    ("PLATFORMS", "three names baked in as a constant", "built by reading the two arms -- sources grow"),
+    ("platform_of", "reads the `[oliveyoung …]` at the head of the chunk body", "the `review.source` column"),
 )
 
 
 def _load(path: Path, name: str, extra_path: Path) -> Any:
-    """ydc 파일을 그 자리에서 임포트한다. 배포되는 코드가 아니라 대조 도구이고, 대조하려면 양쪽이 한
-    프로세스에 있어야 한다 (`tool/compare-ydc-crosscheck` 와 같은 규약)."""
+    """Imports a ydc file on the spot. It is a comparison tool rather than deployed code, and comparing
+    needs both sides in one process (the same convention as `tool/compare-ydc-crosscheck`)."""
     sys.path.insert(0, str(extra_path))
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
@@ -83,19 +88,27 @@ def _same(name: str, theirs: object, ours: object) -> int:
 
 
 def _constants(source: Any) -> int:
-    print("상수  ydc 는 `report` 안에 리터럴로 들고 있다 -- 함수를 못 부르므로 소스를 읽어 맞댄다")
+    print(
+        "constants  ydc holds them as literals inside `report` -- the function cannot be called, so the"
+        " source is read"
+    )
     body = inspect.getsource(source.report)
-    differ = _same("MATERIAL_PP (report 리터럴)", "abs(d) <= 1.5" in body, holdout.MATERIAL_PP == 1.5)
-    differ += _same("RANK_TOP (report 리터럴)", "ra[:2] == rb[:2]" in body, holdout.RANK_TOP == 2)
+    differ = _same("MATERIAL_PP (report literal)", "abs(d) <= 1.5" in body, holdout.MATERIAL_PP == 1.5)
+    differ += _same("RANK_TOP (report literal)", "ra[:2] == rb[:2]" in body, holdout.RANK_TOP == 2)
     # 옮기지 **않은** 규칙이라, 원본에 그것이 아직 있는지를 확인한다. 사라지면 우리 계약의 근거 문장이
     # 원본을 잘못 인용하고 있다는 뜻이다 (계약 §홀드아웃 상수).
-    differ += _same("원본에 최하위 일치 규칙이 있다(우리는 안 옮겼다)", "ra[-1] == rb[-1]" in body, True)
+    differ += _same(
+        "the source has the lowest-rank match rule (we did not port it)", "ra[-1] == rb[-1]" in body, True
+    )
     return differ
 
 
 def _rules(source: Any) -> int:
-    """같은 텍스트에 (건수, 비율). **맞대는 것은 매처가 아니라 세는 법이다.**"""
-    print("규칙  같은 텍스트에 (건수, 비율) -- 한 건에 여러 표현이 있어도 한 번인가 · 분모가 리뷰 수인가")
+    """(count, rate) on the same texts. **What is compared is the way of counting, not the matcher.**"""
+    print(
+        "rules  (count, rate) on the same texts -- once per item however many expressions ·"
+        " is the denominator the review count"
+    )
     theirs = source.rates(TEXTS)
     labels = tuple(source.TERMS)
     reviews = [
@@ -103,7 +116,7 @@ def _rules(source: Any) -> int:
             platform="oliveyoung",
             product_key="p1",
             captured_at=AT,
-            # 매처는 #7 이 이미 ydc `count_terms` 와 1:1 로 맞댄 그 함수다.
+            # The matcher is the function #7 already compared 1:1 with ydc's `count_terms`.
             topics=tuple(
                 label for label, terms in source.TERMS.items() if crosscheck.mentions_term(text, terms)
             ),
@@ -119,10 +132,10 @@ def _rules(source: Any) -> int:
             (theirs[label][0], round(theirs[label][1], 6)),
             (documents, round(holdout.rate(documents, counted.reviews), 6)),
         )
-    # ydc 는 순위를 비율로 매긴다(`sorted(TERMS, key=lambda k: -a[k][1])`). 우리 `topics` 도 같은 축이다.
+    # ydc ranks by rate (`sorted(TERMS, key=lambda k: -a[k][1])`). Our `topics` is on the same axis.
     theirs_order = sorted(labels, key=lambda label: -theirs[label][1])
     ours_order = sorted(labels, key=lambda label: -holdout.rate(counted.documents[label], counted.reviews))
-    differ += _same("순위 축(비율 내림차순)", theirs_order, ours_order)
+    differ += _same("rank axis (rate descending)", theirs_order, ours_order)
     return differ
 
 
@@ -152,7 +165,8 @@ def main() -> int:
                 capture_output=True,
             ).stdout
         )
-        # `--demo` 만 돌린다. 인자 없이 돌리면 그 머신의 PostgREST 로 나가는데, 우리 원천이 아니다.
+        # Only `--demo` is run. Without arguments it goes out to that machine's PostgREST, which is not
+        # our source.
         done = subprocess.run(  # noqa: S603
             [sys.executable, str(script), "--demo"], cwd=ydc, check=False, capture_output=True, text=True
         )

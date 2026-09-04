@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""벡터 저장소가 어느 판본인지 한 줄로 찍는다 (포크 #49).
+"""Prints in one line which version the vector store is (fork #49).
 
 `cosmai retrieval eval` 이 vector·hybrid 행마다 싣는 것과 **같은 문자열**이다 -- 계약
 (`contracts/interfaces.md` §검색 실측)이 적어 둔 판본을 다시 확인하는 길이고, 그래서 매니페스트와
 id 목록만 읽는다: 1.2GB 행렬을 열지 않으므로 GPU 도 몇 분도 필요 없다.
 
-개수는 매니페스트가 주장하는 `count` 가 아니라 **id 파일의 행 수**다. 둘이 갈리면 판본을 찍지 않고
-막힌다 -- 저장소가 스스로에 대해 하는 말과 실제가 다른 것은 `vectors.load` 가 거부하는 자리와 같다.
+The count is **the number of rows in the id file**, not the `count` the manifest claims. When the two
+diverge it prints no version and blocks -- a store whose word about itself differs from the fact is the
+same place `vectors.load` refuses.
 
     tool/show-vector-stamp                             # var/retrieval/vectors/e5base
     tool/show-vector-stamp var/retrieval/vectors/e5base
@@ -38,7 +39,7 @@ def main() -> int:
         "store",
         nargs="?",
         default=str(vectors.DEFAULT_STORE),
-        help="저장소 경로 (확장자 없이). 기본값은 vectors.DEFAULT_STORE.",
+        help="Store path (without the extension). Default is vectors.DEFAULT_STORE.",
     )
     args = parser.parse_args()
 
@@ -46,21 +47,21 @@ def main() -> int:
     _, ids_path, manifest_path = vectors.paths(out)
     missing = [p.name for p in (ids_path, manifest_path) if not p.exists()]
     if missing:
-        print(f"저장소를 읽을 수 없다: {', '.join(missing)} 가 없다 ({out.parent})", file=sys.stderr)
+        print(f"cannot read the store: {', '.join(missing)} is missing ({out.parent})", file=sys.stderr)
         return 2
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as broken:
-        print(f"매니페스트를 읽을 수 없다: {manifest_path} ({broken})", file=sys.stderr)
+        print(f"cannot read the manifest: {manifest_path} ({broken})", file=sys.stderr)
         return 2
     if absent := [key for key in vectors.REQUIRED_MANIFEST if key not in manifest]:
-        print(f"매니페스트에 {', '.join(absent)} 가 없다: {manifest_path}", file=sys.stderr)
+        print(f"the manifest has no {', '.join(absent)}: {manifest_path}", file=sys.stderr)
         return 2
     with ids_path.open(encoding="utf-8", newline="") as handle:
         count = sum(1 for _ in csv.DictReader(handle))
     if manifest.get("count") not in (None, count):
         print(
-            f"매니페스트가 {manifest['count']}개라는데 id 는 {count}개다: {out}",
+            f"the manifest says {manifest['count']} but the ids are {count}: {out}",
             file=sys.stderr,
         )
         return 2

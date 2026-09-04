@@ -1,28 +1,31 @@
 #!/usr/bin/env python3
 """계약 §질의 라우팅 이 인용하는 수를 우리 사전 위에서 다시 잰다 (포크 #47).
 
-ydc `v0.3.0` 이 실측한 것 -- 라우터 초판이 성분명 목록으로 **Kiwi 토크나이저 사전**을 썼더니 자연어 질의
-10개 중 7개가 BM25 로 갔다 -- 을 우리 사전으로 재현한다. 우리도 같은 사전을 같은 자리에 두고 있다
-(`analysis/retrieval/bm25.py` 의 `DICTIONARIES`).
+What ydc `v0.3.0` measured -- the first router used the **Kiwi tokenizer dictionary** as its ingredient
+list, and 7 of 10 natural-language queries went to BM25 -- is reproduced here on our dictionary. We keep
+the same dictionary in the same place (`DICTIONARIES` in `analysis/retrieval/bm25.py`).
 
-**재는 규칙은 ydc 초판 그대로다.** 정확 신호(성분명 목록에 걸리는 표기)가 있으면 `bm25`, 없으면 `vector`.
+**The measuring rule is exactly ydc's first edition.** With an exact signal (a surface caught by the
+ingredient list) it is `bm25`, without one `vector`.
 자연어 판정도 ydc 와 같이 Kiwi 의 서술어 태그(`VA`·`VV`·`EF`·`EC`·`VCP`·`VCN`)로 한다 -- 길이로는 안
 갈린다(`백탁이 심해요` 는 12자인데 문장이고 `에칠헥실트리아존` 은 9자인데 낱말이다). **오라우팅**은
 자연어인데 `bm25` 로 간 것이다.
 
-**표본은 규칙이 만든다, 사람이 고르지 않는다.** 활성 주제 사전의 주제 순서대로, 주제마다 그 주제의 첫
-`ko` 별칭을 고정 문형 열 개에 순서대로 끼운다. 표본 10 = 앞 10주제, 그리고 15주제 전부의 수를 함께 낸다.
-문형은 성분 신호를 하나도 내지 않아야 하고(`frame_signals`), 그렇지 않으면 비율이 문형에서 온 것이 된다.
+**A rule makes the sample; a person does not pick it.** In the topic order of the active topic
+dictionary, each topic's first `ko` alias is put into the ten fixed frames in turn. Sample 10 = the
+first 10 topics, and the number over all 15 topics is given alongside. The frames must emit no
+ingredient signal at all (`frame_signals`), or else the rate comes from the frames.
 
 **비율은 이 실측의 답이 아니다.** 비율은 표본의 주제 구성이 정한다 -- 앞 10주제에 `선크림` 주제가 안
 들어가고(사전에서 15번째다) 넣으면 오른다. 답은 `ko_in_dictionary` 다: 사람이 쓰는 말 몇 개가 성분 신호로
 서는가. 그것은 표본과 무관한 사전의 성질이고, 그 말이 든 자연어 질의는 전부 `bm25` 로 간다.
 
-주제 사전의 정본은 `needs.aspect_lexicon` 의 활성 버전이지만 이 도구는 DB 를 쓰지 않고 적재 원본 CSV 를
-그대로 프로세스에 세운다 -- `tests/retrieval/conftest.py` 가 DB 없는 유닛에 쓰는 바로 그 길이다.
+The canonical topic dictionary is the active version of `needs.aspect_lexicon`, but this tool uses no
+DB and stands the load-source CSV up in the process as it is -- exactly the path
+`tests/retrieval/conftest.py` uses for the units that have no DB.
 
-    tool/measure-query-routing              # 사람이 읽는 형식
-    tool/measure-query-routing --json       # 테스트가 읽는 형식
+    tool/measure-query-routing              # the human-readable form
+    tool/measure-query-routing --json       # the form the tests read
 """
 
 from __future__ import annotations
@@ -43,11 +46,12 @@ INGREDIENTS = bm25.DICT_DIR / "ingredient_dictionary.tsv"
 CATALOGUE = ROOT / "eval" / "lexicon" / "ingredient_kr_colloquial_v1.csv"
 BRANDS = ROOT / "eval" / "lexicon" / "brand_lexicon_v1.csv"
 SAMPLE = 10
-# ydc `router.py` 의 `SPF_PA`. 표기 그대로 찾는 것이라 자연어 여지가 없다.
+# `SPF_PA` from ydc `router.py`. It looks for the surface as it is, so there is no room for natural language.
 SPF_PA = re.compile(r"SPF\s*\d{1,3}\+?|PA\s*\+{1,4}", re.IGNORECASE)
-# ydc `router.py` 의 `is_natural`. 어미·서술어가 있으면 문장이다.
+# `is_natural` from ydc `router.py`. With an ending or a predicate it is a sentence.
 NATURAL_TAGS = frozenset({"VA", "VV", "EF", "EC", "VCP", "VCN"})
-# 주제어를 갈아 끼워도 뜻이 서는 물음 열 개. 어느 것도 성분 신호를 내면 안 된다 -- 도구가 매번 확인한다.
+# Ten questions that still make sense whatever topic word is swapped in. None may emit an ingredient
+# signal -- the tool checks that every time.
 FRAMES = (
     "{alias} 관련해서 소비자들이 뭐라고 해",
     "{alias} 어떤지 알려줘",
@@ -60,13 +64,15 @@ FRAMES = (
     "{alias} 있는 거 추천해 주세요",
     "{alias} 어떻게 골라야 하나요",
 )
-# ydc 가 `rag/README.md` 와 커밋 `2146d1b` 에 걸린 표기까지 공표한 셋. 우리 것과 글자 그대로 같아야 한다.
+# The three ydc published, down to the surfaces in `rag/README.md` and commit `2146d1b`. Ours must be
+# the same letter for letter.
 PUBLISHED = ("선크림 루틴 알려줘", "백탁 관련해서 소비자들이 뭐라고 해", "끈적이지 않는 선크림 추천")
 
 
 def install_topics() -> topics.Topics:
-    """적재 원본 CSV 를 활성 사전으로. `cosmai lexicon load` 가 쓰는 바로 그 변환을 탄다 -- 사전을 손으로
-    다시 적으면 그 순간 사전이 두 벌이 되고, 실측이 자기 사본을 재게 된다."""
+    """The load-source CSV as the active dictionary. It takes exactly the conversion `cosmai lexicon load`
+    uses -- writing the dictionary out by hand would make it two copies from that moment, and the
+    measurement would be measuring its own copy."""
     from cosmai.cli import _csv_rows
     from db.lexicon import ASPECT_COLUMNS
 
@@ -76,14 +82,16 @@ def install_topics() -> topics.Topics:
 
 
 def vocabulary() -> list[str]:
-    """라우터가 "성분명 목록"으로 오해할 그 파일. **긴 표기부터** 훑는다 (ydc `Router._find`)."""
+    """The file a router would mistake for an "ingredient list". Scanned **longest surface first**
+    (ydc `Router._find`)."""
     lines = INGREDIENTS.read_text(encoding="utf-8").splitlines()
     found = {line.split("\t")[0] for line in lines if line.strip() and not line.startswith("#")}
     return sorted(found, key=len, reverse=True)
 
 
 def matched(query: str, vocab: list[str]) -> list[str]:
-    """찾은 자리는 지운다 -- 안 지우면 부분문자열이 겹쳐 센다 (ydc `Router._find` 그대로)."""
+    """A found position is erased -- without that, substrings overlap and are counted twice (exactly ydc
+    `Router._find`)."""
     found, rest = [], query
     for term in vocab:
         if term in rest:
@@ -110,12 +118,14 @@ def route(query: str, vocab: list[str]) -> dict:
 
 
 def sample(dictionary: topics.Topics, vocab: list[str]) -> dict:
-    """주제 순서 × 주제의 첫 `ko` 별칭 × 문형. 고를 자리가 없는 것이 이 표본의 성질이다."""
+    """Topic order × the topic's first `ko` alias × frame. Having no place to choose is the property of
+    this sample."""
     rows = []
     for position, entry in enumerate(dictionary.entries):
         frame = FRAMES[position % len(FRAMES)]
         rows.append({"topic": entry["topic"], **route(frame.format(alias=entry["ko"][0]), vocab)})
-    # 문형만 따로 라우팅해 본다. 여기서 하나라도 걸리면 비율이 주제어가 아니라 문형에서 온 것이다.
+    # The frames alone are routed separately. If even one is caught here, the rate came from the frames
+    # rather than from the topic words.
     empty = sum(len(matched(frame.format(alias=" "), vocab)) for frame in FRAMES)
     return {
         "size": SAMPLE,
@@ -128,7 +138,7 @@ def sample(dictionary: topics.Topics, vocab: list[str]) -> dict:
 
 
 def dictionary_shape(dictionary: topics.Topics, vocab: list[str]) -> dict:
-    """표본과 무관한 수 -- 이 절의 답이 여기 있다."""
+    """A number independent of the sample -- the answer of this section is here."""
     present = set(vocab)
     people = {alias for entry in dictionary.entries for alias in entry["ko"]}
     inci = {alias for entry in dictionary.entries for alias in entry["mfds_inci"]}
@@ -145,13 +155,15 @@ def dictionary_shape(dictionary: topics.Topics, vocab: list[str]) -> dict:
 
 
 def brand_only(dictionary: topics.Topics) -> dict:
-    """**성분명 축을 뺀 라우터가 실제로 무엇을 하는가.** 열려 있는 신호 둘(브랜드 표기 · SPF/PA 정규식)만
-    보는 라우터를 우리의 유일한 측정된 질의 워크로드 -- 활성 주제 사전의 `ko` 별칭 -- 에 통과시킨다.
+    """**What a router without the ingredient-name axis actually does.** A router that looks only at the
+    two open signals (brand surfaces · the SPF/PA regex) is run over our only measured query workload --
+    the `ko` aliases of the active topic dictionary.
     `interfaces.md` §검색 실측 의 literal 모드가 재는 질의가 그 별칭들이다.
 
-    부분 라우터가 **불완전할 뿐 해롭지는 않다**는 반론을 이 수가 막는다: 옳게 보낸 질의가 0개이고 오라우팅만
-    남으면, 그 라우터는 기본값보다 나쁘다. 브랜드 표기는 짧은 것이 많아(2자 이하가 상당수) ydc 의 부분문자열
-    `_find` 아래에서 평범한 한국어에 걸린다."""
+    This number stops the objection that a partial router is **merely incomplete, not harmful**: with 0
+    queries sent correctly and nothing but misroutes left, that router is worse than the default. Many
+    brand surfaces are short (a fair number are two characters or fewer), so under ydc's substring
+    `_find` they catch ordinary Korean."""
     from db.seed.lexicon import _brand_rows
 
     rows = _brand_rows(ROOT / "eval")
@@ -164,7 +176,7 @@ def brand_only(dictionary: topics.Topics) -> dict:
     }
     return {
         "queries": len(queries),
-        # 주제 별칭은 브랜드명이 아니므로 여기 걸린 것은 전부 오탐이다.
+        # A topic alias is not a brand name, so everything caught here is a false positive.
         "misrouted": len(caught),
         "correct": 0,
         "traces": caught,
@@ -175,9 +187,10 @@ def brand_only(dictionary: topics.Topics) -> dict:
 
 
 def alias_rules(dictionary: topics.Topics, vocab: list[str]) -> dict:
-    """**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.** 별칭 고르는 규칙을 넷으로 바꿔 보면 앞 10주제의
-    오라우팅이 0 에서 6 까지 움직인다 -- `misrouted` 한 수를 이 절의 답으로 읽으면 안 되는 이유이고, 답이
-    `ko_in_dictionary` 인 이유다(그쪽은 별칭 규칙이 없다)."""
+    """**Even when a rule makes the sample, the arbitrariness of choosing the rule remains.** Swapping the
+    alias-choosing rule between four options moves the misroutes of the first 10 topics between 0 and 6
+    -- which is why the one `misrouted` number must not be read as this section's answer, and why the
+    answer is `ko_in_dictionary` (that side has no alias rule)."""
     present = set(vocab)
     heads = dictionary.entries[:SAMPLE]
     picks = {
@@ -186,13 +199,14 @@ def alias_rules(dictionary: topics.Topics, vocab: list[str]) -> dict:
         "first_inci": [entry["mfds_inci"][0] for entry in heads if entry["mfds_inci"]],
     }
     rates = {name: sum(1 for alias in chosen if alias in present) for name, chosen in picks.items()}
-    # `any_ko` 는 별칭 하나가 아니라 "그 주제의 별칭 중 하나라도 걸리는가"다.
+    # `any_ko` is not one alias but "is any one of that topic's aliases caught".
     rates["any_ko"] = sum(1 for entry in heads if set(entry["ko"]) & present)
     return {"of": SAMPLE, "rates": rates, "low": min(rates.values()), "high": max(rates.values())}
 
 
 def candidates() -> dict:
-    """성분명 판정의 정본이 될 수 있었던 다른 목록. 왜 못 되는지를 수로 낸다."""
+    """The other lists that could have been canonical for deciding an ingredient name. Why they cannot
+    be, as numbers."""
     from db.seed.lexicon import _ingredient_rows
 
     rows = _ingredient_rows(ROOT / "eval")
@@ -206,7 +220,7 @@ def candidates() -> dict:
         "entity_keys": len({str(row[key]) for row in rows}),
         "entity_ingredient_keys": sum(1 for row in catalogue if row["category"] == "ingredient"),
         "entity_categories": len({row["category"] for row in catalogue}),
-        # 한 표기가 성분 키 둘을 가리키면 그 표기로는 어느 성분인지 못 정한다.
+        # If one surface points at two ingredient keys, that surface cannot decide which ingredient it is.
         "entity_ambiguous": sorted(word for word, keys in keys_of.items() if len(keys) > 1),
     }
 
@@ -224,14 +238,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--json", action="store_true", help="테스트가 읽는 형식으로만 낸다.")
+    parser.add_argument("--json", action="store_true", help="Print only in the form the tests read.")
     args = parser.parse_args()
 
-    # 원천이 없는 것은 실패가 아니라 막힘이다 -- 0 으로 나가면 "재 봤더니 함정이 없더라"로 읽힌다.
+    # A missing source is blocked rather than a failure -- exiting 0 reads as "we measured and found no trap".
     sources = (INGREDIENTS, topics.DICTIONARY_CSV, CATALOGUE, BRANDS)
     missing = [path for path in sources if not path.exists()]
     if missing:
-        print("잴 원천이 없다: " + ", ".join(str(p.relative_to(ROOT)) for p in missing), file=sys.stderr)
+        print(
+            "no source to measure: " + ", ".join(str(p.relative_to(ROOT)) for p in missing),
+            file=sys.stderr,
+        )
         return 2
 
     dictionary = install_topics()
@@ -253,47 +270,50 @@ def main() -> int:
 def report(measured: dict) -> None:
     shape, found = measured["dictionary"], measured["sample"]
     print(
-        f"[표본] 자연어 질의 {found['size']}개 중 오라우팅 {found['misrouted']}개 "
-        f"· {found['topics']}주제 전부로는 {found['topic_misrouted']}개 "
-        f"· 문형이 낸 성분 신호 {found['frame_signals']}개"
+        f"[sample] {found['misrouted']} misrouted of {found['size']} natural-language queries "
+        f"· {found['topic_misrouted']} over all {found['topics']} topics "
+        f"· {found['frame_signals']} ingredient signals from the frames"
     )
     for position, row in enumerate(found["rows"]):
-        mark = "오라우팅" if row["misrouted"] else "        "
-        edge = "   " if position < found["size"] else "(밖)"
+        mark = "misrouted" if row["misrouted"] else "         "
+        edge = "   " if position < found["size"] else "(out)"
         print(f"  {edge} {mark} {row['route']:6s} {row['hits']!s:24s} {row['query']}")
-    print(f"\n[ydc 공표분] {measured['ydc_published']['misrouted']}/{measured['ydc_published']['queries']}")
+    print(
+        f"\n[ydc published] {measured['ydc_published']['misrouted']}/{measured['ydc_published']['queries']}"
+    )
     for query, hits in measured["ydc_published"]["traces"].items():
         print(f"        {hits!s:24s} {query}")
     print(
-        f"\n[사전] 성분 사전 {shape['surfaces']:,}표기 "
-        f"· 사람이 쓰는 말(`ko`) {shape['ko_aliases']}개 중 {shape['ko_in_dictionary']}개가 여기 있다"
+        f"\n[dictionary] ingredient dictionary {shape['surfaces']:,} surfaces "
+        f"· {shape['ko_in_dictionary']} of the {shape['ko_aliases']} words people use (`ko`) are in it"
     )
     print(f"        {shape['ko_caught']}")
     print(
-        f"        성분 표기(`mfds_inci`) {shape['inci_surfaces']}개 중 {shape['inci_in_dictionary']}개 "
-        f"· 그중 사람도 쓰는 말 {shape['inci_also_asked_with']}"
+        f"        {shape['inci_in_dictionary']} of the {shape['inci_surfaces']} ingredient surfaces "
+        f"(`mfds_inci`) · of those, the ones people also use {shape['inci_also_asked_with']}"
     )
     wobble = found["alias_rules"]
     print(
-        f"        별칭 고르는 규칙을 바꾸면 {wobble['low']}~{wobble['high']}/{wobble['of']} 로 움직인다 "
+        f"        changing the alias-choosing rule moves it {wobble['low']}~{wobble['high']}/{wobble['of']} "
         f"· {wobble['rates']}"
     )
     only = measured["brand_only"]
     print(
-        f"\n[성분명 축을 뺀 라우터] 주제 별칭 {only['queries']}개 중 bm25 로 보내는 것 "
-        f"{only['misrouted']}개 · 그중 옳게 보낸 것 {only['correct']}개"
+        f"\n[router without the ingredient axis] {only['misrouted']} of {only['queries']} topic aliases "
+        f"sent to bm25 · {only['correct']} of those sent correctly"
     )
     for query, hits in only["traces"].items():
         print(f"        {query} <- {hits}")
     print(
-        f"        브랜드 {only['rows']}행 / 고유 표기 {only['surfaces']} "
-        f"· 그중 2자 이하 {only['short_surfaces']}"
+        f"        brands {only['rows']} rows / {only['surfaces']} distinct surfaces "
+        f"· of those, two characters or fewer {only['short_surfaces']}"
     )
     other = measured["candidates"]
     print(
-        f"\n[다른 후보] entity_lexicon kind='ingredient' {other['entity_rows']}행 / {other['entity_keys']}키 "
-        f"· category 는 {other['entity_categories']}종이고 성분은 {other['entity_ingredient_keys']}키 "
-        f"· 성분 둘을 가리키는 표기 {other['entity_ambiguous']}"
+        f"\n[other candidates] entity_lexicon kind='ingredient' {other['entity_rows']} rows "
+        f"/ {other['entity_keys']} keys · category is {other['entity_categories']} kinds and ingredient is "
+        f"{other['entity_ingredient_keys']} keys "
+        f"· surfaces pointing at two ingredients {other['entity_ambiguous']}"
     )
 
 

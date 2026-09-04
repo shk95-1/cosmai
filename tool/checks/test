@@ -38,7 +38,7 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
         exit 1
     fi
     secret_file=$(mktemp)
-    # rm -v: postgres 이미지의 익명 볼륨까지 제거 (없으면 실행마다 ~1GB 볼륨이 누수됨)
+    # rm -v: removes the postgres image's anonymous volume too (without it every run leaks a ~1GB volume)
     trap 'rm -f "$secret_file"; docker rm -f -v "$name" >/dev/null 2>&1 || true' EXIT
     docker rm -f -v "$name" >/dev/null 2>&1 || true
     docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
