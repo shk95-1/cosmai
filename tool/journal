@@ -60,9 +60,7 @@ state=$3
 note=${4:-}
 
 case "$number" in ''|*[!0-9]*) usage ;; esac
-# 예정 is the word the journals already on the issues use; it is accepted until #192 step 4 and
-# written as `planned`, so the ledger stops growing in two languages while both are legal.
-case "$state" in planned|ok|fail) ;; 예정) state=planned ;; *) usage ;; esac
+case "$state" in planned|ok|fail) ;; *) usage ;; esac
 
 # Literal replacement, not sed: $HOME is a path and would otherwise be read as a regex.
 scrub() {
@@ -105,11 +103,9 @@ line="- $step $state $(date -u +%Y-%m-%dT%H:%MZ) $(git rev-parse --short HEAD)"
 # The one journal is the earliest journal comment, by created_at rather than by where it sits in
 # the listing: two of them can exist for a moment (see below), and every caller has to pick the same
 # one or the steps split across two comments without anybody noticing.
-# Both heads are read: the journals already on the issues carry `## 저널`, and a tool that stopped
-# seeing them would open a second journal on every one of those issues (migration window, #192).
 journal_comment() {
     gh api --paginate "repos/$repo/issues/$number/comments" \
-        | jq -s '[.[][]] | map(select((.body // "") | test("^## (Journal|저널)")))
+        | jq -s '[.[][]] | map(select((.body // "") | test("^## Journal")))
                  | sort_by(.created_at) | first // null'
 }
 

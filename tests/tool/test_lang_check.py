@@ -85,12 +85,14 @@ def test_a_test_fixture_directory_passes(repo: Path):
     assert done.returncode == 0, done.stderr
 
 
-def test_the_two_migrating_tools_still_carry_their_korean_anchors(repo: Path):
-    # tool/issue and tool/journal accept both anchor sets until #192 step 4 removes the Korean ones.
+def test_the_two_migrated_tools_no_longer_get_a_korean_allowance(repo: Path):
+    # #204 closes the migration window: tool/issue and tool/journal carry no Hangul allowlist entry
+    # any more, so a staged Korean line in either fails like it would anywhere else.
     for path in ("tool/issue", "tool/journal"):
         stage(repo, path, f"# {KOREAN}")
     done = run_check(repo)
-    assert done.returncode == 0, done.stderr
+    assert done.returncode == 1, (done.returncode, done.stdout, done.stderr)
+    assert "tool/issue" in done.stderr and "tool/journal" in done.stderr, done.stderr
 
 
 def test_only_added_lines_count(repo: Path):
