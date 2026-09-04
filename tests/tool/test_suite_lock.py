@@ -178,8 +178,10 @@ def test_the_wait_gives_up_and_says_where_to_look(acquire):
 
 
 # The cleanup handler of tool/checks/test is lifted out of the real script rather than restated, so
-# a change there cannot pass here. /bin/sh is dash on this host and dash runs NO exit trap on
-# SIGTERM: a plain `kill`, a timeout wrapper or a supervisor would leak the slot and the container.
+# a change there cannot pass here. /bin/sh is dash on this host: killed by a signal it has not
+# trapped, it runs no EXIT trap at all, so a plain `kill`, a timeout wrapper or a supervisor would
+# leak the slot and the container. dash also runs a trap only between commands, which is why the
+# driver below waits in `wait` rather than inside a foreground command.
 CLEANUP_BLOCK = ["sed", "-n", "/^cleanup() {/,/^trap cleanup EXIT$/p"]
 
 
@@ -236,4 +238,30 @@ def test_a_terminated_run_frees_its_slot_and_removes_its_container(tmp_path: Pat
             running.kill()
 
     assert not lock_dir.exists(), "SIGTERM left the slot held; the host loses a suite for ever"
-    assert f"rm -f -v cosmai-test-postgres-{PORT}" in calls.read_text(encoding="utf-8")
+    # Exactly once: the signal trap runs cleanup and then exits, which fires the EXIT trap over the
+    # same handler. Without its `cleanup_ran` guard everything here would be done twice, and the
+    # second `docker rm` would be aimed at whatever took the name in between (#214 review, minor).
+    removals = [line for line in calls.read_text(encoding="utf-8").splitlines() if line.startswith("rm ")]
+    assert removals == [f"rm -f -v cosmai-test-postgres-{PORT}"], removals
+
+
+def test_a_non_numeric_wait_timeout_falls_back_instead_of_breaking_the_wait(acquire):
+    # `[ 0 -ge abc ]` is an error, not a comparison: the give-up test would fail on every poll and
+    # the wait this timeout exists to bound would never end (#214 review, minor).
+    done = acquire([3, 3, 0], COSMAI_SUITE_WAIT_TIMEOUT_SECONDS="soon")
+    assert done.returncode == 0, done.stderr
+    assert "acquired" in done.stdout, done.stdout
+    assert "Illegal number" not in done.stderr, done.stderr
+
+
+def test_a_non_numeric_stale_limit_still_expires_a_leaked_slot(acquire):
+    # `find -mmin +abc` fails, and the failure is swallowed: the expiry would stop happening in
+    # silence and three leaked slots would deadlock every suite on the host.
+    for port in ("55001", "55002", "55003"):
+        stale = acquire.lock_root / port
+        stale.mkdir(parents=True)
+        age(stale, 60 * 4)
+    done = acquire([0], COSMAI_SUITE_LOCK_STALE_MINUTES="180m")
+    assert done.returncode == 0, done.stderr
+    assert "acquired" in done.stdout, done.stdout
+    assert sorted(p.name for p in acquire.lock_root.iterdir()) == [PORT]

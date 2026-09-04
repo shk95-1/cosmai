@@ -2,7 +2,23 @@
 # The repository operates in English (#192 D12), so a Hangul line in a tracked file is a regression
 # the moment it is staged. Only staged additions are examined, like tool/checks/paths: history is
 # not this check's business, and the migration itself has to be able to delete Korean.
+#
+# `--range <base>` reads `<base>...HEAD` instead of the index, for the one caller that has no index to
+# read: the push gate's prose class, where nothing is staged and the staged form passes vacuously --
+# the check the class exists to run measuring nothing at all (#215 review I3).
 set -e
+
+lang_range="--cached"
+if [ "$1" = "--range" ]; then
+    if [ -z "$2" ]; then
+        printf 'usage: tool/checks/lang [--range <base>]\n' >&2
+        exit 2
+    fi
+    lang_range="$2...HEAD"
+elif [ -n "$1" ]; then
+    printf 'usage: tool/checks/lang [--range <base>]\n' >&2
+    exit 2
+fi
 
 # Codepoints rather than a literal 가-힣 range: outside a UTF-8 locale grep reads such a range as
 # bytes and then every multibyte character matches, which would fail on Japanese product names.
@@ -19,7 +35,8 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 # #192 removes its reason, so the list is here rather than spread across the tree.
 # A fixture directory is named twice because git's default pathspec matching gives `**` no empty
 # match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
-hits=$(git diff --cached -U0 --no-color -- . \
+# Unquoted on purpose: one word, either --cached or a revision range.
+hits=$(git diff $lang_range -U0 --no-color -- . \
     ':!tool/checks/lang' \
     ':!README.ko.md' \
     ':!eval/' \
@@ -34,7 +51,7 @@ hits=$(git diff --cached -U0 --no-color -- . \
     | grep -P "$HANGUL" || true)
 [ -z "$hits" ] && exit 0
 printf '%s\n' "$hits" >&2
-printf '\n✗ A staged line is in Korean. The tools and the repository operate in English (#192).\n' >&2
+printf '\n✗ An added line is in Korean. The tools and the repository operate in English (#192).\n' >&2
 printf '  Korean that is data (seed rows, evaluation sets, UI strings) belongs on the allowlist in\n' >&2
 printf '  tool/checks/lang; Korean a test needs belongs under a tests/**/fixtures/ directory.\n\n' >&2
 exit 1

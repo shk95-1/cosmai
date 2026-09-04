@@ -2,19 +2,59 @@
 # Tests against a real Postgres. A throwaway postgres:18 is started only when TEST_POSTGRES_URL
 # is unset, then db/migrate.sh -- the SAME script production runs -- applies db/bootstrap.sql,
 # the needs migration ledger and contracts/ddl/needs/*.sql. Removed on exit.
+#
+# `tool/checks/test` alone is that whole suite. `tool/checks/test --changed [<base>]` asks what the
+# change can break first (#215) and runs the smallest verification that answers it:
+#
+#   A  the whole suite      the database, the packaging, the gate itself, or anything unmapped
+#   B  the mapped tests + the DB-free suite    code under one package (tests/scope.toml)
+#   C  format·lint·lang + the snapshot tests   prose, or code tool/checks/invariants proves is unmoved
+#   N  format·lint, recorded nowhere           a tree identical to the base: there is nothing to verify
 set -e
 . tool/checks/prerequisite
 . tool/checks/suite-lock
 . tool/checks/tested-tree
-require_command uv docker pg_isready
 
 # git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
 # temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
 # commit landed on a real branch during pre-push). The suite must see the same environment under
 # a hook as from a terminal. PYTEST_ADDOPTS for the same reason and a sharper one: an inherited
 # -k/-m/-x/--lf narrows the run, and a narrowed run must never write a cache entry every worktree
-# of this clone then trusts (#214).
+# of this clone then trusts (#214). Unset before the classifier below, which asks git where it is.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR PYTEST_ADDOPTS
+
+change_class=A
+change_reason="no --changed: the whole suite was asked for"
+change_tests=""
+change_base=""
+if [ "$1" = "--changed" ]; then
+    require_command python3 git
+    change_base=${2:-origin/main}
+    # Three lines: the class, the reason, the test paths. The classifier is the only thing that
+    # decides this, so a checkout where it cannot run has no partial mode -- it has the full suite.
+    if change_scope=$(python3 tool/change_scope.py "$change_base"); then
+        change_class=$(printf '%s\n' "$change_scope" | sed -n 1p)
+        change_reason=$(printf '%s\n' "$change_scope" | sed -n 2p)
+        change_tests=$(printf '%s\n' "$change_scope" | sed -n 3p)
+    else
+        change_reason="the classifier could not answer, so the change is worth the whole suite"
+    fi
+    case "$change_class" in
+        A | B | C | N) ;;
+        *) change_reason="the classifier said '$change_class', which is not a class"; change_class=A ;;
+    esac
+elif [ -n "$1" ]; then
+    printf 'usage: tool/checks/test [--changed [<base>]]\n' >&2
+    exit 2
+fi
+printf 'verification: class %s — %s\n' "$change_class" "$change_reason"
+
+# Neither of the two cheap classes touches a database, so a host without docker can still run them.
+if [ "$change_class" = C ] || [ "$change_class" = N ]; then
+    require_command uv
+else
+    require_command uv docker pg_isready
+fi
 
 # Before anything runs: what the suite proves is the tree it started against, not whatever HEAD has
 # become seventeen minutes later, and not a tree plus uncommitted edits (#214).
@@ -23,8 +63,10 @@ tested_tree_capture
 # One exit path for everything this run holds: the slot it took, the container it started, the
 # secret file, and -- only when pytest came back green -- the tested-tree entry that lets the next
 # push of this same tree skip the suite (#214). Killed or failed, this records nothing.
-# /bin/sh here is dash, which runs no EXIT trap on SIGTERM: without the signal traps a `kill`, a
-# timeout wrapper or a supervisor would leak both the slot and the container (measured, #214 review).
+# /bin/sh here is dash: a shell killed by a signal it has not trapped runs no EXIT trap at all, so
+# without the three signal traps below a `kill`, a timeout wrapper or a supervisor would leak both
+# the slot and the container. dash also runs a trap only between commands, so a signal arriving
+# during pytest is handled when pytest returns, not the instant it lands (measured, #215).
 secret_file=""
 container_name=""
 suite_green=""
@@ -36,22 +78,29 @@ cleanup() {
     [ -z "$secret_file" ] || rm -f "$secret_file" || true
     [ -z "$container_name" ] || docker rm -f -v "$container_name" >/dev/null 2>&1 || true
     [ -z "$suite_lock_dir" ] || rmdir "$suite_lock_dir" 2>/dev/null || true
-    [ -z "$suite_green" ] || tested_tree_record || true
+    # The entry names the class it was verified at: a tree green for class C is green for a class-C
+    # change, and the next push has to be able to see which question was answered (#215).
+    [ -z "$suite_green" ] || tested_tree_record "$change_class" || true
     return $cleanup_status
 }
 trap 'cleanup; exit 1' INT TERM HUP
 trap cleanup EXIT
 
 # Before the postgres container: a broken portal/public/*.js fails here for free, without
-# paying the ~2min container-and-migrate cost that the python suite below needs.
-printf '→ js\n'
-tool/checks/js
+# paying the ~2min container-and-migrate cost that the python suite below needs. Class C skips it:
+# what it changed in a .js file was proved to be comment lines.
+if [ "$change_class" != C ] && [ "$change_class" != N ]; then
+    printf '→ js\n'
+    tool/checks/js
+fi
 
 # retrieval: the morphological analyzer (kiwipiepy) analysis/retrieval needs. Without it the BM25
 # tests fail wholesale with ModuleNotFoundError, indistinguishable from "the dictionary was not loaded" (#28).
+# The same extras in every class: a narrower sync would uninstall them from the shared venv, and the
+# next full run would pay to put them back.
 uv sync --extra dev --extra retrieval --frozen
 
-if [ -z "$TEST_POSTGRES_URL" ]; then
+if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
     # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
     # COSMAI_TEST_PG_PORT still overrides it (#60 2.10).
@@ -120,8 +169,55 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
 fi
 
-printf '→ pytest\n'
 # Straight to the terminal, colour and stderr intact: nothing reads pytest's output, since what the
 # cleanup records is the tree and the time, not a count (#214 review).
-uv run pytest
+# $change_tests is unquoted on purpose: it is a list of paths the classifier produced, one word each.
+case "$change_class" in
+    N)
+        # The tree is the base's own. Format and lint still read the working files, so they can say
+        # something; nothing else can, and no entry is recorded for a run that verified nothing.
+        printf '→ format\n'
+        tool/checks/format
+        printf '→ lint\n'
+        tool/checks/lint
+        exit 0
+        ;;
+    C)
+        # Nothing executable moved, so what is left to check is the text and the surfaces made of it.
+        printf '→ format\n'
+        tool/checks/format
+        printf '→ lint\n'
+        tool/checks/lint
+        # --range: on a push nothing is staged, and the staged form of this check would pass whatever
+        # the branch carries -- the one check this class exists to run, measuring nothing (#215 review).
+        printf '→ lang\n'
+        tool/checks/lang --range "$change_base"
+        if [ -n "$change_tests" ]; then
+            printf '→ pytest %s\n' "$change_tests"
+            uv run pytest $change_tests
+        fi
+        ;;
+    B)
+        # An entry can map to no tests at all (a directory nothing imports), and a bare `uv run
+        # pytest` there would collect the whole suite -- the opposite of what this class is for.
+        if [ -n "$change_tests" ]; then
+            printf '→ pytest %s\n' "$change_tests"
+            uv run pytest $change_tests
+        fi
+        # The whole suite minus the part that needs the database: a package's own tests say the
+        # package is right, and this says nothing else in the tree noticed. The marker expression
+        # repeats the two the ini file excludes, because -m on the command line replaces it.
+        # COSMAI_FULL_SUITE: this is a whole-tree session, which is the shape the #30 registration
+        # guard exists for -- one file poisoning the next (#215 review I5). The mapped run above is
+        # a focused session and stays without it.
+        printf '→ pytest (the DB-free suite)\n'
+        COSMAI_FULL_SUITE=1 uv run pytest -m 'not postgres and not live and not local_llm'
+        ;;
+    *)
+        printf '→ pytest\n'
+        # The session guards in tests/conftest.py are armed only here: a partial run never registers
+        # the default implementations, so outside the full suite they report a failure of their own (#215).
+        COSMAI_FULL_SUITE=1 uv run pytest
+        ;;
+esac
 suite_green=1
