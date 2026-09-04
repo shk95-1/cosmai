@@ -33,5 +33,5 @@ CREATE TABLE needs.retrieval_ask_log (
 -- The question asked of this table is "what was asked lately", not "what was asked by id".
 CREATE INDEX ON needs.retrieval_ask_log (called_at);
 
--- Append and read only. The runtime never rewrites a call that already happened.
+-- Append-only by convention: the runtime only ever INSERTs here (the default privileges of db/bootstrap.sql also carry UPDATE/DELETE; nothing revokes them).
 GRANT SELECT, INSERT ON needs.retrieval_ask_log TO needs_runtime;

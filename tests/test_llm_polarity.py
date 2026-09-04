@@ -1,4 +1,5 @@
-"""LLMPolarity: 프롬프트·구조화 출력·재시도·배치·원장. 진짜 Anthropic 호출은 여기 없다 (가짜 클라이언트)."""
+"""LLMPolarity: prompt, structured output, retry, batch, ledger. No real Anthropic call is here (a fake
+client)."""
 
 from __future__ import annotations
 
@@ -83,7 +84,8 @@ class FakeBatches:
         return SimpleNamespace(id=batch_id, processing_status=self.status, request_counts=COUNTS)
 
     def results(self, batch_id: str) -> Any:
-        # 결과는 아무 순서로나 온다 (Batches 계약) — 뒤집어 돌려주어 순서 복원을 강제한다.
+        # Results arrive in any order (the Batches contract) — returning them reversed forces the order to be
+        # restored.
         for custom_id, text in reversed(list(self.answers.items())):
             yield SimpleNamespace(
                 custom_id=custom_id,
@@ -111,7 +113,7 @@ class FakeClient:
 
 
 def test_the_system_prompt_carries_the_contract_label_criteria_verbatim():
-    """골드의 정의는 formats.md 에 있다 — 프롬프트가 그것을 고쳐 쓰면 다른 과제를 채점하게 된다."""
+    """The definition of the gold set is in formats.md — a prompt that rewrites it grades a different task."""
     assert f"- 라벨 기준(polarity): {LABEL_CRITERIA}" in FORMATS.read_text(encoding="utf-8")
     assert LABEL_CRITERIA in system_prompt(SUN)
 
@@ -170,7 +172,7 @@ class TestAgainstAFakeClient:
         with connect(needs_runtime_url) as conn:
             found = self._polarity(conn, client).classify(SENTENCE, None, "선블록", SUN)
         assert found.polarity == "중립"
-        assert len(client.messages.calls) == 2  # 재시도는 한 번뿐이다
+        assert len(client.messages.calls) == 2  # the retry happens only once
         assert "긍정" not in found.reason
 
     def test_a_retry_that_comes_back_inside_the_three_labels_is_kept(self, needs_runtime_url: str):
@@ -183,7 +185,7 @@ class TestAgainstAFakeClient:
         client = FakeClient([_answer("중립", aspect=None)])
         with connect(needs_runtime_url) as conn:
             found = self._polarity(conn, client).classify("배송이 늦었어요", None, "선블록", SUN)
-        assert found.aspect is None  # B8: 저장은 need_key='' 로 접힌다
+        assert found.aspect is None  # B8: storage folds it to need_key=''
 
     def test_an_aspect_outside_the_dictionary_is_dropped_rather_than_invented(self, needs_runtime_url: str):
         client = FakeClient([_answer("불만", aspect="가격만족도")])
@@ -209,12 +211,13 @@ class TestAgainstAFakeClient:
     ):
         client = FakeClient([_answer("불만")])
         with connect(needs_runtime_url) as conn:
-            # LLM_BUDGET_USD 와 별개인 좁은 예산을 줘서, 그 상수가 얼마든 경계 검사가 계속 뜻을 갖게 한다.
+            # A narrow budget independent of LLM_BUDGET_USD keeps the boundary check meaningful whatever that
+            # constant is.
             ledger = UsageLedger(conn, budget=Decimal("7.00"))
-            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999, $0.001 남음
+            ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999, $0.001 left
             with pytest.raises(BudgetExceeded):
                 LLMPolarity("claude-sonnet-5", ledger, client=client).classify(SENTENCE, None, None, SUN)
-        assert client.messages.calls == []  # 호출 자체가 없었다
+        assert client.messages.calls == []  # there was no call at all
 
     def test_the_ledger_is_a_required_argument_so_no_call_can_skip_the_hard_stop(self):
         with pytest.raises(TypeError):
@@ -240,7 +243,7 @@ class TestAgainstAFakeClient:
             with pytest.raises(LookupError) as timed_out:
                 llm.classify_many((PolarityRequest(SENTENCE, 1.0, "선블록"),), SUN)
             assert "msgbatch_fake" in str(timed_out.value)
-            # 응답을 못 받아도 예약은 남는다 — 다음 실행의 예산이 그것을 본다.
+            # The reservation stays even when no response arrives — the next run's budget sees it.
             assert ledger.spent() > 0
             assert ledger.reservation_for("msgbatch_fake") is not None
 
@@ -254,7 +257,7 @@ class TestAgainstAFakeClient:
                 cur.execute("SELECT purpose FROM llm_usage")
                 purposes = [r[0] for r in cur.fetchall()]
         assert found[1].reason == "llm:배치 expired"
-        assert "succeeded:1" in purposes[0]  # 몇 건이 왜 중립이 됐는지가 원장에 남는다
+        assert "succeeded:1" in purposes[0]  # how many became neutral and why stays in the ledger
 
     def test_classify_many_submits_one_batch_and_returns_the_input_order(self, needs_runtime_url: str):
         batches = FakeBatches({"p0": _answer("불만"), "p1": _answer("만족", aspect="백탁")})
@@ -275,7 +278,7 @@ class TestAgainstAFakeClient:
             with conn.cursor() as cur:
                 cur.execute("SELECT batch_id, usd FROM llm_usage")
                 rows = cur.fetchall()
-        assert rows == [("msgbatch_fake", Decimal("0.000525"))]  # 단건 $0.00105 의 절반
+        assert rows == [("msgbatch_fake", Decimal("0.000525"))]  # half of the $0.00105 single call
 
     def test_a_batch_result_that_failed_falls_back_to_neutral_rather_than_shifting_the_rest(
         self, needs_runtime_url: str

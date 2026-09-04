@@ -1,13 +1,15 @@
-"""청크 색인 + 커머스 원천 + 그 run 의 판정 → 소스 대조 세 답 (포크 #7).
+"""The chunk index + the commerce source + the judgement of that run -> the three cross-source answers
+(fork #7).
 
 **이 파이프라인은 아무것도 쓰지 않는다.** 세 답의 행은 (주제) 또는 (성분) 하나가 키인데 022 의 분기
 입자는 여덟 칸이 키이고, 커머스 쪽에는 그중 분기도 명부도 없다 (`contracts/interfaces.md` §대조). 그래서
 산출은 표가 아니라 답이고, 읽기 전용이라 운영 DB 에 그대로 돌린다.
 
-청크 색인을 한 번 훑는다. 한 흐름으로 훑으면 그 트랜잭션이 매칭이 끝날 때까지 열려 있는데 `needs_runtime`
-의 `transaction_timeout`(60초)은 트랜잭션 **총 수명**의 상한이라 도중에 끊는다 -- 그래서 키셋으로 한
-페이지씩 받고 페이지마다 커밋한다(`analysis/retrieval/eval.py` 의 `gold_from_chunks` 와 같은 방식, 같은
-이유). 전량 381,950청크 48MB 11.3초로 실제로 재 봤다.
+The chunk index is scanned once. Scanned in one stream, the transaction stays open until the matching ends,
+and `needs_runtime`'s `transaction_timeout` (60 seconds) is a cap on the **total lifetime** of a transaction
+and cuts it mid-way -- so pages are taken one keyset page at a time and committed per page (the same way and
+for the same reason as `gold_from_chunks` in `analysis/retrieval/eval.py`). It was really measured over all
+381,950 chunks: 48MB in 11.3 seconds.
 """
 
 from __future__ import annotations
@@ -42,8 +44,9 @@ SUN_JOIN = """
 SUN_REVIEWS = "SELECT r.source, r.review_key FROM {review} r" + SUN_JOIN
 RATED = (
     "SELECT t.source, t.product_key, t.topic_group, t.topic_name, t.share_pct, t.captured_at "
-    # `share_pct` 가 NULL 인 소스는 비중 대신 가중치(`score`)를 싣는다. 가중치와 백분율은 다른 단위라
-    # 섞어 평균 내면 아무것도 보여 주지 않고 틀린다 (`review_topic.score` 의 DDL 주석).
+    # A source whose `share_pct` is NULL carries the weight (`score`) instead of the share. A weight and a
+    # percentage are different units, so mixing and averaging them shows nothing and is wrong (the DDL
+    # comment of `review_topic.score`).
     "FROM {topic} t" + SUN_JOIN + " WHERE t.share_pct IS NOT NULL"
 )
 FORMULA = "SELECT source, product_key, ingredients FROM {product} WHERE coalesce(ingredients, '') <> ''"
@@ -58,10 +61,12 @@ CHUNKS: LiteralString = (
 )
 CHUNK_DOCS: LiteralString = "SELECT source, count(DISTINCT doc_id) FROM retrieval_chunk GROUP BY 1"
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
-# 판정과 지표를 한 번에. 순위·구성비는 판정 표에 없고 지표 표에 있다 (024 는 세는 칸을 들지 않는다).
-# 여덟 칸 키 중 여섯을 건다(`quarter`·`topic_key` 는 답의 축이라 남긴다). `content_type`·`panel_role` 을
-# 열어 두면 두 번째 값이 생기는 날 `_judged` 의 topic 키 dict 에서 **어느 판정이 이기는지 비결정**이다 --
-# 오늘 run 이 (long_form, product) 하나뿐이라 안 터질 뿐이다 (같은 계열이 #43).
+# The judgement and the metrics in one. The rank and the share are not in the judgement table but in the
+# metrics table (024 holds no counted column). Six of the eight key columns are bound (`quarter` and
+# `topic_key` are the axes of the answer and are left free). Leaving `content_type` and `panel_role` open
+# makes it **non-deterministic which judgement wins** in the topic-keyed dict of `_judged` the day a second
+# value appears -- it simply does not blow up today because a run is only (long_form, product) (#43 is the
+# same family).
 CELLS: LiteralString = """
 SELECT j.quarter, j.topic_key, j.trend_type, j.gap_pp, m.composition
   FROM topic_quarter_judgement j
@@ -76,12 +81,12 @@ SELECT j.quarter, j.topic_key, j.trend_type, j.gap_pp, m.composition
 
 
 class NoCrosscheck(LookupError):
-    """대조할 것이 아직 없다. 실패가 아니라 막힘이라 CLI 에서는 blocked(2) 다."""
+    """There is nothing to compare yet. Blocked rather than a failure, so in the CLI it is blocked(2)."""
 
 
 @dataclass(frozen=True)
 class Built:
-    """세 답 한 벌. 아무것도 쓰지 않으므로 이것이 산출의 전부다."""
+    """One set of the three answers. Nothing is written, so this is the whole output."""
 
     run_id: int
     snapshot_id: int
@@ -123,7 +128,8 @@ class Built:
 
 @dataclass(frozen=True)
 class Outcome:
-    """`quarter`·`judge`·`sensitivity` 와 같은 세 칸(note·status·violations). `lines` 만 이 명령의 것이다."""
+    """The same three columns as `quarter` · `judge` · `sensitivity` (note · status · violations). Only
+    `lines` belongs to this command."""
 
     built: Built
     lines: tuple[str, ...] = ()
@@ -142,20 +148,23 @@ class Outcome:
 
 
 def _table(schema: str, table: str) -> pgsql.Composed | pgsql.Identifier:
-    """운영은 trend_radar 스키마를, 테스트는 검사용 스키마 하나를 쓴다 (tests/conftest.py)."""
+    """Production uses the trend_radar schema and the tests use a single schema of their own
+    (tests/conftest.py)."""
     if not schema:
         return pgsql.Identifier(table)
     return pgsql.SQL("{}.{}").format(pgsql.Identifier(schema), pgsql.Identifier(table))
 
 
 def sun_params() -> dict[str, Any]:
-    """선케어 모집단 술어의 인자. 홀드아웃(#51)도 이 술어 위에 서야 두 팔의 차이가 표본의 것이지
-    필터의 것이 아니다 -- 두 자리에 적히면 한쪽만 바뀌는 날 모집단이 조용히 갈린다."""
+    """The arguments of the suncare population predicate. The holdout (#51) has to stand on this predicate too
+    for the difference between the two arms to be the sample's rather than the filter's -- written in two
+    places, the population splits quietly the day only one changes."""
     return {"board": SUN_BOARD, "category": list(SUN_CATEGORY)}
 
 
 def commerce_sql(schema: str, statement: str) -> pgsql.Composed:
-    """커머스 원천 넷을 그 스키마로 묶는다. 공개인 것은 홀드아웃이 같은 술어를 다시 적지 않기 위해서다."""
+    """Binds the four commerce sources to that schema. It is public so the holdout does not write the same
+    predicate again."""
     return pgsql.SQL(statement).format(  # pyright: ignore[reportArgumentType]
         rank=_table(schema, "rank_snapshot"),
         review=_table(schema, "review"),
@@ -203,17 +212,21 @@ def _judged(rows: list[tuple], quarter: str) -> dict[str, tuple[int | None, floa
 def _scan(
     conn: psycopg.Connection[Any], dictionary: Any, topic_keys: tuple[str, ...], sun_reviews: set[str]
 ) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]], int]:
-    """청크를 한 번 훑어 (소스 -> 주제 -> 문서 수)·(성분 -> 담론 문서 수)·커머스 모집단 크기를 낸다.
+    """One scan of the chunks produces (source -> topic -> documents) · (ingredient -> discourse documents) ·
+    the size of the commerce population.
 
-    두 답이 같은 훑기를 나눠 쓰는 것은 비용 때문만이 아니다 -- 따로 훑으면 두 답이 다른 시점의 색인을
-    볼 수 있고, 그때 "성분 담론은 있는데 그 주제는 없다" 가 색인 차이인지 사실인지 갈리지 않는다.
+    The two answers share one scan not only for cost -- scanned apart they could see the index at two
+    different moments, and then "there is ingredient discourse but not that topic" cannot be told apart as an
+    index difference or a fact.
 
-    커머스 모집단만 문서 id 집합을 든다. 유튜브 쪽 문서 수는 SQL 이 세는 값이라 여기서 들 필요가 없고,
-    28만 개를 파이썬 집합으로 들면 그 자체가 답보다 큰 비용이다.
+    Only the commerce population holds a set of document ids. The document count on the YouTube side is a
+    value the SQL counts and need not be held here, and holding 280k of them as a Python set costs more than
+    the answer itself.
 
-    **페이지마다 커밋한다.** 주제 매칭이 트랜잭션 밖에서 돌아야 하기 때문이다 -- 한 흐름으로 훑으면 그
-    트랜잭션이 매칭이 끝날 때까지(전량 11.3초) 열려 있는데 `needs_runtime` 의 `transaction_timeout`(60초)은
-    트랜잭션 **총 수명**의 상한이라 코퍼스가 자라면 도중에 끊는다.
+    **It commits per page.** Because the topic matching has to run outside the transaction -- scanned in one
+    stream that transaction stays open until the matching ends (11.3 seconds over the whole set), and
+    `needs_runtime`'s `transaction_timeout` (60 seconds) is a cap on the **total lifetime** of a transaction
+    and cuts it mid-way as the corpus grows.
     """
     mentions: dict[str, dict[str, set[str]]] = {source: {} for source in crosscheck.SOURCES}
     talk: dict[str, dict[str, set[str]]] = {
@@ -228,7 +241,8 @@ def _scan(
             rows = cur.fetchall()
         conn.commit()
         for _chunk_id, source, doc_id, text in rows:
-            # 커머스 쪽 모집단은 랭킹이 정한다 -- 선케어 보드 밖 제품의 리뷰는 이 표에 들지 않는다.
+            # The commerce population is decided by the ranking -- reviews of a product outside the suncare
+            # boards do not enter this table.
             if source == crosscheck.COMMERCE_REVIEW:
                 if doc_id not in sun_reviews:
                     continue
@@ -265,11 +279,11 @@ def load(
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Read:
-    """읽는다. run 을 찾는 길은 `quarter`·`judge`·`sensitivity` 와 같은 하나다.
+    """It reads. The run is found the same one way as `quarter` · `judge` · `sensitivity`.
 
-    `commerce_schema` 는 호출 시점에 푼다 -- `None` 은 "배포 기본값(`trend_radar`)", `""` 는 "search_path
-    가 아는 것" 이다. 인자 기본값으로 박아 두면 그 둘을 부르는 자리가 갈리지 않는다 (`--url` 이 `None`
-    이면 `runtime_url()` 인 것과 같은 규약).
+    `commerce_schema` is resolved at call time -- `None` is "the deployment default (`trend_radar`)" and `""`
+    is "whatever search_path knows". Nailed into an argument default, the two callers would not stay apart
+    (the same convention as `--url` being `runtime_url()` when it is `None`).
     """
     commerce_schema = COMMERCE_SCHEMA if commerce_schema is None else commerce_schema
     dictionary = topic_registry.use_active(conn)
@@ -325,8 +339,9 @@ def load(
     quarters = sorted({str(row[0]) for row in cells})
     quarter = _quarter_of(quarters)
     mentions, talk, commerce_documents = _scan(conn, dictionary, topic_keys, sun_reviews)
-    # 커머스 쪽 문서 수는 색인 전체가 아니라 **랭킹이 정한 모집단**의 크기다. 색인 전체를 실으면
-    # 구성비의 분모와 문서 수가 다른 모집단을 가리키게 된다.
+    # The commerce document count is the size of **the population the ranking decided**, not the whole index.
+    # Carrying the whole index would point the denominator of the share and the document count at different
+    # populations.
     documents[crosscheck.COMMERCE_REVIEW] = commerce_documents
     names = [
         (f"{source}:{product}", name)
@@ -404,7 +419,8 @@ def build(
         run_on_lists=read.run_on_lists,
         names=len({name for _product, name in read.formula}),
     )
-    # 위반 줄은 전부 같은 말을 한다: **이 산출을 믿지 마라.** 어긋남은 여기 들지 않는다.
+    # Every violation line says the same thing: **do not trust this output.** A disagreement is not one of
+    # them.
     violations = [
         f"key_mismatch {audit.key} caught {', '.join(audit.denied)} -- "
         f"{crosscheck.denial_reason(audit.key, audit.denied[0])}"
@@ -434,14 +450,17 @@ def build(
 
 
 HEAD = ("댓글", "자막", "제목", "리뷰")
-# 성분명 하나가 384자인 성분표가 있다(쉼표 없이 공백으로만 나열한 것, 2026-08-27 실측). 감사 줄이 그대로
-# 서면 읽을 수 없으므로 표시에서만 자른다 -- 세는 값은 원문 그대로다. 폭은 글자 수가 아니라 **화면 칸**
-# 으로 센다: 한글이 두 칸이라 `len()` 으로 자르면 34자가 화면 60칸이 되어 그 줄만 표 밖으로 나간다.
+# There is an ingredient list whose single name is 384 characters (written with spaces and no commas,
+# measured 2026-08-27). An audit line carrying it as it is cannot be read, so it is cut for display only --
+# the counted value is the original. The width is counted in **screen cells** rather than characters: a
+# Hangul character is two cells, so cutting by `len()` turns 34 characters into 60 screen cells and only that
+# line runs outside the table.
 NAME_WIDTH = 34
 
 
 def _pad(text: str, width: int, *, right: bool = False) -> str:
-    """한글은 터미널에서 두 칸을 먹는다. 파이썬의 자릿수 맞춤은 그것을 모르므로 여기서 센다."""
+    """Hangul takes two cells in a terminal. Python's field padding does not know that, so it is counted
+    here."""
     space = " " * max(0, width - _width(text))
     return (space + text) if right else (text + space)
 
@@ -464,7 +483,7 @@ def _short(name: str) -> str:
 
 
 def render(built: Built) -> list[str]:
-    """사람이 읽는 답. ydc 세 스크립트의 요약과 같은 문장을 낸다."""
+    """The answer a person reads. It emits the same sentences as the summaries of the three ydc scripts."""
     lines = [
         "구성  같은 사전·같은 단위(문서)·소스마다 자기 분모. 합산하지 않는다 · "
         + " · ".join(

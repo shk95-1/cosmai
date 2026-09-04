@@ -1,18 +1,21 @@
-"""근거 없는 질의를 막는다 (포크 #48, ydc `vector_threshold.py` 의 `df_gate`).
+"""Blocks a query with no grounding (fork #48, `df_gate` in ydc `vector_threshold.py`).
 
-**게이트는 `vector`·`hybrid` 에만 걸린다**(`pipeline.search`). `bm25` 는 df 0 인 낱말을 idf 0 으로
-무시하고 남은 낱말로 답하므로 이 게이트를 걸면 부분 답이 0건이 되는데, 그 손해를 아무도 재지 않았다.
+**The gate applies to `vector` and `hybrid` only** (`pipeline.search`). `bm25` ignores a word with df 0 by
+giving it idf 0 and answers with the words that are left, so the gate would turn a partial answer into 0
+results, and that loss is not worth it.
 
 **코사인 하한선 대신이다.** 계약 §벡터 하한선 이 재기 전에 정한 판정으로 하한선을 버렸다 -- 진짜
 질의(주제 별칭 61개)와 코퍼스에 없는 성분명의 최고 코사인 분포가 갈리지 않아서, 문턱은 무관한 결과를
 통과시키면서 맞는 결과를 자르는 쪽으로만 작동한다. 코사인은 안 갈리지만 **df 는 갈린다.**
 
-규칙 하나다. **길이 `ZERO_DF_MINLEN` 이상인 질의 토큰 중 청크빈도가 0 인 것이 있으면 막는다.**
-코퍼스가 그 이름을 한 번도 말한 적이 없다는 뜻이라, 검색 결과가 나와도 그 이름과 무관한 문서다.
+One rule. **If any query token of length `ZERO_DF_MINLEN` or more has a chunk frequency of 0, it is blocked.**
+That means the corpus has never once said that name, so even when search results come back they have nothing
+to do with that name.
 
-**"df" 라 부르지만 세는 단위는 청크다** -- `Index` 는 청크 단위로 서고(`pipeline.load_index`) 그래서
-`len(postings[term])` 은 문서 수가 아니라 청크 수다. 0 인지 아닌지만 보므로 판정은 같지만,
-`eval.docs_with_tokens` 가 하는 일(문서로 접기)과는 다른 낱말이라 여기서 갈라 적는다.
+**It is called "df" but the unit counted is a chunk** -- `Index` is built per chunk (`pipeline.load_index`),
+so `len(postings[term])` is a chunk count rather than a document count. Only 0-or-not is looked at so the
+decision is the same, but it is a different word from what `eval.docs_with_tokens` does (folding into
+documents), and it is written apart here.
 
 버린 갈래가 둘이고 둘 다 실측으로 **이득 0 · 손해 2** 였다(계약 §벡터 하한선 의 표).
 
@@ -26,8 +29,9 @@
 유일하게 답하는 자리**를 막는다 -- 그 질의들에서 bm25 는 검색 결과가 0건이다. 키릴 표기 하나를 못 막는
 것이 그 대가이고, 고칠 자리는 이 게이트가 아니라 토큰화다.
 
-빈도는 **색인 축**에서 읽는다(`bm25.tokenize` · `Index.postings`). 질의 불용어(포크 #46)를 태우면 그
-목록이 바뀌는 날 이 판정이 함께 흔들린다 -- `eval.docs_with_tokens` 가 같은 이유로 같은 축이다.
+The frequency is read on the **index axis** (`bm25.tokenize` · `Index.postings`). Riding the query stopwords
+(fork #46) would make this decision shake along with that list the day it changes -- `eval.docs_with_tokens`
+takes the same shape for the same reason.
 """
 
 from __future__ import annotations
@@ -36,14 +40,15 @@ from dataclasses import dataclass
 
 from analysis.retrieval import bm25
 
-# 빈도 0 을 "코퍼스에 없는 이름" 의 근거로 볼 최소 토큰 길이. 이름과 값은 ydc `v0.3.0`
-# `vector_threshold.py:33` 과 같고, 그 값이 우리 코퍼스에서도 맞는다는 것은 실측이 정했다.
+# The smallest token length at which frequency 0 counts as evidence of "a name not in the corpus". The name
+# and the value are the same as ydc `v0.3.0` `vector_threshold.py:33`, and that the value also holds for our
+# corpus was settled by measurement
 ZERO_DF_MINLEN = 4
 
 
 @dataclass(frozen=True)
 class Grounding:
-    """질의가 코퍼스에 근거를 갖는가. `note` 는 통과든 차단이든 사람에게 그 이유를 말한다."""
+    """Does the query have grounding in the corpus. `note` tells a person the reason either way."""
 
     ok: bool
     note: str
@@ -51,8 +56,8 @@ class Grounding:
 
 
 def check(query: str, index: bm25.Index) -> Grounding:
-    """이 질의를 검색해도 되는가. 막으면 부르는 쪽이 결과 0건으로 답한다."""
-    # 청크 수다(위 docstring). 그래서 이름도 df 가 아니라 frequency 다.
+    """May this query be searched. Blocked, the caller answers with 0 results."""
+    # It is a chunk count (docstring above). Which is why the name is frequency rather than df.
     frequency = {term: len(index.postings.get(term, ())) for term in set(bm25.tokenize(query))}
     if not frequency:
         return Grounding(True, "질의에 토큰이 없다 -- 빈도로 판정할 수 없어 벡터에 맡긴다")

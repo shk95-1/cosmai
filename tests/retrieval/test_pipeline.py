@@ -1,6 +1,6 @@
-"""청크 적재와 검색. needs 스키마와 원천 스키마가 한 테스트 안에서 같이 서야 하므로
-needs_schema 픽스처가 만든 스키마에 원천 테이블을 직접 세운다 -- 원천 픽스처는 같은
-스키마 이름을 쓰기 때문에 둘을 동시에 요구할 수 없다."""
+"""Chunk loading and search. The needs schema and a source schema have to stand together inside one test, so
+the source tables are built directly in the schema the needs_schema fixture made -- the source fixtures use
+the same schema name, so both cannot be requested at once."""
 
 from __future__ import annotations
 
@@ -17,8 +17,9 @@ from tests.retrieval.conftest import csv_rows, install_topics
 
 pytestmark = pytest.mark.postgres
 
-# `now()` 로 넣은 행은 걸리고 2020년 행은 걸리지 않는 경계. `date.today()` 를 쓰면 컨테이너가
-# UTC 라 한국 시각으로 오전에는 오늘 넣은 행이 어제로 보여 훑기가 통째로 빈다(실측).
+# The boundary where a row inserted with `now()` is caught and a 2020 row is not. With `date.today()` the
+# container is UTC, so in the Korean morning a row inserted today looks like yesterday and the scan comes
+# out empty (measured).
 SINCE = date(2021, 1, 1)
 
 COMMENTS_DDL = """
@@ -43,7 +44,8 @@ def _connect(url: str, schema: str) -> psycopg.Connection:
 
 @pytest.fixture
 def owner(needs_schema: str, _schema_name: str):
-    """원천 테이블을 세우고 쓰는 쪽. 운영에서 수집기가 자기 스키마에 쓰는 자리에 해당한다."""
+    """The side that builds and writes the source tables. It corresponds to where a collector writes to its
+    own schema in production."""
     connection = _connect(needs_schema, _schema_name)
     with connection.cursor() as cur:
         cur.execute(COMMENTS_DDL)
@@ -55,7 +57,7 @@ def owner(needs_schema: str, _schema_name: str):
                 ("v2", "c3", "에칠헥실트리아존 들어간 제품"),
             ],
         )
-        # 운영에서는 db/grants/needs_runtime_reader.sql 이 원천 스키마에 하는 일이다.
+        # In production this is what db/grants/needs_runtime_reader.sql does to the source schema.
         cur.execute("GRANT SELECT ON comments TO needs_runtime")
     connection.commit()
     try:
@@ -66,9 +68,11 @@ def owner(needs_schema: str, _schema_name: str):
 
 @pytest.fixture
 def conn(owner, needs_runtime_url: str):
-    """파이프라인이 도는 롤. 운영과 같은 needs_runtime 이라야 GRANT 누락이 여기서 드러난다.
+    """The role the pipeline runs as. Only needs_runtime, as in production, makes a missing GRANT show up
+    here.
 
-    주제 사전도 여기서 스키마에 세운다 -- 색인은 활성 사전 없이는 서지 않는다(#8)."""
+    The topic dictionary is set up in this schema too -- the index does not stand without an active dictionary
+    (#8)."""
     parsed = make_url(needs_runtime_url)
     connection = psycopg.connect(
         host=parsed.host,
@@ -100,7 +104,7 @@ def test_a_run_loads_one_chunk_per_short_comment(conn, _schema_name):
 def test_a_second_run_writes_nothing_new(conn, _schema_name):
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     again = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
-    # text_md5 가 같으면 UPDATE 를 건너뛴다 -- 안 그러면 재실행마다 30만 행이 죽은 튜플이 된다.
+    # An equal text_md5 skips the UPDATE -- otherwise every rerun turns 300k rows into dead tuples.
     assert again.chunks == 3
     assert again.written == 0
 
@@ -130,15 +134,15 @@ def test_a_long_comment_becomes_several_ordinals(conn, owner, _schema_name):
             "SELECT ordinal FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c4' ORDER BY ordinal"
         )
         ordinals = [r[0] for r in cur.fetchall()]
-    # 계약: 0 부터 연속. 비면 check_rows 가 위반으로 잡는다.
+    # Contract: contiguous from 0. A gap and check_rows catches it as a violation.
     assert len(ordinals) > 1
     assert ordinals == list(range(len(ordinals)))
 
 
 def test_a_shrunken_document_drops_its_stale_ordinals(conn, owner, _schema_name):
-    """원천이 짧아지면 옛 ordinal 이 영구 잔존해 계약("0 부터 연속",
-    contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는
-    check_rows 는 그 문서를 다시 다 봤다고 여기므로 위반을 못 낸다(#17 S9)."""
+    """When the source gets shorter the old ordinal stays forever and the contract ("contiguous from 0",
+    contracts/ddl/needs/020_retrieval_chunk.sql:15) breaks at the table level -- check_rows, which sees only a
+    batch, takes it that it saw that whole document again and reports no violation (#17 S9)."""
     with owner.cursor() as cur:
         cur.execute(
             "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
@@ -161,7 +165,7 @@ def test_a_shrunken_document_drops_its_stale_ordinals(conn, owner, _schema_name)
 
 
 def test_pruning_the_tail_stays_idempotent(conn, owner, _schema_name):
-    # 지울 꼬리가 없는 재실행은 아무 행도 건드리지 않는다 -- 안 그러면 매 실행이 죽은 튜플을 쌓는다.
+    # A rerun with no tail to delete touches no row -- otherwise every run piles up dead tuples.
     with owner.cursor() as cur:
         cur.execute(
             "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
@@ -174,8 +178,9 @@ def test_pruning_the_tail_stays_idempotent(conn, owner, _schema_name):
 
 
 def test_an_emptied_document_loses_all_its_chunks(conn, owner, _schema_name):
-    """본문이 통째로 비면 조각이 0개라 그 문서는 배치에도 꼬리 삭제에도 들어가지 않았다 --
-    S9 가 덮은 것은 "짧아진" 문서뿐이고, 사라진 원천을 가리키는 청크가 검색에 계속 잡혔다(#23)."""
+    """A body gone entirely empty has 0 pieces, so that document entered neither the batch nor the tail
+    delete -- what S9 covered was only "shortened" documents, and chunks pointing at a source that is gone
+    kept coming up in the search (#23)."""
     with owner.cursor() as cur:
         cur.execute(
             "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES ('v7', 'c7', %s, now())",
@@ -191,15 +196,16 @@ def test_an_emptied_document_loses_all_its_chunks(conn, owner, _schema_name):
         cur.execute("SELECT count(*) FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c7'")
         assert cur.fetchone()[0] == 0
         cur.execute("SELECT count(*) FROM retrieval_chunk")
-        assert cur.fetchone()[0] == 3  # 나머지 문서는 그대로다
+        assert cur.fetchone()[0] == 3  # the other documents are unchanged
     assert outcome.emptied > 0
-    # 훑어서 본문이 빈 것을 직접 본 것이지, 안 나와서 사라졌다고 친 것이 아니다.
+    # The empty body was seen directly in the scan; it was not taken as vanished because it did not come up.
     assert outcome.vanished == 0
     assert "본문이 빈 문서의 청크" in outcome.note
 
 
 def test_a_row_that_vanished_from_the_source_loses_its_chunks(conn, owner, _schema_name):
-    # 본문만 비는 것과 행 자체가 사라지는 것은 원천에서 다른 일이다 -- 후자는 훑기에 아예 안 나온다.
+    # A body going empty and the row itself disappearing are different events at the source -- the latter
+    # does not come up in the scan at all.
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     with owner.cursor() as cur:
         cur.execute("DELETE FROM comments WHERE comment_id = 'c1'")
@@ -213,8 +219,8 @@ def test_a_row_that_vanished_from_the_source_loses_its_chunks(conn, owner, _sche
 
 
 def test_an_incremental_run_never_drops_what_it_did_not_scan(conn, owner, _schema_name):
-    """가장 위험한 자리. `--since` 범위 밖 문서는 훑지 않으므로 "안 나왔다"가 "사라졌다"의 근거가
-    될 수 없다 -- 그렇게 읽으면 증분 실행 한 번이 코퍼스 대부분을 지운다."""
+    """The most dangerous place. `--since` does not scan documents outside its range, so "it did not come up"
+    cannot be evidence that "it vanished" -- read that way, one incremental run erases most of the corpus."""
     with owner.cursor() as cur:
         cur.execute(
             "INSERT INTO comments (video_id, comment_id, text, published_at) "
@@ -223,7 +229,7 @@ def test_an_incremental_run_never_drops_what_it_did_not_scan(conn, owner, _schem
     owner.commit()
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,), since=SINCE)
-    assert outcome.documents == 3  # 오래된 댓글은 범위 밖이라 이 실행이 보지 못했다
+    assert outcome.documents == 3  # the old comment is out of range and this run did not see it
     assert (outcome.vanished, outcome.pruned, outcome.emptied) == (0, 0, 0)
     with conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM retrieval_chunk WHERE doc_id = 'youtube_comment:c5'")
@@ -232,7 +238,8 @@ def test_an_incremental_run_never_drops_what_it_did_not_scan(conn, owner, _schem
 
 
 def test_an_incremental_run_still_clears_a_body_it_scanned_as_empty(conn, owner, _schema_name):
-    # 빈 본문의 근거는 훑기 안에 있다 -- 증분이라고 미룰 이유가 없고, 미루면 그 청크가 계속 잡힌다.
+    # The evidence for an empty body is inside the scan -- there is no reason to defer it for being
+    # incremental, and deferred, that chunk keeps coming up.
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     with owner.cursor() as cur:
         cur.execute("UPDATE comments SET text = '' WHERE comment_id = 'c1'")
@@ -245,7 +252,7 @@ def test_an_incremental_run_still_clears_a_body_it_scanned_as_empty(conn, owner,
 
 
 def test_the_cleanup_stays_idempotent(conn, owner, _schema_name):
-    # 지울 것이 없는 재실행이 행을 건드리면 매 실행이 죽은 튜플을 쌓는다(#17 과 같은 자리).
+    # A rerun with nothing to delete touching rows piles up dead tuples on every run (the same place as #17).
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     with owner.cursor() as cur:
         cur.execute("UPDATE comments SET text = '' WHERE comment_id = 'c1'")
@@ -258,8 +265,9 @@ def test_the_cleanup_stays_idempotent(conn, owner, _schema_name):
 
 
 def test_a_source_that_scanned_nothing_is_left_out_of_the_cleanup(conn, owner, _schema_name):
-    """훑어서 문서가 0건인 소스는 "다 사라졌다"와 "못 읽었다"(빈 스키마·안 돈 수집기)가 구분되지
-    않는다. 삭제는 되돌릴 수 없으므로 안전한 쪽으로 기울이되, 건너뛴 사실은 말한다."""
+    """For a source scanned to 0 documents, "they all vanished" and "it could not be read" (an empty schema, a
+    collector that did not run) are indistinguishable. A delete cannot be undone, so it leans to the safe side
+    and says what it skipped."""
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     with owner.cursor() as cur:
         cur.execute("DELETE FROM comments")
@@ -275,8 +283,9 @@ def test_a_source_that_scanned_nothing_is_left_out_of_the_cleanup(conn, owner, _
 def test_a_document_split_across_write_batches_is_not_a_false_violation(
     conn, owner, _schema_name, monkeypatch
 ):
-    """실측(2026-08-25, 운영 381,950청크)에서 58건이 이렇게 났다 -- 자막 한 편이 최대 155조각이라
-    배치 경계에 걸리고, 뒤쪽 배치만 보면 ordinal 이 5 부터 시작하는 것으로 보인다."""
+    """Measured (2026-08-25, 381,950 chunks in production), 58 cases came out this way -- one transcript runs
+    to 155 pieces, so it straddles a batch boundary, and seen from the later batch alone the ordinal looks
+    like it starts at 5."""
     monkeypatch.setattr(pipeline, "WRITE_BATCH", 2)
     with owner.cursor() as cur:
         cur.execute(
@@ -289,10 +298,10 @@ def test_a_document_split_across_write_batches_is_not_a_false_violation(
 
 
 def test_a_chunk_over_the_target_length_is_reported_but_not_blocking(conn, owner, _schema_name, monkeypatch):
-    """split_text 는 500 이하를 보장하므로 자체 생성분에는 안 나지만, 이미 조각난 텍스트를
-    그대로 흘려보내는 경로(외부 청크에 해당)에서는 날 수 있다 -- ydc v0.2.0 에서 27건이
-    `[통과]` 뒤에 묻힌 것이 이 자리다(#2). 600자는 목표(500) 초과지만 하드스톱(1000) 아래라
-    problems 를 건드리지 않는다(M11: 검증기가 500 에서 말하되, 실행 종료 코드는 그대로)."""
+    """split_text guarantees 500 or less, so it does not happen on our own output, but it can on a path that
+    passes already-chunked text straight through (external chunks). In ydc v0.2.0 this is where 27 of them
+    were buried behind `[pass]` (#2). 600 characters is over the target (500) but under the hard stop (1000),
+    so it does not touch problems (M11: the validator speaks at 500 while the run's exit code stays)."""
     monkeypatch.setattr(pipeline, "split_text", lambda text: [text])
     with owner.cursor() as cur:
         cur.execute(
@@ -318,16 +327,18 @@ def test_the_index_is_cached_and_reused(conn, _schema_name, tmp_path):
     first, _ = pipeline.load_index(conn, cache_dir=tmp_path)
     files = list(tmp_path.glob("index-*.pkl"))
     assert len(files) == 1
-    # 두 번째는 피클에서 온다. 같은 답을 줘야 캐시가 정본과 갈리지 않는다.
+    # The second comes from the pickle. It has to give the same answer for the cache not to drift from the
+    # canonical one.
     second, _ = pipeline.load_index(conn, cache_dir=tmp_path)
     assert second.search("백탁") == first.search("백탁")
     assert second.n == first.n
 
 
 def test_the_topic_dictionary_is_not_a_file_in_the_cache_key():
-    """주제 별칭은 Kiwi 사용자 단어이자 expand() 의 확장 목록이라 토큰을 정한다. 그 원천이
-    `needs.aspect_lexicon` 으로 옮겨간 뒤 `topics.py` 를 해시하면 **주제 내용을 안 덮는 해시**가
-    캐시 키에 남아, 사전을 바꿔도 옛 색인이 재사용되는 것을 못 막는다(#17 S3 -> #8)."""
+    """A topic alias is a Kiwi user word and an entry in expand()'s expansion list, so it decides tokens. Once
+    its source moved to `needs.aspect_lexicon`, hashing `topics.py` leaves **a hash that does not cover the
+    topic content** in the cache key and cannot stop an old index being reused after the dictionary changed
+    (#17 S3 -> #8)."""
     from analysis.retrieval import topics
 
     files = {p.resolve() for p in pipeline.TOKENIZER_INPUTS}
@@ -336,8 +347,9 @@ def test_the_topic_dictionary_is_not_a_file_in_the_cache_key():
 
 
 def test_a_changed_topic_dictionary_invalidates_the_index_cache(conn, _schema_name, tmp_path):
-    """완료 기준 3번이 주제에 대해 깨지던 자리다 -- 서명이 활성 사전(버전 + 내용 지문)을 따라가지
-    않으면 별칭을 하나 더한 날 96MB 옛 색인이 그대로 답한다(#8)."""
+    """The place where completion criterion 3 was breaking for topics -- unless the signature follows the
+    active dictionary (version + content fingerprint), the day an alias is added the 96MB old index answers as
+    it is (#8)."""
     from db.lexicon import activate, insert_aspects
 
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
@@ -356,7 +368,8 @@ def test_a_changed_topic_dictionary_invalidates_the_index_cache(conn, _schema_na
 
 
 def test_an_index_cannot_be_built_without_an_active_dictionary(needs_runtime_url, _schema_name):
-    """사전이 안 켜져 있으면 색인은 오류 없이 서고 검색만 조용히 빈다 -- 그 초록이 가장 나쁘다."""
+    """Without the dictionary switched on the index stands with no error and only the search goes quietly
+    empty -- that green is the worst of them."""
     bare = _connect(needs_runtime_url, _schema_name)
     try:
         with pytest.raises(LookupError, match="cosmai lexicon"):
@@ -366,7 +379,8 @@ def test_an_index_cannot_be_built_without_an_active_dictionary(needs_runtime_url
 
 
 def test_a_changed_tokenizer_input_invalidates_the_signature(conn, tmp_path, monkeypatch):
-    # 토큰을 정하는 입력이 바뀌면 같은 본문이 다른 토큰이 된다 -- 서명이 안 움직이면 옛 색인이 산다.
+    # When an input that decides the tokens changes, the same body becomes different tokens -- if the
+    # signature does not move, the old index answers.
     spare = tmp_path / "user_dictionary.tsv"
     spare.write_text("백탁\tNNG\n", encoding="utf-8")
     monkeypatch.setattr(pipeline, "TOKENIZER_INPUTS", (spare,))
@@ -376,7 +390,8 @@ def test_a_changed_tokenizer_input_invalidates_the_signature(conn, tmp_path, mon
 
 
 def test_new_chunks_invalidate_the_cache(conn, owner, _schema_name, tmp_path):
-    # 서명이 안 움직이면 어제 색인으로 오늘 검색하게 되고, 그것은 오류가 아니라 빠진 결과다.
+    # If the signature does not move, today's search runs on yesterday's index, and that is not an error but
+    # missing results.
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     before = pipeline.index_signature(conn, None)
     with owner.cursor() as cur:
@@ -398,15 +413,16 @@ def test_search_finds_the_chunk_that_contains_the_query(conn, _schema_name):
 
 
 def test_search_finds_an_ingredient_by_its_exact_name(conn, _schema_name):
-    # 성분 사전이 안 얹히면 여기가 조용히 빈다 -- 예외는 나지 않는다.
+    # Without the ingredient dictionary on it this goes quietly empty -- no exception is raised.
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     hits = pipeline.search(conn, "에칠헥실트리아존", top=3, cache_dir=None)
     assert [h[0] for h in hits][:1] == ["youtube_comment:c3#0"]
 
 
 def test_search_leaves_no_open_transaction(conn, _schema_name):
-    """마지막 SELECT 뒤에 커밋이 없으면 연결이 idle in transaction 으로 남는다 -- 그 트랜잭션은
-    vacuum 을 막고, 끊는 것은 15초짜리 idle_in_transaction_session_timeout 뿐이다(#18 M13)."""
+    """Without a commit after the last SELECT the connection stays idle in transaction -- that transaction
+    blocks vacuum, and the only thing that cuts it is the 15-second idle_in_transaction_session_timeout
+    (#18 M13)."""
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     assert pipeline.search(conn, "백탁", top=3, cache_dir=None)
     assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
@@ -417,7 +433,8 @@ def test_search_on_an_empty_index_returns_nothing(conn):
 
 
 class _FakeEncoder:
-    """질의를 태우는 자리만 채운다 -- 여기서 재는 것은 순위가 아니라 "저장소가 청크를 덮는가" 다."""
+    """Only the place that burns the query is filled -- what is measured here is not the ranking but "does the
+    store cover the chunks"."""
 
     def encode(self, texts, **_kw):
         return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
@@ -425,7 +442,7 @@ class _FakeEncoder:
 
 @pytest.fixture
 def encoded(conn, _schema_name, monkeypatch, tmp_path):
-    """청크를 적재하고 그 위에 저장소를 굽는다. 이 뒤에 청크가 늘어나는 것이 #12 의 어긋남이다."""
+    """Loads the chunks and bakes a store on top of them. Chunks growing after this is the mismatch of #12."""
     from analysis.retrieval import embed
 
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
@@ -447,31 +464,32 @@ def _one_more_chunk(conn, chunk_id: str = "youtube_comment:c9#0") -> None:
 
 
 def test_vector_search_warns_about_the_chunks_the_store_does_not_cover(encoded, conn, capsys):
-    """재청킹으로 청크가 늘면 BM25 는 캐시 키로 따라가지만 벡터는 오류 없이 옛 코퍼스 위에서만
-    답한다 -- 아무도 검사하지 않으면 그 어긋남은 틀린 순위로도 안 나타난다(#12)."""
+    """When rechunking grows the chunks, BM25 follows through the cache key but the vectors answer, with no
+    error, only on the old corpus -- unchecked, that mismatch does not even show up as a wrong ranking
+    (#12)."""
     _one_more_chunk(conn)
     hits = pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
-    assert hits  # 멈추지 않는다 -- 옛 코퍼스를 일부러 검색하는 정상 용법이 막히면 안 된다
+    assert hits  # it does not stop -- searching an old corpus on purpose is normal and must not be blocked
     err = capsys.readouterr().err
     assert "경고" in err and "1건" in err
 
 
 def test_hybrid_search_warns_on_the_same_drift(encoded, conn, capsys):
-    # hybrid 도 같은 저장소를 쓴다 -- 융합이 어휘 쪽을 섞는다고 빠진 벡터가 채워지지 않는다.
+    # hybrid uses the same store -- fusing in the lexical side does not fill in the missing vectors.
     _one_more_chunk(conn)
     pipeline.ranked_chunks(conn, "백탁", engine="hybrid", store=encoded, cache_dir=None)
     assert "경고" in capsys.readouterr().err
 
 
 def test_a_store_that_covers_the_corpus_says_nothing(encoded, conn, capsys):
-    # 매번 찍히는 경고는 아무도 안 읽는다. 덮고 있으면 조용해야 한다.
+    # A warning printed every time is read by nobody. Covering it, it has to stay quiet.
     pipeline.ranked_chunks(conn, "백탁", engine="vector", store=encoded, cache_dir=None)
     assert capsys.readouterr().err == ""
 
 
 def test_the_same_count_with_changed_text_is_caught_by_chunked_at_max(encoded, conn, owner, _schema_name):
-    """`count` 만으로는 "같은 수, 다른 집합" 을 못 잡는다 -- 매니페스트의 chunked_at_max 가
-    그 자리다(#12 완료 기준 3)."""
+    """`count` alone cannot catch "same number, different set" -- the manifest's chunked_at_max is that place
+    (#12, completion criterion 3)."""
     with owner.cursor() as cur:
         cur.execute("UPDATE comments SET text = '백탁이 아주 심하다' WHERE comment_id = 'c1'")
     owner.commit()
@@ -482,8 +500,8 @@ def test_the_same_count_with_changed_text_is_caught_by_chunked_at_max(encoded, c
 
 
 def test_a_store_made_before_chunked_at_max_still_searches_and_says_so(encoded, conn, capsys):
-    """운영 저장소(2026-08-24 인코딩분)에는 이 키가 없다. 필수 키로 올리면 지금 도는 vector·hybrid
-    검색이 통째로 거부된다 -- 없으면 말해 줄 자리이지 멈출 자리가 아니다."""
+    """A production store (encoded 2026-08-24) does not have this key. Raised to a required key, every vector
+    and hybrid search running today is refused wholesale -- missing it is a place to say so, not to stop."""
     _, _, manifest_path = vectors.paths(encoded)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     del manifest["chunked_at_max"]
@@ -494,10 +512,11 @@ def test_a_store_made_before_chunked_at_max_still_searches_and_says_so(encoded, 
 
 
 def test_the_sample_cap_holds_across_the_whole_run(conn, owner, _schema_name, monkeypatch):
-    """check_rows 의 종류별 3건 상한은 한 배치 안에서만 걸린다 -- 실측 규모(381,950청크 = 382배치)
-    에서 배치마다 리셋되면 한 종류가 천 줄 넘게 쌓여 보고가 다시 읽을 수 없어진다(#18 M12)."""
-    monkeypatch.setattr(pipeline, "split_text", lambda text: [text])  # 하드스톱 초과를 그대로 흘린다
-    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # 문서 하나가 배치 하나
+    """The 3-per-kind cap of check_rows applies only inside one batch -- at the measured scale (381,950 chunks
+    = 382 batches), reset per batch, one kind piles past a thousand lines and the report stops being
+    readable (#18 M12)."""
+    monkeypatch.setattr(pipeline, "split_text", lambda text: [text])  # let a hard-stop overrun through
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # one document is one batch
     with owner.cursor() as cur:
         cur.executemany(
             "INSERT INTO comments (video_id, comment_id, text, published_at) VALUES (%s,%s,%s,now())",
@@ -509,7 +528,7 @@ def test_the_sample_cap_holds_across_the_whole_run(conn, owner, _schema_name, mo
 
 
 def test_the_note_counts_kinds_not_samples(conn, owner, _schema_name, monkeypatch):
-    # 한 종류의 표본 3건이 "3종" 으로 읽히면 위반의 폭을 잘못 본다.
+    # Reading 3 samples of one kind as "3 kinds" gets the breadth of the violation wrong.
     monkeypatch.setattr(pipeline, "split_text", lambda text: [text])
     monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)
     with owner.cursor() as cur:
@@ -524,22 +543,24 @@ def test_the_note_counts_kinds_not_samples(conn, owner, _schema_name, monkeypatc
 
 
 def test_violations_in_two_batches_read_as_two_coordinates(conn, owner, _schema_name, monkeypatch):
-    """행 번호는 한 배치 안에서 세어져 "2행"이 배치마다 다른 문서를 가리켰다. 표본 상한이 실행
-    전체로 이어진 뒤(#18 M12b) 남는 표본이 어느 문서인지 읽히지 않는다 -- 좌표가 모호하면 사람이
-    원본을 찾아가라는 메시지의 목적이 없어진다(#27)."""
-    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # 문서 하나가 배치 하나
+    """The row number was counted inside one batch, so "row 2" pointed at a different document per batch.
+    After the sample cap was carried across the whole run (#18 M12b), which document a remaining sample is
+    cannot be read -- an ambiguous coordinate defeats the purpose of a message telling a person to go find the
+    original (#27)."""
+    monkeypatch.setattr(pipeline, "WRITE_BATCH", 1)  # one document is one batch
     real = pipeline.document_rows
 
     def blank_source(documents):
-        # source 없음은 행 자체의 좌표 말고는 서로를 가를 것이 없는 종류다.
+        # A missing source is the kind where nothing but the row's own coordinate tells them apart.
         for document, rows in real(documents):
             yield document, [row | {"source": ""} for row in rows]
 
     monkeypatch.setattr(pipeline, "document_rows", blank_source)
     outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     missing = [p for p in outcome.problems if p.startswith("source 없음")]
-    # 세 문서가 세 배치로 갈렸고 각각 자기 chunk_id 로 읽힌다 -- 전에는 셋 다 "2행" 이라
-    # 표본 상한을 채우기도 전에 같은 메시지로 접혀 한 건만 남았다.
+    # The three documents were split into three batches and each is read by its own chunk_id -- before, all
+    # three were "row 2" and were folded into the same message before the sample cap was even reached, leaving
+    # only one.
     assert {p.split(": ", 1)[1] for p in missing} == {
         f"{corpus.YOUTUBE_COMMENT}:c{i}#0" for i in (1, 2, 3)
     }, outcome.problems

@@ -1,5 +1,6 @@
-"""기준선 상수는 contracts/interfaces.md 표의 사본이다 — 표를 파싱해 숫자를 대조하고(T10/T11),
-그 숫자로 만들어진 게이트를 기준선을 만든 규칙 자신이 통과하는지까지 본다."""
+"""The baseline constants are a copy of the table in contracts/interfaces.md -- the table is parsed and the
+numbers compared (T10/T11), and the gate those numbers build is checked against the very rules that made the
+baseline."""
 
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ MEASURED = re.compile(r"([^\s|·]+)\s+(\d*\.\d+)")
 
 
 def _written(number: str) -> str:
-    """표에 적힌 자리수까지 비교하려고 글자로 맞춘다 — `.870` 이 `.87` 로 줄면 게이트의 해상도가 바뀐다."""
+    """Compared as text so the decimal places written in the table are compared too -- `.870` shortened to
+    `.87` changes the resolution of the gate."""
     return str(Decimal(number))
 
 
@@ -69,7 +71,8 @@ def _measured_rows() -> dict[str, dict[str, str]]:
 
 
 def test_the_rule_measured_table_and_the_constant_carry_the_same_numbers():
-    """교체 조건은 이 표다 — 상수만 있으면 #3 이 규칙을 고쳤을 때 조용히 낡는다 (수정 라운드 1, I-5)."""
+    """The replacement condition is this table -- constants alone go stale quietly the day #3 changes the
+    rules (fix round 1, I-5)."""
     parsed = _measured_rows()
     assert parsed == {
         "sun holdout 100": {"acc": "0.870", "P:불만": "0.915"},
@@ -86,8 +89,9 @@ def test_every_measured_set_is_one_of_the_contract_baseline_sets():
     assert set(RULE_MEASURED["polarity"]) <= names
 
 
-# 규칙 구현(#3/#4)이 홀드아웃에서 낸 **원값**. 표의 숫자는 이 분수들의 반올림 표기다 — 분수로 적어 두는
-# 것은 다음 사람이 소수 표기만 보고 반올림 인공물을 다시 만들지 않게 하려는 것이다.
+# The **raw values** the rule implementations (#3/#4) produced on the holdout. The numbers in the table are
+# the rounded form of these fractions -- they are written as fractions so the next person does not rebuild a
+# rounding artefact from the decimal form alone.
 RULE_RAW: dict[tuple[str, str], float] = {
     ("sun holdout 100", "acc"): 87 / 100,
     ("sun holdout 100", "P:불만"): 43 / 47,
@@ -101,13 +105,15 @@ KNOWN_MISS = ("P9 blind60_v2", "P:a")
 
 
 def test_every_baseline_check_except_the_known_wish_miss_has_a_measured_rule_number():
-    """RULE_RAW 에서 한 줄이 빠지면 아래 두 검사가 그 칸을 조용히 건너뛴다 — 빠짐을 여기서 잡는다."""
+    """A missing line in RULE_RAW makes the two checks below skip that cell quietly -- the omission is caught
+    here."""
     covered = {(b.name, c.metric) for b in BASELINES for c in b.checks}
     assert covered - set(RULE_RAW) == {KNOWN_MISS}
 
 
 def test_the_rule_that_set_the_baselines_passes_them():
-    """기준선을 만든 구현이 자기 게이트에 지면 그것은 기준이 아니라 반올림 인공물이다."""
+    """If the implementation that made the baseline loses to its own gate, that is a rounding artefact rather
+    than a baseline."""
     missed = [
         f"{b.name}: {c.metric} {RULE_RAW[(b.name, c.metric)]!r} < {c.threshold}"
         for b in BASELINES
@@ -130,14 +136,16 @@ def test_the_rule_measured_bar_is_met_by_the_raw_numbers_it_was_rounded_from():
 def test_the_rule_implementations_pass_check_baseline_on_the_holdout_sets(
     needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch, capsys
 ):
-    """RULE_RAW 는 손으로 옮긴 숫자다 — 실제 구현을 돌려 그 숫자가 아직 현실인지 여기서 못 박는다."""
+    """RULE_RAW is a number copied by hand -- the real implementation is run to pin down that the number is
+    still reality."""
     from analysis import predictors
     from cosmai.cli import main
     from db import seed
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
-    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 — 그 목적지 한 자리를 돌리면
-    # 네 예측자 모두 따라온다 (tests/test_eval_lexicon_url.py 가 그 성질을 지킨다).
+    # The Predictor contract hands over no connection, so the implementation opens the dictionary connection
+    # itself -- turning that one destination brings all four predictors with it
+    # (tests/test_eval_lexicon_url.py keeps that property).
     monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
     gate = ["--url", needs_runtime_url, "--split", "holdout", "--check-baseline"]
     for task in ("polarity", "brand_link", "product_match"):
@@ -148,8 +156,9 @@ def test_the_rule_implementations_pass_check_baseline_on_the_holdout_sets(
 
 
 def test_a_threshold_is_read_at_the_precision_it_is_written_to():
-    """`.67` 은 두 자리다 — 세 자리로 잰 .667 을 미달로 읽으면 게이트가 자기 출처와 어긋난다.
-    반대로 자리를 늘려 적으면 그만큼 촘촘해진다: 완화가 아니라 표기와 대조를 같은 자로 맞추는 것이다."""
+    """`.67` is two places -- reading .667, measured to three, as short of it puts the gate out of step with
+    its own source. Written to more places it is that much finer: this is not a relaxation but matching the
+    notation and the comparison to one ruler."""
     assert meets(2 / 3, Decimal(".67"))
     assert not meets(0.6649, Decimal(".67"))
     assert meets(0.76851, Decimal(".769"))

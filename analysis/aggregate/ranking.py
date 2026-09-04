@@ -1,4 +1,5 @@
-"""랭킹·가격·분모 파생 (contracts/ddl/needs/001·002). trend_radar 읽기 → needs 자연키 upsert."""
+"""Ranking, price and denominator derivations (contracts/ddl/needs/001 · 002). Read trend_radar → upsert on
+the needs natural key."""
 
 from __future__ import annotations
 
@@ -36,9 +37,10 @@ __all__ = [
 ]
 
 KST = timezone(timedelta(hours=9))
-# 창 안에 그 시각의 보드 스냅샷이 있는데 제품이 없으면 '순위 밖'이다 — 결측이 아니라 상수 벌점 (slice-p2).
+# When the window holds a board snapshot for that moment but no product, it is 'out of rank' — a constant
+# penalty, not a missing value (slice-p2).
 ABSENT_RANK = 101
-# collectors/commerce/scope.json 의 oliveyoung.review_low.low_complete_threshold (#7) 와 같은 값이다.
+# The same value as oliveyoung.review_low.low_complete_threshold in collectors/commerce/scope.json (#7).
 LOW_COMPLETE_THRESHOLD = 150
 SCOPE_JSON = Path(__file__).resolve().parents[2] / "collectors" / "commerce" / "scope.json"
 WINDOWS = (6, 12, 24)
@@ -118,13 +120,15 @@ class PriceEventRow:
 
 
 def scope_threshold() -> int:
-    """상수가 수집기의 표본 설계와 갈라지면 low_complete 가 조용히 틀린다 (entrypoints.md)."""
+    """When the constant diverges from the collector's sampling design, low_complete is silently wrong
+    (entrypoints.md)."""
     return int(json.loads(SCOPE_JSON.read_text())["oliveyoung"]["review_low"]["low_complete_threshold"])
 
 
 def rank_daily(snapshots: Iterable[RankSnapshot], version: str) -> list[RankDailyRow]:
     rows = list(snapshots)
-    # 보드가 그 날 몇 번 찍혔는지는 제품과 무관하다 — 미등장을 세려면 분모가 먼저 필요하다 (A16).
+    # How often a board was captured that day has nothing to do with the product — counting an absence needs
+    # the denominator first (A16).
     board_times: dict[tuple[str, str, str, date], set[datetime]] = defaultdict(set)
     seen: dict[tuple[str, str, str, str, date], list[RankSnapshot]] = defaultdict(list)
     for s in rows:
@@ -256,7 +260,7 @@ def denominators(
                 category=categories.get((source, product)) or None,
                 site_review_count=stat.review_count if stat else None,
                 low_collected=low,
-                # interfaces.md: 표본이 상한에 닿지 않았거나 3★ 이 섞였으면 ≤2★ 는 전수다.
+                # interfaces.md: if the sample did not reach the cap or a 3★ is mixed in, ≤2★ is complete.
                 low_complete=low < LOW_COMPLETE_THRESHOLD or any(r == 3 for r in ratings),
                 site_low_est=round((stat.review_count or 0) * site_low_pct) if stat else None,
             )
@@ -298,8 +302,9 @@ SET category = EXCLUDED.category, site_review_count = EXCLUDED.site_review_count
 """
 
 
-# 런타임 롤의 제한은 statement 단위로 잡힌 값이고(db/bootstrap.sql) 60s transaction_timeout 을 넘기면
-# 부분 진행 없이 전부 롤백된다 — 17,948행 rank_daily 를 한 트랜잭션에 담지 않는다.
+# The runtime role's limit is set per statement (db/bootstrap.sql), and going past the 60s
+# transaction_timeout rolls everything back with no partial progress — 17,948 rank_daily rows do not go into
+# one transaction.
 WRITE_BATCH = 2000
 
 
@@ -312,7 +317,8 @@ def _write(conn: psycopg.Connection[Any], statement: LiteralString, rows: list[t
 
 
 def _from(schema: str, table: str) -> pgsql.Identifier:
-    """운영은 trend_radar 스키마를, 테스트는 검사용 스키마 하나를 쓴다 (tests/conftest.py)."""
+    """Production uses the trend_radar schema and the tests use a single schema of their own
+    (tests/conftest.py)."""
     return pgsql.Identifier(schema, table) if schema else pgsql.Identifier(table)
 
 
@@ -352,7 +358,8 @@ def run_ranking(
 
     conn.commit()
 
-    # 리뷰 행에는 카테고리가 없다 — 사이트가 그 제품을 걸어 둔 보드 이름이 유일한 출처다 (B6).
+    # A review row has no category — the name of the board the site hung that product on is the only source
+    # (B6).
     categories = latest_categories(snapshots)
     daily = rank_daily(snapshots, version)
     events = price_events(prices, snapshots, version)

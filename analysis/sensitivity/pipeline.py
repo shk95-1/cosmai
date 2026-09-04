@@ -1,17 +1,21 @@
-"""`needs.corpus_*` + 그 run 의 `metrics_topic_quarter` → 민감도·후향 검증 셋 (포크 #41).
+"""`needs.corpus_*` + the `metrics_topic_quarter` of that run -> the three sensitivity and backtest
+measurements (fork #41).
 
-**이 파이프라인은 아무것도 쓰지 않는다.** 세 측정이 다루는 것은 반사실 모집단(43채널 전부 · 과거
-분기까지만 · 광고 영상을 뺀)이라, 그 행에는 022 의 `panel_role` 어휘에도 `analysis_run` 에도 자리가
-없다. 자리를 만드는 것은 추가만의 범위가 아니라 저장된 비율의 뜻을 바꾸는 일이므로, 산출은 표가 아니라
-답이다 -- 그리고 읽기 전용이라 운영 DB 에 그대로 돌릴 수 있다.
+**This pipeline writes nothing.** What the three measurements handle is a counterfactual population (all 43
+channels · only up to a past quarter · with the ad videos removed), so those rows have no place in the
+`panel_role` vocabulary of 022 nor in `analysis_run`. Making a place is not within the additive scope but a
+change to the meaning of a stored ratio, so the output is an answer rather than a table -- and being
+read-only it can be run against the production DB as it is.
 
-기저는 다시 센다. 저장된 행을 그대로 쓰지 않는 것은, 세 측정의 차이가 뜻을 가지려면 기저와 변형이
-**같은 코드 경로**에서 나와야 하기 때문이다. 대신 다시 센 기저가 저장된 행과 같은지 되묻고, 다르면
-그 사실이 먼저 나온다 (`baseline_drift`) -- 그때 이 명령의 모든 차이는 뜻이 없다.
+The baseline is recounted. The stored rows are not used as they are because, for the differences between the
+three measurements to mean anything, the baseline and the variants have to come out of **the same code
+path**. Instead the recounted baseline is asked back against the stored rows, and if they differ that fact
+comes out first (`baseline_drift`) -- at which point every difference this command reports means nothing.
 
-읽기는 문서 단위다(광고 문구·운영자 해시·홍보 링크는 접힌 셈에서 되살릴 수 없다). 그래서
-`analysis/trend/pipeline.py` 와 달리 GROUP BY 로 접지 않고, 대신 읽자마자 `conn.commit()` 한다 --
-`needs_runtime` 의 `idle_in_transaction_session_timeout` 은 15초다.
+Reads are per document (the ad wording, the operator hash and the promotional links cannot be recovered from
+a folded count). So unlike `analysis/trend/pipeline.py` it does not fold with GROUP BY, and instead calls
+`conn.commit()` as soon as it has read -- `needs_runtime`'s `idle_in_transaction_session_timeout` is 15
+seconds.
 """
 
 from __future__ import annotations
@@ -51,7 +55,8 @@ from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
 
 COMMENT_SOURCE = "youtube_comment"
-# 패널을 역할로 좁히지 않는다 -- 좁히면 43채널 전부인 반사실이 설 자리가 없다. 역할은 행에 실려 온다.
+# The panel is not narrowed by role -- narrowed, the all-43-channel counterfactual has nowhere to stand. The
+# role arrives on the row.
 POPULATION: LiteralString = f"""
 WITH panel AS (
   SELECT channel_id, panel_role FROM panel_channel
@@ -80,8 +85,9 @@ SELECT v.source_item_id, m.topic_id
   JOIN corpus_mention m ON m.snapshot_id = %(snapshot)s AND m.doc_id = v.doc_id AND m.trend_use
 """
 )
-# 댓글 술어는 `content_type = 'comment'` 다 -- `source` 하나만 걸면 023 의 부분 인덱스를 못 타고 26만
-# 행을 훑는다(#5·#40 실측). 두 술어를 나란히 두는 것은 계약이 그 둘의 동치를 보장하지 않기 때문이다.
+# The comment predicate is `content_type = 'comment'` -- with `source` alone it does not ride the partial
+# index of 023 and scans 260k rows (measured in #5 and #40). The two predicates sit side by side because the
+# contract does not guarantee they are equivalent.
 COMMENTS: LiteralString = (
     POPULATION
     + f"""
@@ -106,11 +112,12 @@ SELECT c.parent_item_id, md5(c.text) AS digest, m.topic_id
 )  # noqa: S608
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
 
-DECLARED = "True"  # 코퍼스가 파이썬 bool 을 문자열로 실은 값이다 (source_metadata)
+DECLARED = "True"  # the corpus carried a Python bool as a string (source_metadata)
 
 
 class NoBaseline(LookupError):
-    """비교할 기저가 없다. 민감도는 "그 결론이 흔들리는가"라, 결론이 아직 없으면 물을 것이 없다."""
+    """There is no baseline to compare against. Sensitivity asks "does that conclusion wobble", so with no
+    conclusion yet there is nothing to ask."""
 
 
 @dataclass(frozen=True)
@@ -124,7 +131,7 @@ class Loaded:
 
 @dataclass(frozen=True)
 class Built:
-    """세 답 한 벌. 아무것도 쓰지 않으므로 이것이 산출의 전부다."""
+    """One set of the three answers. Nothing is written, so this is the whole output."""
 
     run_id: int
     snapshot_id: int
@@ -144,7 +151,7 @@ class Built:
 
     @property
     def status(self) -> str:
-        """`ok` = 답이 계산됐다. **흔들림은 여기 실리지 않는다.**
+        """`ok` = the answers were computed. **A wobble is not carried here.**
 
         흔들린다는 것은 이 명령이 답하려고 존재하는 발견이지 실행의 실패가 아니고, 그 신호는 `note` 의
         `panel_flips=`·`ad_flips=` 와 표가 이미 싣는다. 종료 코드에 얹으면 두 가지가 깨진다 -- 전량에서
@@ -167,8 +174,9 @@ class Built:
 
 @dataclass(frozen=True)
 class Outcome:
-    """`trend quarter`·`trend judge` 의 결과와 같은 세 칸(note·status·violations)을 낸다 -- CLI 가 세
-    명령을 한 자리에서 다루려면 답의 모양이 같아야 한다. `lines` 만 이 명령의 것이다."""
+    """It emits the same three columns as the results of `trend quarter` and `trend judge`
+    (note · status · violations) -- for the CLI to handle the three commands in one place the answers have to
+    have the same shape. Only `lines` belongs to this command."""
 
     built: Built
     lines: tuple[str, ...] = ()
@@ -219,7 +227,8 @@ def _videos(cur: psycopg.Cursor[Any], params: dict[str, Any]) -> list[Video]:
 
 
 def _reactions(cur: psycopg.Cursor[Any], params: dict[str, Any]) -> list[Reaction]:
-    """(부모 영상, 텍스트) 묶음으로 접는다. 접는 자리가 제외의 단위이자 ydc 의 `(video_id, text)` 키다."""
+    """Folded into (parent video, text) groups. Where it folds is the unit of exclusion and the
+    `(video_id, text)` key of ydc."""
     cur.execute(COMMENT_TOPICS, dict(params))
     topics: dict[tuple[str, str], set[str]] = {}
     for parent, digest, topic in cur.fetchall():
@@ -233,8 +242,9 @@ def _reactions(cur: psycopg.Cursor[Any], params: dict[str, Any]) -> list[Reactio
         key = (parent, digest)
         documents[key] = documents.get(key, 0) + 1
         counted[key] = counted.get(key, 0) + int(bool(is_counted))
-        # 운영자 댓글이 먼저다 -- 판매 링크를 단 운영자 고정 댓글이 두 계열에 겹쳐 들면 제외 집합의
-        # 합이 각 집합의 합과 달라진다 (ydc 의 elif 와 같은 자리).
+        # Operator comments come first -- an operator's pinned comment carrying a sales link falling into
+        # both series would make the sum of the exclusion sets differ from the sum of each set (the same place
+        # as ydc's elif).
         owner = author == sensitivity.creator_hash(channel_id)
         creator[key] = creator.get(key, False) or owner
         promo[key] = promo.get(key, False) or (not owner and bool(sensitivity.PROMO_RE.search(text or "")))
@@ -270,7 +280,8 @@ def load(
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Loaded:
-    """읽고, 트랜잭션을 닫는다. run 을 찾는 길은 `trend quarter`·`trend judge` 와 같은 하나다."""
+    """It reads and closes the transaction. The run is found the same one way as `trend quarter` and
+    `trend judge`."""
     with conn.cursor() as cur:
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
@@ -302,13 +313,14 @@ def load(
     )
 
 
-# 후향 검증이라 부르려면 사례가 둘은 있어야 한다 (기획안 08.25 "후향 검증 사례 2건 이상"). ydc
-# `backtest.py` 도 이 하나에만 종료 코드 1 을 쓴다.
+# To call it a backtest there have to be at least two cases (the 08.25 plan, "two or more backtest cases").
+# ydc `backtest.py` also uses exit code 1 on this one alone.
 MIN_CASES = 2
 
 
 def _drift(base: list[MetricsTopicQuarterRow], stored: tuple[MetricsTopicQuarterRow, ...]) -> list[str]:
-    """다시 센 기저가 저장된 행과 같은가. 다르면 세 측정의 차이는 전부 뜻을 잃는다."""
+    """Is the recounted baseline the same as the stored rows. If it differs, every difference of the three
+    measurements loses its meaning."""
     key = lambda row: (row.source, row.topic_key, row.quarter)  # noqa: E731
     mine = {key(row): row for row in base}
     theirs = {key(row): row for row in stored}
@@ -332,7 +344,7 @@ def build(
     read = load(conn, scope=scope, snapshot_id=snapshot_id, panel_version=panel_version)
     base = sensitivity.metrics(read.population, read.topics, read.frame)
     back = sensitivity.backtest(read.population, read.topics, read.frame, base)
-    # 위반 줄은 전부 같은 말을 한다: **이 산출을 믿지 마라.** 흔들림은 여기 들지 않는다.
+    # Every violation line says the same thing: **do not trust this output.** A wobble is not one of them.
     violations = _drift(base, read.stored)
     if len(back.rows) < MIN_CASES:
         violations.append(
@@ -351,7 +363,7 @@ def build(
 
 
 def render(built: Built) -> list[str]:
-    """사람이 읽는 답. ydc 세 스크립트의 요약과 같은 문장을 낸다."""
+    """The answer a person reads. It emits the same sentences as the summaries of the three ydc scripts."""
     ad = built.ad
     lines = [
         f"패널  {len(built.panel)}셀(주제 × 소스) 중 판정 대상 "

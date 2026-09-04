@@ -1,9 +1,10 @@
-"""주제 사전의 **얼어붙은 사본**(2026-08-26, 이식 직전 `analysis/retrieval/topics.py` 그대로).
+"""A **frozen copy** of the topic dictionary (2026-08-26, `analysis/retrieval/topics.py` as it stood just
+before the move).
 
-여기 있는 리터럴과 `match_topics` 는 손대지 않는다. 주제 확장의 원천이 상수에서
-`needs.aspect_lexicon` 으로 옮겨간 뒤에도 **같은 15개 주제·같은 별칭·같은 매칭 결과**라는 것을
-`test_topics.py` 가 이 사본과 맞대어 증명한다 -- `contracts/interfaces.md` 의 검색 실측 표
-(mode x engine 여섯 줄)가 이 동등성 위에 서 있기 때문이다.
+The literals here and `match_topics` are not touched. That there are **the same 15 topics, the same aliases
+and the same match results** after the source of topic expansion moved from constants to
+`needs.aspect_lexicon` is proved by `test_topics.py` against this copy -- because the measured search table
+of `contracts/interfaces.md` (six mode x engine lines) stands on that equivalence.
 """
 
 from __future__ import annotations
@@ -176,7 +177,7 @@ TOPICS: list[dict] = [
 
 
 def _latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
-    """영문 토큰은 앞뒤가 영문자가 아닐 때만 매칭한다 (coupang -> PA 오탐 16% 차단)."""
+    """A latin token matches only when neither side is a letter (blocks the coupang -> PA 16% false hits)."""
     if not terms:
         return None
     alts = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
@@ -187,7 +188,7 @@ _LATIN = {t["topic"]: _latin_pattern(t["latin"]) for t in TOPICS}
 
 
 def match_topics(text: str, *, include_excluded: bool = False) -> list[str]:
-    """텍스트에 등장하는 주제 목록. 한 문서가 여러 주제에 걸릴 수 있다."""
+    """The topics that appear in the text. One document can hit several topics."""
     if not text:
         return []
     lowered = text.lower()

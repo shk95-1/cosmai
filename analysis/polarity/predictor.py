@@ -1,7 +1,8 @@
-"""`cosmai eval polarity --impl llm:<model>` 의 팩터리. registry.load_implementations() 가 꽂는다.
+"""Factory for `cosmai eval polarity --impl llm:<model>`. registry.load_implementations() plugs it in.
 
-한 실행이 두 사전(suncare-v2.2 · p1-v2.2)을 만나므로 시스템 프롬프트도 둘이다 — 사전별로 묶어
-배치를 따로 낸다. 그래야 400문장이 프롬프트 캐시 두 개만 만들고, 섞여서 캐시가 매번 깨지지 않는다.
+One run meets two lexicons (suncare-v2.2 · p1-v2.2), so there are two system prompts as well — the rows are
+grouped per lexicon and sent as separate batches. That way 400 sentences build only two prompt caches instead
+of breaking the cache on every mixed call.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ def _predictor(model: str) -> Predictor:
                     found = llm.classify_many([items[i] for i in indexes], aspects[ruleset])
                     for i, result in zip(indexes, found, strict=True):
                         out[i] = result.polarity
-            # 예산 차단은 blocked(exit 2)여야 한다 — cli 의 그 경로가 LookupError 를 잡는다.
+            # A budget stop has to be blocked (exit 2) — that path in the cli catches LookupError.
             except BudgetExceeded as blocked:
                 raise LookupError(str(blocked)) from blocked
         return out
@@ -64,15 +65,16 @@ def _ollama_predictor(model: str) -> Predictor:
         items, by_ruleset = _rows_by_ruleset(rows)
         out = [""] * len(rows)
         with connect_lexicon() as conn:
-            # ollama 에는 배치 API 가 없어 문장마다 왕복한다(수 초, ollama.py:103) — 트랜잭션을 쥔 채
-            # 그동안 기다리면 needs_runtime 의 idle_in_transaction_session_timeout(15s, db/bootstrap.sql)
-            # 을 첫 문장에서 넘긴다(실측: IdleInTransactionSessionTimeout). llm 경로는 pricing.reserve()
-            # 의 커밋이 부수적으로 이걸 막아 왔다 — reserve() 없는 무료 경로는 스스로 커밋해야 한다.
+            # ollama has no batch API, so every sentence is a round trip (seconds, ollama.py:103) — waiting
+            # that out while holding a transaction passes needs_runtime's
+            # idle_in_transaction_session_timeout (15s, db/bootstrap.sql) on the first sentence (measured:
+            # IdleInTransactionSessionTimeout). On the llm path the commit in pricing.reserve() has been
+            # stopping this as a side effect — the free path, which has no reserve(), must commit for itself.
             conn.autocommit = True
             aspects = {name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)}
             ollama = OllamaPolarity(model, UsageLedger(conn))
-            # 무료 경로는 reserve() 를 거치지 않으니 BudgetExceeded 가 날 수 없다 — llm 팩터리와
-            # 달리 그 분기가 아예 없다(있으면 예산 보호가 있는 것처럼 오독된다).
+            # The free path never goes through reserve(), so BudgetExceeded cannot be raised — unlike the llm
+            # factory there is no such branch at all (one would be misread as budget protection in place).
             for ruleset, indexes in by_ruleset.items():
                 found = ollama.classify_many([items[i] for i in indexes], aspects[ruleset])
                 for i, result in zip(indexes, found, strict=True):
@@ -88,23 +90,27 @@ def build_ollama(model: str) -> Implementation:
     return Implementation(version=OllamaPolarity(model).version, predict=_ollama_predictor(model))
 
 
-# 왕복 고장의 표면 그대로다: urlopen 은 URLError·TimeoutError(둘 다 OSError)를 내고, getresponse() 는
-# RemoteDisconnected·IncompleteRead 를 그대로 흘린다. 여기서 넓히면 안 된다 — AttributeError 같은
-# 프로그래밍 실수까지 삼키면 run 이 조용히 failed 로 닫히고 버그가 note 한 줄로 숨는다.
+# Exactly the surface of a broken round trip: urlopen raises URLError · TimeoutError (both OSError) and
+# getresponse() lets RemoteDisconnected · IncompleteRead through as they are. It must not be widened here —
+# swallowing a programming mistake such as AttributeError as well closes the run quietly as failed and hides
+# the bug in a single note line.
 UNREACHABLE = (OSError, http.client.HTTPException)
 
 
 class _Blocking:
-    """이 판정자를 멈추게 하는 것들을 단계가 잡는 예외로 바꾼다 — 예산 하드스톱(BudgetExceeded,
-    RuntimeError)도 왕복 실패(URLError 등, OSError)도 analysis/pipeline.py 의 FAILURES 밖이라, 그대로
-    새면 단계가 트레이스백으로 끝나고 polarity 가 연 run 이 'running' 인 채 영원히 열려 있다."""
+    """Turns whatever stops this classifier into an exception the stage catches — neither the budget hard stop
+    (BudgetExceeded, RuntimeError) nor a failed round trip (URLError and friends, OSError) is inside
+    FAILURES in
+    analysis/pipeline.py, so letting either through ends the stage in a traceback and leaves the run polarity
+    opened sitting at 'running' forever."""
 
     def __init__(self, inner: Polarity) -> None:
         self.inner = inner
         self.version = inner.version
 
     def preflight(self) -> None:
-        # 단계가 이 이름으로 찾는다 — 감싼 판정자에 프로브가 있어도 여기서 안 내보내면 못 본다.
+        # The stage looks it up by this name — a probe on the wrapped classifier is invisible unless it is
+        # exposed here.
         probe = getattr(self.inner, "preflight", None)
         if probe is None:
             return
@@ -129,8 +135,8 @@ class _Blocking:
 
 @contextmanager
 def open_llm(model: str) -> Iterator[Polarity]:
-    """`analyze --impl llm:<model>`. 원장은 단계의 커넥션이 아니라 자기 것을 쓴다 — reserve() 의 커밋이
-    단계의 미완성 upsert 를 같이 커밋해 버리면 페이지 단위 재개가 깨진다."""
+    """`analyze --impl llm:<model>`. The ledger uses its own connection, not the stage's — if the commit in
+    reserve() committed the stage's half-finished upsert with it, resuming page by page would break."""
     if not model:
         raise LookupError("--impl llm:<model> needs a model, e.g. llm:claude-sonnet-5")
     with connect_lexicon() as conn:
@@ -141,9 +147,9 @@ def open_llm(model: str) -> Iterator[Polarity]:
 
 @contextmanager
 def open_ollama(model: str) -> Iterator[Polarity]:
-    """`analyze --impl ollama:<model>`. autocommit 은 "왕복을 트랜잭션 안에서 기다리지 않는다" 를 이
-    커넥션의 성질로 만든다 — 오늘 안전한 이유는 record() 가 스스로 커밋한다는 우연뿐이고, eval 이 같은
-    자리에서 죽은 것(f8aff76)은 사전 로드가 트랜잭션 하나를 열어 둔 채였기 때문이다."""
+    """`analyze --impl ollama:<model>`. autocommit makes "a round trip is not waited out inside a transaction"
+    a property of this connection — the only reason it is safe today is the accident that record() commits for
+    itself, and eval died in the same place (f8aff76) because loading the lexicon held a transaction open."""
     if not model:
         raise LookupError("--impl ollama:<model> needs a model, e.g. ollama:gemma4:latest")
     with connect_lexicon() as conn:
@@ -152,7 +158,7 @@ def open_ollama(model: str) -> Iterator[Polarity]:
 
 
 def register_implementations() -> None:
-    """registry.load_implementations() 만이 등록을 일으킨다 (#99)."""
+    """Only registry.load_implementations() causes registration (#99)."""
     register_factory("polarity", IMPL_NAME, build, paid=True, classifier=open_llm)
-    # 무료·로컬이라 --split 강제(cli.is_paid)에 걸리지 않는다 — 홀드아웃을 첫 호출로 바로 돌려도 된다.
+    # Free and local, so the forced --split (cli.is_paid) does not apply — a holdout can run on call one.
     register_factory("polarity", OLLAMA_IMPL_NAME, build_ollama, paid=False, classifier=open_ollama)

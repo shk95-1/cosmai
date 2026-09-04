@@ -1,6 +1,7 @@
-"""파일 벡터 저장소와 RRF. 모델은 부르지 않는다 -- 여기서 재는 것은 "세 파일이 한 벌로 남는가 ·
-어긋나면 멈추는가 · 코사인 순서로 나오는가" 다. 어긋난 벡터는 오류가 아니라 틀린 순위로
-나타나므로, 읽는 쪽에서 세우지 않으면 아무도 못 알아챈다."""
+"""The file vector store and RRF. The model is not called -- what is measured here is "do the three files
+stay as one set · does it stop when they are out of step · does it come out in cosine order". A vector out of
+step shows up as a wrong ranking rather than an error, so unless the reading side pins it down nobody
+notices."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ STAMP_TOOL = Path(__file__).resolve().parents[2] / "tool" / "show-vector-stamp"
 
 
 def _unit(index: int) -> list[float]:
-    """축 하나만 1 인 단위 벡터. 직교하면 코사인 거리가 정확히 1 이 된다."""
+    """A unit vector with 1 on a single axis. Orthogonal, the cosine distance is exactly 1."""
     vector = [0.0] * vectors.DIM
     vector[index] = 1.0
     return vector
@@ -44,14 +45,15 @@ def store(tmp_path):
 
 
 def test_rrf_prefers_what_both_rankings_agree_on():
-    # 양쪽에서 2위인 b 가, 한쪽에서만 1위이고 다른 쪽에는 없는 a 를 이겨야 융합이 의미가 있다.
+    # b, second on both sides, has to beat a, which is first on one side and absent from the other, for the
+    # fusion to mean anything.
     fused = vectors.rrf(["a", "b", "c"], ["x", "b", "y"])
     assert fused[0] == "b"
     assert fused.index("b") < fused.index("a")
 
 
 def test_rrf_is_deterministic_on_ties():
-    # dict 순서에 기대면 같은 입력이 실행마다 다른 답을 준다.
+    # Leaning on dict order makes the same input give a different answer from run to run.
     assert vectors.rrf(["a", "b"], ["a", "b"]) == vectors.rrf(["a", "b"], ["a", "b"])
     assert vectors.rrf(["a"], ["b"]) == ["a", "b"]
 
@@ -74,7 +76,8 @@ def test_saving_refuses_when_rows_and_matrix_disagree(tmp_path):
 
 
 def test_loading_refuses_when_the_id_count_drifts(store):
-    # 행렬과 id 는 순서로만 대응한다. 길이가 어긋나면 검색 결과로는 못 알아챈다.
+    # The matrix and the ids correspond by order alone. A length mismatch cannot be noticed from a search
+    # result.
     _, ids, _ = vectors.paths(store)
     ids.write_text("chunk_id,source\nd1#0,youtube_comment\n", encoding="utf-8")
     with pytest.raises(vectors.StoreMissing):
@@ -82,7 +85,8 @@ def test_loading_refuses_when_the_id_count_drifts(store):
 
 
 def test_loading_refuses_vectors_that_are_not_normalised(store):
-    # 정규화가 안 됐으면 내적을 코사인으로 쓸 수 없다. 조용히 틀린 순위를 내느니 멈춘다.
+    # Without normalization the inner product cannot serve as cosine. Rather than emit a quietly wrong
+    # ranking, it stops.
     _, _, manifest = vectors.paths(store)
     manifest.write_text(json.dumps({**MANIFEST, "l2_normalized": False, "count": 3}), encoding="utf-8")
     with pytest.raises(vectors.StoreMissing):
@@ -91,8 +95,8 @@ def test_loading_refuses_vectors_that_are_not_normalised(store):
 
 @pytest.mark.parametrize("key", ["model", "query_prefix", "l2_normalized", "dim"])
 def test_loading_refuses_a_manifest_that_is_missing_a_key(store, key):
-    """빠진 키를 코드의 기본값으로 메우면 다른 모델·다른 프리픽스로 구운 저장소가 조용히
-    통과하고, 그 어긋남은 오류가 아니라 틀린 순위로만 나타난다(#17 S7)."""
+    """Filling a missing key from a code default lets a store baked with another model or another prefix pass
+    quietly, and that mismatch shows up as a wrong ranking rather than an error (#17 S7)."""
     _, _, manifest = vectors.paths(store)
     kept = {k: v for k, v in {**MANIFEST, "count": 3}.items() if k != key}
     manifest.write_text(json.dumps(kept), encoding="utf-8")
@@ -102,7 +106,7 @@ def test_loading_refuses_a_manifest_that_is_missing_a_key(store, key):
 
 
 def test_loading_refuses_a_manifest_whose_dim_is_not_the_matrix_width(store):
-    # dim 은 적어 두기만 하고 아무도 대조하지 않았다 -- 768 이라 적힌 512 차원 행렬이 통과했다.
+    # dim was only written down and nobody compared it -- a 512-dimension matrix labelled 768 passed.
     _, _, manifest = vectors.paths(store)
     manifest.write_text(json.dumps({**MANIFEST, "dim": 512, "count": 3}), encoding="utf-8")
     with pytest.raises(vectors.StoreMissing) as refused:
@@ -111,7 +115,7 @@ def test_loading_refuses_a_manifest_whose_dim_is_not_the_matrix_width(store):
 
 
 def test_loading_refuses_vectors_whose_rows_are_not_unit_length(tmp_path):
-    # l2_normalized 는 embed.py 가 적은 리터럴 True 라 스스로를 증명하지 못한다 -- 재서 본다(#17 S8).
+    # l2_normalized is a literal True embed.py wrote and cannot prove itself -- it is measured (#17 S8).
     out = tmp_path / "raw"
     matrix = np.zeros((2, vectors.DIM), dtype="float32")
     matrix[:, 0] = 3.0
@@ -122,14 +126,16 @@ def test_loading_refuses_vectors_whose_rows_are_not_unit_length(tmp_path):
 
 
 def test_the_model_name_comes_from_the_manifest_alone(store):
-    # 매니페스트가 정본이다. 코드 상수로 되돌아가면 다른 모델로 구운 벡터에 e5 질의를 태운다.
+    # The manifest is canonical. Falling back to code constants burns an e5 query on vectors baked with
+    # another model.
     _, _, manifest = vectors.paths(store)
     manifest.write_text(json.dumps({**MANIFEST, "model": "other/model", "count": 3}), encoding="utf-8")
     assert vectors.load(store).model == "other/model"
 
 
 def test_the_query_prefix_comes_from_the_manifest(store):
-    # 문서에 붙인 것과 짝이 맞아야 한다. 코드의 기본값을 다시 쓰면 정본이 두 벌이 된다.
+    # It has to pair with what was attached to the documents. Using the code default again makes two
+    # canonical copies.
     _, _, manifest = vectors.paths(store)
     manifest.write_text(json.dumps({**MANIFEST, "query_prefix": "q: ", "count": 3}), encoding="utf-8")
     assert vectors.load(store).query_prefix == "q: "
@@ -144,7 +150,7 @@ def test_search_returns_the_nearest_chunk_first(store):
     hits = vectors.search(vectors.load(store), _unit(1), top=3)
     assert hits[0][0] == "d2#0"
     assert hits[0][1] == pytest.approx(0.0, abs=1e-6)
-    # 직교하는 축은 코사인 거리 1 이다.
+    # An orthogonal axis is at cosine distance 1.
     assert all(h[1] == pytest.approx(1.0, abs=1e-6) for h in hits[1:])
 
 
@@ -160,14 +166,16 @@ def test_search_on_an_empty_store_returns_nothing(tmp_path):
 
 
 def test_chunked_at_max_is_not_a_required_key(store):
-    """운영 저장소(2026-08-24 인코딩분)에는 이 키가 없다 -- 필수 키로 올리면 지금 도는 vector·hybrid
-    검색이 통째로 StoreMissing 이 된다. 커버리지 가드가 없으면 없다고 말할 자리다(#12)."""
+    """A production store (encoded 2026-08-24) does not have this key -- raised to a required key, every
+    vector and hybrid search running today becomes StoreMissing. It is a place to say it is missing when the
+    coverage guard has none (#12)."""
     assert "chunked_at_max" not in vectors.REQUIRED_MANIFEST
     assert vectors.load(store).manifest.get("chunked_at_max") is None
 
 
 def test_the_stamp_says_what_the_store_was_baked_from(store):
-    """커버리지 경고와 축이 다르다 -- 그쪽은 어긋날 때만 할 말이 있고, 판본은 언제나 있다(#49)."""
+    """A different axis from the coverage warning -- that one has something to say only when out of step, and
+    the revision always has (#49)."""
     stamped = vectors.load(store).stamp
     assert f"model={vectors.MODEL}" in stamped
     assert "revision=revsha" in stamped
@@ -175,8 +183,8 @@ def test_the_stamp_says_what_the_store_was_baked_from(store):
 
 
 def test_the_stamp_tells_an_absent_key_from_a_null_value(store):
-    """키가 없는 것(그 키 이전에 구운 저장소)과 None 인 것(빈 코퍼스를 태웠다)은 다른 사실이다 --
-    한 낱말로 뭉치면 운영 저장소가 빈 코퍼스로 읽힌다."""
+    """A missing key (a store baked before that key) and None (an empty corpus was burned) are different
+    facts -- lumped into one word, a production store reads as an empty corpus."""
     assert "chunked_at_max=키없음" in vectors.manifest_stamp(MANIFEST, 3)
     assert "chunked_at_max=null" in vectors.manifest_stamp({**MANIFEST, "chunked_at_max": None}, 3)
     stamped = vectors.manifest_stamp({**MANIFEST, "chunked_at_max": "2026-08-19T09:00:00+09:00"}, 3)
@@ -184,19 +192,22 @@ def test_the_stamp_tells_an_absent_key_from_a_null_value(store):
 
 
 def test_a_store_without_a_model_has_no_version_to_stamp():
-    """`model=` 만 적힌 판본은 판본이 아니다 -- 그런 행을 내느니 멈춘다(`load` 도 같은 자리에서 거절한다)."""
+    """A revision with only `model=` is not a revision -- rather than emit such a row it stops (`load` refuses
+    in the same place)."""
     with pytest.raises(ValueError):
         vectors.manifest_stamp({**MANIFEST, "model": "  "}, 3)
 
 
 def test_a_count_nobody_measured_is_not_written_as_zero():
-    """개수를 모르는 매니페스트에 0 을 적으면 "빈 저장소" 로 읽힌다 -- 모르는 것은 모른다고 적는다."""
+    """Writing 0 into a manifest whose count is unknown reads as "an empty store" -- what is unknown is
+    written as unknown."""
     assert "count" not in MANIFEST
     assert "vectors=미상" in vectors.manifest_stamp(MANIFEST)
 
 
 def _stamp_tool(*args: str) -> subprocess.CompletedProcess[str]:
-    # 없는 파일을 부른 파이썬도 2 로 나간다 -- 도구가 있는지 먼저 보지 않으면 막힘과 구분되지 않는다.
+    # Python called on a missing file also exits 2 -- without checking the tool is there first, that is
+    # indistinguishable from blocked.
     assert STAMP_TOOL.exists(), STAMP_TOOL
     return subprocess.run(
         [sys.executable, str(STAMP_TOOL), *args], capture_output=True, text=True, check=False
@@ -204,7 +215,8 @@ def _stamp_tool(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_the_tool_prints_the_stamp_without_opening_the_matrix(store):
-    """1.2GB 를 열어야 판본을 알 수 있으면 계약에 적힌 판본을 아무도 다시 확인하지 않는다."""
+    """If the revision can only be known by opening 1.2GB, nobody ever re-checks the revision the contract
+    writes down."""
     matrix, _, _ = vectors.paths(store)
     matrix.unlink()
     done = _stamp_tool(str(store))
@@ -213,7 +225,7 @@ def test_the_tool_prints_the_stamp_without_opening_the_matrix(store):
 
 
 def test_the_tool_counts_the_ids_instead_of_quoting_the_manifest(store):
-    """매니페스트의 `count` 를 그대로 옮기면 그 수는 잰 것이 아니라 저장소가 주장하는 것이다."""
+    """Copy the manifest's `count` as it is and that number is not measured but what the store claims."""
     _, _, manifest = vectors.paths(store)
     manifest.write_text(json.dumps({**MANIFEST, "count": 300_000}), encoding="utf-8")
     done = _stamp_tool(str(store))

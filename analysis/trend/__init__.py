@@ -1,9 +1,9 @@
 """분기 시계열의 다섯 수식 — `contracts/interfaces.md` §수식 이 정본이다 (포크 #5).
 
-규칙의 출처는 ydc `analysis/slices/ydc/trend.py`(v0.2)이고, 슬라이스를 import 하지 않고 옮겨 적었다
-(`analysis/retrieval/` 가 쓴 방식). 이 모듈은 DB 를 모른다: 셈(`Counts`·`VideoPanel`)을 받아 행을
-만들 뿐이라, 같은 수식을 코퍼스 표에서도 원 수집 CSV 에서도 같은 코드로 돌릴 수 있다 — 골든 대조가
-성립하는 자리가 그것이다.
+The rules come from ydc `analysis/slices/ydc/trend.py` (v0.2) and were written over rather than imported
+from the slice (the way `analysis/retrieval/` did it). This module knows no DB: it takes counts (`Counts` ·
+`VideoPanel`) and produces rows, so the same formulas run on the corpus tables and on the raw collection CSV
+with the same code -- that is where the golden comparison stands.
 """
 
 from __future__ import annotations
@@ -15,11 +15,14 @@ from dataclasses import dataclass
 
 from analysis.types import MetricsTopicQuarterRow
 
-# ydc 가 모든 행에 다는 정의 판본. 값이 아니라 정의(TEAM_DECISIONS_v0.2)의 이름이라 그대로 옮긴다.
+# The definition revision ydc puts on every row. It is the name of a definition (TEAM_DECISIONS_v0.2) rather
+# than a value, so it is carried over as it is.
 METRIC_VERSION = "v0.2"
-# 표본 게이트이자 velocity 의 조건. 022 의 CHECK 이 이 수와 sample_ok 의 등식을 강제한다.
+# The sample gate and the condition of velocity. The CHECK of 022 enforces the equality of this number with
+# sample_ok.
 MIN_MENTIONS = 5
-# persistence 의 창 길이 상한. 전역 최신 4분기가 아니라 그 행의 분기에서 끝나는 4개다.
+# The cap on the window length of persistence. Not the four newest quarters globally but the four ending at
+# that row's quarter.
 WINDOW_QUARTERS = 4
 # 저장 자리수 (interfaces.md §수식 "저장 자리수", 022 의 numeric(p,s)).
 DIGITS: Mapping[str, int] = {
@@ -33,20 +36,22 @@ DIGITS: Mapping[str, int] = {
 
 @dataclass(frozen=True)
 class Counts:
-    """한 `source` 의 셈. 다섯 수식은 이 넷 위에서만 돌아, 셈이 어디서 왔는지와 무관하다."""
+    """The counts of one `source`. The five formulas run on these four alone, independent of where the counts
+    came from."""
 
-    documents: Mapping[str, int]  # 분기 -> 그 분기 그 모집단의 문서 수
-    mentions: Mapping[tuple[str, str], int]  # (주제, 분기) -> 언급 수
-    raw: Mapping[tuple[str, str], int]  # (주제, 분기) -> 중복 포함 언급 수 (unique_ratio 의 분모)
-    channels: Mapping[tuple[str, str], int]  # (주제, 분기) -> 그 source 에서 그 주제를 낸 채널 수
+    documents: Mapping[str, int]  # quarter -> documents of that population in that quarter
+    mentions: Mapping[tuple[str, str], int]  # (topic, quarter) -> mentions
+    raw: Mapping[tuple[str, str], int]  # (topic, quarter) -> mentions with duplicates (unique_ratio denom)
+    channels: Mapping[tuple[str, str], int]  # (topic, quarter) -> channels producing that topic on the source
 
 
 @dataclass(frozen=True)
 class VideoPanel:
-    """영상에서 나온 채널 분포. `channel_diffusion` 은 두 항 다 이것을 써서 source 에 의존하지 않는다."""
+    """The channel distribution coming from the videos. `channel_diffusion` uses it for both terms and so
+    does not depend on the source."""
 
-    denom_channels: Mapping[str, int]  # 분기 -> 그 분기에 산출에 든 패널 채널 수
-    per_channel: Mapping[tuple[str, str], Mapping[str, int]]  # (주제, 분기) -> {채널: 영상 수}
+    denom_channels: Mapping[str, int]  # quarter -> panel channels that entered the output in that quarter
+    per_channel: Mapping[tuple[str, str], Mapping[str, int]]  # (topic, quarter) -> {channel: videos}
 
 
 def previous_year_quarter(quarter: str) -> str:
@@ -55,7 +60,8 @@ def previous_year_quarter(quarter: str) -> str:
 
 
 def entropy(counts: Sequence[int]) -> float:
-    """정규화 섀넌 엔트로피 — 한 채널이 독점하면 0, 그 채널들에 고르게 퍼지면 1이다."""
+    """Normalized Shannon entropy -- 0 when one channel monopolizes it, 1 when it is spread evenly over
+    those channels."""
     total = sum(counts)
     if total == 0 or len(counts) <= 1:
         return 0.0
@@ -64,7 +70,8 @@ def entropy(counts: Sequence[int]) -> float:
 
 
 def diffusion(distribution: Mapping[str, int], denom_channels: int) -> float:
-    """넓이(몇 채널이 냈나)와 고름(한 채널이 독점하나)을 반씩 섞는다 — 둘 중 하나만으로는 갈린다."""
+    """Half breadth (how many channels produced it) and half evenness (does one channel monopolize it) --
+    either one on its own splits them apart."""
     breadth = len(distribution) / denom_channels if denom_channels else 0.0
     return 0.5 * breadth + 0.5 * entropy(list(distribution.values()))
 
@@ -81,16 +88,19 @@ def rows(
     panel_version: int,
     panel_role: str,
 ) -> list[MetricsTopicQuarterRow]:
-    """조밀한 격자 한 벌: trend_use 주제 × 그 산출에 존재하는 분기 전부, 언급 0 셀도 행이다."""
+    """One dense grid: trend_use topics x every quarter present in that output; a cell with 0 mentions is a
+    row too."""
     quarters = sorted(counts.documents)
-    # 분모는 그 분기 trend_use 주제들의 언급 합이다 — 이 합이 닫혀야 저장된 표의 GROUP BY 가 맞는다.
+    # The denominator is the sum of mentions of that quarter's trend_use topics -- that sum has to close for
+    # the GROUP BY of the stored table to hold.
     totals = {q: sum(counts.mentions.get((t, q), 0) for t in topics) for q in quarters}
     composition = {
         (t, q): (counts.mentions.get((t, q), 0) / totals[q] if totals[q] else 0.0)
         for t in topics
         for q in quarters
     }
-    # 기준선의 "전 기간"은 언급 0 분기도 포함한다 — 0 셀을 빼면 모든 주제의 persistence 가 올라간다.
+    # The "whole period" of the baseline includes quarters with 0 mentions -- drop the 0 cells and the
+    # persistence of every topic rises.
     baseline = {t: statistics.median([composition[(t, q)] for q in quarters]) for t in topics}
 
     built: list[MetricsTopicQuarterRow] = []
@@ -140,7 +150,7 @@ def _velocity(
     composition: Mapping[tuple[str, str], float],
     totals: Mapping[str, int],
 ) -> float | None:
-    """표본 부족을 급등으로 읽지 않으려고 양쪽 분기가 다 게이트를 넘을 때만 낸다."""
+    """Emitted only when both quarters clear the gate, so a thin sample is not read as a surge."""
     previous = previous_year_quarter(quarter)
     if previous not in totals:
         return None

@@ -1,5 +1,6 @@
-"""미포착 표현 목록. 사전의 천장을 사람이 보게 만드는 두 표다 (포크 #8, 슬라이스
-`ydc/unmatched_terms.py` · `ydc/ingredient_terms.py` 의 규칙을 옮겼다).
+"""The list of unmatched expressions. The two tables that put the ceiling of the dictionary in front of a
+person (fork #8; the rules of the slices `ydc/unmatched_terms.py` · `ydc/ingredient_terms.py` were carried
+over).
 
   미포착 표현   활성 사전이 **못 잡는** 고빈도 명사. 사전 밖의 성분·제형은 검색에도 트렌드 판정에도
                 아예 관측되지 않고, 그 사실은 어떤 점수로도 나타나지 않는다.
@@ -27,8 +28,8 @@
 9개 중 자리가 있는 것은 셋뿐이고 **5종은 아직 미이전**이라, 옮기기 전에 슬라이스를 지우면 그 표면형이
 사라진다(포크 #56 · 포크 #9 가 그 이슈에 blockedBy).
 
-**자동으로 사전에 넣지 않는다.** 표는 사람이 읽고 `dict/topics_v1.csv` 를 고치는 재료이며, 그
-CSV 가 DB 로 가는 길은 `cosmai lexicon load/diff/activate` 하나다.
+**Nothing goes into the dictionary automatically.** The tables are material a person reads before editing
+`dict/topics_v1.csv`, and the one path from that CSV into the DB is `cosmai lexicon load/diff/activate`.
 """
 
 from __future__ import annotations
@@ -42,11 +43,11 @@ from typing import Any, LiteralString
 from analysis.retrieval import bm25, topics
 from analysis.retrieval.topics import DICTIONARY_CSV
 
-NOUN_TAGS = frozenset({"NNG", "NNP", "SL"})  # 일반명사·고유명사·외국어
+NOUN_TAGS = frozenset({"NNG", "NNP", "SL"})  # common noun · proper noun · foreign word
 MIN_LENGTH = 2  # 한 글자 명사는 잡음이 많다 (거·것·수)
-MIN_DOCS = 5  # ydc 표본 기준과 같게 둔다
-MIN_LIFT = 2.0  # 대조군 대비 이 배수 미만은 일반어로 본다
-PAGE = 2000  # eval.GOLD_PAGE 와 같은 규모
+MIN_DOCS = 5  # kept the same as the ydc sample criterion
+MIN_LIFT = 2.0  # below this multiple against the control group it counts as a general word
+PAGE = 2000  # the same scale as eval.GOLD_PAGE
 
 SCAN_SQL: LiteralString = """
 SELECT chunk_id, doc_id, text FROM retrieval_chunk
@@ -78,8 +79,8 @@ class Ingredient:
 
 @dataclass(frozen=True)
 class Scan:
-    """한 번의 코퍼스 훑기가 낸 것 전부. 두 표가 같은 훑기를 나눠 쓴다 -- 38만 청크를 두 번 도는
-    것은 형태소 분석을 두 번 하는 것이다."""
+    """Everything one pass over the corpus produced. The two tables share one pass -- walking 380k chunks
+    twice means running the morphological analysis twice."""
 
     dictionary: topics.Topics
     documents: Counter = field(default_factory=Counter)
@@ -93,16 +94,18 @@ def is_word(noun: str) -> bool:
 
 
 def ingredient_words() -> frozenset[str]:
-    """Kiwi 성분 사전의 표면형. 미포착 명사가 여기 있으면 사전 추가 최우선 후보다."""
+    """The surface forms of the Kiwi ingredient dictionary. An unmatched noun found here is the first
+    candidate to add."""
     path = bm25.DICT_DIR / "ingredient_dictionary.tsv"
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     return frozenset(line.split("\t")[0] for line in lines if line and not line.startswith("#"))
 
 
 def _documents(conn: Any, sources: tuple[str, ...] | None) -> Iterator[tuple[str, str]]:
-    """(doc_id, 문서 본문). 청크를 문서로 접어 한 페이지씩 키셋으로 훑는다(eval.gold_from_chunks 와
-    같은 방식) -- 서버 커서로 38만 행을 한 흐름에 훑으면 그 트랜잭션이 형태소 분석이 끝날 때까지
-    열려 있고, needs_runtime 의 transaction_timeout(60초)은 트랜잭션 총 수명의 상한이다."""
+    """(doc_id, document body). Chunks are folded into documents and walked one keyset page at a time (the
+    same way as eval.gold_from_chunks) -- walking 380k rows in one stream with a server cursor holds that
+    transaction open until the morphological analysis ends, and needs_runtime's transaction_timeout (60s) is
+    a cap on the total lifetime of a transaction."""
     narrow, params = "", ()
     if sources:
         narrow, params = " AND source = ANY(%s)", (list(sources),)
@@ -112,8 +115,9 @@ def _documents(conn: Any, sources: tuple[str, ...] | None) -> Iterator[tuple[str
             cur.execute(SCAN_SQL.format(source=narrow), (cursor, *params, PAGE))  # noqa: S608
             rows = cur.fetchall()
         conn.commit()
-        # chunk_id 는 `<doc_id>#<ordinal>` 이고 '#' 는 어떤 영숫자보다 작아, 한 문서의 조각은
-        # chunk_id 순서에서 반드시 붙어 있다 -- 그래서 문서 하나만 물고 흘려보낼 수 있다.
+        # chunk_id is `<doc_id>#<ordinal>` and '#' sorts below any alphanumeric, so the pieces of one
+        # document are necessarily adjacent in chunk_id order -- which is why only one document is held at a
+        # time and the rest is streamed out.
         for _chunk_id, doc_id, text in rows:
             if doc_id != current:
                 if current is not None:
@@ -128,8 +132,9 @@ def _documents(conn: Any, sources: tuple[str, ...] | None) -> Iterator[tuple[str
 
 
 def _term_patterns(dictionary: topics.Topics) -> list[tuple[str, str, str, str, re.Pattern | None]]:
-    """(topic, topic_type, term, term_kind, 경계 패턴). 라틴 표기는 경계 매칭이다 -- 부분문자열로
-    세면 PA 가 coupang 에 걸려 오탐 16% 가 그대로 표에 실린다(ydc 실측)."""
+    """(topic, topic_type, term, term_kind, boundary pattern). A latin spelling is matched on boundaries --
+    counted as a substring, PA hits coupang and 16% false positives go straight into the table (measured on
+    ydc)."""
     out = []
     for entry in dictionary.entries:
         seen: dict[str, str] = {}
@@ -143,7 +148,8 @@ def _term_patterns(dictionary: topics.Topics) -> list[tuple[str, str, str, str, 
 
 
 def scan(conn: Any, sources: tuple[str, ...] | None = None) -> Scan:
-    """코퍼스를 한 번 훑어 두 표의 재료를 만든다. 사전은 이 DB 의 활성 버전이다."""
+    """One pass over the corpus produces the material for both tables. The dictionary is the active version
+    of this DB."""
     dictionary = topics.use_active(conn)
     found = Scan(dictionary=dictionary)
     terms = _term_patterns(dictionary)
@@ -162,7 +168,8 @@ def scan(conn: Any, sources: tuple[str, ...] | None = None) -> Scan:
 
 
 def _nouns(text: str, dictionary: topics.Topics, covered: dict[str, bool]) -> set[str]:
-    """문서 하나가 내놓는 미포착 명사. 문서 안에서 몇 번 나오든 한 번 센다 (등장 문서 수 우선).
+    """The unmatched nouns one document produces. However often it occurs inside the document it is counted
+    once (document count first).
 
     분석기는 색인이 쓰는 바로 그 Kiwi 다 -- 사전 없이 돌리면 `백탁` 이 `백`+`탁` 으로 쪼개져
     목록이 통째로 쓸모없어진다."""
@@ -176,7 +183,8 @@ def _nouns(text: str, dictionary: topics.Topics, covered: dict[str, bool]) -> se
             continue
         hit = covered.get(noun)
         if hit is None:
-            # 판정은 본 파이프라인과 같은 함수로 한다 -- 별칭 규칙을 두 벌 두면 그 둘이 갈린다.
+            # The decision is made with the same function as the main pipeline -- two copies of the alias
+            # rule would drift apart.
             hit = bool(topics.match_topics(noun, include_excluded=True, dictionary=dictionary))
             covered[noun] = hit
         if not hit:
@@ -185,7 +193,7 @@ def _nouns(text: str, dictionary: topics.Topics, covered: dict[str, bool]) -> se
 
 
 def unmatched(scanned: Scan, *, top: int | None = None) -> list[Unmatched]:
-    """미포착 명사를 대조군 대비 비중 순으로."""
+    """The unmatched nouns by their share against the control group."""
     topical = max(1, scanned.documents[TOPICAL])
     control = max(1, scanned.documents[CONTROL])
     known = ingredient_words()
@@ -194,8 +202,8 @@ def unmatched(scanned: Scan, *, top: int | None = None) -> list[Unmatched]:
         if docs < MIN_DOCS:
             continue
         other = scanned.nouns[CONTROL][term]
-        # 대조군에 한 번도 없으면 분모가 0 이라 lift 가 무한이 된다. 1건으로 두어(라플라스 보정)
-        # 순위가 폭발하지 않게 한다.
+        # With nothing in the control group the denominator is 0 and lift becomes infinite. It is held at 1
+        # (Laplace correction) so the ranking does not explode.
         lift = (docs / topical) / (max(other, 1) / control)
         if lift < MIN_LIFT:
             continue
@@ -205,7 +213,7 @@ def unmatched(scanned: Scan, *, top: int | None = None) -> list[Unmatched]:
 
 
 def ingredients(scanned: Scan) -> list[Ingredient]:
-    """사전의 표기마다 한 행. 0건도 남긴다."""
+    """One row per spelling in the dictionary. A count of 0 is kept as well."""
     rows = [
         Ingredient(topic, topic_type, term, kind, scanned.term_docs[(topic, term)])
         for topic, topic_type, term, kind, _pattern in _term_patterns(scanned.dictionary)
@@ -215,8 +223,9 @@ def ingredients(scanned: Scan) -> list[Ingredient]:
 
 
 def render(scanned: Scan, *, top: int = 40) -> str:
-    """사람이 읽는 두 표. 파일로 떨구지 않는다 -- 이 목록은 매일 자라는 코퍼스의 스냅숏이라
-    레포에 두면 낡고, 무엇보다 **사전으로 오해된다**. 남기고 싶으면 리다이렉트한다."""
+    """The two tables a person reads. Nothing is dropped to a file -- this list is a snapshot of a corpus
+    that grows daily, so in the repo it goes stale and, above all, **it is mistaken for a dictionary**. Anyone
+    who wants to keep it redirects it."""
     candidates = unmatched(scanned)
     lines = [
         f"문서 {scanned.documents[TOPICAL]:,}건에 주제가 걸렸고 {scanned.documents[CONTROL]:,}건은 안 걸렸다"

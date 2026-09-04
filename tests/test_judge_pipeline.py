@@ -1,11 +1,12 @@
-"""판정의 적재: 그 run 을 찾고, 통째로 다시 쓰고, 저장된 행에 되묻는다 (포크 #40).
+"""Loading the judgement: it finds that run, rewrites it wholesale and asks the stored rows back (fork #40).
 
-지표(#5)와 갈리는 자리 셋을 본다. ① 판정은 코퍼스를 읽지 않는다 -- 입력이 `metrics_topic_quarter`
-하나라 이 파이프라인의 질의는 그 표만 만진다. ② 판정 행은 지표 행 없이 설 수 없다(024 의 FK).
-③ 지표 행이 아직 없는 것은 실패가 아니라 막힘이다.
+Three places where it parts from the metrics (#5) are looked at. 1. The judgement does not read the corpus --
+its one input is `metrics_topic_quarter`, so this pipeline's queries touch only that table. 2. A judgement
+row cannot stand without a metric row (the FK of 024). 3. A metric row not being there yet is blocked rather
+than a failure.
 
-DB 를 타지만 코퍼스는 타지 않으므로 지표 행을 손으로 심는다 -- 그래야 격자 하나를 정확히 통제할 수
-있고, 골든(`tests/test_judge_golden.py`)이 실제 코퍼스 쪽을 진다.
+It goes through the DB but not the corpus, so metric rows are planted by hand -- that way one grid can be
+controlled exactly, and the golden set (`tests/test_judge_golden.py`) carries the real-corpus side.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ VIEWS = (
     ROOT / "db" / "views" / "metrics_topic_quarter_violation.sql",
     ROOT / "db" / "views" / "topic_quarter_judgement_violation.sql",
 )
-SNAPSHOT = 7  # 코퍼스를 타지 않으므로 스냅샷 번호는 run 의 note 를 만드는 데만 쓰인다.
+SNAPSHOT = 7  # the corpus is not touched, so the snapshot number only builds the run's note.
 QUARTERS = ("2024Q1", "2024Q2", "2024Q3", "2024Q4")
 TOPICS = ("백탁", "발림성")
 OWNER = text("SET ROLE needs_owner")
@@ -66,7 +67,7 @@ def graded(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
 
 
 def _plant(conn: psycopg.Connection[Any]) -> int:
-    """`cosmai trend quarter` 가 낸 것과 같은 모양의 조밀한 격자 하나."""
+    """One dense grid of the same shape `cosmai trend quarter` emits."""
     with conn.cursor() as cur:
         cur.execute(OPEN_RUN, ('{"metric": "v0.2"}', note_of(SCOPE, SNAPSHOT, 1)))
         found = cur.fetchone()
@@ -81,7 +82,8 @@ def _plant(conn: psycopg.Connection[Any]) -> int:
 
 
 def test_a_run_without_metric_rows_is_blocked_not_failed(graded: str):
-    """지표를 아직 안 세운 것이라 0행을 조용히 쓰면 안 된다 -- 빈 표도 불변식은 참이다."""
+    """The metrics are simply not counted yet, so 0 rows must not be written quietly -- the invariants are
+    true of an empty table too."""
     with connect(graded) as conn, pytest.raises(NoJudgement):
         build(conn, snapshot_id=SNAPSHOT, panel_version=1)
 
@@ -97,7 +99,7 @@ def test_the_judgement_lands_on_the_run_the_metrics_already_have(graded: str):
 
 
 def test_running_twice_rewrites_the_same_rows(graded: str):
-    """부분 갱신이 아니라 통째로 다시 쓰는 것이 지표 행과의 1:1 을 지키는 방법이다."""
+    """Rewriting wholesale rather than updating in part is how the 1:1 with the metric rows is kept."""
     with connect(graded) as conn:
         _plant(conn)
         first = run(conn, snapshot_id=SNAPSHOT, panel_version=1)
@@ -109,7 +111,8 @@ def test_running_twice_rewrites_the_same_rows(graded: str):
 
 
 def test_a_judgement_row_cannot_stand_without_its_metric_row(graded: str):
-    """ "파생"의 기계적 형태가 이 FK 다 -- 문장으로만 있으면 지표 없는 판정이 조용히 산다."""
+    """This FK is the mechanical form of "derived" -- as a sentence alone, a judgement with no metric lives
+    quietly."""
     with connect(graded) as conn:
         _plant(conn)
         run(conn, snapshot_id=SNAPSHOT, panel_version=1)
@@ -123,7 +126,8 @@ def test_a_judgement_row_cannot_stand_without_its_metric_row(graded: str):
 
 
 def test_the_view_notices_a_metric_row_nobody_judged(graded: str):
-    """FK 는 그 반대를 못 지킨다 -- 판정이 일부에서 빠지면 유형 분포가 남은 것들의 분포가 된다."""
+    """The FK cannot keep the converse -- if the judgement is missing on some, the type distribution becomes
+    the distribution of what is left."""
     with connect(graded) as conn:
         _plant(conn)
         run(conn, snapshot_id=SNAPSHOT, panel_version=1)
@@ -139,7 +143,7 @@ def test_the_view_notices_two_source_rows_that_disagree_about_the_gap(graded: st
         _plant(conn)
         run(conn, snapshot_id=SNAPSHOT, panel_version=1)
         with conn.cursor() as cur:
-            # 한 source 만 있는 격자이므로 gap_pp 는 NULL 이어야 한다 -- 값을 넣는 것이 곧 위반이다.
+            # It is a grid with one source, so gap_pp has to be NULL -- putting a value in is the violation.
             cur.execute("UPDATE topic_quarter_judgement SET gap_pp = 1.0 WHERE quarter = %s", (QUARTERS[0],))
             cur.execute("SELECT violation, count(*) FROM topic_quarter_judgement_violation GROUP BY 1")
             assert cur.fetchall() == [("gap_pp_disagrees", 2)]
@@ -147,7 +151,7 @@ def test_the_view_notices_two_source_rows_that_disagree_about_the_gap(graded: st
 
 
 def test_the_ddl_refuses_a_judged_flag_that_disagrees_with_the_type(graded: str):
-    """이름만 있고 정의가 없으면 행이 자기 이름과 다른 것을 말한다."""
+    """A name with no definition makes a row say something other than its own name."""
     with connect(graded) as conn:
         _plant(conn)
         run(conn, snapshot_id=SNAPSHOT, panel_version=1)
@@ -160,7 +164,7 @@ def test_the_ddl_refuses_a_judged_flag_that_disagrees_with_the_type(graded: str)
 
 
 def test_the_ddl_refuses_a_score_on_a_cell_that_was_not_judged(graded: str):
-    """점수는 그 집합 안에서 정규화된 눈금이라, 집합 밖의 행에 있으면 다른 눈금이 섞인 것이다."""
+    """The score is a scale normalized inside that set, so on a row outside the set it is two scales mixed."""
     with connect(graded) as conn:
         _plant(conn)
         run(conn, snapshot_id=SNAPSHOT, panel_version=1)
@@ -170,8 +174,9 @@ def test_the_ddl_refuses_a_score_on_a_cell_that_was_not_judged(graded: str):
 
 
 def test_the_pipeline_reads_no_table_but_the_quarter_metrics(graded: str):
-    """판정이 코퍼스를 다시 훑으면 그 순간 이 단계는 지표 계산의 사본이 된다 (#5 의 인덱스 함정도 그
-    질의에 붙는다). 이 유닛의 SELECT 는 지표 표 하나여야 한다."""
+    """The moment the judgement rescans the corpus, this stage becomes a copy of the metric computation (and
+    the index trap of #5 comes with that query). The SELECTs of this unit have to be the metrics table
+    alone."""
     from analysis.judge import pipeline
 
     assert "corpus_document" not in pipeline.SELECT_METRICS
