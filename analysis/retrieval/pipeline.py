@@ -469,6 +469,9 @@ def search(
     sources: tuple[str, ...] | None = None,
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
+    index: Index | None = None,
+    vector_store=None,
+    encoder=None,
 ) -> list[tuple[str, float, str]]:
     """(chunk_id, 점수, 본문). `vector`·`hybrid` 는 근거 없는 질의를 순위를 매기기 전에 막는다.
 
@@ -482,7 +485,10 @@ def search(
     (`index_signature` 가 `sources` 를 문다). 벡터 파일이 없는 호스트는 그 비용을 치른 **뒤에야**
     `StoreMissing`(2)을 본다 -- 게이트가 저장소보다 앞이라서다.
     """
-    index, _ = load_index(conn, sources, cache_dir=cache_dir)
+    # The three handles are pass-throughs to ranked_chunks, which already takes them: a caller that
+    # has to read the index or the store for something else (ask.py reads both for its version note)
+    # would otherwise open them a second time here. Behaviour is unchanged when they are None.
+    index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
     if engine in ("vector", "hybrid") and not (grounded := grounding.check(query, index)).ok:
         # 결과 0건은 이미 계약이 아는 답이다(종료 코드 1) -- 새 코드를 늘리지 않고 이유만 말한다.
         print(grounded.note, file=sys.stderr)
@@ -496,6 +502,8 @@ def search(
         store=store,
         cache_dir=cache_dir,
         index=index,  # 게이트가 이미 연 것을 넘긴다 -- bm25·hybrid 가 같은 색인을 두 번 열지 않는다
+        vector_store=vector_store,
+        encoder=encoder,
     )
     # 벡터는 질의를 토큰화하지 않고 원문을 인코딩하므로 이 목록을 안 탄다 -- 그쪽에 이 줄을 찍으면
     # 안 일어난 일을 말하게 된다.
