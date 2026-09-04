@@ -501,7 +501,8 @@ AUDIT='
     | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
   missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)],
   foreign_closes: $foreign_closes,
-  fork_behind: $fork_behind
+  fork_behind: $fork_behind,
+  ownership: $ownership
 }
 '
 
@@ -519,6 +520,7 @@ block("Queue per channel"; [.channels[] | "  " + .channel + " (" + .epic + ") ·
 + block("Shared label missing from a repo"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
 + block("Closed by a commit that belongs to the other repo"; [.foreign_closes[] | "  " + .])
 + block("fork behind on shared surfaces"; [.fork_behind[] | "  " + .])
++ block("fork changed a file upstream owns"; [.ownership[] | "  " + .])
 | .[]
 '
 
@@ -615,12 +617,19 @@ case "$cmd" in
                 fork_behind=$(printf '%s' "$behind" | head -20)
                 [ "$behind_count" -le 20 ] \
                     || fork_behind=$(printf '%s\n… and %s more' "$fork_behind" "$((behind_count - 20))")
+                # The ownership boundary is one script's judgment too (#212, contracts/ownership.md).
+                # Its stdout is one path per line and its exit code is the fork's pre-PR gate, not
+                # this report's: audit stays exit 0 and prints what the check found.
+                ownership_cmd=${COSMAI_OWNERSHIP_CHECK:-"$issue_tool_dir/checks/ownership"}
+                ownership=$("$ownership_cmd" upstream/main 2>/dev/null || true)
             else
                 fork_behind='(no upstream/main ref — nothing has been fetched from upstream)'
+                ownership='(no upstream/main ref — nothing has been fetched from upstream)'
             fi
         else
             foreign_closes='(no upstream remote — skipped)'
             fork_behind='(no upstream remote — skipped)'
+            ownership='(no upstream remote — skipped)'
         fi
         printf '%s' "$graph_json" | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
             --argjson memo_days "$MEMO_DAYS" \
@@ -630,6 +639,7 @@ case "$cmd" in
             --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
             --argjson foreign_closes "$(printf '%s' "$foreign_closes" | jq -R -s "$to_lines")" \
             --argjson fork_behind "$(printf '%s' "$fork_behind" | jq -R -s "$to_lines")" \
+            --argjson ownership "$(printf '%s' "$ownership" | jq -R -s "$to_lines")" \
             "$JQ_LIB $AUDIT | $RENDER_AUDIT"
         ;;
     *) usage ;;
