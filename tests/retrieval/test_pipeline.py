@@ -605,3 +605,43 @@ def test_the_index_fingerprint_moves_with_the_source_set(conn, _schema_name):
     pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
     text_only = corpus.SOURCES[: corpus.SOURCES.index(corpus.MFDS)]
     assert pipeline.index_signature(conn, corpus.SOURCES) != pipeline.index_signature(conn, text_only)
+
+
+REPORT_NO = "2018008612"
+
+
+def test_the_vector_gate_stands_on_the_encoded_sources_only(conn, _schema_name, tmp_path):
+    """The ledger is bm25 only, so a report number is grounded in an index the vector store does not
+    carry. Gated on the whole corpus, `vector` would pass on that token and rank the nearest *text*
+    chunks -- before the ledger was a source the same query was refused here (#77 review, finding 1).
+
+    A store path that does not exist is how "the store was never opened" is measured: past the gate,
+    `vectors.load` raises StoreMissing, which is exactly what `hybrid` below has to do."""
+    _seed_filings(conn)
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    pipeline.run(conn, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    absent = tmp_path / "no-store"
+
+    hits = pipeline.search(conn, REPORT_NO, engine="bm25", top=3, cache_dir=None)
+    assert [hit[0] for hit in hits] == [f"mfds:{REPORT_NO}#0"]
+
+    assert pipeline.search(conn, REPORT_NO, engine="vector", store=absent, cache_dir=None) == []
+
+    # hybrid keeps the full set -- its lexical arm can answer with the filing, so the gate has to let
+    # it through and the store has to be reached.
+    with pytest.raises(vectors.StoreMissing):
+        pipeline.search(conn, REPORT_NO, engine="hybrid", store=absent, cache_dir=None)
+
+
+def test_the_vector_gate_narrowing_is_the_pre_ledger_source_set(conn):
+    """The narrowing must be exactly the four the store was burned from: a different set is a
+    different `index_signature`, which is a 380k-chunk index rebuild nobody asked for."""
+    assert pipeline.index_sources("vector", corpus.SOURCES) == corpus.ENCODED_SOURCES
+    assert pipeline.index_sources("vector", None) == corpus.ENCODED_SOURCES
+    # A narrowed --source stays narrowed, and the two lexical engines are untouched.
+    assert pipeline.index_sources("vector", (corpus.COMMERCE_REVIEW, corpus.MFDS)) == (
+        corpus.COMMERCE_REVIEW,
+    )
+    for engine in ("bm25", "hybrid"):
+        assert pipeline.index_sources(engine, corpus.SOURCES) == corpus.SOURCES
+        assert pipeline.index_sources(engine, None) is None

@@ -30,6 +30,13 @@ MFDS = "mfds"
 # four would change every existing combination's cache key for no reason.
 SOURCES = (YOUTUBE_COMMENT, YOUTUBE_VIDEO, YOUTUBE_TRANSCRIPT, COMMERCE_REVIEW, MFDS)
 
+# What the vector store carries, and so what the vector path's grounding gate may stand on. `mfds` is
+# out (#77): a nearest neighbour of a filing is a different filing, which is a wrong answer rather than a
+# ranking mistake. It lives here rather than beside the encoder because pipeline.py's gate has to stand on
+# the very tuple the store was burned from, and pipeline cannot import embed -- that module pulls numpy in,
+# and pipeline is imported by a plain `cosmai retrieval chunk` (#77 review).
+ENCODED_SOURCES = (YOUTUBE_COMMENT, YOUTUBE_VIDEO, YOUTUBE_TRANSCRIPT, COMMERCE_REVIEW)
+
 # The two labels a filing's line carries. English rather than the Korean the ledger is filed in:
 # tool/checks/lang refuses an added Hangul line outside its path allowlist and this module is not on
 # it. They are index tokens, so changing one re-tokenizes every filing (#77).
@@ -168,8 +175,9 @@ def mfds_filings(conn: psycopg.Connection, schema: str, since: date | None = Non
     # report_date is when it was filed, not when we saw it. So since is not applied here, as in
     # youtube_transcripts.
     query = FILINGS.format(schema=pgsql.Identifier(schema))
-    # 0 rather than "": report_seq is a bigint, and it is positive (MFDS's own 10-digit number).
-    rows = _keyset(conn, query, (), key_len=1, start=(0,))
+    # -1 rather than "": report_seq is a bigint, and the cursor has to sit below every key the column can
+    # hold -- from 0 a report_seq of 0 would be dropped from the corpus with nothing to show for it.
+    rows = _keyset(conn, query, (), key_len=1, start=(-1,))
     for report_seq, item_name, entp_name, report_date, label in rows:
         yield Document(
             f"{MFDS}:{report_seq}",

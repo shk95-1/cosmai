@@ -509,3 +509,30 @@ def test_the_same_query_finds_nothing_when_the_ledger_is_left_out(with_a_filing)
     assert client.calls == []
     assert answer.status == "no_evidence" and answer.evidence == ()
     assert log_rows(with_a_filing) == []
+
+
+def test_a_filing_token_does_not_open_the_store_on_the_vector_path(with_a_filing, tmp_path):
+    """The paid half of the same rule (#77 review, finding 1). Grounded on the whole corpus, a report
+    number would pass the gate, open the 1.2GB store and buy an answer built from the ten nearest text
+    chunks -- an answer about something else. Before the ledger was a source this query cost $0, and it
+    still does. The store path does not exist, so reaching it would raise instead of refusing."""
+    client = FakeClient()
+    answer = ask_it(
+        with_a_filing, query=REPORT_NO, engine="vector", store=tmp_path / "no-store", client=client
+    )
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []
+
+
+def test_hybrid_still_stands_on_the_filing_because_its_lexical_arm_carries_it(with_a_filing, tmp_path):
+    """The narrowing is the vector path's alone: hybrid ranks the ledger through BM25 and fuses, so its
+    gate keeps the full source set. Reaching the missing store is what says the gate let it through."""
+    with pytest.raises(ask.StoreMissing):
+        ask_it(
+            with_a_filing,
+            query=REPORT_NO,
+            engine="hybrid",
+            store=tmp_path / "no-store",
+            client=FakeClient(),
+        )
