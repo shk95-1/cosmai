@@ -29,7 +29,7 @@ if TYPE_CHECKING:  # importing psycopg here drags the driver in on a single --he
 STAGES = ("link", "polarity", "aggregate", "all")
 # The same value as analysis.retrieval.corpus.SOURCES. It is written out again here so that a single
 # `--help` does not drag psycopg in, and tests/retrieval checks that the two are the same.
-RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
+RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review", "mfds")
 # bm25 is letters, vector is meaning, hybrid is the two rankings fused with RRF.
 RETRIEVAL_ENGINES = ("bm25", "vector", "hybrid")
 # analysis.retrieval.ask.DEFAULT_MODEL restated for the same reason RETRIEVAL_SOURCES is: the

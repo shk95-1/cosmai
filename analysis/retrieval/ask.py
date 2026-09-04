@@ -299,15 +299,23 @@ def run(
     # Refused before the corpus is touched: an unpriced model is the caller's typo, and making a
     # person wait through an index build to hear about it teaches nothing.
     price_for(model)
+    # The vector path gates on the sources the store actually carries, and `search` narrows the same
+    # way -- measured once here so the index, the gate, the fingerprint and the ranking are one
+    # decision rather than four (#77 review).
+    grounded_in = pipeline.index_sources(engine, sources)
     # Opened once and handed to `search` below -- rule 6, the log column and the ranking all stand
     # on this one index (`eval.run` passes the same handle down for the same reason).
-    index, origin = pipeline.load_index(conn, sources, cache_dir=cache_dir)
+    index, origin = pipeline.load_index(conn, grounded_in, cache_dir=cache_dir)
     # The version axes are read here, beside the index they describe, and never re-read. An
     # `activate` landing later in the run would otherwise stamp the row with a lexicon the evidence
     # never stood on -- the property #68 pinned for eval rows.
     dictionary = topics.use_active(conn)
-    signature = pipeline.index_signature(conn, sources)
-    count, _latest = pipeline.chunk_census(conn, sources)
+    # The fingerprint names the index that was opened, not the one the flags asked for: on the vector
+    # path those differ, and a row claiming an index nobody built cannot be traced back.
+    signature = pipeline.index_signature(conn, grounded_in)
+    # The census stands on the same set as the fingerprint, or the note's chunk count describes an index
+    # the fingerprint does not (chunk_census's own docstring guards that pairing).
+    count, _latest = pipeline.chunk_census(conn, grounded_in)
     # load_index installed the active query stopword list, which tokenize_query reads.
     frequency = token_frequency(index, query)
     # The paid path is gated whatever the engine, because a df-0 name makes the model refuse anyway

@@ -21,7 +21,7 @@ from sqlalchemy.engine import make_url
 
 from analysis.crosscheck import PAPER_HOLD
 from analysis.polarity.pricing import UsageLedger
-from analysis.retrieval import ask
+from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
 pytestmark = pytest.mark.postgres
@@ -459,3 +459,80 @@ def test_the_help_lists_every_argument():
         "v",
         ["commerce_review"],
     )
+
+
+# ---------- the MFDS ledger as a fifth source (#77) ----------
+REPORT_NO = "2018008612"
+FILING_DOC = f"mfds:{REPORT_NO}"
+TEXT_SOURCES = tuple(s for s in corpus.SOURCES if s != corpus.MFDS)
+
+
+@pytest.fixture
+def with_a_filing(loaded, _schema_name):
+    """One filing beside the text chunks, put there the way production puts it: ledger rows, then the
+    chunk scan. Inserting the chunk by hand would leave the source list, the reader and the dispatch
+    untested and the test green whatever they say."""
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, 'mfds-ydc-v0.4.0', 'ydc v0.4.0', "
+            "'eval/mfds/x.csv', 1, '2026-08-20', 'not_updated')"
+        )
+        cur.execute(
+            "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, entp_key, "
+            "snapshot_id) VALUES (%s, 'sun cream alpha', 'acme labs', '2026-08-20', 'acmelabs', 1)",
+            (int(REPORT_NO),),
+        )
+    loaded.commit()
+    pipeline.run(loaded, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    return loaded
+
+
+def test_a_report_number_reaches_the_model_and_the_log_row_names_the_filing(with_a_filing):
+    """Row 8 of the #74 table: the report number was in the database and the query was refused at the
+    gate with frequency 0, because the ledger was not a source. The log row is what says which filing
+    the answer stood on."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, client=client)
+    assert answer.called and answer.status == "ok"
+    assert [item.doc_id for item in answer.evidence] == [FILING_DOC]
+    (row,) = log_rows(with_a_filing)
+    assert row[4] == [FILING_DOC]  # doc_ids
+    assert row[3][REPORT_NO] == 1  # token_df: the ledger is what makes the number a grounded token
+
+
+def test_the_same_query_finds_nothing_when_the_ledger_is_left_out(with_a_filing):
+    """`--source` restricted to the four text sources: the filing has to be out of the index itself
+    rather than merely ranked away, or the gate would pass on a token no evidence can carry."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, sources=TEXT_SOURCES, client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []
+
+
+def test_a_filing_token_does_not_open_the_store_on_the_vector_path(with_a_filing, tmp_path):
+    """The paid half of the same rule (#77 review, finding 1). Grounded on the whole corpus, a report
+    number would pass the gate, open the 1.2GB store and buy an answer built from the ten nearest text
+    chunks -- an answer about something else. Before the ledger was a source this query cost $0, and it
+    still does. The store path does not exist, so reaching it would raise instead of refusing."""
+    client = FakeClient()
+    answer = ask_it(
+        with_a_filing, query=REPORT_NO, engine="vector", store=tmp_path / "no-store", client=client
+    )
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []
+
+
+def test_hybrid_still_stands_on_the_filing_because_its_lexical_arm_carries_it(with_a_filing, tmp_path):
+    """The narrowing is the vector path's alone: hybrid ranks the ledger through BM25 and fuses, so its
+    gate keeps the full source set. Reaching the missing store is what says the gate let it through."""
+    with pytest.raises(ask.StoreMissing):
+        ask_it(
+            with_a_filing,
+            query=REPORT_NO,
+            engine="hybrid",
+            store=tmp_path / "no-store",
+            client=FakeClient(),
+        )

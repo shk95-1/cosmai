@@ -347,9 +347,18 @@ cosmai retrieval eval   --mode <m> [--engine <e>] [--source <s>]... [--out <csv>
 cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <path>]
 cosmai retrieval terms  [--source <s>]... [--top <n>]
 cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--model <m>] [--dry-run] [--vectors <path>]
-  source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
+  source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review, mfds}
   engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
 ```
+- **`mfds` is the fifth source (fork #77)** — one document per filing of `needs.mfds_registration` (DDL 028,
+  fork #55), `doc_id = mfds:<report_seq>`, text = item name · company · `report no. <report_seq>` · `registered <report_date>` · the snapshot label, one chunk each (the line is far under the 500-character split, not an enforced invariant). It is
+  **BM25 only**: `retrieval embed` never encodes it (`embed.ENCODED_SOURCES` holds the four text sources), so
+  `vector` cannot find a filing and `hybrid` finds it through its lexical arm alone — and the grounding gate on
+  `--engine vector` reads the four encoded sources only (`pipeline.index_sources`), so a token grounded by a
+  filing alone is still refused there instead of buying a call answered from unrelated text chunks. `chunk` scans it with the
+  others; `--since` does not apply (a snapshot has no per-row time). Adding the source moved the index
+  fingerprint (`index_signature` hashes the source set), so the first `search`/`ask`/`eval`/`terms` after #77
+  rebuilds the cache (`chunk` never reads it). Source: rows 8 and 13 of the #74 acceptance table on fork #69 — the seed alone lifted neither.
 - **The topic lexicon is the active version of `needs.aspect_lexicon`** (`ruleset='retrieval-topic'`, fork
   #8). Its aliases set both the BM25 token expansion (Kiwi user words + substring expansion) and the
   evaluation gold (`match_topics`), so the one way to change the lexicon is `cosmai lexicon

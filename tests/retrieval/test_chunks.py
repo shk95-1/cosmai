@@ -3,8 +3,11 @@ that validator. Carried over from the demo() assertions of slices/ydc/chunks.py 
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
+from analysis.retrieval import corpus, pipeline
 from analysis.retrieval.chunks import (
     FIELDS,
     MAX_CHARS,
@@ -13,6 +16,7 @@ from analysis.retrieval.chunks import (
     problem_kind,
     split_text,
 )
+from analysis.retrieval.normalize import normalize_text
 
 
 def _row(**over):
@@ -140,3 +144,22 @@ def test_the_place_in_the_run_continues_across_calls():
     later, *_ = check_rows([_row(chunk_id="", doc_id="", source="")], first_line=2 + len(lengths))
     assert problems != later
     assert any(p.startswith("chunk_id 없음: 3행") for p in later), later
+
+
+def test_a_filing_is_one_chunk_that_passes_the_contract():
+    """The MFDS ledger's line is short enough to stay one piece, and it goes through the same
+    normalization as every other source -- a chunk stored unnormalized is a contract violation that no
+    rerun can clear, because an equal text_md5 skips the update and the stored text never moves (#77)."""
+    raw = corpus.filing_text(
+        2018008612, "sun  cream", "acme &amp;amp; co", date(2026, 8, 20), "mfds-ydc-v0.4.0"
+    )
+    _document, rows = next(
+        pipeline.document_rows([corpus.Document(f"{corpus.MFDS}:2018008612", corpus.MFDS, raw)])
+    )
+    problems, per_source, _lengths, docs = check_rows(rows)
+    assert problems == []
+    assert per_source == {corpus.MFDS: 1} and docs == 1
+    assert [row["ordinal"] for row in rows] == [0]
+    assert all(set(FIELDS) <= set(row) for row in rows)
+    # The normalization did work here, so this is not green by the text happening to be clean.
+    assert rows[0]["text"] != raw and rows[0]["text"] == normalize_text(rows[0]["text"])

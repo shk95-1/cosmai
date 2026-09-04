@@ -25,6 +25,7 @@ from pathlib import Path
 
 import psycopg
 
+from analysis.retrieval import corpus
 from analysis.retrieval.vectors import (
     DEFAULT_STORE,
     DIM,
@@ -36,8 +37,10 @@ from analysis.retrieval.vectors import (
 )
 
 BATCH = 256
-# What gets encoded. The day an ingredient family arrives as a source, it is excluded in one line here.
-ENCODED_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
+# What gets encoded. The MFDS ledger (`mfds`, fork #77) is the source the line that stood here was waiting
+# for. The tuple itself is corpus.ENCODED_SOURCES: what the store was burned from and what the vector
+# gate may stand on have to be one list, and two copies drift the day one of them moves (#77 review).
+ENCODED_SOURCES = corpus.ENCODED_SOURCES
 
 
 @dataclass(frozen=True)
