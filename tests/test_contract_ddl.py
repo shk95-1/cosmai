@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_thirtyseven_contract_tables():
+def test_the_ddl_declares_the_thirtynine_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: 파이프라인 단계의 기대 주기 선언)
@@ -50,8 +50,11 @@ def test_the_ddl_declares_the_thirtyseven_contract_tables():
     # corpus_document rows that made it).
     # + 1 from 026_retrieval_ask_log.sql (fork issue #73: retrieval_ask_log -- one row per real
     # `cosmai retrieval ask` call, the only query log this schema has).
+    # + 2 from 028_mfds_registration.sql (fork issue #55: mfds_snapshot, mfds_registration -- the
+    # official MFDS filing ledger as a reference table, plus the one row that says which snapshot of
+    # it this is and that it is not updated). 027 adds no table: it is a constraint trigger.
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 37
+    assert len(declared_tables()) == 39
 
 
 def test_every_declared_table_exists_in_the_database():

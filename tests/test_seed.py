@@ -25,6 +25,10 @@ EXPECTED = {
     # eval/panel/channels_v1.csv 43채널의 명부 한 판본 (#31)
     "panel_roster": 1,
     "panel_channel": 43,
+    # eval/mfds/mfds_items_v1.csv: the MFDS filing ledger at ydc v0.4.0, one snapshot row (#55).
+    # 4,736 is the file's line count -- the header is one of those lines.
+    "mfds_snapshot": 1,
+    "mfds_registration": 4735,
     # eval/README.md: polarity 400 + wish 220(tune100 + holdout60 + blind60_v2)
     # + brand_link 120 + product_match 80
     "labeled_set": 820,

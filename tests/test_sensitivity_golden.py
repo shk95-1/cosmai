@@ -13,11 +13,11 @@
 43채널 전부인 산출을 갈라 봐야 하고 표본이 전부 product 면 두 산출이 같은 값이 되어 **아무 말도 하지
 않는다.**
 
-**표본이 못 보는 자리**: 이 표본은 `quarters_ok_product` 가 최대 3이라 `sample_ok` 가 한 셀도 서지 않고,
-그래서 뒤집힘 판정(`flipped`)이 여기서는 돌지 않는다. 홍보 댓글도 0건이다(전량 17). 두 갈래는
-`tests/test_sensitivity_rules.py` 가 홀로 지고, 표본이 그것들을 밟게 만드는 일은 **#57 이 진다** --
-product 모집단을 건드리는 순간 골든을 **다섯 벌**(#5 분기 지표 · #40 판정 · #41 민감도 셋) 다시 만들어야
-하고, 그 비용 때문에 이 PR 은 product 에 한 문서도 대지 않고 expert 만 더했다.
+**What the sample reaches.** #57 re-cut it (11 channels -> 18, product 4 -> 11) and paid the cost that
+kept #41 from doing it: seven golden files remade at once (#5 quarterly metrics · #40 verdicts · #41's
+three · #6's evidence and cards). Both branches this file used to assert away are live now -- four
+cells stand with `sample_ok` and one of them flips, and the promo variant drops comments that carry a
+topic, so its rows move instead of copying the base.
 
 **전량 대조는 CI 가 못 한다** -- 261,317문서는 `archive/` 에 있고 그 자리는 읽기 전용이다. 사람이 한 번
 돌리는 절차와 대조 코드는 `tool/compare-ydc-sensitivity` 한 자리에 있다(2026-08-26 실행: 패널 26행 ·
@@ -182,17 +182,28 @@ def test_the_three_flags_are_not_all_empty_in_this_sample(built):
     """표시가 0건이면 "빼도 결론이 같다"가 아무것도 뺀 적 없다는 말이 된다."""
     assert built.ad.ad_videos > 0
     assert built.ad.creator_comments > 0
-    # 홍보 댓글은 이 표본에 없다(전량 17건, #57 의 구멍 5). 그 사실을 침묵으로 두지 않는다 -- 0 이
-    # 아니게 되는 날 promo 변형의 행들이 처음으로 움직이고, 이 줄이 먼저 깨져서 그것을 알린다.
-    assert built.ad.promo_comments == 0
-    assert all(row.diff_pp == 0 for row in built.ad.rows if row.variant == sensitivity.PROMO_COMMENT)
+    # #57's gap 5. While this was 0 the promo variant's rows were a copy of the base, so "excluding
+    # them changes nothing" was a sentence about an empty exclusion.
+    assert built.ad.promo_comments > 0
+    moved = [row for row in built.ad.rows if row.variant == sensitivity.PROMO_COMMENT and row.diff_pp]
+    assert moved, "promo comments are dropped but no composition moves; they carry no judged topic"
 
 
-def test_the_sample_reaches_no_flip_and_says_so_instead_of_pretending(built):
-    """`sample_ok` 가 한 셀도 서지 않는다 -- 그러니 `flipped` 는 여기서 0회 돈다(#57 의 구멍 4). 표본이
-    바뀌어 서기 시작하면 이 줄이 먼저 깨져서, 뒤집힘 대조가 조용히 공회전하고 있었다는 사실이 드러난다."""
-    assert not any(row.sample_ok for row in built.panel)
-    assert built.flipped == []
+def test_the_flip_verdict_runs_on_this_sample_and_reaches_a_cell(built):
+    """#57's gap 4. `flipped` filters on `sample_ok` first, so while no cell was judgeable the other
+    two conditions -- opposite signs, and a move of at least `MATERIAL_PP` -- were never evaluated and
+    the measurement idled. Both halves are asked here: that cells stand, and that the verdict is the
+    one those three conditions give on them."""
+    standing = [row for row in built.panel if row.sample_ok]
+    assert standing, "no cell is judgeable, so the flip verdict runs zero times again"
+    expected = [
+        row
+        for row in standing
+        if row.delta_product_pp * row.delta_all_pp < 0
+        and max(abs(row.delta_product_pp), abs(row.delta_all_pp)) >= sensitivity.MATERIAL_PP
+    ]
+    assert expected, "no standing cell flips, so the verdict is again only its own first filter"
+    assert built.flipped == expected
 
 
 def _same(want: str, got: object) -> bool:

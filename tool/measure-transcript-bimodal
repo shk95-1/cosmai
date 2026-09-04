@@ -1,0 +1,511 @@
+#!/usr/bin/env python3
+"""What makes `youtube_transcript` bimodal in the global top 10 (fork #65).
+
+`#54` measured that `youtube_transcript` is 16.75% of the index but takes 5.47% of the global top 10,
+and that the split is bimodal: of the 58 queries with candidates 47 first appear beyond rank 10
+(median first rank 32) while 11 reach the top 10, often at rank 1. This tool measures the two
+candidate causes with numbers -- **chunk length** (BM25's length normalisation, `bm25.B`) and **term
+competition** (how much of a query term's df the source owns) -- and prices what moving `B` would
+cost on the §Retrieval-measurements table baseline.
+
+Parts. Each prints a table; `--json` prints the same numbers.
+
+    lengths  chunk length per source: tokens as the index counts them (`Index.lengths`) and
+             characters (DB), plus chunks per document.
+    sweep    a `bm25.B` sweep over the literal query set: per-source share of the global top 10, the
+             transcript within/beyond-10 split, and the median first-appearance rank.
+    cohort   the queries where transcript reaches the top 10 against the ones where it does not --
+             candidates, the source split of the query terms' df, and the best transcript chunk.
+    gold     the two numbers a decision to move `B` has to survive: each source's share of the df the
+             query set reaches, and how often its chunks carry a topic label at all -- the gold of
+             `eval` is topic labels, so a source whose chunks are labelled more often is more likely
+             to be gold for any query.
+    eval     P@10 / MRR@10 / Hit@10 per `B` for both modes -- the §Retrieval-measurements
+             table's row. The gold set is built once and reused across the sweep;
+             `eval.gold_from_chunks` is the slow part because it matches topics over every chunk.
+
+`B` is a module constant, so the sweep sets `bm25.B` around each pass. The index itself does not
+depend on `B` -- `Index.lengths` is fixed when the index is built -- so one index serves the whole
+sweep. It is read from the BM25 cache; without a cache, tokenising 380k chunks takes over ten
+minutes, and `--cache-dir` points at a cache built elsewhere.
+
+Read only. Every connection is opened with `default_transaction_read_only=on`, so a write would fail
+loudly rather than reach production.
+
+    uv run --extra retrieval tool/measure-transcript-bimodal --part lengths
+    uv run --extra retrieval tool/measure-transcript-bimodal --part sweep --json
+    uv run --extra retrieval tool/measure-transcript-bimodal --part eval --b 0.75 --b 0.4
+
+Exit codes: 0 the answer was computed · 2 blocked (no active topic dictionary, or the chunks are
+empty -- the same place as `contracts/entrypoints.md` §Search's blocked).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from contextlib import contextmanager
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from analysis.retrieval import bm25, topics  # noqa: E402
+from analysis.retrieval import eval as retrieval_eval  # noqa: E402
+
+SOURCE = "youtube_transcript"  # the source this issue is about
+K = 10  # the same k as the §Retrieval-measurements table and `analysis/retrieval/eval.K`
+# The sweep the issue names. 0.0 is "no length normalisation at all" and 1.0 is "normalise fully";
+# 0.75 is the value in the code, so it is always in the sweep as the baseline column.
+B_SWEEP = (0.0, 0.25, 0.5, 0.75, 0.9, 1.0)
+
+CHAR_LENGTHS = """
+SELECT source, count(*), avg(length(text)),
+       percentile_disc(0.10) WITHIN GROUP (ORDER BY length(text)),
+       percentile_disc(0.50) WITHIN GROUP (ORDER BY length(text)),
+       percentile_disc(0.90) WITHIN GROUP (ORDER BY length(text)),
+       max(length(text)),
+       count(DISTINCT doc_id)
+FROM retrieval_chunk GROUP BY source ORDER BY count(*) DESC
+"""
+
+
+def read_only(url: str | None):
+    """A production connection that cannot write. The URL never leaves this function."""
+    import psycopg
+    from sqlalchemy.engine import make_url
+
+    from db.runtime import runtime_url
+
+    parsed = make_url(url or runtime_url())
+    return psycopg.connect(
+        host=parsed.host,
+        port=parsed.port,
+        user=parsed.username,
+        password=parsed.password,
+        dbname=parsed.database,
+        options="-c default_transaction_read_only=on",
+    )
+
+
+@contextmanager
+def length_norm(value: float):
+    """Runs the block with `bm25.B` set to `value`. `Index.search` reads the module global on every
+    call, so this is the whole knob -- nothing is rebuilt."""
+    before = bm25.B
+    bm25.B = value
+    try:
+        yield
+    finally:
+        bm25.B = before
+
+
+def percentiles(values: list[int]) -> dict:
+    ordered = sorted(values)
+    if not ordered:
+        return {"n": 0}
+    return {
+        "n": len(ordered),
+        "mean": statistics.mean(ordered),
+        "p10": ordered[int(0.10 * (len(ordered) - 1))],
+        "median": statistics.median(ordered),
+        "p90": ordered[int(0.90 * (len(ordered) - 1))],
+        "max": ordered[-1],
+    }
+
+
+def token_lengths(index, origin: dict[str, str]) -> dict:
+    """Chunk length per source in tokens **as the index counts them** -- `Index.lengths` is the list
+    BM25 divides by, so any other token count would describe a different scorer."""
+    per_source: dict[str, list[int]] = {}
+    for chunk_id, source in origin.items():
+        per_source.setdefault(source, []).append(index.lengths[index.position[chunk_id]])
+    out = {source: percentiles(values) for source, values in per_source.items()}
+    for cell in out.values():
+        cell["over_avg_len"] = cell["median"] / index.avg_len if index.avg_len else 0.0
+    return out
+
+
+def char_lengths(conn) -> dict:
+    """Chunk length per source in characters, plus chunks per document -- the 500-char target in
+    `chunks.MAX_CHARS` is a character rule, so the cause has to be visible on that axis too."""
+    with conn.cursor() as cur:
+        cur.execute(CHAR_LENGTHS)
+        rows = cur.fetchall()
+    conn.commit()
+    return {
+        str(source): {
+            "chunks": int(chunks),
+            "mean": float(mean),
+            "p10": int(p10),
+            "median": int(p50),
+            "p90": int(p90),
+            "max": int(longest),
+            "docs": int(docs),
+            "chunks_per_doc": chunks / docs if docs else 0.0,
+        }
+        for source, chunks, mean, p10, p50, p90, longest, docs in rows
+    }
+
+
+def ranked_sources(index, origin: dict[str, str], query: str) -> list[str]:
+    """The source of every candidate, in rank order. The full ranking is taken because where beyond
+    k the first appearance falls is half of this measurement (the same reason as `#54`'s tool)."""
+    return [origin[chunk_id] for chunk_id, _score in index.search(query, k=None)]
+
+
+def one_pass(index, origin, queries: list[tuple[str, str]], k: int = K) -> dict:
+    """One `B`'s worth of ranking over every query: the top-k source shares and, per source, where it
+    first appears among the queries that have candidates for it."""
+    top_k: dict[str, int] = {}
+    first: dict[str, list[int]] = {}
+    per_query: list[dict] = []
+    for _topic, query in queries:
+        sources = ranked_sources(index, origin, query)
+        if not sources:
+            continue
+        head = sources[:k]
+        for source in head:
+            top_k[source] = top_k.get(source, 0) + 1
+        seen: dict[str, int] = {}
+        for rank, source in enumerate(sources, 1):
+            seen.setdefault(source, rank)
+        for source, rank in seen.items():
+            first.setdefault(source, []).append(rank)
+        per_query.append({"query": query, "candidates": len(sources), "first": seen})
+    total = sum(top_k.values()) or 1
+    return {
+        "queries": len(per_query),
+        "top_k": {s: {"n": n, "share": n / total} for s, n in sorted(top_k.items(), key=lambda kv: -kv[1])},
+        "first_rank": {
+            source: {
+                "queries_with_candidates": len(ranks),
+                "within_k": sum(1 for r in ranks if r <= k),
+                "beyond_k": sum(1 for r in ranks if r > k),
+                "median": statistics.median(ranks),
+                "max": max(ranks),
+            }
+            for source, ranks in sorted(first.items())
+        },
+        "per_query": per_query,
+    }
+
+
+def sweep(index, origin, queries, values: tuple[float, ...], k: int = K) -> dict:
+    out = {}
+    for value in values:
+        with length_norm(value):
+            out[f"{value}"] = one_pass(index, origin, queries, k)
+    return out
+
+
+def source_at(index, origin: dict[str, str]) -> list[str]:
+    """Position -> source, once. Rebuilt per query it would be 380k dictionary writes per query."""
+    out = [""] * index.n
+    for chunk_id, source in origin.items():
+        out[index.position[chunk_id]] = source
+    return out
+
+
+def source_df(index, at: list[str], query: str) -> dict[str, dict]:
+    """Per source, how much of the query terms' df it owns, and the length of its candidates. This is
+    the competition axis -- a source can be buried because its chunks are long, or because another
+    source simply owns the term."""
+    per_source: dict[str, dict] = {}
+    for term in set(bm25.tokenize_query(query)):
+        if index.idf(term) == 0.0:
+            continue  # a term the scorer ignores does not compete
+        for i, tf in index.postings.get(term, ()):
+            cell = per_source.setdefault(at[i], {"df": 0, "tf": [], "lengths": []})
+            cell["df"] += 1
+            cell["tf"].append(tf)
+            cell["lengths"].append(index.lengths[i])
+    total = sum(cell["df"] for cell in per_source.values()) or 1
+    return {
+        source: {
+            "df": cell["df"],
+            "df_share": cell["df"] / total,
+            "median_tf": statistics.median(cell["tf"]),
+            "max_tf": max(cell["tf"]),
+            "median_len": statistics.median(cell["lengths"]),
+        }
+        for source, cell in per_source.items()
+    }
+
+
+def cohort(index, origin, queries, k: int = K) -> dict:
+    """The two halves of the bimodal split, side by side. Split by the fact the issue names -- does
+    the source reach the top k for that query -- and then described by the two candidate causes."""
+    within: list[dict] = []
+    beyond: list[dict] = []
+    at = source_at(index, origin)
+    for _topic, query in queries:
+        sources = ranked_sources(index, origin, query)
+        if SOURCE not in sources:
+            continue
+        rank = sources.index(SOURCE) + 1
+        split = source_df(index, at, query)
+        mine = split.get(SOURCE, {})
+        row = {
+            "query": query,
+            "first_rank": rank,
+            "candidates": len(sources),
+            "own_df": mine.get("df", 0),
+            "own_df_share": mine.get("df_share", 0.0),
+            "own_median_tf": mine.get("median_tf", 0),
+            "own_max_tf": mine.get("max_tf", 0),
+            "top1_source": sources[0],
+            "df_share": {s: cell["df_share"] for s, cell in sorted(split.items())},
+        }
+        (within if rank <= k else beyond).append(row)
+
+    def describe(rows: list[dict]) -> dict:
+        if not rows:
+            return {"queries": 0}
+        return {
+            "queries": len(rows),
+            "median_first_rank": statistics.median([r["first_rank"] for r in rows]),
+            "median_own_df": statistics.median([r["own_df"] for r in rows]),
+            "median_own_df_share": statistics.median([r["own_df_share"] for r in rows]),
+            "median_own_max_tf": statistics.median([r["own_max_tf"] for r in rows]),
+            "top1_is_own": sum(1 for r in rows if r["top1_source"] == SOURCE),
+        }
+
+    return {
+        "within_k": describe(within),
+        "beyond_k": describe(beyond),
+        "rows": sorted(within + beyond, key=lambda r: r["first_rank"]),
+    }
+
+
+SAMPLE = """
+SELECT text FROM retrieval_chunk WHERE source = %s ORDER BY md5(chunk_id) LIMIT %s
+"""
+
+
+def candidate_mass(index, at: list[str], queries: list[tuple[str, str]]) -> dict:
+    """Per source, its share of the df the query set actually reaches -- "does this source say the
+    words the queries ask for", pooled over every query. A source that is under-represented here is
+    losing at matching; one that is over-represented here and under-represented in the top 10 is
+    losing at scoring, which is a different repair."""
+    pooled: dict[str, int] = {}
+    for _topic, query in queries:
+        for source, cell in source_df(index, at, query).items():
+            pooled[source] = pooled.get(source, 0) + cell["df"]
+    total = sum(pooled.values()) or 1
+    return {source: {"df": df, "share": df / total} for source, df in sorted(pooled.items())}
+
+
+def gold_density(conn, dictionary, sources: list[str], sample: int = 3000) -> dict:
+    """How often a chunk of each source carries a topic label at all. `eval`'s gold is "documents the
+    topic dictionary labelled", so a source whose chunks are labelled more often is more likely to be
+    gold for **any** query -- which is how a P@10 that rose when long chunks rose can be arithmetic
+    rather than relevance. The sample is `md5(chunk_id)`-ordered, so it is the same sample on every
+    rerun."""
+    out: dict[str, dict] = {}
+    for source in sources:
+        with conn.cursor() as cur:
+            cur.execute(SAMPLE, (source, sample))
+            texts = [row[0] for row in cur.fetchall()]
+        conn.commit()  # topic matching is slower than the query -- it runs outside the transaction
+        labelled = [len(topics.match_topics(text, dictionary=dictionary)) for text in texts]
+        chars = sum(len(text) for text in texts) or 1
+        out[source] = {
+            "sampled": len(texts),
+            "with_a_label": sum(1 for n in labelled if n),
+            "label_rate": sum(1 for n in labelled if n) / (len(texts) or 1),
+            "labels_per_chunk": sum(labelled) / (len(texts) or 1),
+            "labels_per_1k_chars": 1000 * sum(labelled) / chars,
+        }
+    return out
+
+
+def report_gold(measured: dict) -> None:
+    # fmt: off
+    print("share of the df the query set reaches (candidate mass), against the index share")
+    for source, cell in measured["candidate_mass"].items():
+        print(f"  {source:20s} df {cell['df']:>9,} {cell['share'] * 100:6.2f}%")
+    print("\nhow often a chunk carries a topic label at all (the axis eval's gold is built on)")
+    for source, cell in measured["gold_density"].items():
+        print(f"  {source:20s} sampled {cell['sampled']:>5,} · with a label {cell['label_rate'] * 100:6.2f}%"
+              f" · labels per chunk {cell['labels_per_chunk']:5.2f}"
+              f" · per 1k chars {cell['labels_per_1k_chars']:5.2f}")
+    # fmt: on
+
+
+def eval_sweep(conn, index, origin, dictionary, values: tuple[float, ...], k: int = K) -> dict:
+    """The §Retrieval-measurements table's two bm25 rows per `B`. Neither the gold set nor the
+    held-out exclusions depend on `B`, so both are computed once -- otherwise every `B` in the sweep
+    would rescan 380k chunks."""
+    gold_all = retrieval_eval.gold_from_chunks(conn, None, dictionary=dictionary)
+    excluded: dict[str, set[str]] = {}
+    out: dict[str, dict] = {}
+    for value in values:
+        modes: dict[str, dict] = {}
+        for mode in retrieval_eval.MODES:
+            scored = []
+            transcript_docs = 0
+            for topic_id, query in retrieval_eval.queries(mode, dictionary):
+                gold = set(gold_all.get(topic_id, ()))
+                if mode == "heldout":
+                    if query not in excluded:
+                        excluded[query] = retrieval_eval.docs_with_tokens(index, query)
+                    gold -= excluded[query]
+                if not gold:
+                    continue  # a query with no gold has no score, as in `eval.run`
+                with length_norm(value):
+                    hits = index.search(query, k=k * 4)
+                ranked = retrieval_eval.to_docs([chunk_id for chunk_id, _ in hits], k)
+                transcript_docs += sum(1 for doc in ranked if doc.startswith(f"{SOURCE}:"))
+                scored.append(retrieval_eval.score(ranked, gold))
+            n = len(scored) or 1
+            modes[mode] = {
+                "queries": len(scored),
+                "p_at_k": sum(p for p, _m, _h in scored) / n,
+                "mrr": sum(m for _p, m, _h in scored) / n,
+                "hit": sum(1 for _p, _m, h in scored if h) / n,
+                "transcript_docs_in_top_k": transcript_docs,
+            }
+        out[f"{value}"] = modes
+    return out
+
+
+def report_lengths(measured: dict) -> None:
+    # fmt: off
+    print("chunk length per source -- tokens as the index counts them (Index.lengths)")
+    print(f"  avg_len over the whole index {measured['avg_len']:.2f} tokens")
+    for source, cell in measured["tokens"].items():
+        print(f"  {source:20s} n {cell['n']:>7,} mean {cell['mean']:6.2f} p10 {cell['p10']:4d}"
+              f" median {cell['median']:6.1f} p90 {cell['p90']:4d} max {cell['max']:4d}"
+              f" · median/avg_len {cell['over_avg_len']:5.2f}x")
+    print("\nchunk length per source -- characters (chunks.MAX_CHARS is 500)")
+    for source, cell in measured["chars"].items():
+        print(f"  {source:20s} n {cell['chunks']:>7,} mean {cell['mean']:6.2f} p10 {cell['p10']:4d}"
+              f" median {cell['median']:4d} p90 {cell['p90']:4d} max {cell['max']:4d}"
+              f" · docs {cell['docs']:>7,} chunks/doc {cell['chunks_per_doc']:5.2f}")
+    # fmt: on
+
+
+def report_sweep(measured: dict, k: int = K) -> None:
+    # fmt: off
+    print(f"B sweep -- {SOURCE} in the global top {k} (queries are the literal topic aliases)")
+    print("     B | top10 share | queries | within10 | beyond10 | median first | max")
+    for value, cell in measured.items():
+        share = cell["top_k"].get(SOURCE, {"share": 0.0})["share"]
+        first = cell["first_rank"].get(SOURCE)
+        if not first:
+            continue
+        print(f"  {float(value):.2f} | {share * 100:10.2f}% | {first['queries_with_candidates']:7d}"
+              f" | {first['within_k']:8d} | {first['beyond_k']:8d} | {first['median']:12.1f}"
+              f" | {first['max']:5d}")
+    print("\nthe same sweep, every source's share of the global top 10")
+    sources = sorted({s for cell in measured.values() for s in cell["top_k"]})
+    print("     B | " + " | ".join(f"{s:18s}" for s in sources))
+    for value, cell in measured.items():
+        row = " | ".join(f"{cell['top_k'].get(s, {'share': 0.0})['share'] * 100:17.2f}%" for s in sources)
+        print(f"  {float(value):.2f} | {row}")
+    # fmt: on
+
+
+def report_cohort(measured: dict, k: int = K) -> None:
+    # fmt: off
+    print(f"the two halves of the split, for the queries where {SOURCE} has candidates")
+    for name in ("within_k", "beyond_k"):
+        cell = measured[name]
+        label = f"within top {k}" if name == "within_k" else f"beyond top {k}"
+        if not cell["queries"]:
+            print(f"  {label:16s} 0 queries")
+            continue
+        print(f"  {label:16s} queries {cell['queries']:3d}"
+              f" · median first rank {cell['median_first_rank']:6.1f}"
+              f" · median own df {cell['median_own_df']:8.1f}"
+              f" · median own df share {cell['median_own_df_share'] * 100:6.2f}%"
+              f" · median own max tf {cell['median_own_max_tf']:5.1f}"
+              f" · rank 1 is this source {cell['top1_is_own']:3d}")
+    print("\nper query (first rank, own df share, own max tf, source at rank 1)")
+    for row in measured["rows"]:
+        print(f"  {row['query']:18s} rank {row['first_rank']:5d} · candidates {row['candidates']:7,}"
+              f" · own df {row['own_df']:7,} ({row['own_df_share'] * 100:5.2f}%)"
+              f" · own max tf {row['own_max_tf']:3d} · rank1 {row['top1_source']}")
+    # fmt: on
+
+
+def report_eval(measured: dict, k: int = K) -> None:
+    # fmt: off
+    print(f"the §Retrieval-measurements table bm25 rows per B (P@{k} / MRR@{k} / Hit@{k})")
+    print("     B | mode    | queries | P@10  | MRR@10 | Hit@10 | transcript docs in top 10")
+    for value, modes in measured.items():
+        for mode, cell in modes.items():
+            print(f"  {float(value):.2f} | {mode:7s} | {cell['queries']:7d} | {cell['p_at_k']:.3f}"
+                  f" | {cell['mrr']:6.3f} | {cell['hit'] * 100:5.1f}%"
+                  f" | {cell['transcript_docs_in_top_k']:5d}")
+    # fmt: on
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--part", choices=("lengths", "sweep", "cohort", "gold", "eval"), default="lengths")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+    parser.add_argument("--cache-dir", default=None, help="BM25 index cache. Default is pipeline.CACHE_DIR")
+    parser.add_argument(
+        "--b", type=float, action="append", default=None, help=f"a B to sweep (repeatable). Default {B_SWEEP}"
+    )
+    args = parser.parse_args()
+
+    from analysis.retrieval.pipeline import CACHE_DIR, load_index
+
+    cache_dir = Path(args.cache_dir) if args.cache_dir else CACHE_DIR
+    values = tuple(args.b) if args.b else B_SWEEP
+    try:
+        with read_only(args.url) as conn:
+            dictionary = topics.use_active(conn)
+            index, origin = load_index(conn, None, cache_dir=cache_dir)
+            conn.commit()  # the index is open now -- do not hold a transaction across the ranking
+            if not index.n:
+                raise SystemExit("the chunks are empty -- `cosmai retrieval chunk` comes first (blocked)")
+            queries = retrieval_eval.queries("literal", dictionary)
+            if args.part == "lengths":
+                measured = {
+                    "avg_len": index.avg_len,
+                    "tokens": token_lengths(index, origin),
+                    "chars": char_lengths(conn),
+                }
+            elif args.part == "sweep":
+                measured = sweep(index, origin, queries, values)
+            elif args.part == "cohort":
+                measured = cohort(index, origin, queries)
+            elif args.part == "gold":
+                measured = {
+                    "candidate_mass": candidate_mass(index, source_at(index, origin), queries),
+                    "gold_density": gold_density(conn, dictionary, sorted(set(origin.values()))),
+                }
+            else:
+                measured = eval_sweep(conn, index, origin, dictionary, values)
+    except topics.NoDictionary as exc:
+        print(f"{exc} (blocked)", file=sys.stderr)
+        return 2
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(measured, ensure_ascii=False, indent=2, default=float))
+    elif args.part == "lengths":
+        report_lengths(measured)
+    elif args.part == "sweep":
+        report_sweep(measured)
+    elif args.part == "cohort":
+        report_cohort(measured)
+    elif args.part == "gold":
+        report_gold(measured)
+    else:
+        report_eval(measured)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
