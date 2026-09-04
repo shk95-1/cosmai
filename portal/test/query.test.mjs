@@ -27,8 +27,8 @@ test('buildQuery skips empty filter values', () => {
   assert.equal(new URLSearchParams(q).has('scope'), false);
 });
 
-// #109: 카테고리 합 행은 product_ref 가 빈 문자열이다 — 'product_ref=eq.' 로만 걸러진다.
-// 빈 값을 무조건 버리는 기본 규칙(셀렉트가 안 골라진 상태)과 구분하려고 allowEmpty 를 쓴다.
+// #109: category-sum rows have an empty product_ref — they are matched only by 'product_ref=eq.'.
+// allowEmpty exists to distinguish this from the default rule of always dropping an empty value (a select that picked nothing).
 test('buildQuery keeps an empty filter value when allowEmpty is set (#109)', () => {
   const q = buildQuery({
     select: ['run_id', 'need_key'],
@@ -40,16 +40,16 @@ test('buildQuery keeps an empty filter value when allowEmpty is set (#109)', () 
   assert.equal(params.get('product_ref'), 'eq.');
 });
 
-// 화면 3(제품 축)은 그 반대편 — 빈 product_ref 를 뺀다.
+// Screen 3 (product axis) is the opposite side — it excludes an empty product_ref.
 test('buildQuery builds the product-axis filter product_ref=neq. (#109)', () => {
   const q = buildQuery({ filters: [{ column: 'product_ref', op: 'neq', value: '', allowEmpty: true }] });
   assert.equal(new URLSearchParams(q).get('product_ref'), 'neq.');
 });
 
-// #130: 월 행이 얹히면 metrics_need 가 두 배가 된다(실측 7,219행 → 대략 14,000). 기존 두
-// 질의는 화면에서 걸러 안 보일 뿐 네트워크로는 다 받으므로, 질의 자체를 month=eq. 로 좁힌다.
-// 손으로 적은 필터가 아니라 app.js 가 실제로 보내는 스펙(NEED_QUERIES)을 읽는다 — 그러지
-// 않으면 이 테스트는 buildQuery 만 확인하고 화면이 무엇을 받는지는 아무도 안 본다.
+// #130: adding the month rows doubles metrics_need (measured 7,219 rows → roughly 14,000). The existing two
+// queries only filtered it out of view but still fetched all of it over the network, so the query itself is narrowed to month=eq.
+// This reads the spec app.js actually sends (NEED_QUERIES), not a hand-written filter — otherwise this test
+// would only check buildQuery, and nobody would be looking at what the screen actually receives.
 test('NEED_QUERIES: 전체 기간 두 질의는 month=eq. 로 월 행을 뺀다 (#130)', () => {
   for (const spec of [NEED_QUERIES.category, NEED_QUERIES.product]) {
     assert.equal(new URLSearchParams(buildQuery(spec)).get('month'), 'eq.');
@@ -62,27 +62,27 @@ test('NEED_QUERIES: 월 축 질의는 month=neq. 와 product_ref=eq. 를 함께 
   const params = new URLSearchParams(buildQuery(NEED_QUERIES.month));
   assert.equal(params.get('month'), 'neq.');
   assert.equal(params.get('product_ref'), 'eq.');
-  // 분모·persist_* 는 월 행에서 NULL 이라 받을 이유가 없다(#129 의 결정).
+  // denominator·persist_* are NULL on month rows, so there is no reason to fetch them (#129's decision).
   assert.equal(params.get('select').includes('denom_'), false);
   assert.equal(params.get('select').includes('persist_'), false);
 });
 
-// 셋은 metrics_need 를 빠짐없이·겹치지 않게 나눈다. 한 행은 (product_ref 빈가 · month 빈가)
-// 네 조합 중 하나이고, 세 질의가 그중 셋을 하나씩 가져간다 — 겹치면 같은 행을 두 번 받고,
-// 빠지면 그 축은 화면에서 사라진다.
+// The three queries partition metrics_need without gaps or overlap. Every row is one of (product_ref empty ·
+// month empty)'s four combinations, and the three queries take one each of three of them — an overlap would
+// receive the same row twice, and a gap would make that axis disappear from the screen.
 test('NEED_QUERIES: 세 축은 서로 겹치지 않는다 (#130)', () => {
   const opOf = (spec, column) => spec.filters.find((f) => f.column === column).op;
   const axis = (spec) => `${opOf(spec, 'product_ref')}/${opOf(spec, 'month')}`;
   assert.equal(axis(NEED_QUERIES.category), 'eq/eq');
   assert.equal(axis(NEED_QUERIES.product), 'neq/eq');
   assert.equal(axis(NEED_QUERIES.month), 'eq/neq');
-  // 필터 값은 셋 다 빈 문자열이고, 빈 값을 값으로 쓰겠다고 밝혀야 살아남는다(#109).
+  // The filter value is an empty string in all three, and it survives only by declaring the empty value is being used as a value (#109).
   for (const spec of Object.values(NEED_QUERIES)) {
     for (const f of spec.filters) {
       assert.equal(f.value, '');
       assert.equal(f.allowEmpty, true);
     }
-    assert.match(spec.order, /^run_id\.desc,scope,need_key,month/); // offset 페이징의 안정 정렬
+    assert.match(spec.order, /^run_id\.desc,scope,need_key,month/); // the stable sort for offset paging
   }
 });
 

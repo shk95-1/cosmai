@@ -1,20 +1,20 @@
 ---
-name: 작업 이슈 (unit)
-about: 채널 하나·PR 하나·완료 기준 하나. 규칙은 #60, 도구는 tool/issue lint.
+name: Work issue (unit)
+about: One channel, one PR, one done-when. Rules are #60, the tool is tool/issue lint.
 labels: ''
 ---
 
-## 맥락
-<!-- 왜 지금 이것이 필요한가. 문서 참조 금지 — 필요한 사실은 아래에 인라인 -->
+## Context
+<!-- Why this is needed now. No document references — put the facts you need inline below -->
 
-## 사실
-<!-- path:line 근거. 실측 값과 날짜. 운영 상태는 tool/status 로 -->
+## Facts
+<!-- path:line evidence. Measured values and dates. Production state via tool/status -->
 
-## 할 일
-<!-- 디렉터리 둘에 걸치면 쪼갠다. 결정과 구현이 섞이면 [결정] 이슈를 먼저 -->
+## To do
+<!-- Split it if it spans two directories. If a decision and an implementation are mixed, a [decision] issue first -->
 
-## 완료 기준
-<!-- 기계 검사 가능한 문장 하나 -->
+## Done when
+<!-- One machine-checkable sentence -->
 
-## 채널·자리 / 등급 / 규모
-<!-- ch:<경로>, 어느 이슈 뒤. grade-A|B|C. 규모 S|M (L 은 착수 시 거부, 꼬리는 L(머리에서 분해)). 자원: GPU|ops|사람|live|공유DB -->
+## Channel · position / grade / size
+<!-- ch:<path>, after which issue. grade-A|B|C. Size S|M (L is rejected at start; a tail is L, split off from the head). Resources: GPU|ops|person|live|sharedDB -->

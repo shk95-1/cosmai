@@ -1,107 +1,107 @@
-# 03 — 범위·정책 잠금
+# 03 — Scope · policy locks
 
-"숫자 하나가 조용히 바뀌면 시계열의 뜻이 바뀐다"는 trend-radar의 핵심 관찰이다(`tests/test_collection_scope_is_recorded.py:3-8`:
-page size 20→50, 1페이지→2페이지로 시간당 리뷰 400→1,000, 6주 뒤 `git log`만이 답할 수 있었다). 이 섹션의 잠금들은 전부 그 한 사고의
-파생이며, 효과는 분명하나 비용도 이 섹션에 몰려 있다.
+trend-radar's core observation is that "if a single number quietly changes, the time series' meaning changes" (`tests/test_collection_scope_is_recorded.py:3-8`:
+page size 20→50, 1 page→2 pages made reviews-per-hour go 400→1,000, and six weeks later only `git log` could answer why). Every lock in this section descends from
+that one incident, and while the effect is clear, so is the cost this section concentrates.
 
-| ID | 이름 | 등급 |
+| ID | Name | Grade |
 |---|---|---|
-| S01 | `scope.lock.json` + CHANGELOG `Unreleased` 결합 + 기준 ref 비교 | 변형 |
-| S02 | scope는 상수에서 파생, 모든 run 행에 저장 | 채택 |
-| S03 | `service-db.json` 매니페스트 + 연결 예산 산수 테스트 + `policy.py` 렌더/감사 | 변형 |
-| S04 | `SourcePolicy`가 유일한 요청 제어 계약, 상수 옆에 실측 이유 | 채택 |
-| S05 | enum 멤버마다 수집기가 있다 ("기능처럼 보이는 구멍") | 채택 |
-| S06 | 페이지 걷기는 정책 깊이 안에, 조용한 절단은 보고서·exit code에 | 채택 |
-| S07 | 정직한 User-Agent 테스트 | 채택 |
-| S08 | 예산 추적기 — 헤더 의미를 정책이 선언 (`budget_is_daily`) | 채택 |
+| S01 | `scope.lock.json` + tying it to CHANGELOG `Unreleased` + a base-ref comparison | Adapt |
+| S02 | scope is derived from a constant, stored on every run row | Adopt |
+| S03 | `service-db.json` manifest + a connection-budget arithmetic test + `policy.py` render/audit | Adapt |
+| S04 | `SourcePolicy` is the sole request-control contract, with a measured reason beside each constant | Adopt |
+| S05 | A collector exists for every enum member ("a gap that looks like a feature") | Adopt |
+| S06 | Page walks stay within policy depth; a silent truncation shows in the report and exit code | Adopt |
+| S07 | Honest User-Agent test | Adopt |
+| S08 | Budget tracker — the policy declares what a header means (`budget_is_daily`) | Adopt |
 
 ---
 
-## S01. `scope.lock.json` + CHANGELOG 결합 + 기준 ref 비교
+## S01. `scope.lock.json` + tying it to CHANGELOG + a base-ref comparison
 
-- **어디서**: trend-radar `scope.lock.json:2-14`(파일 자체 설명: dataset 키, `changed_in`), `tests/test_collection_scope_is_recorded.py:70-107`
-  (레지스트리↔lock 동일, `changed_in`이 릴리스 헤딩 또는 `Unreleased`, Unreleased면 CHANGELOG Unreleased 절에 소스명), `:110-172`
-  (**커밋된 lock과 비교** — HEAD 또는 CI의 `SCOPE_LOCK_BASE_REF`; 양쪽을 같이 고쳐도 통과 못 하게), `.github/workflows/checks.yml:101-133`(기준 ref 계산).
+- **Where**: trend-radar `scope.lock.json:2-14` (the file explains itself: dataset key, `changed_in`), `tests/test_collection_scope_is_recorded.py:70-107`
+  (registry↔lock must match; `changed_in` is a release heading or `Unreleased`, and if `Unreleased` the source's name must be in the CHANGELOG's Unreleased section), `:110-172`
+  (**compares against the committed lock** — HEAD or CI's `SCOPE_LOCK_BASE_REF`; changing both sides together still fails), `.github/workflows/checks.yml:101-133` (computes the base ref).
   `AGENTS.md:98-109`.
-- **관찰된 효과**: 오늘 b9ffa95(`review_low`)가 lock 없이 통과했을 리 없다 — 새 데이터셋은 lock에 자기 이름으로 scope를 기록해야 하고
-  (`AGENTS.md:101-103`), 커밋 본문이 "scope records it under its own name so the two walks' row counts cannot be confused"라고 적은 것이 이 테스트의 산물.
-  1.1.0 릴리스 커밋 ba11c24 본문 "Stops the ingredients scope from identifying itself as Unreleased"도 이 결합이 만든 문장.
-- **관찰된 비용**: (1) 숫자 하나 바꾸는 데 세 파일(소스 상수, lock, CHANGELOG) + 릴리스 때 `changed_in` 갱신. (2) CI가 기준 ref를 계산하는 33줄 yaml.
-  (3) CHANGELOG가 없는 레포(Research_Paper 결정)에서는 성립 불가 — 테스트가 `## Unreleased` 문자열을 `index()`로 찾는다(`:64`). (4) 뜻의 변화는 못 본다
-  (`:21-24`, 그래서 `docs/sources/<key>.md`가 또 필요).
-- **재사용 형태**: lock 파일은 가져가지 않는다. 대신 S02(행에 scope 저장) + "scope는 상수에서 파생" 테스트(`snippets/test_scope_is_derived.py`)만.
-  scope 변경의 **기록**은 run 행의 `scope` jsonb와 `collector_version`이 이미 한다 — 소급 질문("그때 몇 페이지 걸었나")은 SQL로 답한다.
-- **등급: 변형** — 소유자 지시(scope-lock을 그대로 가져가지 않음). 잃는 것: "바꾸기 전에 사람이 문장을 쓴다"는 강제. 대신 커밋 본문(R09)에 맡긴다.
+- **Observed effect**: today's b9ffa95 (`review_low`) could not have passed without the lock — a new dataset must record its scope under its own name in the lock
+  (`AGENTS.md:101-103`), and the commit body's "scope records it under its own name so the two walks' row counts cannot be confused" is a product of this test.
+  The 1.1.0 release commit ba11c24's body, "Stops the ingredients scope from identifying itself as Unreleased", is a sentence this pairing produced too.
+- **Observed cost**: (1) changing one number touches three files (the source constant, the lock, the CHANGELOG) + a `changed_in` update at release. (2) 33 lines of yaml for CI to compute the base ref.
+  (3) impossible in a repo with no CHANGELOG (Research_Paper's decision) — the test finds the `## Unreleased` string via `index()` (`:64`). (4) it cannot see a change in meaning
+  (`:21-24`, which is why `docs/sources/<key>.md` is still needed).
+- **Reuse form**: the lock file is not taken. Instead, only S02 (scope stored on the row) + the "scope is derived from a constant" test (`snippets/test_scope_is_derived.py`).
+  The **record** of a scope change is already made by the run row's `scope` jsonb and `collector_version` — a retroactive question ("how many pages did it walk back then") is answered in SQL.
+- **Grade: Adapt** — owner's call (scope-lock is not taken as is). What's lost: the enforcement that "a person writes a sentence before changing this". Left instead to the commit body (R09).
 
-## S02. scope는 상수에서 파생, 모든 run 행에 저장
+## S02. scope is derived from a constant, stored on every run row
 
-- **어디서**: trend-radar `src/trend_radar/contract.py:139-145`(주석: 왜 run마다 저장하는가), `AGENTS.md:25-28`("두 번 쓴 숫자는 한쪽이 썩는다"),
-  `tests/test_scope_is_declared.py:131-172`(`CONSTANT_FOR` 표로 scope 값 == 모듈 상수), `:57-65`(scope 키 집합 == datasets 집합),
-  `tool/checks/data:68-73`(spec 없이 수집한 run을 hygiene 위반으로).
-- **관찰된 효과**: 오늘 P16이 `trend_radar.run`(140행)과 `fetch_log`(5,336행)만으로 소스별 성공률·p50·p90 표를 만들었다
-  (`architect/slice-p16-collector-reliability/README.md:7,12-19`). 행이 자기 출처를 들고 있어서 가능했다.
-- **관찰된 비용**: `ClassVar` 선언 규칙(`AGENTS.md:19-23`)과 `MappingProxyType` 중첩 같은 타입 체조. 테스트 180줄.
-- **재사용 형태**: `contracts/run.md`에 "run 행은 `collector_version`, `schema_revision`, `scope(jsonb)`를 가진다"를 계약으로;
-  `snippets/test_scope_is_derived.py` 30줄.
-- **등급: 채택** — 새 레포 `contracts/`의 run/fetch_log 형태 항목이 바로 이것.
+- **Where**: trend-radar `src/trend_radar/contract.py:139-145` (a comment: why store this on every run), `AGENTS.md:25-28` ("a number written twice, one copy rots"),
+  `tests/test_scope_is_declared.py:131-172` (a `CONSTANT_FOR` table checks scope value == the module constant), `:57-65` (the scope key set == the datasets set),
+  `tool/checks/data:68-73` (a run collected with no spec is a hygiene violation).
+- **Observed effect**: today's P16 built a per-source success-rate · p50 · p90 table using only `trend_radar.run` (140 rows) and `fetch_log` (5,336 rows)
+  (`architect/slice-p16-collector-reliability/README.md:7,12-19`). Possible because a row carries its own provenance.
+- **Observed cost**: type gymnastics — the `ClassVar` declaration rule (`AGENTS.md:19-23`) and nested `MappingProxyType`. 180 lines of test.
+- **Reuse form**: in `contracts/run.md`, as a contract: "a run row has `collector_version`, `schema_revision`, `scope(jsonb)`";
+  `snippets/test_scope_is_derived.py`, 30 lines.
+- **Grade: Adopt** — this is exactly the run/fetch_log shape entry in the new repo's `contracts/`.
 
-## S03. `service-db.json` 매니페스트 + 예산 산수 + `policy.py`
+## S03. `service-db.json` manifest + budget arithmetic + `policy.py`
 
-- **어디서**: trend-radar `service-db.json`(41줄: 4롤, 연결 예산 분해, 세션 기본값), `tests/test_service_database_manifest.py:32-46`
-  (`instances × (pool+overflow) + workers + migration + spare == total`), `tool/db/policy.py:1-7`(매니페스트가 유일한 출처, GRANT SQL은 생성),
-  **1,451줄**. yt-scrapper `service-db.json`(48줄: 3롤, 외부 객체 저장소 선언 `:12-19`, 예산 32), `deploy/tubedepth-worker.service:52-59`
-  (`2C + 13 = 25 at C=6, 32 안에`). `docs/shared-postgres.md` 규칙 4(`:313`).
-- **관찰된 효과**: 연결 예산이 "대충"이 아니라 산수로 닫힌다. 컨테이너 14개가 Postgres 하나에 붙은 오늘 스택에서 `max_connections` 초과가 없었다.
-- **관찰된 비용**: (1) `policy.py` 1,451줄 — 렌더·감사·추출 리허설까지 한 파일, 새 레포가 다 쓸 일 없다. (2) 매니페스트 드리프트: `service-db.json:4`
-  `"database": "trend_radar"`인데 실제 배치는 `app`(`stack/docker-compose.yml:152`, `architect/README.md` §6 #1) — 매니페스트가 "유일한 출처"인데 틀렸다.
-  (3) 같은 정보가 `postgres-bootstrap.sql:144-153` 주석과 유닛 파일 주석에 또 있다.
-- **재사용 형태**: `snippets/service-db.json`(한 스키마 = 한 항목, 3롤, 예산 분해) + `snippets/test_connection_budget_adds_up.py`(12줄).
-  SQL 생성기는 두지 않는다 — bootstrap SQL을 직접 쓰고(04-O01) 매니페스트 값과 일치하는지 grep 한 번.
-- **등급: 변형** — 모노레포 전체에 매니페스트 **하나**(스키마 4개 × 롤 3개 × 예산), 테스트 하나.
+- **Where**: trend-radar `service-db.json` (41 lines: 4 roles, a connection-budget breakdown, session defaults), `tests/test_service_database_manifest.py:32-46`
+  (`instances × (pool+overflow) + workers + migration + spare == total`), `tool/db/policy.py:1-7` (the manifest is the sole source, GRANT SQL is generated),
+  **1,451 lines**. yt-scrapper `service-db.json` (48 lines: 3 roles, an external object-storage declaration `:12-19`, budget 32), `deploy/tubedepth-worker.service:52-59`
+  (`2C + 13 = 25 at C=6`, inside 32). `docs/shared-postgres.md` rule 4 (`:313`).
+- **Observed effect**: the connection budget closes by arithmetic, not by guessing. On today's stack, with 14 containers attached to one Postgres, `max_connections` was never exceeded.
+- **Observed cost**: (1) `policy.py`'s 1,451 lines put render, audit, and extraction dry-run all in one file, and the new repo would never use all of it. (2) manifest drift: `service-db.json:4`
+  says `"database": "trend_radar"`, but the real deployment is `app` (`stack/docker-compose.yml:152`, `architect/README.md` §6 #1) — the manifest is "the sole source" and it's wrong.
+  (3) the same information appears again in the `postgres-bootstrap.sql:144-153` comments and in unit-file comments.
+- **Reuse form**: `snippets/service-db.json` (one schema = one entry, 3 roles, a budget breakdown) + `snippets/test_connection_budget_adds_up.py` (12 lines).
+  No SQL generator — the bootstrap SQL is written directly (04-O01), with one grep to check it matches the manifest's values.
+- **Grade: Adapt** — **one** manifest for the whole monorepo (4 schemas × 3 roles × budget), one test.
 
-## S04. `SourcePolicy` — 유일한 요청 제어 계약, 상수 옆에 실측 이유
+## S04. `SourcePolicy` — the sole request-control contract, a measured reason beside each constant
 
-- **어디서**: trend-radar `src/trend_radar/contract.py:105-136`(interval/concurrency/timeout/attempts/depth/budget + `__post_init__` 검증),
-  `AGENTS.md:37-41`("실측 응답 크기·지연·완료 창에서 나온다; 바꾸려면 새 측정과 어떤 운영 실패를 막는지 한 문장"),
-  `src/trend_radar/sources/oliveyoung.py:74-78`("50이 이 엔드포인트 최대. 60·70·75·80·100에서 SUCCESS + 빈 목록 실측. 재측정 없이 올리지 말 것"),
-  Research_Paper `src/paper_radar/contract.py:41-56`(`max_attempts=5` Retry-After 39~40초 실측, `budget_is_daily` 헤더 의미 충돌 실측),
-  `docs/sources/oliveyoung.md:28-30`(`min_interval_s=5.0, concurrency=1`의 근거).
-- **관찰된 효과**: 오늘 P16 — trend-radar 4소스 5,336요청 중 차단 1건(`slice-p16…/README.md:12-17`). 반대 사례가 같은 표에: tubedepth는
-  팬아웃 상한이 없어 큐 232k 발산(`:26-28`). 정책이 계약에 있는 수집기와 없는 수집기의 차이가 수치로 나왔다.
-- **관찰된 비용**: 상수마다 2~5줄 주석. `AGENTS.md:114-115` "이유 없는 상수는 다음 사람이 정리하는 상수" — 이 레포에서 가장 설득력 있는 주석 규칙이지만
-  yt-scrapper `src/`에서는 prose/code 0.70으로 팽창했다(`metrics.md`).
-- **재사용 형태**: `contracts/collector.md`에 SourcePolicy 필드 표 + "상수 옆 한 문장(측정일·값·막는 실패)" 규칙. 새 레포 `collectors/youtube`의 팬아웃 상한이
-  첫 적용 대상.
-- **등급: 채택** — 주석은 **한 문장**으로 제한(05-D07).
+- **Where**: trend-radar `src/trend_radar/contract.py:105-136` (interval/concurrency/timeout/attempts/depth/budget + `__post_init__` validation),
+  `AGENTS.md:37-41` ("comes from measured response size, latency, and the completion window; changing it needs a new measurement and one sentence on what operational failure it prevents"),
+  `src/trend_radar/sources/oliveyoung.py:74-78` ("50 is this endpoint's max. Measured SUCCESS + empty list at 60·70·75·80·100. Do not raise it without re-measuring"),
+  Research_Paper `src/paper_radar/contract.py:41-56` (`max_attempts=5` measured at a Retry-After of 39–40s; a measured conflict in what `budget_is_daily`'s header means),
+  `docs/sources/oliveyoung.md:28-30` (the evidence for `min_interval_s=5.0, concurrency=1`).
+- **Observed effect**: today's P16 — 1 block out of 5,336 requests across trend-radar's 4 sources (`slice-p16…/README.md:12-17`). The counter-case is in the same table:
+  tubedepth has no fan-out cap and its queue diverged to 232k (`:26-28`). The gap between a collector with a policy in its contract and one without shows up as a number.
+- **Observed cost**: 2–5 comment lines per constant. `AGENTS.md:114-115`: "a constant with no reason is a constant the next person cleans up" — the most convincing comment rule in this repo,
+  yet in yt-scrapper's `src/` it swelled to a prose/code ratio of 0.70 (`metrics.md`).
+- **Reuse form**: a SourcePolicy field table in `contracts/collector.md` + the rule "one sentence beside a constant: measurement date, value, the failure it prevents". The new repo's
+  `collectors/youtube` fan-out cap is the first place to apply it.
+- **Grade: Adopt** — the comment is capped at **one sentence** (05-D07).
 
-## S05. enum 멤버마다 수집기가 있다
+## S05. A collector exists for every enum member
 
-- **어디서**: trend-radar `tests/test_every_dataset_has_a_collector.py:1-19`(`NEW_PRODUCT`·`PRODUCT` 두 번 겪은 "행 0건인 채로 존재하는 데이터셋"),
-  `:37-45`(멤버마다 수집하는 소스가 있다), `:48-62`(수집한다는 소스는 seed도 준다), `docs/judgment-debt.md:23-43`(PRODUCT 삭제 → 이슈 #21로 복귀 경위).
-- **관찰된 효과**: 62줄로 두 번 조사 비용을 막는다. 오늘 P16의 "크론 누락"(`review`/`review_stats`/`new_product`가 08-21 이후 0건)은 같은 모양의
-  사고를 **배선 층**에서 겪은 것 — enum에는 있고 crontab에는 없었다.
-- **재사용 형태**: `snippets/test_every_enum_member_is_collected.py` + T10 변형(크론 줄 존재)으로 배선까지 덮는다.
-- **등급: 채택**.
+- **Where**: trend-radar `tests/test_every_dataset_has_a_collector.py:1-19` (`NEW_PRODUCT` · `PRODUCT` — "a dataset that exists with 0 rows", hit twice),
+  `:37-45` (every member has a source that collects it), `:48-62` (a source that claims to collect also provides a seed), `docs/judgment-debt.md:23-43` (the story of PRODUCT being deleted, then coming back as issue #21).
+- **Observed effect**: 62 lines prevent paying to investigate this twice. Today's P16 "missing cron" (`review`/`review_stats`/`new_product` at 0 since 08-21) is the same shape
+  of incident hitting the **wiring layer** — present in the enum, absent from crontab.
+- **Reuse form**: `snippets/test_every_enum_member_is_collected.py` + the T10 variant (the cron line exists) covers the wiring too.
+- **Grade: Adopt**.
 
-## S06. 페이지 걷기는 정책 깊이 안에, 조용한 절단은 보고서에
+## S06. Page walks stay within policy depth; a silent truncation shows in the report
 
-- **어디서**: trend-radar `tests/sources/test_page_walks_fit_their_policy.py:1-12`(3페이지 선언 + max_depth 2 → 셋째 페이지가 요청도 안 되고 run은 ok),
-  `tests/test_scope_is_declared.py:101-115`(같은 검사를 scope 쪽에서), `AGENTS.md:68-72`("No silent truncation… 두 번 겪었다"),
+- **Where**: trend-radar `tests/sources/test_page_walks_fit_their_policy.py:1-12` (3 pages declared + max_depth 2 → the third page is never even requested and the run is still ok),
+  `tests/test_scope_is_declared.py:101-115` (the same check from the scope side), `AGENTS.md:68-72` ("No silent truncation… hit twice"),
   `tests/engine/test_report_is_honest_about_stopping_early.py`, `tests/engine/test_a_run_records_only_the_scope_it_walked.py`.
-- **관찰된 효과**: 오늘 b9ffa95가 `max_depth`를 "두 걷기 중 깊은 쪽"으로 바꿨다고 본문에 명시 — 이 테스트가 없었으면 `review_low` 6페이지 중 4페이지가 조용히 버려졌다.
-- **재사용 형태**: 규칙 두 줄(계약) + 수집기마다 "선언한 깊이 ≤ 정책 깊이" 테스트 10줄.
-- **등급: 채택**.
+- **Observed effect**: today's b9ffa95 body states it changed `max_depth` to "the deeper of the two walks" — without this test, 4 of `review_low`'s 6 pages would have been silently dropped.
+- **Reuse form**: two rule lines (the contract) + a 10-line "declared depth ≤ policy depth" test per collector.
+- **Grade: Adopt**.
 
-## S07. 정직한 User-Agent
+## S07. Honest User-Agent
 
-- **어디서**: trend-radar `tests/test_user_agent_is_honest.py:1-15`(Chrome UA가 403, curl/빈 UA/Firefox는 200 — 2026-08-19 실측), `:25-47`
-  (브라우저 토큰 금지, `trend-radar/<version>` + GitHub URL).
-- **관찰된 효과**: 정책("위조 안 함")과 버그(WAF 403)를 한 테스트로. 47줄.
-- **등급: 채택** — 새 레포 `contracts/collector.md`에 UA 형식 한 줄 + 테스트 그대로.
+- **Where**: trend-radar `tests/test_user_agent_is_honest.py:1-15` (a Chrome UA gets 403; curl / empty UA / Firefox get 200 — measured 2026-08-19), `:25-47`
+  (browser tokens forbidden, `trend-radar/<version>` + a GitHub URL).
+- **Observed effect**: catches both the policy ("no spoofing") and the bug (a WAF 403) in one test. 47 lines.
+- **Grade: Adopt** — one line for the UA format in the new repo's `contracts/collector.md`, plus the test as is.
 
-## S08. 예산 추적기 — 헤더 의미를 정책이 선언
+## S08. Budget tracker — the policy declares what a header means
 
-- **어디서**: Research_Paper `src/paper_radar/contract.py:47-56`(`x-ratelimit-remaining`이 OpenAlex는 일일, NCBI는 초당 — 이름만으로 구분 불가,
+- **Where**: Research_Paper `src/paper_radar/contract.py:47-56` (`x-ratelimit-remaining` means daily for OpenAlex but per-second for NCBI — indistinguishable by name alone,
   호스트명 분기 대신 정책 필드), `tests/paper_radar/test_budget.py`, git 로그 `f3b06fa fix(paper_radar): NCBI 초당 레이트리밋을 일일 예산으로 오독하던 경고 제거`.
-- **관찰된 효과**: 오탐 경고로 운영자가 경고를 무시하게 되는 것을 막았다(`:52-55`).
-- **등급: 채택** — 패턴만: "호스트 이름으로 분기하지 말고 정책이 선언한다".
+- **Observed effect**: prevented an operator from learning to ignore warnings because of a false-positive one (`:52-55`).
+- **Grade: Adopt** — just the pattern: "the policy declares it, don't branch on the hostname".

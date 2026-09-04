@@ -1,4 +1,4 @@
-"""Exit codes (contracts/entrypoints.md 종료 코드): 0 ok, 1 partial, 2 blocked -- and that
+"""Exit codes (contracts/entrypoints.md's exit codes): 0 ok, 1 partial, 2 blocked -- and that
 `cosmai collect youtube` actually reaches this module."""
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def test_watch_reports_partial_when_the_queue_is_capped(
 
 
 def test_watch_stamps_dataset_on_the_job_it_creates(tubedepth_schema: str, tmp_path: Path):
-    """#102: `jobs.kind` (video.metadata 계열) is not the entrypoints.md dataset vocabulary
+    """#102: `jobs.kind` (the video.metadata family) is not the entrypoints.md dataset vocabulary
     (watch|work|flatten|prune) -- collector_health's youtube arm needs a column in that vocabulary."""
     watchlist = tmp_path / "watch.txt"
     watchlist.write_text("video dQw4w9WgXcQ\n")

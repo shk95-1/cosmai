@@ -42,7 +42,18 @@ hits=$(git diff $lang_range -U0 --no-color -- . \
     ':!eval/' \
     ':!db/seed/' \
     ':!analysis/**/*.csv' \
-    ':!portal/public/' \
+    ':!portal/public/app.js' \
+    ':!portal/public/index.html' \
+    ':!portal/public/lineage.js' \
+    ':!portal/public/map-app.js' \
+    ':!portal/public/map.html' \
+    ':!portal/public/ops-app.js' \
+    ':!portal/public/ops.html' \
+    ':!portal/public/ops.js' \
+    ':!portal/public/query.js' \
+    ':!portal/public/render.js' \
+    ':!portal/public/screens.js' \
+    ':!portal/public/style.css' \
     ':!tests/fixtures/**' \
     ':!tests/golden*/**' \
     ':!tests/**/fixtures/**' \

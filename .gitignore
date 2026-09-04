@@ -6,7 +6,7 @@ __pycache__/
 .env
 *.env
 data/
-# 시드 입력은 레포 안에 살아야 한다 (#79) — 위의 data/ 가 통째로 무시하지 못하게 되돌린다.
+# Seed input must live inside the repo (#79) — reverts the data/ ignore above so it is not swallowed whole.
 !db/seed/data/
 var/
 .pytest_cache/

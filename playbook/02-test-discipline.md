@@ -1,218 +1,218 @@
-# 02 — 테스트 규율
+# 02 — Test discipline
 
-실측(`metrics.md`): trend-radar 1,152 passed / 45 skipped(db) / 11 deselected(live) in **2.7s**; Research_Paper 805 passed in **1.3s**;
-yt-scrapper 632 collected(4 live, 31 postgres 마커); cosmai-old `apps/` 1,199 collected. 네 레포 모두 기본 실행이 오프라인이고
-그 이유는 같다 — `conftest.py`가 소켓을 막는다. 빠른 이유도 같다 — 파서는 순수 함수이고 픽스처는 저장된 바이트다.
+Measured (`metrics.md`): trend-radar 1,152 passed / 45 skipped (db) / 11 deselected (live) in **2.7s**; Research_Paper 805 passed in **1.3s**;
+yt-scrapper 632 collected (4 live, 31 postgres markers); cosmai-old `apps/` 1,199 collected. In all four repos the default run is offline,
+and for the same reason — `conftest.py` blocks sockets. Fast for the same reason too — the parser is a pure function and the fixture is stored bytes.
 
-| ID | 이름 | 등급 |
+| ID | Name | Grade |
 |---|---|---|
-| T01 | 소켓 차단 autouse conftest (`live` 마커 예외, 테스트 DB 포트 허용) | 채택 |
-| T02 | 가드의 가드 — 차단이 실제로 막는지 검증하는 테스트 | 채택 |
-| T03 | 진짜 Postgres, 테스트당 스키마 (`database_url_for_tests`) | 채택 |
-| T04 | `tool/checks/test`가 일회용 Postgres 컨테이너를 띄우고 **프로덕션 bootstrap SQL**로 초기화 | 채택 |
-| T05 | AST 계층 가드 — "소스는 아래로만 import" | 채택 |
-| T06 | 공허성 가드 — "검사할 것이 있었다"를 먼저 단언 | 채택 |
-| T07 | 골든 파일 바이트 동일성 (합성 픽스처 → CSV 5개) | 채택 |
-| T08 | 픽스처 스크럽 테스트 — 커밋된 캡처에 실명·프로필키 없음 | 채택 |
-| T09 | 문서 진실성 메타테스트 (doc-truth, 번역 동기화, 참조 실재, 컨텍스트 파일 도메인 금지) | 제외 |
-| T10 | 설정 진실성 테스트 (compose/systemd 명령줄이 `--help`에 있는가) | 변형 |
-| T11 | 부팅 경로 DDL 금지 + runtime 롤 권한 음성 증명 | 채택 |
-| T12 | payload shape lock — append-only, bump 강제 | 변형 |
-| T13 | 적재된 행 검사 (`tool/checks/data`: hygiene / placeholder 두 계열) | 채택 |
-| T14 | live/contract 검사 분리 — 사람이 돌린다 | 채택 |
-| T15 | 서브프로세스로 워커 띄우는 테스트 + openssl TLS 스텁 | 변형 |
-| T16 | 수용 시나리오 마크다운 (`tests/acceptance/JOB-001…`) | 제외 |
-| T17 | 대시보드/뷰 경계 테스트 — 컴파일된 쿼리 객체 검사 | 변형 |
+| T01 | Socket-blocking autouse conftest (exempts the `live` marker, allows the test DB port) | Adopt |
+| T02 | Guard-the-guard — a test that verifies the block actually blocks | Adopt |
+| T03 | Real Postgres, schema per test (`database_url_for_tests`) | Adopt |
+| T04 | `tool/checks/test` brings up a throwaway Postgres container and initializes it with the **production bootstrap SQL** | Adopt |
+| T05 | AST layering guard — "source only imports downward" | Adopt |
+| T06 | Vacuity guard — assert "there was something to check" first | Adopt |
+| T07 | Golden-file byte identity (synthetic fixture → 5 CSVs) | Adopt |
+| T08 | Fixture-scrub test — no real names or profile keys in a committed capture | Adopt |
+| T09 | Doc-truth meta-tests (doc-truth, translation sync, references resolve, context files forbid a domain) | Drop |
+| T10 | Config-truthfulness test (does the compose/systemd command line exist in `--help`) | Adapt |
+| T11 | DDL forbidden on the boot path + negative-proof of runtime-role permissions | Adopt |
+| T12 | payload shape lock — append-only, forces a bump | Adapt |
+| T13 | Loaded-row check (`tool/checks/data`: hygiene / placeholder, two families) | Adopt |
+| T14 | live/contract checks separated — run by a person | Adopt |
+| T15 | A test that spawns a worker as a subprocess + an openssl TLS stub | Adapt |
+| T16 | Acceptance-scenario markdown (`tests/acceptance/JOB-001…`) | Drop |
+| T17 | Dashboard/view boundary test — inspects the compiled query object | Adapt |
 
 ---
 
-## T01. 소켓 차단 autouse conftest
+## T01. Socket-blocking autouse conftest
 
-- **어디서**: trend-radar `tests/conftest.py:27-41`(connect/connect_ex/create_connection 세 개 패치, 메시지에 nodeid),
-  yt-scrapper `tests/conftest.py:70-104`(`LOCAL_DATABASE_HOSTS` × `TUBEDEPTH_TEST_POSTGRES_URL`의 **포트**만 통과, `:37-51`에 포트로 좁힌 이유),
-  Research_Paper `tests/conftest.py:26-39`(같은 세 개 패치, 한국어 메시지), cosmai-old `tests/conftest.py:31-55`(차단이 아니라
-  `--run-network` 플래그 없으면 `network` 마커 스킵 — 약한 변형).
-- **무엇**: `live` 마커가 없는 테스트가 소켓을 열면 RuntimeError. 실패 메시지가 테스트 이름을 담는다.
-- **관찰된 효과**: 세 레포 합계 2,600여 테스트가 네트워크 없이 5초 안에 끝난다. trend-radar `tests/conftest.py:8-11`
-  "파서가 조용히 요청을 키우는 것이 이 규칙이 깨지는 방식이고, 이게 없으면 증상은 '느려지고 가끔 빨개지는 스위트'".
-  `pyproject.toml:71-78` `-m "not live"`가 addopts — "취향이 아니라 load-bearing".
-- **관찰된 비용**: DB를 쓰는 테스트는 예외 경로가 필요하다. trend-radar `tests/storage/conftest.py:35-40`은 `db` 마커에서
-  `monkeypatch.undo()`로 통째로 푼다(전부 허용); yt-scrapper는 포트 하나만 연다. 후자가 맞다 — 전자는 `db` 테스트 안에서
-  실제 사이트로 나가도 모른다. yt-scrapper 주석 `:41-43` "Task 7이 '로컬 호스트 아무 포트'로 넓혔다가 되돌렸다".
-- **재사용 형태**: `snippets/conftest_no_network.py` (yt-scrapper 포트 허용 방식 + trend-radar 세 함수 패치 합본, 40줄).
-- **등급: 채택**.
+- **Where**: trend-radar `tests/conftest.py:27-41` (patches three functions — connect/connect_ex/create_connection — the message carries the nodeid),
+  yt-scrapper `tests/conftest.py:70-104` (only the **port** from `LOCAL_DATABASE_HOSTS` × `TUBEDEPTH_TEST_POSTGRES_URL` passes; `:37-51` gives the reason for narrowing to a port),
+  Research_Paper `tests/conftest.py:26-39` (the same three patches, Korean messages), cosmai-old `tests/conftest.py:31-55` (not a block but
+  skips the `network` marker unless a `--run-network` flag is passed — a weaker variant).
+- **What**: a test with no `live` marker that opens a socket raises RuntimeError. The failure message carries the test's name.
+- **Observed effect**: across the three repos, ~2,600 tests finish in under 5 seconds with no network. trend-radar `tests/conftest.py:8-11`:
+  "a parser quietly growing a request is how this rule breaks, and without it the symptom is 'a suite that gets slow and occasionally turns red'".
+  `pyproject.toml:71-78`'s `-m "not live"` is in addopts — "not a preference, load-bearing".
+- **Observed cost**: a test using a DB needs an exception path. trend-radar `tests/storage/conftest.py:35-40` lifts the block entirely (allows everything)
+  on the `db` marker with `monkeypatch.undo()`; yt-scrapper opens only one port. The latter is right — the former would not notice a `db` test
+  reaching an actual site. yt-scrapper's comment at `:41-43`: "Task 7 widened this to 'any localhost port' and then reverted it".
+- **Reuse form**: `snippets/conftest_no_network.py` (yt-scrapper's port-allow approach combined with trend-radar's three-function patch, 40 lines).
+- **Grade: Adopt**.
 
-## T02. 가드의 가드
+## T02. Guard-the-guard
 
-- **어디서**: trend-radar `tests/test_conftest_guard.py:6-13`(13줄: 막히는가, 메시지에 테스트 이름이 있는가),
-  Research_Paper `tests/paper_radar/test_guards.py` `SocketGuardTest`, `tests/conftest.py:11-12`가 그쪽을 가리킴.
-- **관찰된 효과**: conftest를 고치다 차단을 잃으면 이 두 테스트가 먼저 빨개진다. 비용 0에 가까움.
-- **재사용 형태**: `snippets/test_conftest_guard.py`.
-- **등급: 채택**.
+- **Where**: trend-radar `tests/test_conftest_guard.py:6-13` (13 lines: does it block, does the message carry the test's name),
+  Research_Paper `tests/paper_radar/test_guards.py`'s `SocketGuardTest`, pointed to by `tests/conftest.py:11-12`.
+- **Observed effect**: if editing conftest loses the block, these two tests go red first. Cost is close to zero.
+- **Reuse form**: `snippets/test_conftest_guard.py`.
+- **Grade: Adopt**.
 
-## T03. 진짜 Postgres, 테스트당 스키마
+## T03. Real Postgres, schema per test
 
-- **어디서**: yt-scrapper `tests/conftest.py:128-139`(nodeid → 63바이트 식별자, sha1 10자리로 충돌 방지), `:142-197`
-  (`DROP SCHEMA … CASCADE; CREATE SCHEMA`, `options=-csearch_path=<schema>,pg_catalog`로 URL에 실어 yield, teardown에서 drop;
-  `render_as_string(hide_password=False)` 함정 `:187-191`). `:145-148` "59번 `Database(tmp_path/…)`를 쓰던 18개 파일이 이 한 픽스처로".
-  cosmai-old `apps/tests/conftest.py:128-186`은 **세션당** 한 번 `cosmai` 스키마를 리셋하고 default privileges를 다시 건다
-  (`:141-158` OID 바뀜 → 권한 소실 함정). trend-radar `tests/storage/conftest.py:8-11`은 `create_all` 대신 **진짜 마이그레이션**을 돌린다.
-- **무엇**: 테스트가 SQLite나 fake가 아니라 프로덕션과 같은 Postgres 18에 붙는다. 격리는 database가 아니라 schema 단위(초 단위 vs ms 단위).
-- **관찰된 효과**: yt-scrapper `tool/checks/test:18-21` "프로덕션은 Postgres, 테스트는 SQLite — 방언 버그가 그렇게 나간다".
-  `decisions/002`는 SQLite 시절 락 문제를 다뤘고 Postgres 이관으로 사문화됐다(`decisions/002…:29-33` 스스로 예견).
-- **관찰된 비용**: Docker 필요(`tool/checks/test:30` `require_command uv docker pg_isready`). cosmai-old는 `cosmai_test` database를
-  사전 프로비저닝해야 해서(`apps/tests/conftest.py:12-14`) 첫 실행 전 수동 단계가 생긴다. yt-scrapper 방식은 migrator에
-  `GRANT CREATE ON DATABASE`가 필요(`tool/checks/test:61-65`, "하네스 전용, bootstrap 파일에는 넣지 않는다").
-- **재사용 형태**: `snippets/db_schema_per_test.py` (yt-scrapper 픽스처 45줄, psycopg/SQLAlchemy 중립화).
-- **등급: 채택** — 새 레포의 "테스트는 진짜·빠르게" 제약에 정확히 맞는다. 모노레포에서는 패키지마다 `<pkg>_t_…` 접두사로 스키마 이름을 나눈다.
+- **Where**: yt-scrapper `tests/conftest.py:128-139` (nodeid → a 63-byte identifier, a 10-char sha1 to avoid collisions), `:142-197`
+  (`DROP SCHEMA … CASCADE; CREATE SCHEMA`, carried in the URL via `options=-csearch_path=<schema>,pg_catalog`, yielded, dropped at teardown;
+  the `render_as_string(hide_password=False)` trap `:187-191`). `:145-148`: "18 files that used `Database(tmp_path/…)` 59 times, now one fixture".
+  cosmai-old `apps/tests/conftest.py:128-186` resets the `cosmai` schema **once per session** and re-grants default privileges
+  (`:141-158`, the OID-changes-so-permissions-vanish trap). trend-radar `tests/storage/conftest.py:8-11` runs a **real migration** instead of `create_all`.
+- **What**: tests connect to the same Postgres 18 as production, not SQLite or a fake. Isolation is per schema, not per database (seconds vs. milliseconds).
+- **Observed effect**: yt-scrapper `tool/checks/test:18-21`: "production runs Postgres, tests run SQLite — that's how dialect bugs ship".
+  `decisions/002` dealt with a lock problem from the SQLite era and became dead letter with the Postgres migration (`decisions/002…:29-33` foresaw this itself).
+- **Observed cost**: needs Docker (`tool/checks/test:30` `require_command uv docker pg_isready`). cosmai-old needs the `cosmai_test` database
+  pre-provisioned (`apps/tests/conftest.py:12-14`), so a manual step precedes the first run. yt-scrapper's approach needs
+  `GRANT CREATE ON DATABASE` on the migrator (`tool/checks/test:61-65`, "harness-only, not put in the bootstrap file").
+- **Reuse form**: `snippets/db_schema_per_test.py` (yt-scrapper's 45-line fixture, made psycopg/SQLAlchemy-neutral).
+- **Grade: Adopt** — fits the new repo's "tests real and fast" constraint exactly. In a monorepo, split schema names per package with a `<pkg>_t_…` prefix.
 
-## T04. 일회용 Postgres + 프로덕션 bootstrap SQL
+## T04. Throwaway Postgres + the production bootstrap SQL
 
-- **어디서**: yt-scrapper `tool/checks/test:34-69`(`TUBEDEPTH_TEST_POSTGRES_URL` 없으면 `postgres:18-alpine` 컨테이너를 띄우고
-  `deploy/postgres-bootstrap.sql`을 그대로 흘려 넣은 뒤 URL export, trap으로 정리). `:40-53` 호스트 쪽 `pg_isready` 폴링 이유
-  (initdb 중 임시 서버가 컨테이너 안 유닉스 소켓으로만 ready를 답한다 — 실제로 겪은 flake).
-- **관찰된 효과**: `deploy/postgres-bootstrap.sql:18-20` "CI가 검사하는 것이 프로덕션의 모양". `tests/test_postgres_privileges.py:1-17`이
-  그 위에서 runtime 롤의 음성 증명(DDL 거부)을 돌린다.
-- **관찰된 비용**: 푸시마다 컨테이너 기동(R03). 로컬 5434 포트의 `shared-postgres`가 이미 떠 있는 이 머신에서는 URL만 넘기면 된다.
-- **재사용 형태**: `snippets/tool-checks/test` (컨테이너 기동 절 포함).
-- **등급: 채택**.
+- **Where**: yt-scrapper `tool/checks/test:34-69` (brings up a `postgres:18-alpine` container if `TUBEDEPTH_TEST_POSTGRES_URL` is unset, pipes
+  `deploy/postgres-bootstrap.sql` in as is, exports the URL, cleans up via trap). `:40-53` gives the reason for polling `pg_isready` from the host side
+  (during initdb the temporary server answers ready only on the container's unix socket — an actually-hit flake).
+- **Observed effect**: `deploy/postgres-bootstrap.sql:18-20`: "what CI checks is production's shape". `tests/test_postgres_privileges.py:1-17` runs
+  the negative-proof of the runtime role (DDL rejected) on top of it.
+- **Observed cost**: a container starts on every push (R03). On this machine, where `shared-postgres` is already up on local port 5434, only the URL needs passing.
+- **Reuse form**: `snippets/tool-checks/test` (includes the container-startup section).
+- **Grade: Adopt**.
 
-## T05. AST 계층 가드
+## T05. AST layering guard
 
-- **어디서**: trend-radar `tests/test_sources_stay_at_their_layer.py:39-43`(`ALLOWED`·`INVERTED` 집합을 이름으로 선언), `:50-64`(AST로 import 수집 —
-  함수 안의 지연 import도 잡는다 `:15-17`), `:89-96`(AGENTS.md 규칙이 같은 집합을 말하는지). Research_Paper `tests/paper_radar/test_guards.py:58-79`
-  (모듈 경로에서 계층 추출), `:82-103`(AST). cosmai-old `tests/environment/test_p1_isolation.py:73-84`(`apps/`가 `experiments`를 import 금지),
-  `test_addon_layer_direction.py`, yt-scrapper `tests/test_repository_hygiene.py:21-30`(transport 생성은 두 곳에서만 — regex).
-- **관찰된 효과**: trend-radar `:9-13` "규칙이 AGENTS.md 산문이던 동안 틀려 있었다 — contract·models만이라 했는데 네 소스가 registry를,
-  셋이 scrub을 import했다. 코드가 눈에 띄게 어기는 규칙은 규칙으로 읽히지 않는다". Research_Paper `test_guards.py:3-4`가 이걸 "trend-radar 교본
-  패턴 3"이라 부르며 이식 — 이미 한 번 재사용된 실적.
-- **관찰된 비용**: 허용 집합이 테스트 파일과 AGENTS.md 두 곳(trend-radar는 그래서 `:89-96` 테스트를 하나 더 둠). yt-scrapper regex판은
-  변수명으로 우회 가능(`test_queries_stay_inside_the_boundary.py:13-15`가 같은 이유로 regex를 거부).
-- **재사용 형태**: `snippets/test_layering_guard.py` (패키지명·계층표만 바꾸면 되는 60줄).
-- **등급: 채택** — 새 레포 `collectors/*` → `contracts/`만, `analysis/` → `contracts/` + `db/`만 같은 방향 규칙을 이걸로 건다.
+- **Where**: trend-radar `tests/test_sources_stay_at_their_layer.py:39-43` (declares `ALLOWED` · `INVERTED` sets by name), `:50-64` (collects imports via AST —
+  catches a deferred import inside a function too, `:15-17`), `:89-96` (whether the AGENTS.md rule names the same set). Research_Paper `tests/paper_radar/test_guards.py:58-79`
+  (derives the layer from the module path), `:82-103` (AST). cosmai-old `tests/environment/test_p1_isolation.py:73-84` (`apps/` forbidden from importing `experiments`),
+  `test_addon_layer_direction.py`, yt-scrapper `tests/test_repository_hygiene.py:21-30` (transport is created in only two places — regex).
+- **Observed effect**: trend-radar `:9-13`: "the rule was wrong the whole time it was AGENTS.md prose — it said contract·models only, but 4 sources imported registry
+  and 3 imported scrub. A rule the code visibly breaks does not read as a rule". Research_Paper `test_guards.py:3-4` calls this "trend-radar playbook
+  pattern 3" and ports it — already reused once, on record.
+- **Observed cost**: the allowed set lives in two places, the test file and AGENTS.md (which is why trend-radar adds one more test, `:89-96`). yt-scrapper's regex version
+  can be dodged by a variable name (`test_queries_stay_inside_the_boundary.py:13-15` rejects regex for the same reason).
+- **Reuse form**: `snippets/test_layering_guard.py` (60 lines, only the package names and layer table need changing).
+- **Grade: Adopt** — this is what enforces the new repo's directional rules: `collectors/*` → `contracts/` only, `analysis/` → `contracts/` + `db/` only.
 
-## T06. 공허성 가드
+## T06. Vacuity guard
 
-- **어디서**: trend-radar `test_sources_stay_at_their_layer.py:67-69`(`len(_modules()) == len(SOURCES)`), `test_version_is_managed.py:44-47`
-  (`len(modules) > 20` — "glob이 테스트 전체"), `test_scope_is_declared.py:175-180`(`total >= 5`, `:17-22`에 실제로 0==0으로 통과했던 사연),
+- **Where**: trend-radar `test_sources_stay_at_their_layer.py:67-69` (`len(_modules()) == len(SOURCES)`), `test_version_is_managed.py:44-47`
+  (`len(modules) > 20` — "the glob is the whole test"), `test_scope_is_declared.py:175-180` (`total >= 5`, `:17-22` tells the story of it actually passing as 0==0),
   `test_docs_references_resolve.py:64-66`, `test_fixtures_are_scrubbed.py:48-50`, `test_every_dataset_has_a_collector.py:30-34`.
-- **무엇**: 파라미터화/glob 기반 검사마다 "검사 대상이 비어 있지 않다"를 먼저 단언.
-- **관찰된 효과**: `test_scope_is_declared.py:17-22` "scope가 dataset 키로 중첩되자 세 검사가 아무것도 안 보고 통과했다" — 실제로 겪고 넣은 것.
-- **관찰된 비용**: 검사마다 3줄. 없음.
-- **재사용 형태**: 패턴 — 모든 `@pytest.mark.parametrize(..., _discovered())` 옆에 `def test_there_is_something_to_check(): assert _discovered()`.
-- **등급: 채택**.
+- **What**: every parametrized/glob-based check first asserts "the set being checked is not empty".
+- **Observed effect**: `test_scope_is_declared.py:17-22`: "once scope nested under a dataset key, three checks passed while seeing nothing" — added after actually hitting it.
+- **Observed cost**: 3 lines per check. None.
+- **Reuse form**: a pattern — next to every `@pytest.mark.parametrize(..., _discovered())`, add `def test_there_is_something_to_check(): assert _discovered()`.
+- **Grade: Adopt**.
 
-## T07. 골든 파일 바이트 동일성
+## T07. Golden-file byte identity
 
-- **어디서**: Research_Paper `tests/paper_radar/test_trend_golden.py:1-17`(합성 OpenAlex 38건 → CSV 5개, 구 코드가 만든 골든과 바이트 비교),
-  `:41-50`(어느 파일 몇 번째 줄인지 메시지), `tests/fixtures/make_trend_golden.py:1-24`(재생성 절차와 "신 코드로 다시 만들면 회귀 감지력을 잃는다"는 경고).
-  `docs/judgment-debt.md:33-48`(원본 303MB가 없어 합성으로 대체한 경위와 "틀리면 비용").
-- **관찰된 효과**: `papers_trend/` 구 코드를 삭제(T7)한 뒤에도 신 `trend/` 패키지가 같은 CSV를 낸다는 것이 테스트로 고정.
-  CSV 컬럼/순서/인코딩이 "과거 산출물과의 조인이 걸린 공개 계약"(`:10-11`).
-- **관찰된 비용**: 픽스처를 바꾸면 골든을 다시 만들어야 하고, 그 순간 테스트가 자기 자신과 비교하는 형태가 된다(`make_trend_golden.py:14-19`).
-  골든은 "잘 안 바뀌게" 설계해야 한다.
-- **재사용 형태**: `snippets/test_golden_files.py`. 새 레포 `eval/`의 labeled_set 660·제품 매핑 80쌍을 같은 형태로 —
-  규칙/LLM을 바꿀 때마다 같은 입력으로 같은 출력 파일을 비교.
-- **등급: 채택** — "eval-set 회귀 유지" 제약의 구현체.
+- **Where**: Research_Paper `tests/paper_radar/test_trend_golden.py:1-17` (38 synthetic OpenAlex records → 5 CSVs, compared byte for byte against the golden made by the old code),
+  `:41-50` (the message names the file and line number), `tests/fixtures/make_trend_golden.py:1-24` (the regeneration procedure and a warning: "regenerating with the new code loses the regression's teeth").
+  `docs/judgment-debt.md:33-48` (why synthetic data replaced the missing 303MB original, and "the cost of getting it wrong").
+- **Observed effect**: even after deleting the old `papers_trend/` code (T7), the test pins down that the new `trend/` package produces the same CSVs.
+  The CSV's columns/order/encoding are "a public contract a join with past output depends on" (`:10-11`).
+- **Observed cost**: changing the fixture forces regenerating the golden, and at that moment the test becomes a comparison against itself (`make_trend_golden.py:14-19`).
+  A golden has to be designed to "rarely need to change".
+- **Reuse form**: `snippets/test_golden_files.py`. The same shape for the new repo's `eval/`: labeled_set 660 and 80 product-mapping pairs —
+  compare the same input against the same output file every time a rule/LLM changes.
+- **Grade: Adopt** — the implementation of the "keep eval-set regression" constraint.
 
-## T08. 픽스처 스크럽 테스트
+## T08. Fixture-scrub test
 
-- **어디서**: trend-radar `tests/test_fixtures_are_scrubbed.py:1-16`(`profileKey`·닉네임 스크럽, `:12-16` 리뷰 디렉터리만 보다가 랭킹 페이지에서
-  실명 61건 발견 → 전체 픽스처로 확대), `:53-57`(`SCRUBBED-` 접두사 검사). 35개 파라미터.
-- **관찰된 효과**: 픽스처 재캡처 때 스크럽을 잊어도 커밋 전에 걸린다.
-- **관찰된 비용**: 사이트별 키 이름(`profileKey`)이 테스트에 박힌다.
-- **재사용 형태**: 패턴 그대로(키 목록만 새 소스 것으로). `snippets/test_fixtures_are_scrubbed.py`.
-- **등급: 채택** — 리뷰 본문을 다루는 새 레포에서 필수.
+- **Where**: trend-radar `tests/test_fixtures_are_scrubbed.py:1-16` (scrubs `profileKey` and nicknames; `:12-16` — after looking only at the reviews directory,
+  61 real names turned up on the ranking page → widened to the whole fixture set), `:53-57` (checks the `SCRUBBED-` prefix). 35 parameters.
+- **Observed effect**: even if scrubbing is forgotten during a fixture recapture, this catches it before the commit.
+- **Observed cost**: a site-specific key name (`profileKey`) is baked into the test.
+- **Reuse form**: the pattern as is (just swap the key list for the new source's). `snippets/test_fixtures_are_scrubbed.py`.
+- **Grade: Adopt** — essential for the new repo, which handles review bodies.
 
-## T09. 문서 진실성 메타테스트
+## T09. Doc-truth meta-tests
 
-- **어디서**: yt-scrapper `tests/test_documentation_is_true.py`(606줄, 17개 테스트 함수; README·api·status·troubleshooting·AGENTS 한/영 두 벌을 HTML 주석
-  마커 `<!-- kinds:start -->`로 잘라 라우트·kind·에러코드·버전 비교 `:1-17`). trend-radar `tests/test_readme_translation_stays_in_step.py`(코드 스팬·링크·
-  `TREND_RADAR_*` 변수 집합 비교), `tests/test_docs_references_resolve.py`(`docs/*.md` 참조 실재, 31개 파라미터), `tests/test_agent_context_is_project_only.py`
-  (AGENTS.md 규칙부에 소스 키·한글 사이트명 금지).
-- **관찰된 효과**: 실제로 README를 고치게 만든 기록 — yt-scrapper `:3-6` "README 첫 예제가 존재한 적 없는 라우트를 불렀고 마일스톤 표는 시작도 안
-  했다고 했다". trend-radar `test_docs_references_resolve.py:3-7` "architecture.md는 몇 주 동안 없었다".
-- **관찰된 비용**: (1) 메타테스트 16파일 1,620줄(trend-radar), 7파일 2,566줄(yt-scrapper). (2) 잡는 것은 "기계적 주장"뿐이고 의미는 못 잡는다
-  (`test_payload_shapes.py:25-27`). (3) 그런데도 오늘 확인된 드리프트: trend-radar `AGENTS.md:79` master-only vs `tool/worktree.sh:22` dev 기본값;
-  `service-db.json:4` database `trend_radar` vs 실제 `app`(`architect/README.md` §6 #1); yt-scrapper `.githooks/pre-commit:30`과 `tool/worktree.sh:70-71`이
-  가리키는 `decisions/002-hooks-are-opt-in…md`·`decisions/006-verify-the-clone.md`는 존재하지 않는다(참조 실재 테스트는 trend-radar에만 있고,
-  trend-radar는 자기 훅에서 그 주석을 지웠다 — 테스트가 없는 쪽에 드리프트가 남았다). (4) 번역 두 벌 유지 비용: README·CHANGELOG·AGENTS·api 각각 `.ko.md`.
-- **등급: 제외** — 소유자 결정. 문서를 테스트로 묶는 대신 문서 자체를 줄인다(05 참조). 단 "참조한 파일이 존재한다" 한 줄짜리 검사는
-  비용이 0에 가까워 필요해지면 T06 패턴으로 20줄에 넣을 수 있다.
+- **Where**: yt-scrapper `tests/test_documentation_is_true.py` (606 lines, 17 test functions; slices the Korean/English pairs of README·api·status·troubleshooting·AGENTS
+  by the HTML comment marker `<!-- kinds:start -->` and compares routes·kind·error codes·version, `:1-17`). trend-radar `tests/test_readme_translation_stays_in_step.py`
+  (compares code spans, links, the `TREND_RADAR_*` variable set), `tests/test_docs_references_resolve.py` (`docs/*.md` references resolve, 31 parameters), `tests/test_agent_context_is_project_only.py`
+  (forbids a source key or a Korean site name in AGENTS.md's rules section).
+- **Observed effect**: a track record of actually forcing README fixes — yt-scrapper `:3-6`: "the README's first example called a route that never existed, and the milestone table said work hadn't even started".
+  trend-radar `test_docs_references_resolve.py:3-7`: "architecture.md was missing for weeks".
+- **Observed cost**: (1) 16 meta-test files, 1,620 lines (trend-radar), 7 files, 2,566 lines (yt-scrapper). (2) all it catches is a "mechanical claim", not meaning
+  (`test_payload_shapes.py:25-27`). (3) yet drift confirmed today anyway: trend-radar `AGENTS.md:79` master-only vs `tool/worktree.sh:22`'s dev default;
+  `service-db.json:4` database `trend_radar` vs actually `app` (`architect/README.md` §6 #1); the `decisions/002-hooks-are-opt-in…md` · `decisions/006-verify-the-clone.md`
+  that yt-scrapper's `.githooks/pre-commit:30` and `tool/worktree.sh:70-71` point to do not exist (the references-resolve test exists only in trend-radar,
+  and trend-radar deleted that comment from its own hook — the drift is left on the side with no test). (4) the cost of keeping two translations: README · CHANGELOG · AGENTS · api each have a `.ko.md`.
+- **Grade: Drop** — owner's decision. Instead of pinning a document down with a test, cut the document itself (see 05). A one-line "the referenced file exists"
+  check costs close to zero, though, and can go into 20 lines using the T06 pattern if it's ever needed.
 
-## T10. 설정 진실성 테스트 — compose/systemd 명령줄
+## T10. Config-truthfulness test — compose/systemd command lines
 
-- **어디서**: yt-scrapper `tests/test_deployment_units.py:1-8`(유닛 파일의 ExecStart 옵션을 `tubedepth <sub> --help`로 검증, `:23-37` 환경 비우고 실행하는 이유),
-  `tests/test_compose.py:1-13`(같은 질문을 compose `command:`에, yaml 앵커 동일성까지 `:34-40`).
-- **관찰된 효과**: "재부팅 때만 드러나는 실수"(옵션 삭제, 잘못된 데이터 디렉터리)를 오프라인에서 잡는다. 425 + 362줄.
-- **관찰된 비용**: 오늘 P16이 찾은 운영 사고 — `stack` 이관 때 trend-radar `review`/`review_stats`/`new_product` 크론 누락
-  (`architect/slice-p16-collector-reliability/README.md:46`), cosmai `trendradar` 스케줄 10초(`:37`), tubedepth page_limit off-by-one(`:38`) — 은
-  **이 테스트들이 있는 레포에서도** 잡히지 않았다. 테스트가 레포 안 compose만 보고, 실제 배선은 `stack/docker-compose.yml`에 있었기 때문.
-- **재사용 형태**: 새 레포는 `stack/`이 같은 레포 안에 있으므로 한 테스트로 충분: "`stack/docker-compose.yml`과 crontab의 모든 `command:`/크론 줄이
-  CLI `--help`에 존재하는 서브커맨드·옵션만 쓴다" + "선언된 데이터셋마다 크론 줄이 하나 있다"(S05와 결합). `snippets/test_stack_commands_resolve.py`.
-- **등급: 변형**.
+- **Where**: yt-scrapper `tests/test_deployment_units.py:1-8` (verifies a unit file's ExecStart options against `tubedepth <sub> --help`; `:23-37` gives the reason it runs with an emptied environment),
+  `tests/test_compose.py:1-13` (asks the same question of compose's `command:`, down to yaml-anchor identity, `:34-40`).
+- **Observed effect**: catches offline the kind of mistake that "only shows up at reboot" — a deleted option, a wrong data directory. 425 + 362 lines.
+- **Observed cost**: the operational incidents found by today's P16 — trend-radar's `review`/`review_stats`/`new_product` cron entries went missing during the `stack` migration
+  (`architect/slice-p16-collector-reliability/README.md:46`), cosmai `trendradar` got a 10-second schedule (`:37`), tubedepth got a page_limit off-by-one (`:38`) —
+  went uncaught **even in the repo that has these tests**. The tests only look at the in-repo compose, while the real wiring lived in `stack/docker-compose.yml`.
+- **Reuse form**: since the new repo has `stack/` inside the same repo, one test is enough: "every `command:`/cron line in `stack/docker-compose.yml` and crontab
+  uses only subcommands and options that exist in the CLI's `--help`" + "there is one cron line per declared dataset" (combined with S05). `snippets/test_stack_commands_resolve.py`.
+- **Grade: Adapt**.
 
-## T11. 부팅 경로 DDL 금지 + 권한 음성 증명
+## T11. DDL forbidden on the boot path + negative-proof of permissions
 
-- **어디서**: yt-scrapper `tests/test_no_ddl_on_the_boot_path.py:1-18`(`_database()`가 `create_schema()`를 부르던 시절 → `duplicate column` 사고),
-  `:35` `DDL_LEADERS = ("create","alter","drop","truncate")`를 SQLAlchemy 이벤트로 감시. `tests/test_postgres_privileges.py:1-17`(runtime 롤로 접속해
-  DDL이 거부되는지). cosmai-old `apps/tests/test_migrate.py`, trend-radar `tests/storage/test_database_policy_acl.py`.
-- **관찰된 효과**: 3롤 DB(04-O01)가 "관례"가 아니라 DB가 강제하는 경계임을 테스트가 증명. `docs/shared-postgres.md:411` 규칙 6.
-- **관찰된 비용**: `postgres` 마커 테스트는 진짜 롤이 있는 DB가 필요 — T04가 해결.
-- **재사용 형태**: `snippets/test_runtime_role_cannot_ddl.py` (15줄: runtime URL로 `CREATE TABLE` 시도 → `InsufficientPrivilege`).
-- **등급: 채택**.
+- **Where**: yt-scrapper `tests/test_no_ddl_on_the_boot_path.py:1-18` (the era when `_database()` called `create_schema()` → a `duplicate column` incident),
+  `:35` watches `DDL_LEADERS = ("create","alter","drop","truncate")` via a SQLAlchemy event. `tests/test_postgres_privileges.py:1-17` (connects as the runtime role and checks
+  DDL is rejected). cosmai-old `apps/tests/test_migrate.py`, trend-radar `tests/storage/test_database_policy_acl.py`.
+- **Observed effect**: the test proves the 3-role DB (04-O01) is a boundary the database enforces, not a convention. `docs/shared-postgres.md:411`, rule 6.
+- **Observed cost**: a `postgres`-marked test needs a DB with real roles — T04 solves this.
+- **Reuse form**: `snippets/test_runtime_role_cannot_ddl.py` (15 lines: attempt `CREATE TABLE` via the runtime URL → `InsufficientPrivilege`).
+- **Grade: Adopt**.
 
 ## T12. payload shape lock
 
-- **어디서**: yt-scrapper `tests/test_payload_shapes.py:1-28`(모델 모양이 바뀌었는데 `schema_version`이 그대로면 실패; lock은 append-only, 현재 버전과
-  다른 모양을 기록하려 하면 거부), `tests/payload_shapes.json`, `Justfile:138-145`, `docs/releasing.md:29-33`.
-- **관찰된 효과**: `:5-9` 커밋 31e87bc가 `published_date`를 추가하고 버전을 안 올려 캐시된 artifact가 그 필드 null로 나갔던 사고의 재발 방지.
-- **관찰된 비용**: 444줄. "초록 = 기록 안 된 모양 변경 없음"이지 "bump 불필요"가 아니다(`:25-27`) — 의미 변화는 못 본다.
-- **재사용 형태**: 새 레포에서는 raw payload가 아니라 **사전·평가셋 테이블의 버전**에 같은 규율 — `entity_lexicon.version`을 올리지 않고 행을 바꾸면
-  실패하는 테스트. 40줄이면 된다(`snippets/test_versioned_table_bumps.py`는 형태만).
-- **등급: 변형**.
+- **Where**: yt-scrapper `tests/test_payload_shapes.py:1-28` (fails if the model's shape changed but `schema_version` did not; the lock is append-only,
+  rejecting an attempt to record a shape different from the current version), `tests/payload_shapes.json`, `Justfile:138-145`, `docs/releasing.md:29-33`.
+- **Observed effect**: `:5-9` — prevents a repeat of the incident where commit 31e87bc added `published_date` without bumping the version, and a cached artifact shipped that field null.
+- **Observed cost**: 444 lines. "Green" means "no unrecorded shape change", not "no bump needed" (`:25-27`) — it cannot see a change in meaning.
+- **Reuse form**: in the new repo, the same discipline applies not to a raw payload but to the **version of a dictionary/eval-set table** — a test that fails
+  if a row changes without bumping `entity_lexicon.version`. 40 lines is enough (`snippets/test_versioned_table_bumps.py` is only the shape).
+- **Grade: Adapt**.
 
-## T13. 적재된 행 검사 — hygiene / placeholder
+## T13. Loaded-row check — hygiene / placeholder
 
-- **어디서**: trend-radar `tool/checks/data:8-24`(일곱 번 초록이면서 거짓이었던 사고 목록, 두 계열의 의미, exit 69), `:40-142`(SQL 한 벌로
-  hygiene 10개 + placeholder 8개 — 보드 전체 같은 별점, 부호 한쪽, 컬럼 통째 null, 전 상품 같은 round number), `:152-160`(hygiene만 실패).
-  `docs/working-agreements.md:12-27`(사고 표: 7건 전부 테스트 초록, 6건 exit 0).
-- **무엇**: "적재된 행을 조회해 숫자를 말하기 전까지 완료가 아니다"의 실행 가능한 절반. 사람이 수집 후 돌린다.
-- **관찰된 효과**: `NOTES.local.md:22-24` 오늘자 기록 "tool/checks/data 비정상 0; LOOK 1건(리뷰 round-number, n=2)" — 실제로 매 변경마다 돌리고 있다.
-  오늘 P16 분석도 같은 방식(DB 로그만으로 수집기 신뢰도 표, `slice-p16…/README.md:47` "운영 메타 테이블이 이미 충분").
-- **관찰된 비용**: 소스별 placeholder 쿼리가 쌓인다(163줄). 자동화 불가 — `working-agreements.md:178` "✗ 불가. 사람이 돌린다".
-- **재사용 형태**: `snippets/data-checks.sh` (hygiene/placeholder 골격 + exit 코드 규약, 쿼리는 새 스키마에 맞춰 작성).
-- **등급: 채택** — 새 레포 `db/`에 스키마별 `checks.sql`로. P16의 수집기 건강 표도 같은 파일에.
+- **Where**: trend-radar `tool/checks/data:8-24` (the list of 7 incidents that were green and wrong anyway, what the two families mean, exit 69), `:40-142` (one batch of SQL —
+  10 hygiene checks + 8 placeholder checks: a whole board with the same star rating, all-one-sign, a column entirely null, every product the same round number), `:152-160` (only hygiene fails the run).
+  `docs/working-agreements.md:12-27` (the incident table: all 7 cases green in tests, 6 of them exit 0).
+- **What**: the executable half of "it isn't done until you query the loaded rows and say a number". A person runs it after a collection.
+- **Observed effect**: `NOTES.local.md:22-24`, today's entry: "tool/checks/data anomalies 0; 1 LOOK (review round-number, n=2)" — actually run on every change.
+  Today's P16 analysis used the same approach (a collector-reliability table from DB logs alone, `slice-p16…/README.md:47`: "the ops meta tables are already enough").
+- **Observed cost**: per-source placeholder queries pile up (163 lines). Not automatable — `working-agreements.md:178`: "✗ cannot. A person runs it".
+- **Reuse form**: `snippets/data-checks.sh` (the hygiene/placeholder skeleton + the exit-code convention; write the queries for the new schema).
+- **Grade: Adopt** — as a per-schema `checks.sql` under the new repo's `db/`. P16's collector-health table goes in the same file.
 
-## T14. live/contract 검사 분리
+## T14. live/contract checks separated
 
-- **어디서**: trend-radar `tool/checks/contract:1-16`(`pytest -m live`, CI 금지, "막힌 소스는 결과이지 에러가 아님"), `tests/test_live_checks_are_paced.py:1-17`
-  (live 테스트가 자기 fetcher를 만들지 않고 게이트를 지나는지 AST로 검사 — 13번 무절제 요청하던 사고), yt-scrapper `Justfile:46-53`(residential 연결에서만).
-- **관찰된 효과**: 기본 스위트는 사이트 상태와 무관하게 초록. live는 11개(trend-radar), 4개(yt-scrapper)로 작다.
-- **관찰된 비용**: live 테스트도 썩는다 — `docs/sources/` 관측이 날짜를 다는 이유.
-- **재사용 형태**: 마커 + `tool/checks/contract` 3줄. `pyproject` addopts `-m "not live"`.
-- **등급: 채택**.
+- **Where**: trend-radar `tool/checks/contract:1-16` (`pytest -m live`, forbidden in CI, "a blocked source is a result, not an error"), `tests/test_live_checks_are_paced.py:1-17`
+  (checks via AST that a live test doesn't build its own fetcher and instead passes through the gate — an incident of 13 unthrottled requests), yt-scrapper `Justfile:46-53` (only over a residential connection).
+- **Observed effect**: the default suite is green regardless of a site's state. live is small — 11 (trend-radar), 4 (yt-scrapper).
+- **Observed cost**: a live test rots too — the reason `docs/sources/` observations carry a date.
+- **Reuse form**: a marker + 3 lines of `tool/checks/contract`. `pyproject` addopts `-m "not live"`.
+- **Grade: Adopt**.
 
-## T15. 서브프로세스 워커 테스트 + TLS 스텁
+## T15. Subprocess worker test + a TLS stub
 
-- **어디서**: cosmai-old `apps/tests/conftest.py:430-520`(`start_worker`/`wait_for_worker`/`run_worker`, 타임아웃 시 kill 후 양쪽 스트림을 메시지에),
-  `apps/tests/test_outbound_transport.py:104-122`(세션당 `openssl req -x509`로 자가서명 인증서 — cryptography/trustme 의존 회피), `:288-310`(루프백 TLS 서버 스텁).
-  yt-scrapper `tests/test_deployment_units.py:23-40`(`--help` 서브프로세스, `env=` 통째 교체).
-- **관찰된 효과**: 리스 만료·SIGINT·두 워커 동시 claim 같은 프로세스 경계 동작을 실제 프로세스로 검증(cosmai-old `tests/acceptance/JOB-005…007`).
-- **관찰된 비용**: 653줄 conftest. 프로세스 기동 비용으로 스위트가 느려진다(1,199개 수집, 실행 시간은 DB 프로비저닝 필요로 오늘 미측정).
-- **재사용 형태**: `start/wait/run` 3함수 패턴(`snippets/subprocess_helpers.py`, 40줄). TLS 스텁은 아웃바운드 정책을 코드로 강제할 때만.
-- **등급: 변형** — 잡 큐/워커가 새 레포에 남는 `collectors/youtube`에서만.
+- **Where**: cosmai-old `apps/tests/conftest.py:430-520` (`start_worker`/`wait_for_worker`/`run_worker`; kills on timeout and puts both streams in the message),
+  `apps/tests/test_outbound_transport.py:104-122` (a self-signed cert via `openssl req -x509` once per session — avoids a cryptography/trustme dependency), `:288-310` (a loopback TLS server stub).
+  yt-scrapper `tests/test_deployment_units.py:23-40` (`--help` as a subprocess, `env=` swapped out wholesale).
+- **Observed effect**: verifies process-boundary behavior — lease expiry, SIGINT, two workers claiming at once — with an actual process (cosmai-old `tests/acceptance/JOB-005…007`).
+- **Observed cost**: a 653-line conftest. The cost of spawning a process slows the suite (1,199 collected; run time unmeasured today because it needs DB provisioning).
+- **Reuse form**: the `start/wait/run` three-function pattern (`snippets/subprocess_helpers.py`, 40 lines). The TLS stub only when an outbound policy is enforced in code.
+- **Grade: Adapt** — only in `collectors/youtube`, the one place the new repo keeps a job queue/worker.
 
-## T16. 수용 시나리오 마크다운
+## T16. Acceptance-scenario markdown
 
-- **어디서**: cosmai-old `tests/acceptance/JOB-001…SEC-004` 16개 + `SCENARIO-TEMPLATE.md`, `docs/agent-workflow/task-packets/` 12개.
-- **관찰된 비용**: 시나리오 문서와 테스트 코드 두 벌. `docs/agent-workflow/README.md:51-62` "강제되는 것은 한 항목뿐(packet이 ACCEPTED라 주장하려면 PASS 링크)".
-- **등급: 제외** — 테스트 함수 이름이 시나리오다(trend-radar `tests/engine/test_report_is_honest_about_stopping_early.py` 식 명명).
+- **Where**: cosmai-old `tests/acceptance/JOB-001…SEC-004`, 16 files + `SCENARIO-TEMPLATE.md`, `docs/agent-workflow/task-packets/`, 12 files.
+- **Observed cost**: two copies, the scenario document and the test code. `docs/agent-workflow/README.md:51-62`: "only one item is enforced — a PASS link, to claim a packet is ACCEPTED".
+- **Grade: Drop** — the test function's name is the scenario (naming in the style of trend-radar's `tests/engine/test_report_is_honest_about_stopping_early.py`).
 
-## T17. 대시보드/뷰 경계 테스트
+## T17. Dashboard/view boundary test
 
-- **어디서**: trend-radar `tests/dashboard/test_queries_stay_inside_the_boundary.py:1-16`(컴파일된 Select 객체를 검사 — regex는 변수명에 진다), 343개 파라미터.
-  `tests/storage/test_the_schema_derives_nothing.py`(마이그레이션 SQL 쪽), `docs/judgment-debt.md:80-95`(뷰는 쿼리 객체 검사의 사각지대였다 → 뷰 좁힘).
-- **관찰된 효과**: "수집 레포는 분석하지 않는다"는 경계가 코드로 유지됐고, 덕분에 오늘 재구성에서 `analysis/`를 별도 패키지로 떼는 결정이 쉬웠다.
-- **관찰된 비용**: 새 레포는 **분석이 목적**이라 이 경계 자체가 없다. 343개 테스트 중 상당수가 이 한 파일.
-- **등급: 변형** — 방향만 남긴다: `collectors/`는 집계하지 않고, `analysis/`만 집계한다 → T05 계층 가드로 충분.
+- **Where**: trend-radar `tests/dashboard/test_queries_stay_inside_the_boundary.py:1-16` (inspects the compiled Select object — regex loses to a variable name), 343 parameters.
+  `tests/storage/test_the_schema_derives_nothing.py` (the migration-SQL side), `docs/judgment-debt.md:80-95` (a view was a blind spot for query-object inspection → the view got narrowed).
+- **Observed effect**: the boundary "the collection repo does not analyze" was held by code, and thanks to that, today's split of `analysis/` into its own package was an easy call.
+- **Observed cost**: the new repo's **purpose is analysis**, so this boundary doesn't exist as such. A large share of the 343 tests are this one file.
+- **Grade: Adapt** — keep only the direction: `collectors/` does not aggregate, only `analysis/` does → the T05 layering guard is enough.
