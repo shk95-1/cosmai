@@ -1,8 +1,8 @@
-// 구조 지도의 배선. 판단은 전부 map.js/query.js 의 순수 함수이고 여기서는 그것을 DOM 과 fetch 에
-// 엮는다 — app.js·ops-app.js 와 같은 분리라서 이 파일에는 테스트가 없다.
+// Wiring for the structure map. Judgement is entirely pure functions in map.js/query.js, and here it is only
+// wired to DOM and fetch — the same split as app.js·ops-app.js, so this file has no tests.
 //
-// 라이브러리를 들이지 않는다. render.js 가 이미 SVG 를 템플릿 문자열로 손으로 그리고(막대·축·산점도),
-// 노드 28개는 열 배치로 충분하다. 포털의 의존성 0 을 지키는 값이 자동배치보다 크다.
+// No library is brought in. render.js already draws SVG by hand as template strings (bars·axes·scatter),
+// and 28 nodes are well served by column layout. Keeping the portal's zero dependencies is worth more than auto-layout.
 import { buildQuery, PAGE_SIZE, nextPageOffset, describeError, MAP_QUERIES } from './query.js';
 import { nodesOf, feedbackEdges, positions, canvasSize, labelOf } from './map.js';
 import { severityClass } from './severity.js';
@@ -25,7 +25,7 @@ async function apiAll(path, { select, order }) {
     }
     if (!res.ok) {
       let body = {};
-      try { body = await res.json(); } catch { /* JSON 아닌 오류 본문 */ }
+      try { body = await res.json(); } catch { /* not a JSON error body */ }
       throw new Error(describeError(body));
     }
     rows.push(...(await res.json()));
@@ -36,8 +36,8 @@ async function apiAll(path, { select, order }) {
   return rows;
 }
 
-// 팔마다 색이 다르면 어느 수집기의 흐름인지 눈으로 따라갈 수 있다. 저장소는 팔이 없으므로
-// 중립색이다 — 여러 팔이 같은 표를 먹일 수 있어 하나의 팔 색을 주면 거짓이 된다.
+// A different color per arm lets the eye follow which collector's flow it is. A store has no arm, so it is
+// a neutral color — several arms can feed the same table, so giving it one arm's color would be false.
 const ARM_CLASS = {
   commerce: 'node-commerce',
   youtube: 'node-youtube',
@@ -48,12 +48,12 @@ const ARM_CLASS = {
 function nodeClass(node, stageByKey) {
   if (node.kind === 'store') return 'node-store';
   const stage = stageByKey.get(node.key);
-  if (stage && stage.enabled === false) return 'node-off'; // 선언상 꺼진 단계는 회색이다(#39)
+  if (stage && stage.enabled === false) return 'node-off'; // a stage declared off is grey (#39)
   return ARM_CLASS[stage ? stage.arm : ''] || 'node-store';
 }
 
-// 엣지는 열에서 열로 가므로 오른쪽 변에서 나와 왼쪽 변으로 든다. 되먹임은 반대 방향이라
-// 위로 크게 돌려 노드를 가로지르지 않게 한다.
+// An edge goes column to column, so it leaves the right edge and enters the left. Feedback runs the opposite
+// direction, so it is bowed up and over so it does not cut across a node.
 function edgePath(from, to, isFeedback) {
   const x1 = isFeedback ? from.x : from.x + from.w;
   const y1 = from.y + from.h / 2;
@@ -88,12 +88,12 @@ function render(edges, stages, health, now) {
     const box = pos.get(node.key);
     const label = labelOf(node);
     const row = healthByKey.get(node.key);
-    // 상태는 **왼쪽 띠** 로 얹는다. 채움은 이미 팔(정체성)을 말하고 있어, 거기에 상태 색을
-    // 겹치면 한 모양에 색 체계가 둘이라 못 읽는다. 띠는 관제 표(#139)가 행에 쓰는 것과 같은
-    // 장치라 두 화면이 같은 말을 한다.
+    // Status is laid on as a **left stripe**. The fill already states the arm (identity), and overlaying a
+    // status color on top would give one shape two color systems, unreadable. The stripe is the same device
+    // the ops table (#139) uses on its rows, so the two screens say the same thing.
     //
-    // 저장소에는 띠가 없다. 표 하나를 여러 단계가 먹일 수 있어(trend_radar.product 를
-    // commerce:ranking 과 commerce:product 둘이 쓴다) 한 단계의 상태를 물려주면 거짓이 된다.
+    // A store has no stripe. Since one table can be fed by several stages (trend_radar.product is fed by
+    // both commerce:ranking and commerce:product), inheriting one stage's status would be false.
     const stripe = row
       ? `<rect class="map-stripe ${severityClass(row)}" x="${box.x}" y="${box.y}" width="4" height="${box.h}"/>`
       : '';

@@ -1,36 +1,36 @@
-// 계보 드릴다운의 판단 부분 — 순수 함수만. DOM 도 fetch 도 없어 portal/test 가 그대로 잰다
-// (query/screens/render/ops 와 같은 분리, tool/checks/js).
+// The judgement half of the lineage drilldown — pure functions only. No DOM, no fetch, so portal/test can measure it directly
+// (the same split as query/screens/render/ops, tool/checks/js).
 //
-// 두 뷰(needs.mention_lineage · needs.collection_lineage)가 이미 구간마다의 답을 갖고 있으므로
-// 여기가 하는 일은 둘뿐이다: 지표 한 칸을 그 뷰의 필터로 옮기는 것, 그리고 그 칸이 지금 되짚을 수
-// 있는 칸인지 판정하는 것.
+// Since the two views (needs.mention_lineage · needs.collection_lineage) already carry the answer for
+// each stage, this file does only two things: turn one metrics cell into that view's filter, and decide
+// whether that cell can currently be traced back.
 //
-// 판정을 화면에 두는 이유(#144): 그것은 `analysis_run` 만으로 계산되고 anon 이 그 표를 이미 읽는다.
-// 지표 페이지가 부팅에서 받는 그 행들이 그대로 근거라, 뷰를 하나 더 만들어 같은 사실을 두 자리에서
-// 주장하게 만들 필요가 없다.
+// Why this judgement lives on the screen (#144): it is computed from `analysis_run` alone, and anon already reads that table.
+// The rows the metrics page receives at boot are already the evidence, so there is no need to build another
+// view that asserts the same fact in two places.
 
-// 집계가 모집단을 고르는 술어는 `extractor_version = ANY(...)` 하나이고, 그 목록이 그대로
-// `analysis_run.versions.extractor` 에 ';' 로 이어져 있다(analysis/aggregate/pipeline.py 의 _versions).
+// The one predicate the aggregation uses to pick its population is `extractor_version = ANY(...)`, and that list is
+// carried straight into `analysis_run.versions.extractor`, joined by ';' (analysis/aggregate/pipeline.py's _versions).
 //
-// polarity 는 절대 같이 걸지 않는다: 한 extractor_version 이 polarity 두 판본을 담아, run 26 에 걸면
-// neg 15,452 가 8,685 로 줄고 33행 중 2행만 맞는다(#144 판단 절 실측).
+// polarity is never filtered on together: one extractor_version can carry two polarity versions, and filtering on run 26
+// shrinks neg from 15,452 to 8,685, with only 2 of 33 rows matching (#144 judgement-clause measurement).
 export function extractorsOf(run) {
   const raw = run && run.versions && typeof run.versions === 'object' ? run.versions.extractor : null;
   if (typeof raw !== 'string') return [];
   return raw.split(';').map((v) => v.trim()).filter(Boolean);
 }
 
-// 언급을 다시 쓰는 것은 `analyze` 뿐이다. eval 과 trend-quarter run 은 need_mention 을 건드리지
-// 않으므로 그것까지 세면 되짚을 수 있는 칸도 "다시 쓴 실행이 있다" 로 닫힌다.
+// Only `analyze` ever rewrites mentions. eval and trend-quarter runs never touch need_mention,
+// so counting them too would close even a traceable cell as "a rewriting run exists."
 const REWRITER = 'analyze:';
 
 function runWith(runs, runId) {
   return (runs || []).find((r) => r && r.run_id === runId) || null;
 }
 
-// 그 run 이 끝난 뒤에 끝난 analyze run 들 — 있으면 그 칸의 모집단은 이미 지금의 need_mention 이
-// 아니다. `analyze polarity` 는 (src, month) 단위로 지우고 다시 넣어(analysis/polarity/pipeline.py 의
-// NEED_DELETE) 시간창도 워터마크도 남기지 않으므로, 복원은 되지 않는다.
+// analyze runs that finished after this run — if any exist, that cell's population is no longer the current
+// need_mention. `analyze polarity` deletes and reinserts per (src, month) (analysis/polarity/pipeline.py's
+// NEED_DELETE), leaving neither a time window nor a watermark behind, so it cannot be restored.
 export function rewritersAfter(runs, runId) {
   const base = runWith(runs, runId);
   if (!base || !base.finished_at) return [];
@@ -41,25 +41,25 @@ export function rewritersAfter(runs, runId) {
     .sort((a, b) => new Date(a.finished_at) - new Date(b.finished_at));
 }
 
-// 모르는 run 은 재현 가능으로 눕히지 않는다 — 조용히 틀린 목록을 보이는 것이 안 보이는 것보다 나쁘다.
+// An unknown run is never treated as reproducible — showing a silently-wrong list is worse than showing none.
 export function reproducible(runs, runId) {
   const base = runWith(runs, runId);
   if (!base || !base.finished_at) return false;
   return rewritersAfter(runs, runId).length === 0;
 }
 
-// PostgREST 의 in. 목록. 값에 따옴표가 들어올 일은 없지만(versioning.md 의 두 형식) 이스케이프는 둔다.
+// PostgREST's in. list. A quote should never appear in a value (the two formats in versioning.md), but the escape stays in place anyway.
 function inList(values) {
   return `(${values.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')})`;
 }
 
 const ROLLUP_SCOPE = 'all';
 
-// metrics_need 한 칸 = PK (run_id, scope, need_key, month, product_ref). 그 칸을 만든 언급들을 고르는
-// 필터는 모집단(extractor_version) + 그 칸의 축이다.
+// One metrics_need cell = PK (run_id, scope, need_key, month, product_ref). The filter that picks the
+// mentions that made that cell is population (extractor_version) + that cell's axes.
 //
-// 빈 month 와 빈 product_ref 는 필터가 아니다 — 그 칸이 '전 기간 · 전 제품' 이라는 뜻이라, 빈 값으로
-// 걸면 언급이 하나도 안 걸린다(언급에는 '전 기간' 이라는 값이 없다).
+// An empty month and an empty product_ref are not filters — the cell means 'all periods · all products,' and
+// filtering on the empty value would match no mentions at all (a mention has no 'all periods' value).
 export function needCellFilters(cell, run) {
   if (!cell) return [];
   const extractors = extractorsOf(run);
@@ -68,8 +68,8 @@ export function needCellFilters(cell, run) {
     { column: 'kind', op: 'eq', value: 'need' },
     { column: 'extractor_version', op: 'in', value: inList(extractors) },
   ];
-  // A17: scope='all' 롤업만 needs.need_key.canonical 로 접힌다. 그 칸을 raw need_key 로 거르면
-  // 대표 이름으로 접힌 동의어 언급들이 통째로 빠진다.
+  // A17: only the scope='all' rollup folds through needs.need_key.canonical. Filtering that cell by the raw
+  // need_key would drop the whole set of synonym mentions folded under the canonical name.
   if (cell.scope === ROLLUP_SCOPE) {
     filters.push({ column: 'need_key_rollup', op: 'eq', value: cell.need_key });
   } else {
@@ -81,12 +81,12 @@ export function needCellFilters(cell, run) {
   return filters;
 }
 
-// metrics_wish 의 scope 는 카테고리가 아니라 바람의 종류다(WISH_SCOPES, analysis/aggregate/__init__.py).
+// metrics_wish's scope is not a category but a kind of wish (WISH_SCOPES, analysis/aggregate/__init__.py).
 const WISH_CLASS = { 'wish:a': 'a', 'wish:b': 'b', 'wish:a:format×attr': 'a' };
 const WISH_AXES = [['format', 'format_first'], ['attribute', 'attribute_first'], ['brand', 'brand']];
 
-// metrics_wish 한 칸 = PK (run_id, scope, format, attribute, brand). 빈 축은 값이 아니라 marginal
-// 이므로 걸지 않는다 — 걸면 그 축이 실제로 빈 언급만 남아 칸의 mentions 와 목록 길이가 어긋난다.
+// One metrics_wish cell = PK (run_id, scope, format, attribute, brand). An empty axis is not a value but a
+// marginal, so it is not filtered on — filtering would leave only mentions where that axis is actually empty, and the cell's mentions and list length would no longer match.
 export function wishCellFilters(cell, run) {
   if (!cell) return [];
   const wishClass = WISH_CLASS[cell.scope];
@@ -103,8 +103,8 @@ export function wishCellFilters(cell, run) {
   return filters;
 }
 
-// 원문 표가 있는 갈래만 수집분까지 내려간다. yt_transcript 와 naver_blog, 그리고 사이트를 모르는
-// wish 리뷰는 mention_lineage 에서 이미 doc_kind 가 없고 여기서도 내려갈 자리가 없다.
+// Only the branches that have a source-document table descend to the collection. yt_transcript, naver_blog,
+// and wish reviews with no known site already have no doc_kind in mention_lineage, so there is nowhere to descend here either.
 const DRILLABLE = new Set(['review', 'yt_comment']);
 
 export function documentFilters(mention) {
@@ -118,9 +118,9 @@ export function documentFilters(mention) {
 
 const docId = (r) => [r.src, r.site, r.doc_parent, r.doc_key].join(' ');
 
-// 후보가 여럿인 문서를 한 덩어리로 묶되 **줄이지 않는다** — 리뷰에서 수집 run 으로 가는 길은
-// captured_at 으로만 이어져 34퍼센트가 후보 2~5개, 10퍼센트가 미상이다(#144 실측). 하나로 찍거나
-// 숨기는 것이 더 나쁘다는 것이 사용자 결정이고, 그래서 이 함수는 rows 를 그대로 들고 순서만 고정한다.
+// A document with several candidates is grouped into one bundle but **not reduced** — the path from a review
+// to a collection run is joined only by captured_at, leaving 34 percent with 2-5 candidates and 10 percent unknown
+// (#144 measurement). Picking one or hiding it is worse, per the user decision, so this function keeps rows as they are and only fixes their order.
 export function groupByDocument(rows) {
   const groups = new Map();
   for (const r of rows || []) {
@@ -139,7 +139,7 @@ export function groupByDocument(rows) {
   return [...groups.values()];
 }
 
-// 화면이 읽는 한 줄. 세 값이 다른 사실이라 문구도 셋이다.
+// The one line the screen reads. The three values are different facts, so there are three wordings.
 export function describeMatch(match, count) {
   if (match === 'single') return '수집 run 확정';
   if (match === 'candidate') return `후보 수집 run ${count}개 — 어느 것인지 기록이 없다`;
