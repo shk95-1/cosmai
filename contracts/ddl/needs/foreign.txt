@@ -1,33 +1,37 @@
-# 운영 app.needs 에 있으나 이 체크아웃의 contracts/ddl/needs/*.sql 로는 만들어지지 않는 객체.
-# 포크가 운영에 DDL 을 올리면 이 파일에 한 줄을 PR 로 보낸다 -- 남의 DDL 이 운영에 들어오면 선언한다.
+# Objects that exist in production app.needs but are not created by this checkout's
+# contracts/ddl/needs/*.sql. When the fork puts DDL into production it sends one line here as a PR --
+# someone else's DDL entering production gets declared.
 #
-# 원장(needs.schema_migration)이 아니라 이 파일이 기준인 이유: 원장에 020 이 있어도 그 파일은 이
-# 체크아웃에 없어 기대치를 조립할 수 없다. 남이 올린 DDL 은 조립되는 것이 아니라 선언되는 것이다.
+# Why this file and not the ledger (needs.schema_migration) is the reference: the ledger may hold 020,
+# but that file is not in this checkout, so the expectation cannot be assembled. DDL someone else
+# applied is declared, not assembled.
 #
-# tool/checks/ddl-drift 만 읽는다. 한 줄에 객체 하나, '#' 뒤는 주석:
-#   <table>           테이블 전체. 운영 pg_dump 에서 -T needs.<table> 로 빠진다.
-#   <table>.<column>  컬럼 하나. pg_dump 에 컬럼 제외가 없어서, 운영 덤프를 일회용 postgres 에
-#                     되돌린 뒤 DROP COLUMN 하고 다시 덤프한다.
+# Only tool/checks/ddl-drift reads it. One object per line, everything after '#' is a comment:
+#   <table>           the whole table. Dropped from the production pg_dump by -T needs.<table>.
+#   <table>.<column>  one column. pg_dump has no column exclusion, so the production dump is restored
+#                     into a throwaway postgres, the column is DROPped and it is dumped again.
 #
-# 여기 없는 남의 객체가 운영에 있으면 ddl-drift 는 DRIFTED 로 실패한다 -- 그것이 이 파일의 값이다.
-# 반대로 이 레포가 선언하는 테이블은 제외되면 안 된다: 제외하는 순간 그 테이블의 드리프트가
-# 영원히 안 보인다.
+# If production holds someone else's object that is not listed here, ddl-drift fails as DRIFTED --
+# that is what this file is worth. Conversely a table this repo declares must not be excluded: the
+# moment it is, that table's drift is invisible forever.
 #
-# 그런데 "이 레포" 가 하나가 아니다. 이 파일이 존재하는 이유가 바로 또 다른 레포가 있다는 사실이고,
-# 그 레포로 머지되면 같은 아홉 줄이 뜻을 뒤집는다 -- upstream cosmai 체크아웃에는 020~025 가 없어
-# 아홉이 전부 남의 것이지만, 포크 cosmai-import-ydc 체크아웃에는 020~025 와 그 뷰들이 있어 아홉이
-# 전부 자기 선언이다 (cosmai#108). 그래서 판정을 이 목록이 아니라 **체크아웃**에 묻는다:
-# 이 체크아웃이 선언하는 객체는 무시한다 -- 목록에 있어도 제외하지 않고 기대치와 그대로 맞댄다.
-# 규칙은 tool/ddl-foreign-entries 한 자리에 있고, 무시가 검사를 약하게 만들지 않는 이유도 거기 있다:
-# 무시된 객체는 기대치에도 서고 운영 덤프에도 남아 여전히 대조된다. 둘 다 선언하면 둘 다 본다.
-# upstream 에서는 아홉 중 어느 것도 선언되지 않아 이 규칙이 한 줄도 건드리지 않는다.
+# But "this repo" is not one repo. The very reason this file exists is that another repo exists, and
+# merged into that repo the same nine lines mean the opposite -- the upstream cosmai checkout has no
+# 020~025, so all nine are someone else's, while the fork cosmai-import-ydc checkout has 020~025 and
+# their views, so all nine are its own declarations (cosmai#108). So the verdict is asked of the
+# **checkout** rather than of this list: objects this checkout declares are ignored -- listed or not,
+# they are not excluded and are compared against the expectation as they are. The rule lives in one
+# place, tool/ddl-foreign-entries, and so does the reason ignoring does not weaken the check: an
+# ignored object stands in the expectation and stays in the production dump, so it is still compared.
+# Declare it on both sides and both sides are seen. In upstream none of the nine is declared, so this
+# rule touches not one line.
 
-retrieval_chunk        # 포크 cosmai-import-ydc 의 020_retrieval_chunk (2026-08-24 23:47 운영 적용)
-aspect_lexicon.extra   # 포크 cosmai-import-ydc 의 021_aspect_lexicon_extra (2026-08-25 18:30 운영 적용)
-panel_roster           # 포크 cosmai-import-ydc 의 022_panel_and_quarter — 패널 명부 판본 (2026-08-25 23:20 운영 적용)
-panel_channel          # 같은 022 — 43채널 명부와 panel_role
-metrics_topic_quarter  # 같은 022 — 분기 그레인 집계
-metrics_topic_quarter_violation  # 포크 db/views/ 의 뷰 (분기 표의 조밀 격자·분모 닫힘 검사). -T 는 뷰에도 걸린다
-corpus_snapshot        # 포크 cosmai-import-ydc 의 023_corpus_snapshot — 코퍼스 스냅샷 판본 (2026-08-26 01:20 운영 적용)
-corpus_document        # 같은 023 — 스냅샷의 문서. doc_id 는 source:source_item_id 의 GENERATED STORED
-corpus_mention         # 같은 023 — 문서 × 주제 언급
+retrieval_chunk        # fork cosmai-import-ydc's 020_retrieval_chunk (applied to production 2026-08-24 23:47)
+aspect_lexicon.extra   # fork cosmai-import-ydc's 021_aspect_lexicon_extra (applied to production 2026-08-25 18:30)
+panel_roster           # fork cosmai-import-ydc's 022_panel_and_quarter -- the panel roster version (applied 2026-08-25 23:20)
+panel_channel          # the same 022 -- the 43-channel roster and panel_role
+metrics_topic_quarter  # the same 022 -- the quarterly-grain aggregate
+metrics_topic_quarter_violation  # a view in the fork's db/views/ (dense-grid and denominator-closure checks on the quarter table). -T catches views too
+corpus_snapshot        # fork cosmai-import-ydc's 023_corpus_snapshot -- the corpus snapshot version (applied 2026-08-26 01:20)
+corpus_document        # the same 023 -- the snapshot's documents. doc_id is GENERATED STORED from source:source_item_id
+corpus_mention         # the same 023 -- document x topic mentions
