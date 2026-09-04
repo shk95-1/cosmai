@@ -21,8 +21,6 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 # match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
 hits=$(git diff --cached -U0 --no-color -- . \
     ':!tool/checks/lang' \
-    ':!tool/issue' \
-    ':!tool/journal' \
     ':!README.ko.md' \
     ':!eval/' \
     ':!db/seed/' \

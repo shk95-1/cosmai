@@ -13,9 +13,6 @@
 # COSMAI_ISSUE_PRIMARY overrides that read. audit's foreign-closes and fork-behind sections read the
 # checkout's `upstream` remote (COSMAI_FOREIGN_CLOSES overrides which script the first one calls),
 # and are skipped when there is no such remote. Nothing here fetches.
-#
-# Every anchor this tool reads out of an issue body is accepted in English and in Korean until both
-# repos have migrated their issues (#192 step 4 removes the Korean half).
 
 set -e
 
@@ -147,7 +144,7 @@ fetch_repo() {
             # arrays intact and the nesting emptied. That nesting IS the graph -- `subIssues` carries
             # queue order, `assignees` who is holding what, `blockedBy` the blockers -- so a page with
             # errors is never a smaller truth, it is a queue with pieces silently missing. It cost a
-            # session once (cosmai#133): a channel read 0건 and the first line read 진행 중 0 while
+            # session once (cosmai#133): a channel read "0 items" and its first line read "in progress 0" while
             # two workers were mid-flight. Any `errors` is fatal; only the retry below is allowed first.
             errors=$(printf '%s' "$page" | jq -r '[.errors[]?.message] | join("; ")' 2>/dev/null)
             if [ -n "$errors" ]; then
@@ -243,14 +240,12 @@ def channel_labels: [.labels[] | select(startswith("ch:"))];
 def channel: (channel_labels | first // null);
 def open_blockers: [.blockers[] | select(.state == "OPEN") | .key];
 def section($name): (.body | test("(^|\n)#{1,6}[ \t]*" + $name));
-# The anchors, English first. Each is one regex rather than two call sites, so no rule can come to
-# read one set and not the other.
-def DONE_WHEN: "(?:Done when|완료 기준)";
-def RELEASE_CONDITION: "(?:Release condition|해제 조건)";
-def WHEN_TO_FIX: "(?:When to fix|언제 고치나)";
-# Case-insensitive on the English half only: this one is a word inside a longer heading
-# ("## Channel / grade / size") and which case that heading lands in is not for this tool to fix.
-def SCALE: "(?:(?i:size)|규모)";
+def DONE_WHEN: "Done when";
+def RELEASE_CONDITION: "Release condition";
+def WHEN_TO_FIX: "When to fix";
+# Case-insensitive: this one is a word inside a longer heading ("## Channel / grade / size") and
+# which case that heading lands in is not for this tool to fix.
+def SCALE: "(?i:size)";
 # null, not [], when the heading is absent: the caller has to be able to tell "no such section"
 # from "the section is empty", and the scale section falls back to the whole body only in the first case.
 def section_lines($name):
@@ -262,14 +257,14 @@ def section_lines($name):
       | $l[$start + 1:$end] end;
 def scale_lines: section_lines(SCALE) // (.body | split("\n"));
 def resource: (scale_lines | join("\n")
-               | (capture("(?:Resources|자원):[ \t]*(?<v>[^\n]*)").v // "")) | sub("[ \t\r]+$"; "");
+               | (capture("Resources:[ \t]*(?<v>[^\n]*)").v // "")) | sub("[ \t\r]+$"; "");
 # The token is the first word of each `·`-separated item, so "ops(stop = approval each time)" and
-# "sharedDB read" both fold onto the resource they contend for. A resource of "none" is dropped in
-# either language: it collides with nothing.
+# "sharedDB read" both fold onto the resource they contend for. A resource of "none" collides with
+# nothing and is dropped.
 def resource_tokens:
   resource | split("·")
   | map(capture("^[ \t]*(?<t>[^ \t(][^ \t(]*)").t | sub("[.,;:]+$"; ""))
-  | map(select((. | ascii_downcase) != "none" and . != "없음" and . != "")) | unique;
+  | map(select((. | ascii_downcase) != "none" and . != "")) | unique;
 def excluded_from_ready: (tagged("memo") or tagged("channel") or tagged("goal") or tagged("deferred"));
 def targets($user): map(select((excluded_from_ready | not) and ($user or (tagged("needs-user") | not))));
 def status_of:
@@ -288,8 +283,10 @@ def outside_fences:
       elif .inside then .
       else .out += [$line] end)
   | .out | join("\n");
-def hangul: test("[ᄀ-ᇿ㄰-㆏가-힣ꥠ-꥿\uffa0-\uffdc]");
-def title_tag($en; $ko): (.title | startswith("[" + $en + "]") or startswith("[" + $ko + "]"));
+# Codepoint escapes, not literal syllables, for the reason tool/checks/lang gives for the same
+# choice: this file must not contain the Hangul the rule below exists to catch.
+def hangul: test("[\\x{1100}-\\x{11FF}\\x{3130}-\\x{318F}\\x{A960}-\\x{A97F}\\x{AC00}-\\x{D7A3}\\x{FFA0}-\\x{FFDC}]");
+def title_tag($en): (.title | startswith("[" + $en + "]"));
 def ready_channels($all; $user):
   ($all | targets($user)) as $t
   | ($t | map({(.key): .}) | add // {}) as $byk
@@ -379,7 +376,7 @@ flat as $all
        title: .title, body: (.body // ""), labels: [.labels.nodes[].name], closedAt: .closedAt}
     | select(.closedAt != null and (days_since(.closedAt) <= $closed_days))
     | select((.labels | index("goal")) or (.labels | index("decision"))
-             or title_tag("goal"; "목표") or title_tag("decision"; "결정"))]) as $moved
+             or title_tag("goal") or title_tag("decision"))]) as $moved
 # Each edge carries the closing closedAt too, not just the key: (e) goes quiet once the pointed-at
 # issue was updated after that closing -- a recheck comment left there is how the signal turns off.
 | (reduce ($moved[] | . as $m

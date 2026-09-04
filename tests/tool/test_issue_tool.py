@@ -8,9 +8,10 @@ actually has.
 Isolation here is PATH precedence, not conftest's socket block: tool/issue shells out, and a
 subprocess is outside the guard that stops in-process sockets.
 
-The tool accepts both anchor sets during #192's migration window. The Korean half is read from
-tests/tool/fixtures/korean_anchors.json rather than written here: tool/checks/lang stops a Hangul
-literal from reaching a .py file, and the follow-up that drops the anchors drops the fixture too.
+#192's migration window closed (#204): the tool reads only the English anchors now, and a Korean
+body is content the D12 rule can flag, not an anchor set it understands. The Korean prose those
+tests still need comes from tests/tool/fixtures/korean_line.txt rather than being written here:
+tool/checks/lang stops a Hangul literal from reaching a .py file.
 """
 
 from __future__ import annotations
@@ -29,8 +30,10 @@ ISSUE = REPO_ROOT / "tool" / "issue"
 UPSTREAM = "slopindustries/cosmai"
 FORK = "slopindustries/cosmai-import-ydc"
 COMMON_LABELS = ["channel", "goal", "decision", "memo", "when-touched", "needs-user"]
-KO = json.loads(
-    (Path(__file__).resolve().parent / "fixtures" / "korean_anchors.json").read_text(encoding="utf-8")
+# A plain Korean sentence, not an anchor: the D12 rule fires on Korean prose anywhere in a body or
+# title, whatever the section headings around it say.
+KOREAN_LINE = (
+    (Path(__file__).resolve().parent / "fixtures" / "korean_line.txt").read_text(encoding="utf-8").strip()
 )
 # Escapes, not literals: this pattern is the assertion that the output carries no Korean at all.
 HANGUL = re.compile("[\u1100-\u11ff\u3130-\u318f\uac00-\ud7a3]")
@@ -38,17 +41,12 @@ HANGUL = re.compile("[\u1100-\u11ff\u3130-\u318f\uac00-\ud7a3]")
 NOW = datetime.now(UTC)
 BODY = (
     "## Context\nsomething\n\n## Done when\na machine checks it\n\n"
-    "## Channel / grade / size\nSize S · Resources: none\n"
-)
-KO_BODY = (
-    f"## Context\nsomething\n\n{KO['done_when']}\na machine checks it\n\n"
-    f"{KO['scale_heading']}\n{KO['scale_line']}\n"
+    "## Channel / grade / size\nSize S \u00b7 Resources: none\n"
 )
 MEMO_BODY = "## Context\nan observation, nothing else\n"
 # A when-touched issue is finished by whatever work next opens that file, not by this issue, so it
 # carries "When to fix" instead of "Done when" (#137).
 WHEN_TOUCHED_BODY = "## Fact\nit does not break today\n\n## When to fix\nwhoever next opens that file\n"
-KO_WHEN_TOUCHED_BODY = f"## Fact\nit does not break today\n\n{KO['when_to_fix']}\nthe next edit\n"
 # Every fixture issue is old enough that the Korean-in-a-new-issue rule cannot fire on it, and the
 # one test of that rule names its own creation date -- neither depends on today's date.
 BEFORE_THE_WINDOW = "2026-01-01T00:00:00Z"
@@ -99,10 +97,6 @@ def closed(number: int, title: str, body: str, *, days_ago: float, labels: tuple
 
 def released(date: str) -> str:
     return BODY + f"\n## Release condition\nafter {date}\n"
-
-
-def ko_released(date: str) -> str:
-    return KO_BODY + f"\n{KO['release_condition']}\n{date}\n"
 
 
 def day(days_from_now: float) -> str:
@@ -343,20 +337,6 @@ def test_a_capitalised_resource_of_none_is_not_folded_either(run):
     assert json.loads(done.stdout)["held"]["resources"] == [], done.stdout
 
 
-def test_a_korean_resource_of_none_is_not_folded_either(run):
-    # The window keeps reading the bodies that are still Korean; "none" has to be dropped in both.
-    done = run(
-        "ready",
-        "--json",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(11, "the ledger", body=KO_BODY, labels=("ch:repo",), assignees=("shk95",)),
-        ],
-    )
-    assert done.returncode == 0, done.stderr
-    assert json.loads(done.stdout)["held"]["resources"] == [], done.stdout
-
-
 def test_a_channel_issue_without_a_parent_is_reported_at_the_end_of_its_channel(run):
     done = run(
         "ready",
@@ -428,19 +408,6 @@ def test_a_deferred_issue_with_a_release_condition_section_passes(run):
     assert done.stdout.strip() == ""
 
 
-def test_a_deferred_issue_with_the_korean_release_condition_section_passes(run):
-    body = KO_BODY + f"\n{KO['release_condition']}\na consumer appears\n"
-    done = run(
-        "lint",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(11, "deferred", body=body, labels=("ch:tool", "deferred"), parent=10),
-        ],
-    )
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.strip() == ""
-
-
 def test_a_deferred_issue_with_neither_condition_is_a_lint_error(run):
     done = run(
         "lint",
@@ -485,18 +452,19 @@ def test_a_body_with_only_english_anchors_lints_clean(run):
     assert done.stdout.strip() == ""
 
 
-def test_a_body_with_only_korean_anchors_still_lints_clean(run):
-    # The window stays open until both repos have migrated their issues (#192 step 4); until then
-    # most bodies are still the Korean ones.
+def test_a_body_with_only_korean_anchors_now_lints_red(run):
+    # #204: the window closed and the Korean anchor pair is gone, so a body whose completion
+    # heading is Korean has no "Done when" section as far as the tool is concerned.
+    body = f"## Context\nsomething\n\n## {KOREAN_LINE}\na machine checks it\n"
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "korean anchors", body=KO_BODY, labels=("ch:tool",), parent=10),
+            issue(11, "korean anchor", body=body, labels=("ch:tool",), parent=10),
         ],
     )
-    assert done.returncode == 0, done.stdout + done.stderr
-    assert done.stdout.strip() == ""
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "body has no Done when section" in done.stdout, done.stdout
 
 
 def test_the_user_queue_is_ordered_by_how_much_it_unblocks(run):
@@ -577,24 +545,6 @@ def test_the_resource_is_read_from_the_scale_section_only(run):
         upstream=[epic(10, "tool", subs=(11,)), issue(11, "scale section", body=body, labels=("ch:tool",))],
     )
     assert json.loads(done.stdout)["channels"][0]["items"][0]["resource"] == "shared DB read"
-
-
-def test_the_resource_is_read_from_a_korean_scale_section_too(run):
-    done = run(
-        "ready",
-        "--json",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(
-                11,
-                "scale section",
-                body=f"## Todo\nnothing\n\n{KO['scale_heading']}\n{KO['scale_line_resourced']}\n",
-                labels=("ch:tool",),
-            ),
-        ],
-    )
-    resource = json.loads(done.stdout)["channels"][0]["items"][0]["resource"]
-    assert resource and "ops" in resource, done.stdout
 
 
 def test_a_rule_quoting_home_is_not_a_machine_path(run):
@@ -748,20 +698,6 @@ def test_a_when_touched_issue_needs_no_completion_criteria(run):
     assert done.stdout.strip() == "", done.stdout
 
 
-def test_a_when_touched_issue_with_the_korean_section_needs_no_completion_criteria(run):
-    done = run(
-        "lint",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(
-                11, "when touched", body=KO_WHEN_TOUCHED_BODY, labels=("ch:tool", "when-touched"), parent=10
-            ),
-        ],
-    )
-    assert done.returncode == 0, done.stdout
-    assert done.stdout.strip() == "", done.stdout
-
-
 def test_a_when_touched_issue_without_when_to_fix_is_a_lint_error(run):
     # The exemption is not an absence of rules -- when it gets fixed still has to be written down.
     done = run(
@@ -778,16 +714,22 @@ def test_a_when_touched_issue_without_when_to_fix_is_a_lint_error(run):
 def test_korean_in_an_issue_opened_after_the_effective_date_is_a_lint_error(run):
     # #192 D12: after the migration date a new issue written in Korean is a rule violation, not a
     # body left over from before. The date is a constant in the tool, so this fixture names a
-    # creation date far past it rather than leaning on today's.
+    # creation date far past it rather than leaning on today's. The body keeps the English Done
+    # when heading so the only finding this proves is the D12 one, not a missing section.
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11, 12)),
             issue(
-                11, "korean body", body=KO_BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+                11,
+                "korean body",
+                body=BODY + f"\n{KOREAN_LINE}\n",
+                labels=("ch:tool",),
+                parent=10,
+                created_at=AFTER_THE_WINDOW,
             ),
             issue(
-                12, KO["goal_prefix"], body=BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+                12, f"[{KOREAN_LINE}]", body=BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
             ),
         ],
     )
@@ -801,13 +743,18 @@ def test_korean_in_an_issue_opened_after_the_effective_date_is_a_lint_error(run)
 def test_halfwidth_jamo_is_korean_to_the_lint_rule_too(run):
     # One rule, three enforcement sites: tool/checks/lang and the commit-msg hook both count these
     # codepoints, so a lint that did not would make a green check stop being evidence.
+    jamo = (
+        (Path(__file__).resolve().parent / "fixtures" / "halfwidth_jamo.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
             issue(
                 11,
-                "halfwidth " + KO["halfwidth_jamo"],
+                "halfwidth " + jamo,
                 body=BODY,
                 labels=("ch:tool",),
                 parent=10,
@@ -821,12 +768,13 @@ def test_halfwidth_jamo_is_korean_to_the_lint_rule_too(run):
 
 def test_korean_in_an_issue_opened_before_the_effective_date_is_not_a_lint_error(run):
     # Otherwise the rule reports every issue in both repos on the day it lands, which is the same
-    # as having no rule.
+    # as having no rule. Uses `issue`'s BEFORE_THE_WINDOW default; the English Done when heading
+    # keeps this isolated to the D12 date check.
     done = run(
         "lint",
         upstream=[
             epic(10, "tool", subs=(11,)),
-            issue(11, "korean body", body=KO_BODY, labels=("ch:tool",), parent=10),
+            issue(11, "korean body", body=BODY + f"\n{KOREAN_LINE}\n", labels=("ch:tool",), parent=10),
         ],
     )
     assert done.returncode == 0, done.stdout
@@ -836,7 +784,7 @@ def test_korean_in_an_issue_opened_before_the_effective_date_is_not_a_lint_error
 def test_korean_inside_a_code_fence_is_not_a_lint_error(run):
     # A fenced block is quoted evidence -- a log line, a seed row, a body being migrated. Rewriting
     # it would falsify the quote.
-    body = BODY + "\n```\n" + KO["scale_line"] + "\n```\n"
+    body = BODY + "\n```\n" + KOREAN_LINE + "\n```\n"
     done = run(
         "lint",
         upstream=[
@@ -956,25 +904,6 @@ def test_recheck_names_each_reason_with_the_checklist_items_to_walk(
     assert not any(r["code"] == "e" for r in by_key["cosmai#11"]["reasons"])
 
 
-def test_recheck_reads_the_korean_goal_prefix_as_well_as_the_english_one(run):
-    # Half the closed goals carry the old title prefix and half the new one during the window; (e)
-    # has to see both or it goes quiet on exactly the issues that just moved.
-    done = run(
-        "recheck",
-        "--json",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(11, "not touched", labels=("ch:tool",), parent=10, updated_days_ago=5),
-        ],
-        upstream_closed=[
-            closed(30, f"{KO['goal_prefix']} a finished goal", "leads to #11\n", days_ago=3, labels=()),
-        ],
-    )
-    assert done.returncode == 1, done.stdout + done.stderr
-    rows = json.loads(done.stdout)
-    assert [r["code"] for r in rows[0]["reasons"]] == ["e"], rows
-
-
 def test_recheck_renders_the_reason_and_the_checklist(run):
     done = run(
         "recheck",
@@ -1013,21 +942,6 @@ def test_recheck_leaves_alone_what_is_still_waiting_for_its_condition(run):
     assert done.returncode == 0, done.stdout + done.stderr
     assert "nothing to recheck" in done.stdout, done.stdout
     assert "cosmai#11" not in done.stdout and "cosmai#12" not in done.stdout, done.stdout
-
-
-def test_recheck_reads_a_korean_release_condition_date(run):
-    done = run(
-        "recheck",
-        "--json",
-        upstream=[
-            epic(10, "tool", subs=(11,)),
-            issue(11, "date passed", body=ko_released(day(-2)), labels=("ch:tool", "deferred"), parent=10),
-        ],
-    )
-    assert done.returncode == 1, done.stdout + done.stderr
-    rows = json.loads(done.stdout)
-    assert [r["code"] for r in rows[0]["reasons"]] == ["b"], rows
-    assert day(-2) in rows[0]["reasons"][0]["why"], rows
 
 
 def test_recheck_does_not_read_a_repo_name_or_a_label_as_a_path(run):
