@@ -21,7 +21,7 @@ from sqlalchemy.engine import make_url
 
 from analysis.crosscheck import PAPER_HOLD
 from analysis.polarity.pricing import UsageLedger
-from analysis.retrieval import ask
+from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
 pytestmark = pytest.mark.postgres
@@ -459,3 +459,53 @@ def test_the_help_lists_every_argument():
         "v",
         ["commerce_review"],
     )
+
+
+# ---------- the MFDS ledger as a fifth source (#77) ----------
+REPORT_NO = "2018008612"
+FILING_DOC = f"mfds:{REPORT_NO}"
+TEXT_SOURCES = tuple(s for s in corpus.SOURCES if s != corpus.MFDS)
+
+
+@pytest.fixture
+def with_a_filing(loaded, _schema_name):
+    """One filing beside the text chunks, put there the way production puts it: ledger rows, then the
+    chunk scan. Inserting the chunk by hand would leave the source list, the reader and the dispatch
+    untested and the test green whatever they say."""
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, 'mfds-ydc-v0.4.0', 'ydc v0.4.0', "
+            "'eval/mfds/x.csv', 1, '2026-08-20', 'not_updated')"
+        )
+        cur.execute(
+            "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, entp_key, "
+            "snapshot_id) VALUES (%s, 'sun cream alpha', 'acme labs', '2026-08-20', 'acmelabs', 1)",
+            (int(REPORT_NO),),
+        )
+    loaded.commit()
+    pipeline.run(loaded, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    return loaded
+
+
+def test_a_report_number_reaches_the_model_and_the_log_row_names_the_filing(with_a_filing):
+    """Row 8 of the #74 table: the report number was in the database and the query was refused at the
+    gate with frequency 0, because the ledger was not a source. The log row is what says which filing
+    the answer stood on."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, client=client)
+    assert answer.called and answer.status == "ok"
+    assert [item.doc_id for item in answer.evidence] == [FILING_DOC]
+    (row,) = log_rows(with_a_filing)
+    assert row[4] == [FILING_DOC]  # doc_ids
+    assert row[3][REPORT_NO] == 1  # token_df: the ledger is what makes the number a grounded token
+
+
+def test_the_same_query_finds_nothing_when_the_ledger_is_left_out(with_a_filing):
+    """`--source` restricted to the four text sources: the filing has to be out of the index itself
+    rather than merely ranked away, or the gate would pass on a token no evidence can carry."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, sources=TEXT_SOURCES, client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []

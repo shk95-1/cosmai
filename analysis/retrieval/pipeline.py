@@ -169,6 +169,7 @@ def run(
     *,
     youtube_schema: str = "tubedepth",
     commerce_schema: str = "trend_radar",
+    mfds_schema: str = "needs",
     since: date | None = None,
     sources: tuple[str, ...] = corpus.SOURCES,
 ) -> ChunkOutcome:
@@ -178,6 +179,7 @@ def run(
         conn,
         youtube_schema=youtube_schema,
         commerce_schema=commerce_schema,
+        mfds_schema=mfds_schema,
         since=since,
         sources=sources,
     )

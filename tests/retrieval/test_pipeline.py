@@ -564,3 +564,44 @@ def test_violations_in_two_batches_read_as_two_coordinates(conn, owner, _schema_
     assert {p.split(": ", 1)[1] for p in missing} == {
         f"{corpus.YOUTUBE_COMMENT}:c{i}#0" for i in (1, 2, 3)
     }, outcome.problems
+
+
+# ---------- the MFDS ledger as a fifth source (#77) ----------
+FILING_TEXT = "sun cream 0 · acme labs · report no. 2018008612 · registered 2026-08-20 · mfds-ydc-v0.4.0"
+
+
+def _seed_filings(conn: psycopg.Connection) -> None:
+    """The ledger stands in the needs schema the pipeline already writes to, so the rows go in as
+    needs_runtime -- 028 grants it INSERT for exactly the load path that put them in production."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, 'mfds-ydc-v0.4.0', 'ydc v0.4.0', "
+            "'eval/mfds/x.csv', 1, '2026-08-20', 'not_updated')"
+        )
+        cur.execute(
+            "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, entp_key, "
+            "snapshot_id) VALUES (2018008612, 'sun cream 0', 'acme labs', '2026-08-20', 'acmelabs', 1)"
+        )
+    conn.commit()
+
+
+def test_a_filing_becomes_one_chunk_under_the_ledger_source(conn, _schema_name):
+    _seed_filings(conn)
+    outcome = pipeline.run(conn, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    assert (outcome.documents, outcome.chunks, outcome.written) == (1, 1, 1)
+    assert outcome.problems == []
+    with conn.cursor() as cur:
+        cur.execute("SELECT chunk_id, doc_id, source, ordinal, text FROM retrieval_chunk")
+        assert cur.fetchall() == [
+            ("mfds:2018008612#0", "mfds:2018008612", "mfds", 0, FILING_TEXT),
+        ]
+
+
+def test_the_index_fingerprint_moves_with_the_source_set(conn, _schema_name):
+    """A source added without the fingerprint moving means the cached index from before it existed
+    answers today's query, and the new source is simply absent -- no error anywhere (#8's rule, #77's
+    case)."""
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    text_only = corpus.SOURCES[: corpus.SOURCES.index(corpus.MFDS)]
+    assert pipeline.index_signature(conn, corpus.SOURCES) != pipeline.index_signature(conn, text_only)

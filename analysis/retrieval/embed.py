@@ -36,7 +36,9 @@ from analysis.retrieval.vectors import (
 )
 
 BATCH = 256
-# What gets encoded. The day an ingredient family arrives as a source, it is excluded in one line here.
+# What gets encoded. The MFDS ledger (`mfds`, fork #77) is the source that line was waiting for: a report
+# number and a filed item name are letters, and a nearest neighbour of one filing is a different filing --
+# an answer, not a ranking, that is wrong. BM25 carries it and the vector store never sees it.
 ENCODED_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
 
 
