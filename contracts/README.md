@@ -23,6 +23,7 @@
 | `interfaces.md` | 분석 패키지 4개의 입출력 타입·수식, 평가 하네스가 넘어야 할 기준선 | `tests/test_contract_types.py` 가 `analysis/types.py` 와 대조 · `eval <task>` 가 기준선과 비교 |
 | `formats.md` | 사전·평가셋 CSV/테이블 포맷 · §카테고리 표기(A21) 가 `category` 의 정본을 못박는다 | 적재 스크립트가 검증 · `tests/test_category_canonical.py` 가 §카테고리 표기의 python 블록을 `analysis/units.py` 와 대조 |
 | `anon_exposure.md` | PostgREST `postgrest_anon` 이 읽는 관계 — **적용 전 34개**(2026-08-27 실측)와 **적용 후 21개**(#168 안 B, 미적용) | `tests/test_anon_exposure_contract.py` 가 `needs` 절을 실제 DB 의 `has_table_privilege` 와, 적용 후 절을 `db/grants/postgrest_anon_old_stack.sql` 과 대조 · 운영 실측은 `db/grants/postgrest_anon_check.sql` |
+| `ownership.md` | What the fork may change, must not change, and must send upstream (#192 methodology row 3, incidents #150 · #103 · #115) — the fork-owned and must-not-change lists plus the shared surfaces PR #59 touched | `tests/test_ownership.py` (the needs DDL split at 020, no path on both lists, every listed path exists) + `tool/checks/ownership <upstream-ref>` before a fork → upstream PR + the `tool/issue audit` item |
 | `secrets.md` | secret 파일 경로와 키 이름 (값 없음) | 기동 시 키 존재 검사 |
 | `versioning.md` | `*_version` 컬럼 규칙과 `analysis_run.versions` 의 키 | `tests/test_version_strings.py` (두 형식) + `tests/test_trend_quarter.py` (`metric` 키) + 코드 리뷰 |
 | `../db/grants/needs_runtime_reader.sql` | 분석이 읽는 원천 테이블 12개의 SELECT 권한 | `tests/test_grants_reader.py` 가 `ddl/current` 와 대조 |

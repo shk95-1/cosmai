@@ -18,7 +18,7 @@
 - Secrets by key name only (`contracts/secrets.md`). No machine paths (repo-relative or `~`). No `--no-verify`. Force push only on your own issue branch with `--force-with-lease`, never on main or a wave branch.
 - Production DB and container actions are run by the coordinator session itself, one command at a time. What needs approval every time is in `STATE.md` §3.
 - Fork concurrency, gap bound: the fork re-merges upstream in the same wave a shared surface changes (`db/`, `tool/checks/`, `contracts/ddl/`, AGENTS.md), and fork → upstream is one PR per wave (`tool/issue audit`); one deployment path — production DB actions run from the upstream checkout only (`db/migrate.sh`, `STATE.md` §3).
-- Fork concurrency, ownership: the fork writes 02x DDL and its own modules only, never `STATE.md` or upstream guards (ownership file + test); two-way merge — predict closes first, then `foreign-closes` · `ddl-drift` · suite · reopen (`tool/checks/foreign-closes`).
+- Fork concurrency, ownership: the fork writes 02x DDL and its own modules only, never `STATE.md` or upstream guards (`contracts/ownership.md` + `tests/test_ownership.py` + `tool/checks/ownership`); two-way merge — predict closes first, then `foreign-closes` · `ddl-drift` · suite · reopen (`tool/checks/foreign-closes`).
 - English is the project's first language — everything except chat with the user and user-designated documents (`README.ko.md`); data values and history are exempt (`tool/checks/lang`, `tool/issue lint`, the commit-msg hook).
 - `contracts/` is canonical and DDL is additive only. The completion commit body carries `Closes owner/repo#n` — a bare `#n` is rejected by the commit-msg hook (#175).
 
