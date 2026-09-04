@@ -29,6 +29,9 @@ EOF
 fi
 
 pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: .+$'
+# Same type list, prefix-only: used below to strip the Conventional Commits type off the subject
+# before the bare-closes scan, so "fix" there is never mistaken for the closing keyword "fix(es)".
+pattern_type_prefix='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._/-]+\))?!?: '
 
 # A branch named <channel>/<issue>-<slug> belongs to exactly one issue (issue #60 rules), and a
 # commit that does not name it cannot be traced back or auto-close it. Detached HEAD and other
@@ -51,7 +54,12 @@ fi
 # properly-qualified one before it (#175 review, should-fix 1).
 # The keyword must stand on its own word, both sides -- "disclose #175" and "prefixes #175" are
 # not closing keywords, and matching them as substrings was a round-2 regression (#175 re-review).
-bare_closes=$(grep -v '^#' "$1" | awk '
+# The Conventional Commits type at the start of the subject ("fix", "fix(scope)", "fix!") is a
+# type, not a closing keyword -- a `fix(...): ... (#n)` subject matches "fix" by construction, so
+# without stripping it every well-formed fix commit naming its own issue was rejected (#198). Only
+# that leading prefix, on the subject line alone, is removed: a later keyword on the subject, and
+# every keyword in the body, is still scanned.
+bare_closes=$(grep -v '^#' "$1" | sed -E "1s#$pattern_type_prefix##" | awk '
   {
     low = tolower($0)
     if (match(low, /(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?)([^[:alnum:]_]|$)/)) {
