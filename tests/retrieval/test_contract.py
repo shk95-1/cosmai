@@ -64,6 +64,17 @@ def test_the_exit_code_contract_covers_every_retrieval_subcommand():
         assert f"`{action}`" in bullet, action
 
 
+def test_the_index_axis_sentence_credits_the_tokenizer_and_idf_not_lift():
+    """fork #59: the contract once said lift removes general terms on the index axis. lift runs only in the
+    `terms` report and never touches BM25 scoring; what drops those words is the tokenizer (13) and idf (16),
+    the contrast tests/retrieval/test_query_stopwords.py counts. The sentence must say that, and must not
+    contradict the query-axis sentence, which says neither lift nor idf is the ground there."""
+    section = "\n".join(_search_section())
+    assert "never touches" in section and "BM25 scoring" in section
+    assert "13" in section and "16" in section and "idf" in section
+    assert "lift removes" not in section and "removed by the lift" not in section
+
+
 def test_the_search_baseline_table_carries_every_mode_and_engine():
     """heldout 의 vector P@10 이 #28 단계 4 벡터 채택의 근거인데, 그 여섯 줄이 사는 곳이
     지워질 리뷰 문서뿐이었다 -- 계약이 그 거처다(#17 S10)."""
