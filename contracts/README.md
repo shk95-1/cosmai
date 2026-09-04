@@ -4,7 +4,7 @@ This directory is not a design document. Everything here has to be in **a shape 
 
 | file | content | how it is checked |
 |---|---|---|
-| `ddl/current/*.sql` | the actual schema dump of the DB as of 2026-08-23 (app.trend_radar 13 · app.tubedepth 13 · cosmai.cosmai 12 tables). **These table shapes must hold** even after the collectors are ported | re-dump with `pg_dump --schema-only` → diff |
+| `ddl/current/*.sql` | the actual schema dump of the DB as of 2026-08-23 (app.trend_radar 13 · app.tubedepth 13 · cosmai.cosmai 12 tables). **These table shapes must hold** even after the collectors are ported — except `cosmai.cosmai.sql`, which since 2026-09-04 (#18) is the record of the dropped database `cosmai`, not a live target | re-dump with `pg_dump --schema-only` → diff |
 | `ddl/needs/001_needs.sql` | the new `app.needs` schema (17 tables). Three comments are stale — see the footnote below | a `pg_catalog` comparison test after the migration is applied |
 | `ddl/needs/002_audit_additive.sql` | the **additions only** the 2026-08-23 contract audit (issue #17) asked for — 3 tables (`need_key`, `category_map`, `product_ref_candidate`) + 31 columns. 20 tables in total | the same test + `tests/test_ddl_additive_only.py` |
 | `ddl/needs/005_need_mention_natural_key.sql` | the `need_mention` natural-key replacement — it solves the btree 2704B ceiling (#5, a production failure) and the seed/analysis collision (#12 option A) at once. `UNIQUE (src, ref, need_key, sentence)` → `UNIQUE INDEX (src, ref, need_key, extractor_version, md5(sentence))`. **The one exception to additive-only** (user approval 2026-08-24) | the `SANCTIONED_DESTRUCTIVE` whitelist in `tests/test_ddl_additive_only.py` + `tests/test_need_mention_natural_key.py` |
