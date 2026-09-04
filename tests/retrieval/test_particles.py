@@ -56,4 +56,5 @@ def test_the_contract_says_the_tags_do_the_cutting():
 
     조사 쪽만 집는다 -- 같은 절의 불용어 문장은 질의 축(포크 #46)이 다시 열 수 있고, 조사 처분 시험이
     그 문장을 인질로 잡을 이유가 없다."""
-    assert "조사는 Kiwi 의 태그가 가른다" in ENTRYPOINTS.read_text(encoding="utf-8")
+    # English since fork #59 rewrote that bullet (upstream #206 moved the contracts to English).
+    assert "Particles are told apart by Kiwi's tags" in ENTRYPOINTS.read_text(encoding="utf-8")
