@@ -1,6 +1,7 @@
 #!/bin/sh
-# Applies db/bootstrap.sql then contracts/ddl/needs/*.sql to $container/$db -- the one path
-# production and the test harness both use to create the needs schema.
+# Applies db/bootstrap_source.sql + the two collector dumps, then db/bootstrap.sql and
+# contracts/ddl/needs/*.sql, to $container/$db -- the one path production, the test harness and
+# tool/checks/ddl-drift all use to create the three schemas.
 set -eu
 
 container=cosmai-postgres
@@ -11,12 +12,15 @@ usage() {
     cat <<'EOF'
 usage: db/migrate.sh [--container NAME] [--db NAME] [--superuser NAME]
 
-Applies db/bootstrap.sql, contracts/ddl/needs/*.sql, the two named grants files
-(db/grants/postgrest_anon_needs.sql, db/grants/needs_runtime_reader.sql) and db/views/*.sql to
-$container/$db through `docker exec`. Every path is repo-relative: run it from the repo root
-(the image's WORKDIR is that root -- stack/Dockerfile).
+Stands up trend_radar and tubedepth when they are absent, then applies db/bootstrap.sql,
+contracts/ddl/needs/*.sql, the two named grants files (db/grants/postgrest_anon_needs.sql,
+db/grants/needs_runtime_reader.sql) and db/views/*.sql to $container/$db through `docker exec`.
+Every path is repo-relative: run it from the repo root (the image's WORKDIR is that root --
+stack/Dockerfile).
 
 Reads NEEDS_DB_MIGRATOR and NEEDS_DB_RUNTIME from $COSMAI_SECRET_FILE (default ~/.config/cosmai/env).
+TREND_RADAR_DB_RUNTIME, TREND_RADAR_DB_READER and TUBEDEPTH_DB_RUNTIME are read from the same file
+by step (0) alone, so a database that already has both schemas -- production -- never asks for them.
 
   --container NAME   postgres container to `docker exec` into (default: cosmai-postgres)
   --db NAME          database to apply to (default: app)
@@ -99,6 +103,85 @@ psql_as() { # $1 = role, $2 = its password, rest = psql arguments; the SQL arriv
 superuser_psql() { # psql as the database owner, no password; the SQL arrives on stdin
     docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 "$@"
 }
+
+# 0. trend_radar (collectors/commerce) and tubedepth (collectors/youtube). The archived old repos'
+# init scripts made these until #178; on an empty database this step is what makes them.
+#
+# Absence is the whole question, and pg_namespace answers it per schema. Production has both, so
+# production always takes the skip -- this step cannot touch a live schema, and it reads none of
+# the three secrets on that path either. The order on the other path is roles before objects:
+# db/bootstrap_source.sql sets the DEFAULT PRIVILEGES the tables must be born under, then the
+# pg_dump baseline contracts/ddl/current/app.<schema>.sql, then every
+# contracts/ddl/<schema>/NNN_*.sql -- the same composition tests/conftest.py builds a throwaway
+# schema from and tool/checks/ddl-drift calls production's expected state.
+#
+# alembic_version comes with the baseline and stays as the dump left it: the table exists and holds
+# no row, because the dump is --schema-only and the old repos' alembic never runs again. Nothing
+# here writes a version into it; from now on this schema changes by a numbered file alone.
+schema_is_present() { # $1 = schema name (a literal from the loop below, never input)
+    superuser_psql -Atq -c "SELECT 1 FROM pg_namespace WHERE nspname = '$1'" < /dev/null
+}
+
+for schema in trend_radar tubedepth; do
+    if [ -n "$(schema_is_present "$schema")" ]; then
+        echo "$schema: present, left alone"
+        continue
+    fi
+    case "$schema" in
+        # trend_radar's third role is trend_radar_reader: what trend-radar-dashboard logs in with and
+        # the beneficiary of the schema's DEFAULT PRIVILEGES (contracts/anon_exposure.md). 8 is
+        # trend_radar_runtime's measured CONNECTION LIMIT, the number
+        # collectors/commerce/storage/db.py sizes its pool against.
+        trend_radar)
+            runtime_key=TREND_RADAR_DB_RUNTIME
+            reader=trend_radar_reader
+            reader_key=TREND_RADAR_DB_READER
+            runtime_limit=8
+            ;;
+        tubedepth)
+            runtime_key=TUBEDEPTH_DB_RUNTIME
+            reader=
+            reader_key=
+            runtime_limit=
+            ;;
+    esac
+
+    runtime_password=$(read_secret "$runtime_key")
+    reader_password=
+    [ -z "$reader_key" ] || reader_password=$(read_secret "$reader_key")
+
+    { psql_set runtime_password "$runtime_password"
+      psql_set reader_password "$reader_password"
+      cat db/bootstrap_source.sql
+    } | superuser_psql -v schema="$schema" -v database="$db" -v reader="$reader" \
+        -v runtime_limit="$runtime_limit" \
+        || { echo "needs: could not create the roles for $schema" >&2; exit 1; }
+
+    # One transaction for the objects: a failure part-way must leave no schema at all, or the next
+    # run would find the half-built one present and skip it forever.
+    #
+    # The baseline is named for production's database (app.<schema>.sql) whatever --db says, and its
+    # own CREATE SCHEMA goes: db/bootstrap_source.sql has already made the schema, owned by
+    # <schema>_owner, which is the point of doing the roles first.
+    added=0
+    { printf 'BEGIN;\nSET ROLE %s_owner;\n' "$schema"
+      grep -v '^\\restrict' "contracts/ddl/current/app.$schema.sql" \
+          | grep -v '^\\unrestrict' | grep -v "^CREATE SCHEMA $schema;\$"
+      for file in contracts/ddl/"$schema"/*.sql; do
+          [ -e "$file" ] || continue
+          printf '\n'
+          cat "$file"
+      done
+      printf '\nCOMMIT;\n'
+      # -o /dev/null: the dump opens with `SELECT pg_catalog.set_config('search_path', ...)` and its
+      # one-row result is not something a deploy log should carry. Errors are on stderr and stay.
+    } | superuser_psql -o /dev/null || { echo "needs: could not stand up schema $schema" >&2; exit 1; }
+    for file in contracts/ddl/"$schema"/*.sql; do
+        [ -e "$file" ] || continue
+        added=$((added + 1))
+    done
+    echo "$schema: created from the baseline dump + $added additive file(s)"
+done
 
 migrator_password=$(read_secret NEEDS_DB_MIGRATOR)
 runtime_password=$(read_secret NEEDS_DB_RUNTIME)
