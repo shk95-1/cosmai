@@ -191,15 +191,26 @@ docker exec "$name" psql -U drift -d drift -X -q -c 'SET client_min_messages = w
 # shellcheck disable=SC2086 # $exclude is a built list of -T flags, and must word-split.
 docker exec "$container" pg_dump -U "$superuser" -d "$needs_db" --schema-only --no-owner -x -n needs \
     $exclude > "$work/production.needs.sql"
-docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
-    -c 'SET client_min_messages = warning' -f - < "$work/production.needs.sql" > /dev/null
-for object in $drop_columns; do
-    docker exec "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
-        -c "ALTER TABLE needs.${object%.*} DROP COLUMN ${object#*.}" > /dev/null
-done
-docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
-    | normalise > "$work/actual.$needs_db.needs"
+# An FK-bound group of tables (one referencing another by foreign key) has to be declared in
+# $foreign whole or left out whole: excluding only the referenced table leaves the referencing
+# table's FK pointing at nothing, and this restore dies (#117). Guarded by `if` rather than left
+# to `set -e` at the top of the file, so that one bad line in $foreign costs only this verdict --
+# the other two already printed above, and losing them too would be the #114 failure again.
+if docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+    -c 'SET client_min_messages = warning' -f - < "$work/production.needs.sql" \
+    > /dev/null 2> "$work/restore.needs.err"; then
+    for object in $drop_columns; do
+        docker exec "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
+            -c "ALTER TABLE needs.${object%.*} DROP COLUMN ${object#*.}" > /dev/null
+    done
+    docker exec "$name" pg_dump -U drift -d drift --schema-only --no-owner -x -n needs \
+        | normalise > "$work/actual.$needs_db.needs"
 
-report "$needs_db.needs" "db/migrate.sh + the objects $foreign declares as someone else's and this checkout does not"
+    report "$needs_db.needs" "db/migrate.sh + the objects $foreign declares as someone else's and this checkout does not"
+else
+    reason=$(tail -n 1 "$work/restore.needs.err")
+    echo "ddl-drift: $needs_db.needs FAILED -- $reason" >&2
+    status=1
+fi
 
 exit $status
