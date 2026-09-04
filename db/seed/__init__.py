@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from db.seed import labeled, lexicon, mentions, metrics, panel, pipeline, products
+from db.seed import labeled, lexicon, mentions, metrics, mfds, panel, pipeline, products
 from db.seed._common import DEFAULT_SLICES, EVAL_DIR, connect
 
 # Order matters: product_ref before the mentions that reference it, analysis_run before the metrics.
 # pipeline 은 아무것도 참조하지 않는 운영 선언이라 어디에 놓아도 되지만, 분석 픽스처와 섞이지
 # 않게 끝에 둔다 -- --only pipeline 하나만 돌리는 것이 흔한 쓰임이다(#138).
-GROUP_NAMES = ("lexicon", "panel", "labeled", "products", "mentions", "metrics", "pipeline")
+# mfds sits with the other eval/ reference loads and references nothing, so its position is free;
+# it is next to panel because both are reference tables read out of eval/ rather than a slice (#55).
+GROUP_NAMES = ("lexicon", "panel", "mfds", "labeled", "products", "mentions", "metrics", "pipeline")
 
 
 def run_all(
@@ -21,6 +23,7 @@ def run_all(
     loaders = {
         "lexicon": (lexicon.load, EVAL_DIR),
         "panel": (panel.load, EVAL_DIR),
+        "mfds": (mfds.load, EVAL_DIR),
         "labeled": (labeled.load, EVAL_DIR),
         "products": (products.load, slices_dir),
         "mentions": (mentions.load, slices_dir),

@@ -182,6 +182,48 @@ used as an exit.
 - 한계 문장 여덟은 `interfaces.md` §모집단의 한계 가 진다 — 그것들은 포맷이 아니라 **숫자를 읽는
   법**이라 수식 옆에 있어야 한다.
 
+## MFDS registration ledger CSV (→ `needs.mfds_registration`, fork #55)
+- Source `eval/mfds/mfds_items_v1.csv`, copied verbatim from ydc `rag/mfds_items.csv` at tag v0.4.0 (`76db718`).
+  Four columns map one to one: `COSMETIC_REPORT_SEQ` → `report_seq`, `ITEM_NAME` → `item_name`,
+  `ENTP_NAME` → `entp_name`, `report_date` → `report_date` (the source carries a `00:00:00` time and no filing
+  has an hour, so it is stored as a date). The file is 4,736 lines and **4,735 records** — the header is the
+  other line. Nothing is dropped and nothing is re-derived: this is the official filing record, which is why
+  `cosmai#73`'s "the external ydc CSV is not imported" does not reach it.
+- **The key that joins is the company, not the product name.** `entp_key` = `db/seed/mfds.py`
+  `normalize_company(entp_name)`: NFKC → the corporate form removed (the Korean company-form word and its
+  two parenthesised abbreviations, `Co.,Ltd` · `Corp` · `Inc` — the vocabulary lives in that function; the
+  latin forms are word-bounded, the Korean ones are written glued to the name) → lower-cased → everything
+  that is not a Hangul syllable, a latin letter or a digit dropped. It is compared against
+  `needs.entity_lexicon.surface WHERE kind='brand'` put through the same function — **the lexicon side
+  folds too** (118 of 950 active surfaces move under the fold; no SQL in the repository folds a surface, the
+  fold is the Python function on both sides, as `tool/measure-mfds-join` does). Measured on production
+  2026-09-04 (read-only): **233 of the 4,735 filings join, on 40 brands; those brands covered 411
+  `trend_radar.product` rows and 29 of 205 `needs.product_ref` rows when measured.** The commerce side grows
+  with every collection — `uv run tool/measure-mfds-join` is the live count, not this sentence. Rejected in
+  the same measurement:
+  folded `item_name` = `trend_radar.product.name` → **0** products (a registered name is a legal name, a
+  listing name is marketing copy); `item_name` through the linker's `normalize_name` → 14 filings;
+  `item_name` contained in a product name → 92 filings, but the pairs are coincidences; `entp_name` with
+  the corporate form left in → 1 filing (4,332 companies carry one, no brand surface does). Re-measure with
+  `tool/measure-mfds-join`; the numbers move as the lexicon grows.
+- **Update path: not updated.** Snapshot of ydc v0.4.0, newest `report_date` **2026-08-20** (oldest
+  2008-10-30). `needs.mfds_snapshot` carries `source_tag`, `source_file`, `source_rows`, `max_report_date`,
+  `update_policy = 'not_updated'` and `loaded_at`, so staleness is readable off the database rather than off
+  a document. The alternative is a collector against the MFDS open API — a new collector, a new key in
+  `secrets.md` and a new pipeline stage; out of #55's scope and not worth it while the ledger cross-checks
+  brands rather than reporting counts. A refresh is a second `mfds_snapshot` row: `report_seq` is the primary
+  key and the loader is `ON CONFLICT DO NOTHING`, so a filing already present keeps the values of the load
+  that first carried it (`snapshot_id` says which) — a filing that changed under the same sequence is
+  neither re-entered nor updated; it stays as first loaded. That rests on a written assumption: MFDS does
+  not re-file under a used report number. The loader refuses a silent merge: after the snapshot row's
+  `DO NOTHING` it reads the row back and raises when the file's `source_rows`, `max_report_date` or
+  `source_file` differ from what is stored, so a refresh is a reviewed bump of the snapshot id in code,
+  never a rerun over a grown file. `entp_key` is loader-filled (`CHECK (entp_key <> '')`, a company that
+  folds to nothing is refused before any DB contact); changing `normalize_company` therefore needs
+  `db/seed/mfds.py` `rekey()` over the stored rows — a rerun of the load cannot repair a key, which is why
+  028 grants `needs_runtime` UPDATE as well. `update_policy` has no CHECK — this vocabulary is this
+  section's to grow and the DDL is additive only.
+
 ## 언급 행의 ref 문법 (A20)
 | src | `ref` | note |
 |---|---|---|

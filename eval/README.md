@@ -9,5 +9,6 @@
 | lexicon/ | brand_lexicon_v1 · ingredient_kr_colloquial_v1 · site_axis_map_seed | 847 / 32 / 25 | slice-p3 · slice-p4 · slice-p1 |
 | lexicon/ | aspect_lexicon_v1(+ruleset·priority) · **need_key_v1** · **category_map_v1** | 70 / 38 / 20 | slice-suncare · slice-p1 (#17 계약 보강) |
 | panel/ | **channels_v1**(ydc 패널 명부: product 34 · expert 9) | 43 | slice-ydc (#31 이 슬라이스 밖으로; #9 가 그 디렉터리를 지운다) |
+| mfds/ | **mfds_items_v1** (the MFDS cosmetic registration ledger, a snapshot of ydc v0.4.0; not re-collected) | 4,735 | ydc `rag/mfds_items.csv` (#55) |
 
 규칙: 라벨은 고치지 않는다(고치면 새 행). 구현 교체는 `contracts/interfaces.md` 기준선 표를 이 셋으로 갱신하는 PR 로만. 적재: `cosmai lexicon load`, `labeled_set` 은 `formats.md` 포맷으로 변환해 적재, 패널 명부는 `python -m db.seed --only panel`.

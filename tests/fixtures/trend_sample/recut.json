@@ -1,0 +1,13 @@
+{
+  "_why": "tool/measure-trend-sample writes a Korean corpus manifest, and the repository's operating surface is English (#192 D12). The vocabulary the manifest is written in is fixture data, so it lives here and the tool stays free of it.",
+  "population_topic": "선크림",
+  "count_keys": {
+    "videos": "선크림_장문_product",
+    "comments": "그_영상_댓글_전체",
+    "unique": "그_영상_댓글_중복제외"
+  },
+  "reproduces": {
+    "재현_방법": "document 에서 content_type=video_long 이고 channel.panel_role=product 이며 mention 에 topic_id=선크림 이 있는 문서 → {videos}. 그 영상들을 parent_item_id 로 갖는 댓글 → {comments}. 그중 quality_flags 가 빈 것 → {unique}.",
+    "표본": "2026-08-19 코퍼스에서 채널 {channels}개만 남기고 잘라낸 대표 표본이다. 각 채널의 선크림 장문 전부와 그 영상들의 댓글 전부를 담았고, 제외 경로를 보이려고 쇼츠 1편 · video_unknown 1편 · 선크림 없는 장문 1편을 함께 남겼다 — 모집단이 채널 단위로 닫혀 있어 ydc trend.py 를 같은 잘린 run 에 돌린 값과 1:1 로 맞댈 수 있다. product {product}개와 expert {expert}개가 들어 있고, 반사실 모집단을 갈라 보는 패널 민감도가 그 둘을 다 요구한다. tool/measure-trend-sample 이 이 표본과 골든 일곱 벌을 한 번에 다시 만든다."
+  }
+}

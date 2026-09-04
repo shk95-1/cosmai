@@ -80,6 +80,9 @@ extend-include = [
     "tool/measure-lexicon-candidates",
     "tool/measure-evidence-fixture",
     "tool/measure-source-mix",
+    "tool/measure-transcript-bimodal",
+    "tool/measure-trend-sample",
+    "tool/measure-mfds-join",
 ]
 
 [tool.ruff.lint]
