@@ -46,9 +46,9 @@ def stage(repo: Path, path: str, text: str) -> None:
     git(repo, "add", "--", path)
 
 
-def run_check(repo: Path) -> subprocess.CompletedProcess:
+def run_check(repo: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["sh", str(CHECK)], cwd=str(repo), capture_output=True, text=True, check=False, env=CLEAN_ENV
+        ["sh", str(CHECK), *args], cwd=str(repo), capture_output=True, text=True, check=False, env=CLEAN_ENV
     )
 
 
@@ -110,3 +110,46 @@ def test_the_check_exempts_itself(repo: Path):
     stage(repo, "tool/checks/lang", f"# {KOREAN}")
     done = run_check(repo)
     assert done.returncode == 0, done.stderr
+
+
+def commit_all(repo: Path, message: str) -> str:
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "--no-verify", "-m", f"chore: {message}")
+    done = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=CLEAN_ENV,
+    )
+    return done.stdout.strip()
+
+
+def test_a_range_reads_the_branch_instead_of_the_index(repo: Path):
+    """#215 review I3: on a push nothing is staged, so the staged form of this check passes whatever
+    the branch carries. The prose class of the push gate is exactly where that matters."""
+    stage(repo, "README.md", "# English\n")
+    base = commit_all(repo, "base")
+    stage(repo, "collectors/naver.py", f"# {KOREAN}")
+    commit_all(repo, "korean")
+
+    staged = run_check(repo)
+    assert staged.returncode == 0, "nothing is staged, so the index form has nothing to say"
+
+    ranged = run_check(repo, "--range", base)
+    assert ranged.returncode == 1, ranged.stdout + ranged.stderr
+    assert "collectors/naver.py" in ranged.stderr, ranged.stderr
+
+
+def test_a_range_over_an_english_branch_passes(repo: Path):
+    stage(repo, "README.md", "# English\n")
+    base = commit_all(repo, "base")
+    stage(repo, "collectors/naver.py", "# English only\n")
+    commit_all(repo, "english")
+    assert run_check(repo, "--range", base).returncode == 0
+
+
+def test_the_range_flag_needs_a_base(repo: Path):
+    # A missing base would silently become `...HEAD`, which git reads as the whole history.
+    assert run_check(repo, "--range").returncode == 2
+    assert run_check(repo, "--whatever").returncode == 2

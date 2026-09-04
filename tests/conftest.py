@@ -23,6 +23,8 @@ from sqlalchemy.engine import make_url
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 SNAPSHOT_UPDATE = "--snapshot-update"
+# Set by tool/checks/test when it runs the whole suite, and by nothing else (#215).
+FULL_SUITE_ENV = "COSMAI_FULL_SUITE"
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -31,14 +33,23 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def _default_registrations_survive_the_suite() -> Iterator[None]:
-    """analysis.registry 는 process 전역 딕셔너리다 — 어떤 테스트가 register()/unregister() 를 오가며
-    기본 등록을 되돌리지 않으면 그 파일 하나가 아니라 뒤에 도는 아무 파일이나 '등록 없음'(exit 2)을
-    만난다. 이 부류가 두 번 나왔으니(#30) 세 번째를 세션 끝에서 잡는다."""
+    """analysis.registry is a process-global dictionary: a test that goes through register() and
+    unregister() without putting the defaults back leaves "no implementation" (exit 2) waiting for
+    whatever file runs next, not for its own. That happened twice (#30), so a third one is caught
+    at the end of the session.
+
+    Armed only while the whole suite is running -- COSMAI_FULL_SUITE=1, which tool/checks/test sets.
+    A focused run never registers the defaults at all, so outside the full suite this guard would end
+    every `uv run pytest <file>` with a teardown ERROR about a run that did nothing wrong (#215).
+    """
+    if os.environ.get(FULL_SUITE_ENV) != "1":
+        yield
+        return
     from analysis import registry
 
     yield
-    # 재는 것이 먼저다: load_implementations() 는 이제 정말로 다시 등록하므로(#99), 먼저 부르면
-    # 스위트가 남긴 상태가 아니라 그 복구 결과를 재게 되어 이 가드가 절대 울리지 않는다.
+    # Measuring comes first: load_implementations() really does register again (#99), so calling it
+    # before the count would measure the repair rather than what the suite left behind.
     missing = [task for task in registry.TASKS if registry.get(task) is None]
     registry.load_implementations()
     assert not missing, f"default registrations not restored by suite end: {missing}"

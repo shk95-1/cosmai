@@ -1,4 +1,8 @@
+import os
 import socket
+import subprocess
+import sys
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -58,3 +62,35 @@ def test_sqlalchemy_engine_connect_to_a_non_test_port_is_also_refused():
             engine.connect()
     finally:
         engine.dispose()
+
+
+def _focused_run(env_value: str | None) -> subprocess.CompletedProcess[str]:
+    """One `pytest <file>` in its own process, the way a worker runs a targeted test."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "COSMAI_FULL_SUITE"))}
+    if env_value is not None:
+        env["COSMAI_FULL_SUITE"] = env_value
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/test_agents_md.py", "-p", "no:cacheprovider"],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
+def test_a_focused_run_ends_without_a_teardown_error():
+    """#215: the session guard used to fail every targeted run, because a focused run registers no
+    default implementations in the first place -- an ERROR about a run that did nothing wrong is how
+    a gate teaches people to stop reading it."""
+    done = _focused_run(None)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "error" not in done.stdout.lower(), done.stdout
+
+
+def test_the_guard_is_still_armed_for_the_whole_suite():
+    # Opt-in has to mean opt-in: with the flag tool/checks/test sets, the guard that caught #30 twice
+    # must still fire on a session that never registered the defaults.
+    done = _focused_run("1")
+    assert done.returncode != 0, done.stdout
+    assert "default registrations not restored" in done.stdout, done.stdout

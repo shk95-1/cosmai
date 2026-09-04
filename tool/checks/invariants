@@ -1,0 +1,19 @@
+#!/bin/sh
+# Is this change only text? (#215)
+#
+# `tool/checks/invariants <base> [paths...]` compares the working revision against <base> with every
+# rule in tool/invariants.py -- python as a blinded AST, SQL with its comments stripped, shell and JS
+# as a comment-only diff, Markdown by its anchors -- and exits 1 with one line per file that differs.
+# It is what class C of `tool/checks/test --changed` rests on, and it is what a translation wave runs
+# to prove a thousand-line diff moved no code.
+#
+# The paths are resolved from this script rather than from the working directory, so it runs against
+# any checkout it is pointed at (a fixture repository under test, a second worktree) and not only
+# against the clone it happens to live in.
+set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$here/prerequisite"
+require_command python3 git
+
+# Stdlib only, so this needs no venv and no `uv sync` -- class C has to be cheap to be worth having.
+exec python3 "$here/../invariants.py" "$@"

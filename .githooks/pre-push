@@ -31,6 +31,21 @@ if [ "$cache" -eq 1 ] && tested_tree_forced; then
   forced=1
 fi
 
+# What this push earns (#215 review C2). A cached entry may only skip a suite it is at least as
+# strong as: before this, a class-C stamp -- format, lint and three snapshot tests -- skipped exactly
+# like a full run. Anything this cannot work out is class A, the strongest thing to have to match.
+# The GIT_* variables git exports to a hook are dropped for the call: the classifier asks git where
+# it is, and under GIT_DIR it would answer for the wrong tree.
+earned=A
+if [ "$cache" -eq 1 ] && [ -r tool/change_scope.py ] && command -v python3 >/dev/null 2>&1; then
+  earned=$( (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+             python3 tool/change_scope.py origin/main 2>/dev/null) | sed -n 1p )
+  case "$earned" in
+    A | B | C | N) ;;
+    *) earned=A ;;
+  esac
+fi
+
 # git feeds the refs being pushed on stdin, one per line:
 #
 #   <local ref> <local sha> <remote ref> <remote sha>
@@ -61,8 +76,10 @@ while read -r _ local_sha _ _; do
 
   if [ "$forced" -eq 0 ]; then
     if [ "$cache" -eq 1 ] && [ -n "$tree" ]; then
-      stamp=$(tested_tree_stamp "$tree" | cut -d' ' -f1)
-      if [ -n "$stamp" ]; then
+      stamp=$(tested_tree_stamp "$tree")
+      recorded=$(tested_tree_class "$stamp")
+      if [ -n "$stamp" ] \
+         && [ "$(tested_tree_rank "$recorded")" -ge "$(tested_tree_rank "$earned")" ]; then
         tested_tree=$tree
         tested_stamp=$stamp
         continue
@@ -96,11 +113,15 @@ if [ -n "$untested_tree" ] && [ "$forced" -eq 1 ]; then
   printf 'pre-push: tree %s forced by COSMAI_FORCE_SUITE=1, running the suite\n' \
     "$(git rev-parse --short "$untested_tree")"
 elif [ -n "$untested_tree" ]; then
-  printf 'pre-push: tree %s untested, running the suite\n' "$(git rev-parse --short "$untested_tree")"
+  printf 'pre-push: tree %s untested for class %s, running the suite\n' \
+    "$(git rev-parse --short "$untested_tree")" "$earned"
 else
   printf '→ test\n'
 fi
-"$script" || {
+# --changed: the suite the push has to pay for is the one this change can break (#215). The base is
+# origin/main because that is what the push is measured against; a checkout that has no origin/main
+# gets class A from the classifier, which is the same suite this line ran before.
+"$script" --changed origin/main || {
   printf '\033[31m✗ Tests failed. Push blocked.\033[0m\n' >&2
   exit 1
 }
