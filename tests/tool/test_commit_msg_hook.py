@@ -26,6 +26,14 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def repo_on_issue_108(tmp_path: Path) -> Path:
+    """A throwaway git repo on branch tool/108-x, for #198's Conventional-Commits-type cases."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "checkout", "-q", "-b", "tool/108-x"], check=True)
+    return tmp_path
+
+
 def run_hook(repo: Path, message: str) -> subprocess.CompletedProcess:
     msg_file = repo / "MSG"
     msg_file.write_text(message, encoding="utf-8")
@@ -146,6 +154,33 @@ def test_a_korean_body_is_rejected(repo: Path):
 
 def test_an_english_message_is_not_rejected_by_the_language_rule(repo: Path):
     done = run_hook(repo, "fix(hook): reject korean commit messages\n\nshk95-1/cosmai#175\n")
+    assert done.returncode == 0, done.stderr
+
+
+# #198: the Conventional Commits type at the start of the subject ("fix", "fix(scope)", "fix!")
+# is a type, not a bare closing keyword -- only that leading prefix is stripped before the
+# bare-closes scan; a later keyword on the subject, or anywhere in the body, is still scanned.
+
+
+def test_fix_type_with_parenthesized_issue_ref_in_subject_is_accepted(repo_on_issue_108: Path):
+    done = run_hook(repo_on_issue_108, "fix(tool): stop silently shrinking an empty list (#108)\n")
+    assert done.returncode == 0, done.stderr
+
+
+def test_fix_type_followed_by_a_real_bare_closes_keyword_is_still_rejected(repo_on_issue_108: Path):
+    done = run_hook(repo_on_issue_108, "fix(tool): closes #108\n")
+    assert done.returncode == 1, done.stderr
+    assert BARE_CLOSES_MARKER in done.stderr, done.stderr
+
+
+def test_a_bare_closes_in_the_body_is_still_rejected(repo_on_issue_108: Path):
+    done = run_hook(repo_on_issue_108, "fix(tool): unrelated change (#108)\n\nFixes #108\n")
+    assert done.returncode == 1, done.stderr
+    assert BARE_CLOSES_MARKER in done.stderr, done.stderr
+
+
+def test_a_qualified_closes_in_the_body_is_accepted(repo_on_issue_108: Path):
+    done = run_hook(repo_on_issue_108, "fix(tool): unrelated change (#108)\n\nFixes shk95-1/cosmai#108\n")
     assert done.returncode == 0, done.stderr
 
 
