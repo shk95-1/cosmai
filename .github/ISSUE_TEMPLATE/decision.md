@@ -1,20 +1,20 @@
 ---
-name: 결정 이슈 (decision)
-about: 코드 없는 결정. 닫히면 구현 이슈가 풀린다. 라벨 decision + needs-user.
+name: Decision issue (decision)
+about: A decision with no code. Closing it unblocks the implementation issue. Labels decision + needs-user.
 labels: decision, needs-user
 ---
 
-## 결정할 것
-<!-- 한 문장 -->
+## What to decide
+<!-- One sentence -->
 
-## 사실
-<!-- 선택에 필요한 실측만 -->
+## Facts
+<!-- Only the measurements the choice needs -->
 
-## 선택지
-<!-- 각 선택의 결과 한 줄씩 -->
+## Options
+<!-- One line per option's consequence -->
 
-## 완료 기준
-결정이 코멘트에 있고 이 이슈를 닫는다. 구현 이슈(blockedBy 이 이슈)가 풀린다.
+## Done when
+The decision is in a comment and this issue is closed. The implementation issue (blockedBy this issue) unblocks.
 
-## 채널·자리 / 등급 / 규모
-<!-- ch:<경로>. 규모 S. 자원: 사람 -->
+## Channel · position / grade / size
+<!-- ch:<path>. Size S. Resources: person -->
