@@ -403,3 +403,51 @@ def test_the_dictionary_stamp_follows_the_dictionary_the_run_actually_read(loade
     assert stamped != after_one
     # 번호표도 별칭 수도 그대로다 -- 갈린 칸이 지문 하나라는 것이 이 테스트의 요점이다.
     assert stamped.rsplit(" · ", 1)[0] == after_one.rsplit(" · ", 1)[0]
+
+
+def test_the_gold_the_queries_and_the_row_stamp_stand_on_the_lexicon_the_run_fixed(loaded, monkeypatch):
+    """`run()` fixes one lexicon and hands it to the gold, the queries and the row stamp (#62). Every
+    test so far ran on one active lexicon, so reverting any of the three to a fresh read of the active
+    lexicon stayed green (#68). Here every read of the active lexicon returns a different one -- what an
+    `activate` landing mid-run does -- and the property is asked row by row: the gold size and the query
+    of a row must be the ones the lexicon in its own stamp produces."""
+    import itertools
+    from dataclasses import replace
+
+    from analysis.retrieval import topics
+
+    wide = topics.load(loaded)
+    gold_wide = retrieval_eval.gold_from_chunks(loaded, dictionary=wide)
+    # The topic the fixture chunks answer most; narrowed to one alias it answers fewer, so a gold that
+    # came from the other lexicon is visible in `gold_size`, not only in the stamp.
+    topic = max(gold_wide, key=lambda t: len(gold_wide[t]))
+
+    def variant(fingerprint: str, **entry_changes) -> topics.Topics:
+        entries = tuple({**e, **entry_changes} if e["topic"] == topic else e for e in wide.entries)
+        return replace(wide, entries=entries, fingerprint=fingerprint)
+
+    first_alias = next(e["ko"] for e in wide.entries if e["topic"] == topic)[:1]
+    narrow = variant("narrow", ko=first_alias)
+    assert len(retrieval_eval.gold_from_chunks(loaded, dictionary=narrow)[topic]) < len(gold_wide[topic])
+    # A lexicon the run never fixed: its queries carry an alias neither of the two above has.
+    stray = variant("stray", latin=["stray-alias"])
+    variants = {lex.stamp: lex for lex in (wide, narrow)}
+    assert len(variants) == 2 and stray.stamp not in variants
+
+    turns = itertools.cycle((wide, narrow))
+    monkeypatch.setattr(topics, "use_active", lambda _conn: topics.use(next(turns)))
+    # A read that bypasses the fixed lexicon through `topics.active()` lands on a third one.
+    monkeypatch.setattr(topics, "active", lambda: stray)
+
+    rows = retrieval_eval.run(loaded, "literal", cache_dir=None)
+    assert rows, "no query was scored"
+    stamps = {row.dictionary for row in rows}
+    assert len(stamps) == 1 and stamps <= variants.keys(), (
+        f"rows name a lexicon the run never fixed: {stamps}"
+    )
+    fixed = variants[stamps.pop()]
+    gold = retrieval_eval.gold_from_chunks(loaded, dictionary=fixed)
+    expected = set(retrieval_eval.queries("literal", fixed))
+    for row in rows:
+        assert (row.topic_id, row.query) in expected, f"query from another lexicon: {row}"
+        assert row.gold_size == len(gold[row.topic_id]), f"gold from another lexicon: {row}"
