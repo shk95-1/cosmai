@@ -119,3 +119,28 @@ def test_a_forced_run_reads_no_stamp(repo: Path):
     assert plain.stdout.strip().startswith("20"), plain.stdout
     forced = run(repo, f'tested_tree_stamp "{tree}"', COSMAI_FORCE_SUITE="1")
     assert forced.stdout.strip() == "", forced.stdout
+
+
+def test_a_checkout_that_became_dirty_during_the_run_is_refused(repo: Path):
+    # #214 review, minor: capture only sees the checkout as it was at the start. An edit made while
+    # the suite ran leaves a tree nothing was tested against wearing a green stamp.
+    script = "tested_tree_capture\necho edited > file.txt\ntested_tree_record"
+    done = run(repo, script)
+    assert done.returncode == 0, done.stderr
+    assert entries(repo) == [], "a run that ended dirty was recorded"
+    assert "became dirty" in done.stdout, done.stdout
+
+
+def test_the_entry_names_the_class_the_run_verified(repo: Path):
+    # #215: a tree green for class C answered a smaller question than one green for class A, and the
+    # next push reads this entry to decide whether to run anything at all.
+    run(repo, 'tested_tree_capture; tested_tree_record "C"')
+    entry = (repo / ".git" / "cosmai-tested" / tree_now(repo)).read_text(encoding="utf-8").strip()
+    assert entry.endswith("class C"), entry
+    assert entry.split(" ")[0].startswith("20"), entry
+
+
+def test_a_run_that_names_no_class_still_records_the_time(repo: Path):
+    run(repo, "tested_tree_capture; tested_tree_record")
+    entry = (repo / ".git" / "cosmai-tested" / tree_now(repo)).read_text(encoding="utf-8").strip()
+    assert entry.endswith("Z"), entry

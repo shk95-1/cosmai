@@ -61,7 +61,7 @@ while read -r _ local_sha _ _; do
 
   if [ "$forced" -eq 0 ]; then
     if [ "$cache" -eq 1 ] && [ -n "$tree" ]; then
-      stamp=$(tested_tree_stamp "$tree" | cut -d' ' -f1)
+      stamp=$(tested_tree_stamp "$tree")
       if [ -n "$stamp" ]; then
         tested_tree=$tree
         tested_stamp=$stamp
@@ -100,7 +100,10 @@ elif [ -n "$untested_tree" ]; then
 else
   printf '→ test\n'
 fi
-"$script" || {
+# --changed: the suite the push has to pay for is the one this change can break (#215). The base is
+# origin/main because that is what the push is measured against; a checkout that has no origin/main
+# gets class A from the classifier, which is the same suite this line ran before.
+"$script" --changed origin/main || {
   printf '\033[31m✗ Tests failed. Push blocked.\033[0m\n' >&2
   exit 1
 }

@@ -40,8 +40,10 @@ tested_tree_capture() {
     tested_tree_captured=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || tested_tree_captured=""
 }
 
-# Records the tree the suite actually ran against. The caller reaches this only after a green run
-# and after the container is gone, so a failed or killed run leaves no claim behind.
+# Records the tree the suite actually ran against, and -- when the caller names one -- the risk class
+# it was verified at (#215): a tree green for class C was asked a smaller question than one green for
+# class A, and the entry has to say which. The caller reaches this only after a green run and after
+# the container is gone, so a failed or killed run leaves no claim behind.
 tested_tree_record() {
     [ -n "$tested_tree_captured" ] || return 0
     tested_tree_now=$(git rev-parse "HEAD^{tree}" 2>/dev/null) || tested_tree_now=""
@@ -49,7 +51,14 @@ tested_tree_record() {
         printf 'tested-tree: HEAD moved during the run; this run will not be recorded\n'
         return 0
     fi
+    # Asked a second time, because HEAD's tree is the same object whether the working files still
+    # match it or not: an edit made while the suite ran leaves a checkout nothing was tested against.
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        printf 'tested-tree: the checkout became dirty during the run; this run will not be recorded\n'
+        return 0
+    fi
     tested_tree_where=$(tested_tree_dir)
     mkdir -p "$tested_tree_where"
-    printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tested_tree_where/$tested_tree_captured"
+    printf '%s%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${1:+ class $1}" \
+        > "$tested_tree_where/$tested_tree_captured"
 }

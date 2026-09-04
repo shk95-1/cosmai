@@ -33,12 +33,12 @@ if [ -r tool/checks/tested-tree ]; then
     tested_tree_capture
 fi
 printf 'fake suite ran\\n'
-printf 'ran\\n' >> "$SUITE_MARKER"
+printf '%s\\n' "$*" >> "$SUITE_MARKER"
 if [ "${FAKE_SUITE_FAILS:-0}" = 1 ]; then
     exit 1
 fi
 if [ -r tool/checks/tested-tree ]; then
-    tested_tree_record
+    tested_tree_record "${FAKE_SUITE_CLASS:-A}"
 fi
 """
 
@@ -83,7 +83,9 @@ def tree_of(repo: Path, sha: str) -> str:
     ).stdout.strip()
 
 
-def run_hook(repo: Path, *shas: str, fails: bool = False, force: bool = False) -> subprocess.CompletedProcess:
+def run_hook(
+    repo: Path, *shas: str, fails: bool = False, force: bool = False, klass: str = "A"
+) -> subprocess.CompletedProcess:
     stdin = "".join(f"refs/heads/main {sha} refs/heads/main {ZERO}\n" for sha in shas)
     return subprocess.run(
         ["sh", str(HOOK)],
@@ -98,6 +100,7 @@ def run_hook(repo: Path, *shas: str, fails: bool = False, force: bool = False) -
             "SUITE_MARKER": str(repo.parent / "marker"),
             "FAKE_SUITE_FAILS": "1" if fails else "0",
             "COSMAI_FORCE_SUITE": "1" if force else "0",
+            "FAKE_SUITE_CLASS": klass,
         },
     )
 
@@ -133,7 +136,7 @@ def test_the_cache_entry_is_named_for_the_tree_and_holds_the_time(repo: Path):
     entry = repo / ".git" / "cosmai-tested" / tree_of(repo, sha)
     assert entry.exists(), "tool/checks/tested-tree recorded nothing for a green run"
     stamp = entry.read_text(encoding="utf-8").strip()
-    assert stamp.endswith("Z") and stamp.startswith("20"), stamp
+    assert stamp.startswith("20") and " class " in stamp, stamp
 
 
 def test_a_merge_commit_carrying_an_already_tested_tree_is_free(repo: Path):
@@ -255,3 +258,21 @@ def test_an_unreadable_cache_still_runs_the_suite_for_anything_else(repo: Path):
     done = run_hook(repo, sha)
     assert "running the suite" in done.stdout, done.stdout
     assert suite_runs(repo) == 1
+
+
+def test_the_hook_asks_for_the_verification_this_change_needs(repo: Path):
+    # #215: the push pays for the class of its own change, not for every suite in the repository.
+    sha = commit(repo, "one")
+    run_hook(repo, sha)
+    marker = (repo.parent / "marker").read_text(encoding="utf-8").strip()
+    assert marker == "--changed origin/main", marker
+
+
+def test_the_skip_line_says_which_class_the_tree_was_verified_at(repo: Path):
+    # A tree green for class C answered a smaller question, and the line that skips the suite has to
+    # say which question that was -- otherwise "tested" reads as "fully tested" every time.
+    sha = commit(repo, "one")
+    run_hook(repo, sha, klass="C")
+    done = run_hook(repo, sha)
+    assert "skipping the suite" in done.stdout, done.stdout
+    assert "class C" in done.stdout, done.stdout

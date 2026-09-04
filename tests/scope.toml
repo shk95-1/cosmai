@@ -1,0 +1,198 @@
+# Which verification a change needs (#215). `tool/checks/test --changed <base>` reads this file and
+# `tool/change_scope.py` turns it into a class: A runs everything, B runs the mapped tests plus the
+# DB-free suite, C runs the format/lint/lang checks and the tests below.
+#
+# `full` is the list of paths whose change can break anything: the database, the packaging or the
+# gate itself. A change touching one of them is class A no matter how small it looks. `tests/scope.toml`
+# is on that list because a wrong entry here is the one error the classifier cannot catch itself.
+full = [
+    "contracts/ddl/",
+    "db/",
+    "tests/conftest.py",
+    "tests/scope.toml",
+    "tool/checks/test",
+    "tool/checks/invariants",
+    "tool/checks/suite-lock",
+    "tool/checks/tested-tree",
+    "tool/change_scope.py",
+    "tool/invariants.py",
+    "pyproject.toml",
+    "uv.lock",
+    ".githooks/",
+]
+
+# What a prose or translation change is verified by: the checks in tool/checks/{format,lint,lang}
+# plus these. `cosmai --help` is a byte snapshot, the version strings are the other user-facing text,
+# and AGENTS.md has a size ceiling a docs edit is exactly the thing that breaks.
+docs = [
+    "tests/test_cli_help.py",
+    "tests/test_version_strings.py",
+    "tests/test_agents_md.py",
+]
+
+# Path prefix -> the tests that cover it. The longest matching prefix wins, so `analysis/polarity/`
+# beats `analysis/`. A changed path that matches nothing here is class A: an unmapped file is not a
+# small change, it is an unmeasured one. A changed `tests/**/test_*.py` needs no entry -- the
+# classifier runs the changed test file itself.
+[map]
+"analysis/" = [
+    "tests/test_baselines.py",
+    "tests/test_metrics.py",
+    "tests/test_registry_loading.py",
+    "tests/test_pipeline_stage.py",
+    "tests/test_pipeline_edge.py",
+    "tests/test_analyze_concurrency.py",
+    "tests/test_lexicon_loader.py",
+    "tests/test_eval_impl.py",
+    "tests/test_version_strings.py",
+    "tests/test_analyze_all.py",
+]
+"analysis/aggregate/" = [
+    "tests/test_aggregate.py",
+    "tests/test_aggregate_golden.py",
+    "tests/test_aggregate_run.py",
+    "tests/test_aggregate_scale.py",
+    "tests/test_category_canonical.py",
+    "tests/test_month_grain_regression.py",
+    "tests/test_ranking.py",
+    "tests/test_ranking_scale.py",
+    "tests/test_version_strings.py",
+]
+"analysis/cards/" = [
+    "tests/test_cards_rules.py",
+    "tests/test_evidence_golden.py",
+]
+"analysis/crosscheck/" = [
+    "tests/test_crosscheck_keys.py",
+    "tests/test_crosscheck_pipeline.py",
+    "tests/test_crosscheck_rules.py",
+]
+"analysis/evidence/" = [
+    "tests/test_evidence_contract.py",
+    "tests/test_evidence_golden.py",
+    "tests/test_evidence_numbers.py",
+    "tests/test_evidence_pipeline.py",
+    "tests/test_evidence_rules.py",
+    "tests/test_cards_rules.py",
+]
+"analysis/extractor/" = [
+    "tests/test_extractor.py",
+    "tests/test_analyze_all.py",
+    "tests/test_version_strings.py",
+]
+"analysis/holdout/" = [
+    "tests/test_holdout_pipeline.py",
+    "tests/test_holdout_rules.py",
+]
+"analysis/judge/" = [
+    "tests/test_judge_constants.py",
+    "tests/test_judge_golden.py",
+    "tests/test_judge_pipeline.py",
+    "tests/test_judge_rules.py",
+    "tests/test_judgement_contract.py",
+    "tests/test_evidence_pipeline.py",
+    "tests/test_sensitivity_pipeline.py",
+]
+"analysis/linker/" = [
+    "tests/test_linker.py",
+    "tests/test_analyze_all.py",
+    "tests/test_cli_eval.py",
+    "tests/test_version_strings.py",
+]
+"analysis/polarity/" = [
+    "tests/test_polarity.py",
+    "tests/test_llm_polarity.py",
+    "tests/test_llm_pricing.py",
+    "tests/test_ollama_polarity.py",
+    "tests/test_ollama_predictor_connection.py",
+    "tests/test_analyze_polarity.py",
+    "tests/test_analyze_concurrency.py",
+    "tests/test_analyze_all.py",
+    "tests/test_eval_impl.py",
+    "tests/test_version_strings.py",
+]
+"analysis/retrieval/" = [
+    "tests/retrieval",
+    "tests/test_cli_lexicon.py",
+    "tests/test_corpus_import.py",
+    "tests/test_lexicon_loader.py",
+    "tests/test_eval_lexicon_url.py",
+]
+"analysis/sensitivity/" = [
+    "tests/test_sensitivity_golden.py",
+    "tests/test_sensitivity_pipeline.py",
+    "tests/test_sensitivity_rules.py",
+]
+"analysis/trend/" = [
+    "tests/test_trend_golden.py",
+    "tests/test_trend_pipeline.py",
+    "tests/test_trend_quarter.py",
+    "tests/test_crosscheck_pipeline.py",
+    "tests/test_evidence_pipeline.py",
+    "tests/test_judge_pipeline.py",
+    "tests/test_sensitivity_pipeline.py",
+    "tests/test_holdout_rules.py",
+]
+"collectors/" = [
+    "tests/collectors",
+    "tests/test_cli_collect_commerce.py",
+]
+"collectors/commerce/" = [
+    "tests/collectors/commerce",
+    "tests/test_cli_collect_commerce.py",
+]
+"collectors/naver/" = ["tests/collectors/naver"]
+"collectors/youtube/" = [
+    "tests/collectors/youtube",
+    "tests/test_runtime_dsn.py",
+]
+"contracts/" = [
+    "tests/test_contract_ddl.py",
+    "tests/test_contract_types.py",
+    "tests/test_ddl_additive_only.py",
+    "tests/test_anon_exposure_contract.py",
+    "tests/test_ownership.py",
+    "tests/test_secrets.py",
+    "tests/tool/test_ddl_drift_foreign.py",
+]
+"cosmai/" = [
+    "tests/test_cli_help.py",
+    "tests/test_cli_analyze.py",
+    "tests/test_cli_eval.py",
+    "tests/test_cli_lexicon.py",
+    "tests/test_cli_collect_commerce.py",
+    "tests/test_analyze_all.py",
+    "tests/retrieval/test_cli_wiring.py",
+]
+# Class A already covers db/, so this entry is documentation: the tests that read the schema, the
+# roles and the views if the classifier ever stops reaching for the whole suite here.
+"db/" = [
+    "tests/test_seed.py",
+    "tests/test_seed_common.py",
+    "tests/test_seed_products.py",
+    "tests/test_panel_seed.py",
+    "tests/test_migrate_ledger_and_grants.py",
+    "tests/test_migrate_view_sweep.py",
+    "tests/test_grants_reader.py",
+    "tests/test_runtime_role_cannot_ddl.py",
+    "tests/test_collector_health_view.py",
+    "tests/test_collection_lineage_view.py",
+    "tests/test_mention_lineage_view.py",
+    "tests/test_pipeline_health_view.py",
+]
+"eval/" = [
+    "tests/test_cli_eval.py",
+    "tests/test_eval_impl.py",
+    "tests/test_eval_lexicon_url.py",
+]
+# The hooks are class A; the entry names what proves them.
+".githooks/" = [
+    "tests/tool/test_pre_push_hook.py",
+    "tests/tool/test_commit_msg_hook.py",
+]
+# Reference snippets only: nothing imports playbook/, so a change there has no test of its own and
+# an empty list means "the DB-free suite and nothing more".
+"playbook/" = []
+"portal/" = ["tests/stack/test_stack_wiring.py"]
+"stack/" = ["tests/stack"]
+"tool/" = ["tests/tool"]
