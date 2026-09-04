@@ -15,8 +15,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 
@@ -25,6 +25,14 @@ from db import secrets
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATE = REPO_ROOT / "db" / "migrate.sh"
 KEY = "NEEDS_DB_RUNTIME"
+# The dummy passwords the harness container's roles carry (tests/conftest.py HARNESS_SECRETS).
+HARNESS_SECRETS_VALUES = (
+    "check",
+    "check-runtime",
+    "check-trend-radar",
+    "check-trend-radar-reader",
+    "check-tubedepth",
+)
 
 # Each case is a whole file. The last five hold the rules a `grep "^KEY="` gets wrong.
 FILES = [
@@ -45,6 +53,15 @@ FILES = [
 ]
 
 
+def _read_secret(path: Path, key: str, *, prefix: str = "needs") -> subprocess.CompletedProcess[str]:
+    """`read_secret` as db/migrate.sh defines it, run over one file with the two variables the
+    script sets around it."""
+    program = f'set -u\nprefix="$1"\nsecret_file="$2"\n{_read_secret_source()}\nread_secret "$3"\n'
+    return subprocess.run(
+        ["sh", "-c", program, "sh", prefix, str(path), key], capture_output=True, text=True, check=False
+    )
+
+
 def _read_secret_source() -> str:
     """`read_secret` lifted out of db/migrate.sh, so this runs the deployed code rather than a copy
     of it. The slice raises if that function stops being a top-level one, which is the point."""
@@ -61,10 +78,7 @@ def test_the_shell_and_the_python_reader_agree_on_one_file(body: str, tmp_path: 
     # Both readers treat an empty value as no value, so both answers collapse to None there.
     expected = secrets.load(path).get(KEY) or None
 
-    program = f'set -u\nsecret_file="$1"\n{_read_secret_source()}\nread_secret "$2"\n'
-    done = subprocess.run(
-        ["sh", "-c", program, "sh", str(path), KEY], capture_output=True, text=True, check=False
-    )
+    done = _read_secret(path, KEY)
     found = done.stdout if done.returncode == 0 else None
     assert found == expected, f"db/secrets.py says {expected!r}, db/migrate.sh says {found!r}"
     if expected is None:
@@ -72,33 +86,29 @@ def test_the_shell_and_the_python_reader_agree_on_one_file(body: str, tmp_path: 
         assert body.replace("\n", " ") not in done.stderr, "and nothing else from the file"
 
 
-def _harness_container() -> str:
-    """The container tool/checks/test started, by the name it derives from the port."""
-    url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
-    port = urlparse(url.replace("postgresql+psycopg://", "postgresql://")).port
-    name = f"cosmai-test-postgres-{port}"
-    probe = subprocess.run(["docker", "inspect", "-f", "{{.Name}}", name], capture_output=True, text=True)
-    if probe.returncode != 0:
-        pytest.skip(f"{name} is not there -- running against an external TEST_POSTGRES_URL")
-    return name
+def test_a_missing_collector_key_is_not_reported_as_a_needs_problem(tmp_path: Path):
+    """Step (0) reads TREND_RADAR_DB_RUNTIME and TUBEDEPTH_DB_RUNTIME, and a message that calls a
+    missing one a `needs` fault sends the reader to the wrong schema. The prefix is a variable the
+    loop sets, so the same reader answers for whichever schema is being built."""
+    path = tmp_path / "env"
+    path.write_text("NEEDS_DB_RUNTIME=present\n", encoding="utf-8")
+    done = _read_secret(path, "TREND_RADAR_DB_RUNTIME", prefix="trend_radar")
+    assert done.returncode != 0
+    assert done.stderr.startswith("trend_radar: missing key"), done.stderr
+    assert "needs:" not in done.stderr
 
 
 @pytest.mark.postgres
-def test_no_secret_value_reaches_the_docker_command_line(tmp_path: Path):
+def test_no_secret_value_reaches_the_docker_command_line(
+    tmp_path: Path, harness_container: str, deploy: Callable[..., subprocess.CompletedProcess[str]]
+):
     """A shim ahead of docker on PATH writes down one line per argument and then execs the real one,
     so what this reads is exactly what `ps` would have shown. Grepping db/migrate.sh instead would
-    measure the spelling of the call rather than the call."""
-    container = _harness_container()
+    measure the spelling of the call rather than the call.
+
+    The deploy goes through the shared fixture, so it waits for needs_migrator's two connection
+    slots the way every other in-suite deploy does (#178 review 4)."""
     real_docker = shutil.which("docker") or pytest.skip("docker is not on PATH")
-    # tool/checks/test's own dummy file is not exported to pytest, so this rebuilds it with the
-    # values that harness wrote -- the roles already exist and keep those passwords.
-    env_file = tmp_path / "env"
-    env_file.write_text(
-        "NEEDS_DB_MIGRATOR=check\nNEEDS_DB_RUNTIME=check-runtime\n"
-        "TREND_RADAR_DB_RUNTIME=check-trend-radar\nTREND_RADAR_DB_READER=check-trend-radar-reader\n"
-        "TUBEDEPTH_DB_RUNTIME=check-tubedepth\n",
-        encoding="utf-8",
-    )
 
     log = tmp_path / "argv"
     shim_dir = tmp_path / "bin"
@@ -110,21 +120,18 @@ def test_no_secret_value_reaches_the_docker_command_line(tmp_path: Path):
     )
     shim.chmod(0o755)
 
-    env = {**os.environ, "PATH": f"{shim_dir}:{os.environ['PATH']}", "COSMAI_SECRET_FILE": str(env_file)}
-    done = subprocess.run(
-        ["db/migrate.sh", "--container", container, "--db", "fleet", "--superuser", "fleet"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
+    original_path = os.environ["PATH"]
+    os.environ["PATH"] = f"{shim_dir}:{original_path}"
+    try:
+        done = deploy()
+    finally:
+        os.environ["PATH"] = original_path
     assert done.returncode == 0, done.stderr
     arguments = log.read_text(encoding="utf-8").splitlines()
     assert any(a == "exec" for a in arguments), "the shim recorded nothing, so it proved nothing"
 
-    values = sorted(secrets.load(env_file).values())
-    assert values, "the fixture file named no secrets; this check would pass on anything"
+    values = sorted(v for v in HARNESS_SECRETS_VALUES if v)
+    assert values, "no secret values to look for; this check would pass on anything"
     exposed = [a for a in arguments for v in values if v in a]
     # The values are named nowhere in the failure: only how many arguments carried one.
     assert not exposed, f"{len(exposed)} argument(s) to docker carry a role password"
