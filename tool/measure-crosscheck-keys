@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""부분문자열 목록이 **지금 표에서** 무엇을 잡는지 다시 재고 확인된 목록과 맞댄다 (포크 #7).
+"""Re-measures what the substring lists catch **in the table as it is now** and compares that with the
+confirmed list (fork #7).
 
-성분 키와 극성 힌트 둘 다 벤더 문자열 위의 부분문자열이라 같은 병을 앓는다 -- 그래서 한 도구가
-둘을 함께 잰다.
+Ingredient keys and polarity hints are both substrings over vendor strings, so they suffer the same
+illness -- which is why one tool measures both together.
 
 계약 §성분 이 지는 문장이 이것이다: *키가 무엇을 잡는지는 사람이 한 번 읽어 확인했고, 코퍼스가 자라
 새 물질이 어떤 키에 들어오면 그 사실이 드러나야 한다.* **CI 는 그 일을 할 수 없다** -- 운영 표에 닿지
@@ -10,17 +11,18 @@
 길이고(#6 의 `tool/measure-evidence-fixture` 와 같은 자리), `tests/test_crosscheck_keys.py` 는 목록
 자체의 자기 정합만 진다.
 
-무엇이 빨간가.
+What is red.
 
   denied  어느 키든 `DENIED_NAMES` 를 잡았다. 이미 아는 오매칭이 되살아난 것이다 (`시카` 사고).
-  new     확인된 목록에 없는 성분명이 그 키에 들어왔다. **오매칭일 수도 있고 아닐 수도 있다** --
-          그것을 가르는 것이 사람이 이 출력을 읽는 일이고, 읽고 나면 CSV 에 줄을 더한다.
+  new     an ingredient name that is not in the confirmed list entered that key. **It may or may not
+          be a mismatch** -- telling the two apart is what a person reading this output does, and once
+          read a line is added to the CSV.
 
-`gone`(있던 이름이 사라진 것)은 빨갛지 않다 -- 제품이 빠진 것은 오매칭이 아니다.
+`gone` (a name that was there disappearing) is not red -- a product dropping out is not a mismatch.
 
-    tool/measure-crosscheck-keys                      # 운영 needs_runtime
+    tool/measure-crosscheck-keys                      # production needs_runtime
     tool/measure-crosscheck-keys --url <url>
-    tool/measure-crosscheck-keys --json               # 기계가 읽는 형식
+    tool/measure-crosscheck-keys --json               # the machine-readable form
 """
 
 from __future__ import annotations
@@ -40,7 +42,8 @@ from db.seed._common import connect  # noqa: E402
 
 
 def measure(url: str, schema: str) -> dict[str, dict[str, int]]:
-    """(제품, 성분명) 행을 읽어 키별로 잡히는 고유 성분명과 그 제품 수를 낸다."""
+    """Reads the (product, ingredient name) rows and gives, per key, the distinct names it catches and
+    how many products carry each."""
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(_commerce(schema, FORMULA), ())
         rows = [
@@ -54,7 +57,7 @@ def measure(url: str, schema: str) -> dict[str, dict[str, int]]:
         for key, terms in crosscheck.INGREDIENT_KEYS.items():
             if crosscheck.matches(name, terms):
                 found[key].setdefault(name, set()).add(product)
-    print(f"{len(rows):,}행 · 고유명 {len({name for _p, name in rows}):,}", file=sys.stderr)
+    print(f"{len(rows):,} rows · {len({name for _p, name in rows}):,} distinct names", file=sys.stderr)
     return {key: {name: len(products) for name, products in names.items()} for key, names in found.items()}
 
 
@@ -66,7 +69,8 @@ SELECT topic_group, topic_name, count(*) FROM {topic}
 
 
 def polarity_drift(url: str, schema: str) -> list[tuple[str, str, int, str, str]]:
-    """`GROUP_MAP` 그룹의 선택지 어휘를 전부 읽어 **확인된 표에 없는 것**을 낸다.
+    """Reads the whole choice vocabulary of the `GROUP_MAP` groups and gives **what is not in the
+    confirmed table**.
 
     없는 것은 힌트가 답하는데, 힌트가 뒤집는 문구가 실측으로 다섯이다 (`자극이 있어요` · `약간
     건조해요` · `예상보다 짧아요` 둘 · `날림이 없어요`). 그래서 표에 없는 문구는 전부 사람이 읽어야 한다.
@@ -89,7 +93,7 @@ def main() -> int:
     )
     parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
     parser.add_argument("--schema", default=COMMERCE_SCHEMA, help="Schema holding trend_radar.product.")
-    parser.add_argument("--json", action="store_true", help="기계가 읽는 형식으로만 낸다.")
+    parser.add_argument("--json", action="store_true", help="Print only in the machine-readable form.")
     args = parser.parse_args()
 
     now = measure(args.url or runtime_url(), args.schema)
@@ -104,26 +108,26 @@ def main() -> int:
         bad += len(denied) + len(new)
         if args.json:
             continue
-        print(f"{key}  {len(names)}종 / 확인된 {len(known[key])}종")
+        print(f"{key}  {len(names)} kinds / {len(known[key])} confirmed")
         for name in denied:
-            print(f"  [금지] {name} -- {crosscheck.denial_reason(key, name)}")
+            print(f"  [denied] {name} -- {crosscheck.denial_reason(key, name)}")
         for name in new:
-            print(f"  [새것] {name} ({names[name]}제품) -- 읽고 판단해서 목록에 더해라")
+            print(f"  [new] {name} ({names[name]} products) -- read it, judge it and add it to the list")
         for name in gone:
-            print(f"   (사라짐) {name}")
+            print(f"   (gone) {name}")
     drift = polarity_drift(args.url or runtime_url(), args.schema)
     report["_polarity"] = {"unconfirmed": [f"{group}/{name}" for group, name, *_rest in drift]}
     bad += len(drift)
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if bad == 0 else 1
-    print(f"\n극성  GROUP_MAP 그룹의 선택지 어휘 -- 확인된 표에 없는 것 {len(drift)}건")
+    print(f"\npolarity  GROUP_MAP group choice vocabulary -- {len(drift)} not in the confirmed table")
     for group, name, count, guess, _known in drift:
-        print(f"  [새것] {group}/{name} ({count}행) -- 힌트는 {guess} 라고 답한다. 읽고 목록에 더해라")
+        print(f"  [new] {group}/{name} ({count} rows) -- hint says {guess}. read it and add to the list")
     if bad:
-        print(f"\n[실패] 사람이 읽어야 할 것 {bad}건. 읽고 나면 {crosscheck.KNOWN_NAMES_CSV} 를 갱신한다")
+        print(f"\n[fail] {bad} for a person to read. once read, update {crosscheck.KNOWN_NAMES_CSV}")
         return 1
-    print("\n[통과] 키가 잡는 성분명이 확인된 목록 그대로다")
+    print("\n[pass] the ingredient names the keys catch are exactly the confirmed list")
     return 0
 
 

@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""주제 사전이 어느 판본인지 한 줄로 찍는다 (포크 #62).
+"""Prints in one line which version the topic dictionary is (fork #62).
 
 `cosmai retrieval eval` 이 행마다 `dictionary` 열에 싣는 것과 **같은 문자열**이다 -- 계약
 (`contracts/interfaces.md` §검색 실측)이 적어 둔 사전 판본을 다시 확인하는 길이고,
 `tool/show-vector-stamp` 가 벡터 축에서 하는 일과 같은 자리다. 문자열을 여기서 따로 지으면 계약이
 인용한 판본과 행이 적은 판본이 조용히 갈린다.
 
-`--against` 를 주면 두 판본이 **어느 축에서** 갈리는지까지 낸다. 지문은 갈렸다는 것만 말하고
-`cosmai lexicon diff` 는 행 단위라 한 주제의 별칭 순서가 바뀐 것을 아예 못 본다 -- 여섯 줄이 선
-사전을 되짚은 것이 이 축의 대조다(얼어붙은 사본과 적재 원본은 매칭이 안 보는 칸의 순서로 갈린다).
+Given `--against` it also says **on which axis** the two versions diverge. The fingerprint says only
+that they diverged and `cosmai lexicon diff` is row-wise, so it cannot see a changed alias order within
+one topic at all -- retracing the dictionary that six lines stood on is the comparison on this axis (a
+frozen copy and a load source diverge by the order of a column matching does not look at).
 
-    tool/show-lexicon-stamp                                             # 활성 버전
+    tool/show-lexicon-stamp                                             # the active version
     tool/show-lexicon-stamp --version 2 --against 3
     tool/show-lexicon-stamp --csv analysis/retrieval/dict/topics_v1.csv --against 3
 
@@ -32,8 +33,9 @@ from analysis.retrieval import topics  # noqa: E402
 
 
 def csv_dictionary(path: Path) -> topics.Topics:
-    """적재 원본 CSV 한 벌. `cosmai lexicon load` 가 쓰는 그 변환을 타되 **프로세스에 세우지 않는다**
-    -- 이 도구는 판본을 찍을 뿐 사전을 바꾸지 않는다. 버전은 None 이다: 번호표는 적재가 준다."""
+    """One load-source CSV. It takes the same conversion `cosmai lexicon load` uses but **does not stand
+    it up in the process** -- this tool only prints the version, it does not change the dictionary. The
+    version is None: the number tag is given by the load."""
     from cosmai.cli import _csv_rows
     from db.lexicon import ASPECT_COLUMNS
 
@@ -46,15 +48,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--version", type=int, default=None, help="이 버전. 기본값은 활성 버전.")
-    parser.add_argument("--csv", default=None, help="DB 대신 이 적재 원본 CSV 의 판본.")
-    parser.add_argument("--against", type=int, default=None, help="맞댈 DB 버전.")
-    parser.add_argument("--url", default=None, help="SQLAlchemy URL; 기본값은 needs_runtime.")
+    parser.add_argument("--version", type=int, default=None, help="This version. Default is the active one.")
+    parser.add_argument("--csv", default=None, help="The version of this load-source CSV instead of the DB.")
+    parser.add_argument("--against", type=int, default=None, help="The DB version to compare with.")
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
     args = parser.parse_args(argv)
 
     if args.csv and args.version is not None:
-        # 어느 쪽이 그 판본인지 둘이 말하면 답이 둘이다 (`cosmai lexicon diff` 와 같은 자리).
-        print("--version 과 --csv 는 함께 줄 수 없다", file=sys.stderr)
+        # If both say which version it is, there are two answers (the same place as `cosmai lexicon diff`).
+        print("--version and --csv cannot be given together", file=sys.stderr)
         return 2
 
     from cosmai.cli import _connect
@@ -70,8 +72,8 @@ def main(argv: list[str] | None = None) -> int:
             with _connect(args.url) as conn:
                 subject = topics.load(conn, version=args.version)
                 other = None if args.against is None else topics.load(conn, version=args.against)
-    # 사전이 아직 없는 것도 CSV 를 못 읽는 것도 실패가 아니라 막힘이다 -- 벡터 저장소가 없는 것과
-    # 같은 자리이고, NoDictionary 는 무엇을 돌려야 하는지까지 말한다.
+    # Neither a dictionary that is not there yet nor a CSV that cannot be read is a failure; both are
+    # blocked -- the same place as a missing vector store, and NoDictionary even says what to run.
     except (topics.NoDictionary, OSError, ValueError, LookupError) as blocked:
         print(blocked, file=sys.stderr)
         return 2

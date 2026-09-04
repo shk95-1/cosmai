@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
-"""전량 대조를 다시 돌린다: ydc 세 스크립트의 산출본 대 `cosmai trend sensitivity` (포크 #41).
+"""Re-runs the full comparison: ydc's three script outputs against `cosmai trend sensitivity` (fork #41).
 
-표본 골든(`tests/test_sensitivity_golden.py`)은 `tests/fixtures/trend_sample/` 위에서 CI 가 매번 지킨다.
+CI keeps the sample golden (`tests/test_sensitivity_golden.py`) on `tests/fixtures/trend_sample/` every time.
 **전량은 CI 가 지킬 수 없다** -- 261,317문서 174MB 는 `archive/` 에 있고 그 자리는 읽기 전용이며 레포에
 넣을 것도 아니다(`contracts/formats.md` §코퍼스 스냅샷). 그래서 전량 대조는 사람이 한 번 돌리는 일이고,
 "어떻게 돌렸나" 가 커밋 메시지에만 남아 아무도 다시 맞대 볼 수 없게 되는 것을 막는 것이 이 파일이다.
 
-돌리는 법 (인자는 전부 그 자리에서 준다 -- 레포에 남의 머신 배치를 적지 않는다):
+How to run it (every argument is given on the spot -- another machine's layout is not written into the repo):
 
-    # 1. 일회용 postgres 에 전량을 세운다 (운영 DB 에 쓰지 않는다)
+    # 1. Stand the whole corpus up in a throwaway postgres (nothing is written to the production DB)
     python -m db.corpus load ~/github_prj/Main/archive/yt-handoff --url "$URL"
-    cosmai trend quarter --url "$URL"      # COPY 직후 첫 실행은 autovacuum 경합으로 한 번 죽는다
+    cosmai trend quarter --url "$URL"      # right after COPY the first run dies once on autovacuum contention
     cosmai trend judge   --url "$URL"
 
-    # 2. ydc 세 스크립트를 손대지 않고 돌려 산출본 셋을 만든 뒤 행 단위로 맞댄다
+    # 2. Run ydc's three scripts untouched to make the three outputs, then compare row by row
     tool/compare-ydc-sensitivity --url "$URL" \
         --ydc ~/github_prj/Main/import/youtube-data-collector \
         --runs data/panel/run_20260819T053057Z data/panel/run_20260819T054559Z
 
-`--runs` 는 `--ydc` 안에서의 상대 경로다 (ydc 스크립트가 자기 디렉터리에서 도는 것을 전제한다).
-`panel_sensitivity.py` 는 판정 대상 셀이 0개면 요약을 찍다 죽지만 CSV 는 그 전에 쓰므로, 종료 코드가
-아니라 파일이 생겼는지로 본다.
+`--runs` are paths relative to `--ydc` (the ydc scripts assume they run from their own directory).
+`panel_sensitivity.py` dies while printing the summary when there are 0 cells to judge, but it writes
+the CSV before that, so what is looked at is whether the file appeared, not the exit code.
 
-산출본 셋 중 `panel_sensitivity.csv` 와 `backtest.csv` 는 ydc 레포에 이미 커밋돼 있고
-(`reports/panel_sensitivity.csv` · `data/backtest.csv`), `spam_ad_sensitivity.csv` 는 없다 -- 그것이 이
-스크립트가 세 개를 **다 다시 만들어** 맞대는 이유다.
+Of the three outputs `panel_sensitivity.csv` and `backtest.csv` are already committed in the ydc repo
+(`reports/panel_sensitivity.csv` · `data/backtest.csv`), while `spam_ad_sensitivity.csv` is not -- that
+is why this script **remakes all three** and compares them.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from analysis.sensitivity.pipeline import build  # noqa: E402
 from db.seed._common import connect  # noqa: E402
 
-# ydc 는 소스를 파일마다 다르게 적는다(`panel_sensitivity.csv` 는 `video`, `backtest.csv` 는
-# `youtube_video`). 이 레포의 어휘는 022 의 CHECK 하나다 -- 그 하나로 옮겨 맞댄다.
+# ydc writes the source differently per file (`panel_sensitivity.csv` says `video`, `backtest.csv` says
+# `youtube_video`). This repo's vocabulary is the single CHECK in 022 -- everything is mapped onto it.
 SOURCE = {"video": "youtube_video", "comment": "youtube_comment"}
 VARIANT = {
     "광고·협찬 영상 제외": "ad_video",
