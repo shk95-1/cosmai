@@ -1,11 +1,13 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,login,analyze,eval,lexicon} ...
+usage: cosmai [-h] {collect,login,analyze,retrieval,trend,eval,lexicon} ...
 
 positional arguments:
-  {collect,login,analyze,eval,lexicon}
+  {collect,login,analyze,retrieval,trend,eval,lexicon}
     collect             Run one collector's dataset for one hour.
     login               Open a visible browser so a person can authorise one source's profile.
     analyze             Run one analysis stage over the needs schema.
+    retrieval           Build the search corpus and query it.
+    trend               Build the panel's quarterly topic series.
     eval                Score one task against needs.labeled_set.
     lexicon             Load, compare and activate a dictionary version.
 
@@ -47,6 +49,153 @@ options:
   --missing             Owner runs only: judge the source rows that have no row of this version
                         yet.
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
+
+$ cosmai retrieval --help
+usage: cosmai retrieval [-h] {chunk,search,eval,terms,embed} ...
+
+positional arguments:
+  {chunk,search,eval,terms,embed}
+    chunk               Load needs.retrieval_chunk from the source schemas.
+    search              Rank chunks against a query.
+    eval                Score the retriever against the topic dictionary.
+    terms               Show the frequent words the topic dictionary misses.
+    embed               Encode chunks into a vector store on disk.
+
+options:
+  -h, --help            show this help message and exit
+
+$ cosmai retrieval chunk --help
+usage: cosmai retrieval chunk [-h] [--since SINCE]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --since SINCE         Only source rows observed on or after this date.
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval search --help
+usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25,vector,hybrid}]
+                               [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                               [--top TOP] [--vectors VECTORS] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         What to search for.
+  --engine {bm25,vector,hybrid}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --top TOP             How many chunks to print.
+  --vectors VECTORS     Vector store path; default var/retrieval/...
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval eval --help
+usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25,vector,hybrid}]
+                             [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                             [--out OUT] [--vectors VECTORS] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --mode {literal,heldout}
+  --engine {bm25,vector,hybrid}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --out OUT             Write one row per query to this CSV.
+  --vectors VECTORS     Vector store path; default var/retrieval/...
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval embed --help
+usage: cosmai retrieval embed [-h] [--model MODEL] [--device DEVICE] [--batch BATCH]
+                              [--vectors VECTORS] [--url URL]
+
+options:
+  -h, --help         show this help message and exit
+  --model MODEL      Sentence-transformers model; default is e5-base.
+  --device DEVICE    cuda, cpu, ...; default is what torch picks.
+  --batch BATCH      Texts per forward pass.
+  --vectors VECTORS  Vector store path; default var/retrieval/...
+  --url URL          SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval terms --help
+usage: cosmai retrieval terms [-h]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--top TOP] [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --top TOP             How many unmatched terms to print.
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend --help
+usage: cosmai trend [-h] {quarter,judge,sensitivity,evidence,crosscheck,holdout,cards} ...
+
+positional arguments:
+  {quarter,judge,sensitivity,evidence,crosscheck,holdout,cards}
+    quarter             Load needs.metrics_topic_quarter from the active corpus snapshot.
+    judge               Load needs.topic_quarter_judgement from that run's quarterly rows.
+    sensitivity         Ask whether the panel, the cutoff or the ad flags move that run's
+                        verdicts.
+    evidence            Load needs.topic_quarter_evidence for that run's judged cells.
+    crosscheck          Put the four sources side by side and name where they disagree.
+    holdout             Ask whether never-seen commerce reviews reproduce the existing ratios.
+    cards               Render the quarter's opportunity cards to stdout.
+
+options:
+  -h, --help            show this help message and exit
+
+$ cosmai trend quarter --help
+usage: cosmai trend quarter [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend judge --help
+usage: cosmai trend judge [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend sensitivity --help
+usage: cosmai trend sensitivity [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend evidence --help
+usage: cosmai trend evidence [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend cards --help
+usage: cosmai trend cards [-h] --quarter QUARTER [--url URL]
+
+options:
+  -h, --help         show this help message and exit
+  --quarter QUARTER  e.g. 2026Q2. A card answers a quarter-level question.
+  --url URL          SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend crosscheck --help
+usage: cosmai trend crosscheck [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai trend holdout --help
+usage: cosmai trend holdout [-h] [--url URL]
+
+options:
+  -h, --help  show this help message and exit
+  --url URL   SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
@@ -92,7 +241,7 @@ options:
 
 $ cosmai lexicon diff --help
 usage: cosmai lexicon diff [-h] --kind {brand,format,attribute,ingredient,stopword,alias,aspect}
-                           --version VERSION [--url URL] [--against AGAINST]
+                           [--version VERSION] [--url URL] [--against AGAINST] [--csv CSV]
 
 options:
   -h, --help            show this help message and exit
@@ -101,6 +250,7 @@ options:
   --version VERSION     The dictionary version to act on.
   --url URL             SQLAlchemy URL; default is needs_runtime.
   --against AGAINST     Version to compare with (default: active).
+  --csv CSV             Compare this load CSV with a version instead of two versions.
 
 $ cosmai lexicon activate --help
 usage: cosmai lexicon activate [-h]

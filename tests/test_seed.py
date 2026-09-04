@@ -22,6 +22,9 @@ EXPECTED = {
     "need_key": 38,
     # p1 extract_candidates.py 의 NAME_CAT 14 + CAT_MAP 6 (A18)
     "category_map": 20,
+    # eval/panel/channels_v1.csv 43채널의 명부 한 판본 (#31)
+    "panel_roster": 1,
+    "panel_channel": 43,
     # eval/README.md: polarity 400 + wish 220(tune100 + holdout60 + blind60_v2)
     # + brand_link 120 + product_match 80
     "labeled_set": 820,

@@ -304,6 +304,131 @@ class MetricsWishRow:  # → needs.metrics_wish
     example: str | None = None
 
 
+@dataclass(frozen=True)
+class PanelRosterRow:  # → needs.panel_roster (포크 #3). 명부 판본 한 줄 — panel_version 이 가리킬 부모
+    version: int
+    note: str | None = None  # 이 판본이 무엇인지 (seed:channels_v1 …)
+
+
+@dataclass(frozen=True)
+class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 명부; 값은 시드가 채운다 (#31)
+    channel_id: str
+    version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
+    panel_role: str  # product | expert — 명부에 없는 채널은 패널 밖이라 분모에 안 들어간다
+    handle: str | None = None
+    channel_title: str | None = None
+    role_basis: str | None = None  # 역할을 그렇게 정한 근거 (team_message | name_rule_verified …)
+    source_list: str | None = None
+    active: bool = True
+
+
+@dataclass(frozen=True)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
+    run_id: int
+    scope: str  # 카테고리명 | 'all' (metrics_need.scope 와 같은 어휘)
+    # 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다
+    topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
+    quarter: str  # 'YYYYQn'
+    source: str  # youtube_video | youtube_comment — 영상 설명과 댓글은 합치지 않고 나란히 낸다
+    content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
+    panel_version: int  # 이 비율의 모집단: panel_channel.version
+    panel_role: str  # 그 명부의 어느 모집단인지. product | expert
+    mentions: int  # 분자: 이 주제가 걸린 문서 수
+    documents: int  # 그 분기 그 모집단의 문서 수
+    quarter_mentions: int  # 구성비의 분모: 그 분기 trend_use 주제들의 언급 합
+    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
+    composition: float | None = None
+    velocity_yoy: float | None = None
+    persistence: float | None = None
+    persist_quarters: int | None = None
+    window_quarters: int | None = None
+    unique_ratio: float | None = None
+    channel_count: int | None = None
+    channel_diffusion: float | None = None
+    sample_ok: bool = False
+
+
+@dataclass(frozen=True)
+class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
+    # 앞 여덟 칸은 metrics_topic_quarter 의 기본키 그대로다. 판정은 그 표의 한 행을 받아 한 행을 내므로
+    # 이 여덟이 곧 FK 이고, 그래서 판정 행은 자기 근거가 되는 지표 행 없이 존재할 수 없다.
+    run_id: int
+    scope: str
+    topic_key: str
+    quarter: str
+    source: str
+    content_type: str
+    panel_version: int
+    panel_role: str
+    trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
+    judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
+    evidence_strength: float  # 0~100 (§판정)
+    single_source: bool  # 이 판정이 소스 하나만 보고 내려졌는가. v1(YouTube 단독)은 언제나 true
+    opportunity_score: float | None = None  # 제품군 내 0~100 정규화. 점수 대상이 아닌 셀은 NULL
+    gap_pp: float | None = None  # 댓글 구성비 - 영상 구성비 (%p). (주제, 분기) 사실이라 두 행이 같은 값
+    hold_reason: str = ""  # `판정 보류` 의 사유 코드. 보류가 아니면 '' (§판정 의 닫힌 어휘)
+
+
+@dataclass(frozen=True)
+class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀을 받치는 소비자 발화 — §근거)
+    # 앞 여덟 칸은 topic_quarter_judgement 의 기본키 그대로다. 근거가 가리키는 것이 지표 행이 아니라
+    # 판정 셀인 것이 뜻이다 — 근거를 묻는 사람은 유형을 읽은 사람이다.
+    run_id: int
+    scope: str
+    topic_key: str
+    quarter: str
+    source: str
+    content_type: str
+    panel_version: int
+    panel_role: str
+    rank: int  # 그 셀 안 좋아요 내림차순 자리. 1 부터 빈칸 없이 (§근거)
+    snapshot_id: int  # 근거 문서가 사는 관측 판본. doc_id 하나로는 재수집분과 갈리지 않는다
+    doc_id: str  # 본문은 여기 없다 — 코퍼스가 정본이고 뷰 topic_quarter_evidence_quote 가 잇는다
+    like_count: int  # 고른 이유. collected_at 시점의 스냅샷이라 나중에 세면 다른 수다
+    matched_term: str | None = None  # corpus_mention 이 이미 단 표현. 여기서 다시 매칭하지 않는다
+
+
+# ---------- 민감도 (반사실 산출. 어느 표에도 저장되지 않는다 — §민감도) ----------
+@dataclass(frozen=True)
+class PanelSensitivityRow:  # 패널 구성이 결론을 바꾸는가 (ydc panel_sensitivity.py)
+    source: str
+    topic_key: str
+    quarters_ok_product: int  # 언급이 표본 게이트를 넘는 분기 수 — product 만인 산출
+    quarters_ok_all: int  # 같은 것을 43채널 전부(product+expert)로 잰 값
+    delta_product_pp: float  # 최근 4분기 구성비 − 직전 4분기 구성비 (%p)
+    delta_all_pp: float
+    difference_pp: float  # 두 델타의 차. 반올림 전 값끼리 뺀다
+    sample_ok: bool  # 충족 분기가 관측 분기의 절반을 넘는가. 아니면 애초에 판정 대상이 아니다
+
+
+@dataclass(frozen=True)
+class BacktestRow:  # 그때 알 수 있었는가 (ydc backtest.py)
+    cutoff: str  # 판정 대상 분기 T. 지표는 T 다음 분기까지만 알던 것처럼 다시 셌다
+    source: str
+    topic_key: str
+    trend_type: str  # 방향이 있는 넷뿐이다 — 급상승·신규 등장·사라짐·단기 피크
+    before_pp: float  # 직전 4분기 평균 구성비 (기준 A)
+    before_excl_pp: float  # T 를 뺀 직전 4분기 평균 (기준 B — "올라간 수준이 유지됐는가")
+    after_pp: float  # C 이후 4분기 평균
+    at_cutoff_pp: float  # T 분기의 구성비. `단기 피크` 의 비교 상대다
+    expected: str  # 상승 유지 | 하락 유지 | 피크 소멸
+    actual: str  # 상승 | 하락 (기준 A 의 비교 결과)
+    hit: bool  # 기준 A
+    hit_level: bool  # 기준 B
+
+
+@dataclass(frozen=True)
+class AdSensitivityRow:  # 광고·협찬을 빼도 결론이 같은가 (ydc spam_ad_flags.py)
+    variant: str  # ad_video | creator_comment | promo_comment | all_flagged
+    source: str
+    topic_key: str
+    composition_base_pp: float  # 최근 4분기 구성비 (기저)
+    composition_kept_pp: float  # 같은 것을 그 변형에서 잰 값
+    diff_pp: float
+    judged_cells: int  # 그 (source, 주제) 에서 기저가 판정한 셀 수
+    flipped_cells: int  # 그중 유형이 바뀐 셀 수. 표본 미달로 사라진 셀은 여기 들지 않는다
+
+
 # ---------- 프로토콜 ----------
 class Linker(Protocol):
     version: str

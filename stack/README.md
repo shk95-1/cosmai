@@ -10,3 +10,4 @@
 - **스위트 잔여 컨테이너**: `tool/checks/test` 는 워크트리마다 `cosmai-test-postgres-<port>`(tmpfs, RAM 점유)를 띄우고 trap 으로 지운다. 셸이 SIGKILL 로 죽으면 남는다 — `tool/status` 의 `test-leftovers` 절이 보여 주고, 같은 포트의 다음 실행은 소유 컨테이너 이름을 찍고 멈춘다. 다른 워크트리 것이면 지우지 말고 주인에게.
 - **이미지는 retrieval extra 를 싣지 않는다**(`stack/Dockerfile` `uv sync --no-dev`). 컨테이너 안에서 `cosmai retrieval …` 은 `--help` 만 통과한다. 검색 크론(#55)이 생기는 날 upstream 이 싣는다.
 - **이미지 베이스가 TLS 지문을 바꾼다**: OpenSSL 3.0 베이스는 oliveyoung 리뷰 API 에 막히고 3.5 베이스(현행)는 통과한다. `tests/stack/test_image_tls_stack.py` 가 하한을 지킨다. 전말은 #35.
+- **`tool/checks/test` syncs `--extra retrieval`, `stack/Dockerfile` does not (until #55).** Cost is `kiwipiepy-model` (88 MB sdist, no wheel) plus `kiwipiepy` (11.5 MB), paid once per uv cache; every run after that is near zero.

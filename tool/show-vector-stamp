@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""벡터 저장소가 어느 판본인지 한 줄로 찍는다 (포크 #49).
+
+`cosmai retrieval eval` 이 vector·hybrid 행마다 싣는 것과 **같은 문자열**이다 -- 계약
+(`contracts/interfaces.md` §검색 실측)이 적어 둔 판본을 다시 확인하는 길이고, 그래서 매니페스트와
+id 목록만 읽는다: 1.2GB 행렬을 열지 않으므로 GPU 도 몇 분도 필요 없다.
+
+개수는 매니페스트가 주장하는 `count` 가 아니라 **id 파일의 행 수**다. 둘이 갈리면 판본을 찍지 않고
+막힌다 -- 저장소가 스스로에 대해 하는 말과 실제가 다른 것은 `vectors.load` 가 거부하는 자리와 같다.
+
+    tool/show-vector-stamp                             # var/retrieval/vectors/e5base
+    tool/show-vector-stamp var/retrieval/vectors/e5base
+
+종료 코드: 0 판본을 찍었다 · 2 저장소를 읽을 수 없다(파일 없음 · 매니페스트가 깨졌음 · 필수 키 없음 ·
+개수 어긋남 -- `contracts/entrypoints.md` §검색 의 blocked 와 같은 자리다). 1 은 없다: 반쯤 읽은
+판본이라는 것이 없어서, 찍었으면 그 줄은 온전하다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from analysis.retrieval import vectors  # noqa: E402
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "store",
+        nargs="?",
+        default=str(vectors.DEFAULT_STORE),
+        help="저장소 경로 (확장자 없이). 기본값은 vectors.DEFAULT_STORE.",
+    )
+    args = parser.parse_args()
+
+    out = Path(args.store)
+    _, ids_path, manifest_path = vectors.paths(out)
+    missing = [p.name for p in (ids_path, manifest_path) if not p.exists()]
+    if missing:
+        print(f"저장소를 읽을 수 없다: {', '.join(missing)} 가 없다 ({out.parent})", file=sys.stderr)
+        return 2
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as broken:
+        print(f"매니페스트를 읽을 수 없다: {manifest_path} ({broken})", file=sys.stderr)
+        return 2
+    if absent := [key for key in vectors.REQUIRED_MANIFEST if key not in manifest]:
+        print(f"매니페스트에 {', '.join(absent)} 가 없다: {manifest_path}", file=sys.stderr)
+        return 2
+    with ids_path.open(encoding="utf-8", newline="") as handle:
+        count = sum(1 for _ in csv.DictReader(handle))
+    if manifest.get("count") not in (None, count):
+        print(
+            f"매니페스트가 {manifest['count']}개라는데 id 는 {count}개다: {out}",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        print(vectors.manifest_stamp(manifest, count))
+    except ValueError as empty:
+        print(f"{empty}: {manifest_path}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

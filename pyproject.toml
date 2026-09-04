@@ -37,6 +37,19 @@ dev = [
     "ruff>=0.9",
     "basedpyright>=1.29",
 ]
+# analysis/retrieval (#28): 성분명·담론어를 한 토큰으로 유지하려면 사용자 사전을 얹은 형태소
+# 분석기가 필요하다 -- 공백 토큰화로는 `에칠헥실트리아존` 이 쪼개져 성분 검색이 조용히 빈다.
+# numpy 는 벡터 파일(.npy)을 읽고 코사인을 계산하는 데 직접 쓴다 -- kiwipiepy 가 딸려 오게
+# 두면 그쪽이 의존을 끊는 날 조용히 사라진다.
+retrieval = [
+    "kiwipiepy>=0.20",
+    "numpy>=2",
+]
+# 벡터를 만드는 쪽만. torch 가 딸려 오므로 이미지에도 tool/checks/test 에도 넣지 않는다 --
+# 인코딩은 GPU 가 있는 호스트에서 사람이 돌리는 일이고, 크론이 하는 일이 아니다 (#28).
+embed = [
+    "sentence-transformers>=3",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,12 +64,32 @@ markers = [
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-exclude = ["analysis/slices", "playbook"]  # analysis/slices 는 #80 이 지웠다 — 포크(cosmai-import-ydc#9)가 ydc 사본을 지우고 올 때까지 자리만 남긴다
+exclude = ["playbook"]
+# 확장자 없는 실행 파일은 기본 수집에 안 걸린다. `tool/` 의 파이썬 도구는 이름으로 들여보낸다 --
+# 안 그러면 훅의 format·lint 가 그 파일 앞에서 조용히 아무 말도 하지 않는다 (포크 #41).
+extend-include = [
+    "tool/compare-ydc-sensitivity",
+    "tool/measure-query-routing",
+    "tool/measure-vector-floor",
+    "tool/show-vector-stamp",
+    "tool/show-lexicon-stamp",
+    "tool/compare-ydc-crosscheck",
+    "tool/compare-ydc-holdout",
+    "tool/measure-crosscheck-keys",
+    "tool/measure-lexicon-candidates",
+    "tool/measure-evidence-fixture",
+    "tool/measure-source-mix",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
+# One line is over 110 columns because it is a Korean report string held under `# fmt: off` --
+# reflowing it would re-stage a Korean line and trip tool/checks/lang for no behaviour change.
+[tool.ruff.lint.per-file-ignores]
+"tool/measure-source-mix" = ["E501"]
+
 [tool.basedpyright]
 typeCheckingMode = "standard"
 include = ["tests", "analysis", "collectors", "db"]
-exclude = ["analysis/slices", "playbook"]  # 같은 이유 (#80)
+exclude = ["playbook"]

@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""전역 상위 k 가 색인 구성비에 지배되는가 (포크 #54, ydc `rag/engine.py` 의 소스별 분배).
+
+ydc 는 소스마다 따로 뽑아 합친다 -- 색인의 **92%가 짧은 유튜브 댓글**이라 전역 상위 k 가 `mfds` 를
+**293위**로, `ingredient` 를 **300위 밖**으로 밀어냈기 때문이다. 우리 `ranked_chunks(..., sources=...)`
+는 `sources` 로 후보를 **좁힐** 뿐이라 소스별 몫이 없다. 그 몫이 필요한 조건이 우리 코퍼스에도 있는지를
+이 도구가 잰다 -- 필요한지 재기 전에 RRF 부터 넣는 것이 이 측정이 막으려는 일이다.
+
+**판정 기준 넷은 재기 전에 정해져 있다.** 결과를 보고 기준을 만들지 않는다. 기준은 `K`·`BURIED_RANK`
+두 상수와 `verdict` 한 함수에만 있고 `tests/retrieval/test_source_mix.py` 가 그 뜻을 붙든다.
+
+    쏠리지 않는다  전역 top-k 의 지배 소스 점유율 < 그 소스의 색인 구성비 -- ydc 의 조건 자체가 없다
+    밀리지 않는다  쏠리되, 후보를 가진 소수 소스의 첫 등장 순위 **중앙값** < BURIED_RANK
+    지배한다       쏠리고, 그 중앙값 >= BURIED_RANK -- 여기서만 분배가 살 자리가 있다
+    측정 불가      후보를 가진 소수 소스가 하나도 없다
+
+**중앙값이 판정을 진다.** 한 질의의 777위로 판정하면 어떤 코퍼스에서도 지배가 나온다 -- 꼬리는 언제나
+길다. **질의는 고르지 않는다**: `cosmai retrieval eval --mode literal` 이 쓰는 그 주제 별칭이고, 정본은
+`needs.aspect_lexicon` 의 활성 버전이라 DB 에서 읽는다.
+
+두 부분의 무거운 의존이 서로 다르다. `mix` 는 GROUP BY 한 문장이고, `topk` 는 BM25 색인을 연다
+(캐시가 없으면 38만 청크에 십수 분 -- 실측 474초).
+
+    uv run --extra retrieval tool/measure-source-mix              # 둘 다
+    uv run --extra retrieval tool/measure-source-mix --json
+    uv run --extra retrieval tool/measure-source-mix --part mix   # 색인을 안 연다
+
+종료 코드: 0 답이 계산됐다 · 2 막힘(활성 주제 사전이 없다 · 청크가 비었다 -- `contracts/entrypoints.md`
+§검색 의 blocked 와 같은 자리다).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import statistics
+import sys
+from pathlib import Path
+from typing import NamedTuple
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from analysis.retrieval import eval as retrieval_eval  # noqa: E402
+from analysis.retrieval import topics  # noqa: E402
+
+K = 10  # 상위 k. 계약 §검색 실측 과 `analysis/retrieval/eval.K` 가 쓰는 그 k 다
+# "밀렸다"의 문턱. ydc 의 293위·300위 밖과 같은 자리수이고, k 의 열 배다 -- 분배가 사는 유일한 근거는
+# 소수 소스가 상위 k 근처에 **없다**는 것이므로, 그 없음이 자리수로 보여야 한다.
+BURIED_RANK = 100
+NO_SKEW = "쏠리지 않는다"
+NOT_BURIED = "밀리지 않는다"
+DOMINATED = "지배한다"
+UNMEASURABLE = "측정 불가"
+YDC_SHARE = 0.92  # ydc 색인에서 짧은 유튜브 댓글이 차지한 몫
+YDC_RANKS = (293, 300)  # 그 색인에서 mfds 가 앉은 자리와 ingredient 가 넘어간 자리
+
+COMPOSITION = """
+SELECT source, count(*) AS chunks, count(DISTINCT doc_id) AS docs
+FROM retrieval_chunk GROUP BY source ORDER BY chunks DESC
+"""
+
+
+class Share(NamedTuple):
+    # dataclass 가 아닌 것은 이 파일이 확장자 없이 `SourceFileLoader` 로도 열리기 때문이다 --
+    # 그 길에서는 모듈이 sys.modules 에 없어 dataclass 의 문자열 어노테이션 해석이 터진다.
+    source: str
+    chunks: int
+    docs: int
+    chunk_share: float = 0.0
+    doc_share: float = 0.0
+
+
+def composition(conn) -> list[Share]:
+    """소스별 (청크, 문서). **한 번의 훑기로 센다** -- 소스마다 물으면 38만 행 전량 훑기가 네 번이고,
+    그 넷이 statement_timeout(30초) 안에 든다는 보장이 없다(다른 워커가 같은 DB 를 읽는 동안에는 더욱)."""
+    with conn.cursor() as cur:
+        cur.execute(COMPOSITION)
+        rows = [(str(s), int(c), int(d)) for s, c, d in cur.fetchall()]
+    conn.commit()  # 뒤이어 38만 청크 색인을 연다 -- 트랜잭션을 열어 둔 채로 나가지 않는다
+    chunks = sum(c for _s, c, _d in rows) or 1
+    docs = sum(d for _s, _c, d in rows) or 1
+    return [Share(s, c, d, c / chunks, d / docs) for s, c, d in rows]
+
+
+def verdict(index_share: float, topk_share: float, first_ranks: list[int]) -> str:
+    """미리 정한 기준으로 판정한다. **결과를 보고 기준을 만들지 않는다.**"""
+    if topk_share < index_share:
+        return NO_SKEW
+    if not first_ranks:
+        return UNMEASURABLE
+    return DOMINATED if statistics.median(first_ranks) >= BURIED_RANK else NOT_BURIED
+
+
+def per_query(index, origin: dict[str, str], query: str, dominant: str, k: int = K) -> dict | None:
+    """질의 하나의 (상위 k 소스 구성, 소수 소스 첫 등장 순위). 후보가 0이면 None -- 없는 순위를 지어내지
+    않는다. 전량 순위를 받는 것은 첫 등장이 k 밖 어디인지가 이 측정의 절반이라서다."""
+    ranked = index.search(query, k=None)
+    if not ranked:
+        return None
+    first: dict[str, int] = {}
+    pool: dict[str, int] = {}
+    for rank, (chunk_id, _score) in enumerate(ranked, 1):
+        source = origin[chunk_id]
+        pool[source] = pool.get(source, 0) + 1
+        first.setdefault(source, rank)
+    head = [origin[chunk_id] for chunk_id, _score in ranked[:k]]
+    return {
+        "query": query,
+        "candidates": len(ranked),
+        "top_k": {source: head.count(source) for source in sorted(set(head))},
+        "dominant_share": head.count(dominant) / len(head),
+        "minority_first": {s: r for s, r in sorted(first.items()) if s != dominant},
+        "pool": dict(sorted(pool.items())),
+    }
+
+
+def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
+    from analysis.retrieval.pipeline import load_index
+
+    shares = composition(conn)
+    if not shares:
+        raise SystemExit("청크가 비었다 -- `cosmai retrieval chunk` 가 먼저다 (blocked)")
+    dominant = shares[0].source
+    dictionary = topics.use_active(conn)
+    index, origin = load_index(conn, None, cache_dir=cache_dir)
+    conn.commit()
+
+    rows = [
+        r
+        for _topic, q in retrieval_eval.queries("literal", dictionary)
+        if (r := per_query(index, origin, q, dominant, k))
+    ]
+    counted: dict[str, int] = {}
+    for row in rows:
+        for source, n in row["top_k"].items():
+            counted[source] = counted.get(source, 0) + n
+    total = sum(counted.values()) or 1
+    ranks = [
+        rank for row in rows for source, rank in row["minority_first"].items() if row["pool"].get(source)
+    ]
+    by_source: dict[str, dict] = {}
+    for share in shares:
+        if share.source == dominant:
+            continue
+        # 소스마다 따로도 낸다 -- 합산 중앙값 하나는 "가끔 이기고 대개 밀리는" 이중분포를 감춘다.
+        own = [row["minority_first"][share.source] for row in rows if row["pool"].get(share.source)]
+        by_source[share.source] = {
+            "queries_with_candidates": len(own),
+            "beyond_k": sum(1 for rank in own if rank > k),
+            "within_k": sum(1 for rank in own if rank <= k),
+            "median": statistics.median(own) if own else None,
+            "max": max(own) if own else None,
+        }
+    index_share = next(s.chunk_share for s in shares if s.source == dominant)
+    topk_share = counted.get(dominant, 0) / total
+    return {
+        "chunks": sum(s.chunks for s in shares),
+        "dictionary": dictionary.version,
+        "dominant": dominant,
+        "composition": [s._asdict() for s in shares],
+        "queries": len(rows),
+        "queries_without_candidates": len(retrieval_eval.queries("literal", dictionary)) - len(rows),
+        "top_k": {
+            source: {"n": n, "share": n / total}
+            for source, n in sorted(counted.items(), key=lambda kv: -kv[1])
+        },
+        "dominant_share_in_index": index_share,
+        "dominant_share_in_top_k": topk_share,
+        "dominant_share_mean_per_query": statistics.mean(r["dominant_share"] for r in rows) if rows else 0.0,
+        "minority_first_rank": {
+            "n": len(ranks),
+            "median": statistics.median(ranks) if ranks else None,
+            "max": max(ranks) if ranks else None,
+            "beyond_k": sum(1 for rank in ranks if rank > k),
+        },
+        "minority_first_rank_by_source": by_source,
+        "queries_with_only_dominant_in_top_k": sum(1 for r in rows if set(r["top_k"]) == {dominant}),
+        "verdict": verdict(index_share, topk_share, ranks),
+        "rows": rows,
+    }
+
+
+def report(measured: dict) -> None:
+    # Left alone rather than reflowed: a merge-session format fix must never re-stage a Korean
+    # report string (tool/checks/lang).
+    # fmt: off
+    print(f"청크 {measured['chunks']:,} · 주제 사전 v{measured['dictionary']} · 질의 {measured['queries']}개"
+          f" (후보 0: {measured['queries_without_candidates']}개)")
+    print("\n색인 구성비")
+    for share in measured["composition"]:
+        print(f"  {share['source']:20s} 청크 {share['chunks']:>8,} {share['chunk_share'] * 100:6.2f}%"
+              f" · 문서 {share['docs']:>8,} {share['doc_share'] * 100:6.2f}%")
+    print(f"\n전역 상위 {K} 의 소스 분포 (질의 {measured['queries']}개 합산)")
+    for source, cell in measured["top_k"].items():
+        print(f"  {source:20s} {cell['n']:>5} {cell['share'] * 100:6.2f}%")
+    first = measured["minority_first_rank"]
+    print(f"\n지배 소스 {measured['dominant']}: 색인 {measured['dominant_share_in_index'] * 100:.2f}%"
+          f" -> 상위 {K} {measured['dominant_share_in_top_k'] * 100:.2f}%"
+          f" (질의별 평균 {measured['dominant_share_mean_per_query'] * 100:.2f}%)")
+    print(f"후보를 가진 소수 소스 (질의, 소스) {first['n']}쌍 · 첫 등장 순위 중앙값 {first['median']}"
+          f" · 최대 {first['max']} · 상위 {K} 밖 {first['beyond_k']}")
+    for source, cell in measured["minority_first_rank_by_source"].items():
+        print(f"  {source:20s} 후보 있는 질의 {cell['queries_with_candidates']:3d} · 상위 {K} 안"
+              f" {cell['within_k']:3d} · 밖 {cell['beyond_k']:3d} · 첫 등장 중앙값 {cell['median']}"
+              f" · 최대 {cell['max']}")
+    print(f"상위 {K} 가 지배 소스뿐인 질의 {measured['queries_with_only_dominant_in_top_k']}개")
+    print(f"\n판정: {measured['verdict']}  (기준: 쏠림은 색인 구성비 이상, 밀림은 중앙값 {BURIED_RANK}위 이상)")
+    # fmt: on
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--part", choices=("mix", "topk", "both"), default="both")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+    parser.add_argument("--cache-dir", default=None, help="BM25 색인 캐시. 기본은 pipeline.CACHE_DIR")
+    args = parser.parse_args()
+
+    from analysis.retrieval.pipeline import CACHE_DIR
+    from cosmai.cli import _connect
+
+    cache_dir = Path(args.cache_dir) if args.cache_dir else CACHE_DIR
+    try:
+        with _connect(args.url) as conn:
+            if args.part == "mix":
+                shares = composition(conn)
+                measured = {"composition": [s._asdict() for s in shares]}
+            else:
+                measured = measure(conn, cache_dir)
+    except topics.NoDictionary as exc:
+        print(f"{exc} (blocked)", file=sys.stderr)
+        return 2
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(measured, ensure_ascii=False, indent=2))
+    elif args.part == "mix":
+        # fmt: off
+        for share in measured["composition"]:
+            print(f"  {share['source']:20s} 청크 {share['chunks']:>8,} {share['chunk_share'] * 100:6.2f}%"
+                  f" · 문서 {share['docs']:>8,} {share['doc_share'] * 100:6.2f}%")
+        # fmt: on
+    else:
+        report(measured)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
