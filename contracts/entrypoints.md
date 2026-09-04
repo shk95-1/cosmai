@@ -357,22 +357,28 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
   **v3 적재는 아직 안 했다**(2026-08-27, 운영은 v2 가 활성) — 그전까지 검색이 보는 사전은 v2 이고, 레포의
   적재 원본은 이미 v3 내용이라 그 둘이 갈려 있다. 켜는 순간 `선크림` 주제가 12,197 → 12,418 문서를 보게
   되고 색인 캐시가 사전 지문으로 무효화된다(`pipeline.index_signature`).
-- **색인·추출 축에는 불용어 목록도 조사 목록도 두지 않는다**(포크 #37, ydc `lexicon.json` 처분). 그 축은
-  색인 토큰화(`bm25.tokenize`)와 `terms` 다 — 일반어는 lift 축이 걷어내고(`analysis/retrieval/terms.py`),
-  조사는 Kiwi 의 태그가 가른다: `KIWI_TAGS` 밖(조사 `J*`·어미 `E*`)을 버리고 한 글자 명사도 버려서, ydc
-  가 코퍼스 실측으로 검증한 조사 30개를 어간에 붙여도 토큰이 하나도 달라지지 않는다(실측 2026-08-26 ·
-  30/30 · `tests/retrieval/test_particles.py`). **질의 축은 이 문장이 정하지 않는다**(포크 #46): 질의를
-  서술하는 말은 df 로 갈리지 않아(ydc 실측 `소비자` 289 < `백탁` 338) 다른 근거가 필요하고, 그 판단은 그
-  이슈가 아래 두 항목에서 진다. 축이 어느 쪽이든 살아남는 것은 파일이 아니라 **버전을 받는 행**이다
-  (포크 #8) — 주제 표기는 위 사전(`ruleset='retrieval-topic'`), 브랜드 표기는 `needs.entity_lexicon`
-  (`formats.md` §사전 CSV).
-  `lexicon.json` 의 별칭 **9개가 다 판정됐다**(포크 #56): 셋(`썬크림`·`자외선차단제`·`코스알엑스`)은
-  이미 있었고, `선크림추천` 은 확장이 잡아 행이 필요 없으며, **셋**(`썬쿠션`·`썬스틱`·`sunscreen`)이 주제
-  사전 v3 의 행이 됐고, `올영`(df 5,583)과 `sunstick`(df 3)은 미등재다 — 앞은 정본이 `tier='stop'` 이라
-  행을 더해도 소비자가 없고, 뒤는 바닥(`terms.MIN_DOCS` 5) 아래이며 그 3편을 이미 `선크림` 이 본다.
-  같은 v3 가 #37 의 후보 7종도 판정해 `선에센스`·`선스프레이`·`속건조`·`파데프리` 넷을 더 올렸다. 판정
-  원장과 등재 기준 넷은 `formats.md` §주제 사전 v3 이고, 그 수를 다시 재 원장과 맞대는 길은
-  `tool/measure-lexicon-candidates` 다.
+- **The index and extraction axis carries no stopword list and no particle list** (fork #37, ydc
+  `lexicon.json` disposed of). That axis is the index tokenizer (`bm25.tokenize`) and `terms`. **General terms
+  are not removed by anything on it** (fork #59 — this line once credited lift): of ydc's general-word block,
+  13 are dropped by `bm25.tokenize` itself (nine carry tags outside `KIWI_TAGS`, four fall to the two-character
+  rule) and the 16 that survive stay in the index at full weight, discounted only by idf because they are
+  common — `tests/retrieval/test_query_stopwords.py` counts that 13/16 contrast. lift
+  (`analysis/retrieval/terms.py`) runs only in the uncaptured-expression report of `terms` and never touches
+  BM25 scoring. Particles are told apart by Kiwi's tags: everything outside `KIWI_TAGS` (particles `J*`,
+  endings `E*`) is dropped, one-character nouns too, so the 30 particles ydc verified on the corpus change not
+  one token when attached to a stem (measured 2026-08-26 · 30/30 · `tests/retrieval/test_particles.py`).
+  **The query axis is not decided by this sentence** (fork #46): words that describe the question are not
+  separated by df (ydc measurement: the word for consumer at df 289 sits below a real topic at df 338), so
+  they need a different ground, and that issue carries the judgment in the two items below. Whichever axis,
+  what survives is not a file but **a row that gets a version** (fork #8) — topic surface forms in the lexicon
+  above (`ruleset='retrieval-topic'`), brand surface forms in `needs.entity_lexicon` (`formats.md`, the
+  lexicon CSV section).
+  All **nine aliases of `lexicon.json` were judged** (fork #56): three were already there, one is caught by
+  expansion and needs no row, **three** became rows of topic lexicon v3, and two stay unlisted — one because
+  its canonical is `tier='stop'` so a row would have no consumer, the other because it sits below the floor
+  (`terms.MIN_DOCS` 5) and its three videos are already seen by the sunscreen topic. The same v3 judged #37's
+  seven candidates and raised four more. The judgment ledger and the four listing criteria are `formats.md`
+  (topic lexicon v3 section), and `tool/measure-lexicon-candidates` re-measures those counts against it.
 - **질의 토큰화는 색인 토큰화와 갈린다**(포크 #46). 색인은 `bm25.tokenize`, 질의는 `bm25.tokenize_query`
   — 같은 토큰화에 **질의 불용어 제거**만 얹은 것이고, `Index.search` 만 그쪽을 탄다. 색인에서 빼지 않는
   이유는 그러면 `소비자` 를 직접 찾는 질의를 못 하게 되기 때문이다. 뺄 근거가 lift 도 idf 도 아닌 이유는
