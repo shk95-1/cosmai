@@ -23,14 +23,14 @@ from typing import TYPE_CHECKING, Any
 
 from analysis.registry import TASKS
 
-if TYPE_CHECKING:  # psycopg 를 여기서 import 하면 --help 한 번에도 드라이버가 딸려 온다.
+if TYPE_CHECKING:  # importing psycopg here drags the driver in on a single --help.
     import psycopg
 
 STAGES = ("link", "polarity", "aggregate", "all")
-# analysis.retrieval.corpus.SOURCES 와 같은 값. 여기서 다시 적는 이유는 `--help` 한 번에
-# psycopg 를 딸려 오게 하지 않으려는 것이고, tests/retrieval 이 둘이 같은지 검사한다.
+# The same value as analysis.retrieval.corpus.SOURCES. It is written out again here so that a single
+# `--help` does not drag psycopg in, and tests/retrieval checks that the two are the same.
 RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
-# bm25 는 글자, vector 는 뜻, hybrid 는 둘의 순위를 RRF 로 합친 것.
+# bm25 is letters, vector is meaning, hybrid is the two rankings fused with RRF.
 RETRIEVAL_ENGINES = ("bm25", "vector", "hybrid")
 # analysis.retrieval.ask.DEFAULT_MODEL restated for the same reason RETRIEVAL_SOURCES is: the
 # default belongs in `--help`, and importing that module would pull psycopg into every --help.
@@ -131,40 +131,45 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     quarter = actions.add_parser(
         "quarter", help="Load needs.metrics_topic_quarter from the active corpus snapshot."
     )
-    # 스냅샷도 명부도 인자가 아니다 -- 활성 판본이 답이고, 그것을 고르는 길이 둘이면 분모도 둘이 된다.
+    # Neither the snapshot nor the roster is an argument -- the active version is the answer, and two
+    # ways of picking it make two denominators.
     quarter.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 판정은 지표를 다시 세지 않는다 -- 같은 run 의 저장된 행을 읽어 유형과 두 점수를 붙인다.
+    # The verdict does not recount the metrics -- it reads the stored rows of the same run and attaches
+    # the type and the two scores.
     judged = actions.add_parser(
         "judge", help="Load needs.topic_quarter_judgement from that run's quarterly rows."
     )
     judged.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 민감도는 아무것도 쓰지 않는다 -- 반사실 모집단에는 022 의 어휘에도 run 에도 자리가 없다.
+    # Sensitivity writes nothing -- a counterfactual population has no place in 022's vocabulary or in a run.
     wobble = actions.add_parser(
         "sensitivity", help="Ask whether the panel, the cutoff or the ad flags move that run's verdicts."
     )
     wobble.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 근거는 판정 셀에 붙는 포인터다 -- 본문을 베끼지 않으므로 인자도 스냅샷도 없다.
+    # Evidence is a pointer attached to a judged cell -- it copies no body, so it has neither an
+    # argument nor a snapshot.
     evidence = actions.add_parser(
         "evidence", help="Load needs.topic_quarter_evidence for that run's judged cells."
     )
     evidence.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 대조도 아무것도 쓰지 않는다 -- (주제)나 (성분) 하나가 키인 행에는 022 의 여덟 칸이 맞지 않는다.
+    # Crosscheck writes nothing either -- 022's eight columns do not fit a row keyed by one (topic) or
+    # one (ingredient).
     cross = actions.add_parser(
         "crosscheck", help="Put the four sources side by side and name where they disagree."
     )
     cross.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 홀드아웃도 아무것도 쓰지 않는다 -- 두 팔을 가르는 경계가 청크 색인이라 돌 때마다 움직인다.
+    # Holdout writes nothing either -- the boundary splitting the two arms is the chunk index, so it
+    # moves on every run.
     hold = actions.add_parser(
         "holdout", help="Ask whether never-seen commerce reviews reproduce the existing ratios."
     )
     hold.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
-    # 카드는 아무것도 쓰지 않는다. 저장된 세 표를 읽어 마크다운을 stdout 으로 낸다.
+    # Cards write nothing. They read the three stored tables and put markdown on stdout.
     cards = actions.add_parser("cards", help="Render the quarter's opportunity cards to stdout.")
     cards.add_argument(
         "--quarter", required=True, help="e.g. 2026Q2. A card answers a quarter-level question."
@@ -193,7 +198,7 @@ def _add_lexicon(subparsers: argparse._SubParsersAction) -> None:
     ):
         sub = actions.add_parser(name, help=helptext)
         sub.add_argument("--kind", required=True, choices=KINDS, help="Which dictionary.")
-        # diff 는 한쪽이 적재 원본 CSV 일 수 있어 --version 이 필수가 아니다 (포크 #62).
+        # diff does not require --version because one side may be a load-source CSV (fork #62).
         sub.add_argument(
             "--version",
             required=name != "diff",
@@ -270,18 +275,20 @@ def _run_analyze(args: argparse.Namespace) -> int:
     with contextlib.ExitStack() as stack:
         try:
             since = date.fromisoformat(args.since) if args.since else None
-            # 판정자의 사전·원장 커넥션도 --url 을 따라가야 한 실행이 두 DB 에 걸치지 않는다 (eval 과 같다).
+            # The judge's dictionary and ledger connections must follow --url too, so one run does not
+            # straddle two DBs (same as eval).
             predictors.set_lexicon_url(args.url)
             polarity = (
                 stack.enter_context(registry.open_classifier("polarity", args.impl)) if args.impl else None
             )
-            # 규칙이 아닌 구현은 소유 표가 자기 이름을 적어둔 자리에서만 돈다 — 사람이 손으로 치는
-            # 명령이라 순서(등록 → 패스)를 아는 곳이 여기밖에 없다 (analysis/polarity/ownership.py).
+            # An implementation that is not the rules runs only where the ownership table wrote its own
+            # name — it is a command a person types by hand, so this is the only place that knows the
+            # order (register → pass) (analysis/polarity/ownership.py).
             if polarity is not None and (blocked := unready(OWNERS, polarity.version, args.scope)):
                 print(blocked)
                 return 2
             conn = stack.enter_context(_connect(args.url))
-        # 아직 아무 단계도 시작하지 못한 거절은 blocked 다 — 실패한 run 과 종료 코드로 갈린다.
+        # A refusal that has not started any stage yet is blocked — the exit code tells it from a failed run.
         except (ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
@@ -301,9 +308,10 @@ def _run_retrieval(args: argparse.Namespace) -> int:
 
     try:
         since = date.fromisoformat(args.since) if getattr(args, "since", None) else None
-        # 인자를 먼저 푼다 -- 인자가 틀렸다고 말하려고 DB 에 붙을 이유가 없고, 연결 뒤에 풀면
-        # 옵션 하나가 빠진 하위명령이 연결에 성공한 뒤에야 AttributeError 로 죽는다.
-        # embed 에는 --source 가 없다: 하위명령마다 있는 옵션이 다르므로 없으면 기본값을 쓴다.
+        # Unpack the arguments first -- there is no reason to reach the DB in order to say an argument
+        # is wrong, and unpacking after the connection makes a subcommand that lacks one option die with
+        # AttributeError only once it has connected.
+        # embed has no --source: the options differ per subcommand, so the default is used when absent.
         sources = tuple(args.source) if getattr(args, "source", None) else corpus.SOURCES
         store = Path(args.vectors) if getattr(args, "vectors", None) else None
         conn = _connect(args.url)
@@ -317,7 +325,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
                 print(outcome.note)
                 for problem in outcome.problems[:10]:
                     print(f"  {problem}")
-                # 계약 위반은 적재를 막지 않지만 조용히 넘어가서도 안 된다.
+                # A contract violation does not stop the load, but it must not pass in silence either.
                 return 0 if not outcome.problems else 1
             if args.action == "eval":
                 return _run_retrieval_eval(conn, args, sources, store)
@@ -330,8 +338,8 @@ def _run_retrieval(args: argparse.Namespace) -> int:
             hits = pipeline.search(
                 conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
             )
-    # 벡터 파일이 없는 것도, 주제 사전이 아직 안 켜진 것도 실패가 아니라 막힘이다 -- 각각
-    # `embed` 와 `cosmai lexicon load/activate` 를 아직 안 돌렸다는 뜻이다.
+    # Neither a missing vector file nor a topic dictionary that is not active yet is a failure; both are
+    # blocked -- they mean `embed` and `cosmai lexicon load/activate` have not been run yet.
     except (StoreMissing, NoDictionary) as blocked:
         print(blocked)
         return 2
@@ -377,7 +385,8 @@ def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str
 
     scanned = terms.scan(conn, sources=sources)
     print(terms.render(scanned, top=args.top))
-    # 문서를 하나도 못 봤으면 표가 아니라 빈 표다 -- `eval` 의 "채점된 질의 0개"와 같은 자리다.
+    # Having seen no document at all is an empty table rather than a table -- the same place as `eval`'s
+    # "0 queries scored".
     return 0 if sum(scanned.documents.values()) else 1
 
 
@@ -410,7 +419,8 @@ def _run_retrieval_eval(
             writer.writeheader()
             writer.writerows(vars(row) for row in rows)
         print(f"saved {args.out}")
-    # 질의가 하나도 채점되지 않으면 청크가 비었거나 사전이 안 얹힌 것이다. 조용히 0 을 주지 않는다.
+    # If not one query is scored, the chunks are empty or the dictionary is not loaded. Do not hand back
+    # a silent 0.
     return 0 if rows else 1
 
 
@@ -459,11 +469,12 @@ def _run_trend(args: argparse.Namespace) -> int:
     try:
         with conn:
             if args.action == "cards":
-                # 카드만 갈래가 다르다 -- 산출이 표가 아니라 stdout 의 마크다운이고 위반 줄이 없다.
+                # Only cards take another branch -- the product is markdown on stdout rather than a
+                # table, and there is no violation line.
                 made = cards_collect(conn, args.quarter)
                 print(cards_report(made), end="")
-                # note 는 stderr 다 -- stdout 이 곧 마크다운 산출물이라, 리다이렉트하면 `.md` 안에
-                # `trend cards run=…` 한 줄이 남는다.
+                # note goes to stderr -- stdout is the markdown product itself, so a redirect leaves a
+                # `trend cards run=…` line inside the `.md`.
                 print(made.note, file=sys.stderr)
                 for violation in made.violations:
                     print(f"  {violation}", file=sys.stderr)
@@ -471,13 +482,16 @@ def _run_trend(args: argparse.Namespace) -> int:
                 # 원문이 없어 카드로 서지 못한 셀이 있을 때뿐이다 (#41 이 §민감도 에서 못 박은 자리).
                 return 0 if made.status == "ok" else 1
             outcome = acts[args.action](conn)
-    # 명부도 스냅샷도 주제 사전도 지표·판정 행도 아직 없는 것은 실패가 아니라 막힘이다 -- 아직 안 세운
-    # 것이고, 스냅샷과 사전이 갈린 것(TopicAxisDrift) 역시 사전 판본을 맞추면 같은 명령이 그대로 선다.
-    # 코퍼스가 비었는데 지표 행이 남아 있는 것(ShortHistory)도 같은 자리다: 창이 설 분기가 없다.
-    # `analysis/judge` 의 SparseGrid·MissingValue 는 여기 없다 -- #41 이 민감도의 반사실 격자에서도
-    # 도달 가능한지 확인했고 여전히 아니다(`analysis.trend.rows` 가 주제 × 분기 직사각형을 통째로
-    # 내고, 문서가 0인 계열은 행을 만들지 않는다). 그 둘을 잡을 조건은 #40 이 적어 둔 그대로 **다른
-    # 생산자가 metrics_topic_quarter 에 쓰는 날**이다.
+    # Having no roster, no snapshot, no topic dictionary and no metric or judgement row yet is blocked
+    # rather than a failure -- they have not been stood up, and a snapshot that diverged from the
+    # dictionary (TopicAxisDrift) likewise stands under the same command once the dictionary version is
+    # matched. An empty corpus with metric rows left over (ShortHistory) is the same place: there is no
+    # quarter for a window to stand on.
+    # `analysis/judge`'s SparseGrid·MissingValue are not here -- #41 checked whether they are reachable in
+    # sensitivity's counterfactual grid as well and they still are not (`analysis.trend.rows` emits the
+    # whole topic × quarter rectangle, and a series with 0 documents makes no row). The condition for
+    # catching those two is what #40 wrote down: **the day another producer writes to
+    # metrics_topic_quarter**.
     except (
         NoPopulation, NoJudgement, NoEvidence, NoBaseline, NoCrosscheck, NoHoldout, TopicAxisDrift,
         NoDictionary, ShortHistory,
@@ -485,15 +499,16 @@ def _run_trend(args: argparse.Namespace) -> int:
         print(blocked)
         return 2
     print(outcome.note)
-    # 답이 표가 아니라 문장인 것은 `sensitivity`·`crosscheck`·`holdout` 셋이다 -- 나머지 셋은 note 와
-    # 위반 줄이 전부다.
-    # getattr 이 아니라 isinstance 인 것은 타입 체커가 그 갈래를 지게 하려는 것이다.
+    # The three whose answer is sentences rather than a table are `sensitivity`·`crosscheck`·`holdout`
+    # -- for the other three the note and the violation lines are everything.
+    # It is isinstance rather than getattr so that the type checker carries that branch.
     if isinstance(outcome, Outcome | CrossOutcome | HoldOutcome):
         for line in outcome.lines:
             print(line)
     for violation in outcome.violations:
         print(f"  {violation}")
-    # 뷰가 무언가 말하면 표는 섰지만 그 표의 뜻이 계약과 다르다 -- 조용히 0 을 주지 않는다.
+    # If the view says something, the table stood up but its meaning differs from the contract -- do not
+    # hand back a silent 0.
     return 0 if outcome.status == "ok" else 1
 
 
@@ -502,8 +517,9 @@ def _run_eval(args: argparse.Namespace) -> int:
     from analysis.baselines import adoption_misses
     from analysis.evaluate import evaluate, record, render
 
-    # 예측자의 사전 커넥션은 registry 와 무관한 별도 전역(analysis/predictors.py) -- --url 을 안 따라가면
-    # eval 한 번이 두 DB(지정한 곳과 운영)에 걸친다. predict 가 열리기 전인 지금 세팅해야 한다.
+    # The predictor's dictionary connection is a separate global unrelated to registry
+    # (analysis/predictors.py) -- without following --url, one eval straddles two DBs (the named one and
+    # production). It has to be set now, before predict is opened.
     predictors.set_lexicon_url(args.url)
     registry.load_implementations()
     try:
@@ -511,8 +527,9 @@ def _run_eval(args: argparse.Namespace) -> int:
     except LookupError as refused:
         print(refused)
         return 2
-    # 기준선 표는 홀드아웃 셋을 먼저 돌려준다 (analysis/baselines.py) — 유료 구현을 --split 없이 부르면
-    # 블라인드 홀드아웃이 첫 호출로 나간다. 규율이 아니라 인자로 막는다.
+    # The baseline table hands the holdout set back first (analysis/baselines.py) — calling a paid
+    # implementation without --split sends the blind holdout out on the first call. It is stopped by an
+    # argument, not by discipline.
     if args.impl and registry.is_paid(args.task, args.impl) and args.split is None:
         print(f"--impl {args.impl} spends money; pass --split tune or --split holdout")
         return 2
@@ -547,7 +564,8 @@ def _run_eval(args: argparse.Namespace) -> int:
 
 
 def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
-    """formats.md 의 사전 CSV → db.lexicon 의 컬럼 순서. kind 열이 있으면 --kind 와 같아야 한다."""
+    """formats.md's dictionary CSV → db.lexicon's column order. A kind column, if there is one, must
+    equal --kind."""
     from db.lexicon import ASPECT_COLUMNS, ASPECT_KIND, ENTITY_COLUMNS
     from db.seed._common import boolean, opt, read_csv
 
@@ -562,11 +580,13 @@ def _csv_rows(kind: str, path: str) -> list[tuple[object, ...]]:
     if mislabelled:
         raise ValueError(f"{path} carries kind(s) {', '.join(sorted(mislabelled))}, not {kind}")
     if kind == ASPECT_KIND:
-        # 알려진 칸 밖의 열은 `extra` 로 간다 -- 룰셋마다 필요한 사실이 다르고(주제 사전의 표기
-        # 계열·주제 유형), 그것을 공통 칸에 얹으면 한 컬럼이 룰셋마다 다른 뜻을 갖는다(021).
-        # 빈 칸은 값이 아니라 무기입이다: 넣으면 "지정하지 않음"과 "빈 문자열"이 섞인다.
+        # A column outside the known slots goes to `extra` -- each ruleset needs different facts (the
+        # topic dictionary's surface family and topic type), and putting those in a shared slot gives one
+        # column a different meaning per ruleset (021).
+        # An empty cell is not a value but no entry: storing it mixes "not specified" with "empty string".
         if "extra" in rows[0]:
-            # 남는 열들이 모이는 자리라 그 이름의 열은 자기 자신 안에 들어간다 -- 조용히 버리지 않는다.
+            # It is where the spare columns gather, so a column of that name would go inside itself --
+            # do not drop it in silence.
             raise ValueError(f"{path} has an 'extra' column; spare columns become extra by name")
         spare = [c for c in rows[0] if c not in ASPECT_COLUMNS]
         return [
@@ -605,7 +625,7 @@ def _run_lexicon(args: argparse.Namespace) -> int:
             if args.action == "load":
                 rows = _csv_rows(args.kind, args.csv)
                 insert = insert_aspects if args.kind == ASPECT_KIND else insert_entities
-                # 새 버전은 꺼진 채로 들어온다 — 교체는 activate 가 한다 (formats.md).
+                # A new version comes in switched off — activate does the swap (formats.md).
                 loaded = insert(cur, rows, args.version, active=False)
                 conn.commit()
                 print(
@@ -618,7 +638,8 @@ def _run_lexicon(args: argparse.Namespace) -> int:
                 conn.commit()
                 print(f"{args.kind} v{args.version} is now the active version ({touched} rows touched)")
                 return 0
-            # 어느 쪽이 그 판본인지 둘이 말하면 답이 둘이다. 하나도 안 말하면 맞댈 것이 없다.
+            # If both say which version it is, there are two answers. If neither says, there is nothing
+            # to compare.
             if (args.csv is None) == (args.version is None):
                 raise ValueError("diff needs exactly one of --version and --csv")
             against = args.against if args.against is not None else active_version(cur, args.kind)
@@ -629,7 +650,8 @@ def _run_lexicon(args: argparse.Namespace) -> int:
                 d = diff_csv(cur, args.kind, _csv_rows(args.kind, args.csv), against)
             else:
                 d = diff(cur, args.kind, args.version, against)
-        # 잘못된 CSV 도 CHECK 위반도 blocked 다 — 트레이스백은 종료 코드 1 이 되어 규약을 깬다.
+        # A bad CSV and a CHECK violation are both blocked — a traceback becomes exit code 1 and breaks
+        # the convention.
         except (OSError, ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2

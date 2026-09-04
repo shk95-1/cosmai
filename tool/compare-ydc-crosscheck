@@ -1,25 +1,28 @@
 #!/usr/bin/env python3
-"""전량 대조를 다시 돌린다: ydc 세 스크립트 대 `cosmai trend crosscheck` (포크 #7).
+"""Re-runs the full comparison: ydc's three scripts against `cosmai trend crosscheck` (fork #7).
 
-**승격 원본은 핀(`v0.1.0 02440ab`)이 아니다.** `cross_source.py` 는 그 뒤 `v0.3.0`(`e5a1b00`)에서 성분 키
-오매칭과 선크림 문맥이 정정됐고, 승격한 것은 그 판이다. 그래서 이 스크립트는 태그에서 그 파일을 꺼내
-**손대지 않고 그대로** 돌린다 -- 읽는 것은 언제나 `--ydc` 가 가리킨 ydc 체크아웃이다 (핀 사본
-`analysis/slices/ydc/` 는 #9 가 지웠다).
+**The promoted source is not the pin (`v0.1.0 02440ab`).** `cross_source.py` had its ingredient-key
+mismatch and its sunscreen context corrected afterwards in `v0.3.0` (`e5a1b00`), and that is the
+revision that was promoted. So this script takes that file out of the tag and runs it **untouched** --
+what is read is always the ydc checkout `--ydc` points at (the pinned copy `analysis/slices/ydc/` was
+deleted by #9).
 
-세 가지를 맞댄다.
+Three things are compared.
 
-  상수   ydc 모듈에서 직접 읽어 우리 `analysis/crosscheck` 와 비교한다. 옮겨 적다 어긋난 한 글자가
-         여기서 걸린다 (`GROUP_MAP` · `NEGATIVE_HINTS` · `INGREDIENT_KEYS` · `SUN_WORDS` · 홀드 둘).
-  규칙   양쪽 순수 함수에 **같은 입력**을 먹여 답을 비교한다.
-  감사   ydc 의 성분표 CSV(577제품)를 양쪽 감사에 그대로 먹여 키별 행수·제품수를 비교한다. 원천이
-         같으므로 이것이 이 이슈에서 가능한 유일한 1:1 이다 -- 우리 성분 원천(`product.ingredients`,
-         180제품)에는 ydc 가 돌 수 있는 입력이 없다.
+  constants  read straight from the ydc modules and compared with our `analysis/crosscheck`. A single
+             character that went wrong while being copied over is caught here (`GROUP_MAP` ·
+             `NEGATIVE_HINTS` · `INGREDIENT_KEYS` · `SUN_WORDS` · the two holds).
+  rules      **the same input** is fed to the pure functions on both sides and the answers compared.
+  audit      ydc's ingredient CSV (577 products) is fed to both audits as it is and the row and product
+             counts per key compared. The source is the same, so this is the only 1:1 possible in this
+             issue -- our ingredient source (`product.ingredients`, 180 products) has no input ydc can
+             run on.
 
-돌리는 법 (인자는 그 자리에서 준다 -- 레포에 남의 머신 배치를 적지 않는다):
+How to run it (the arguments are given on the spot -- another machine's layout is not written into the repo):
 
     tool/compare-ydc-crosscheck --ydc ~/github_prj/Main/import/youtube-data-collector
 
-`--tag` 는 기본 `v0.3.0` 이고, `--formula` 는 `--ydc` 안에서의 상대 경로다.
+`--tag` defaults to `v0.3.0`, and `--formula` is a path relative to `--ydc`.
 """
 
 from __future__ import annotations
@@ -43,8 +46,9 @@ DEFAULT_FORMULA = "data/external/product_ingredient_function_repaired.csv"
 
 
 def _load(path: Path, name: str, extra_path: Path) -> Any:
-    """ydc 파일을 그 자리에서 임포트한다. 우리 코드가 슬라이스를 임포트하지 않는다는 규칙과 다르다 --
-    이것은 배포되는 코드가 아니라 대조 도구이고, 대조하려면 양쪽이 한 프로세스에 있어야 한다."""
+    """Imports a ydc file on the spot. This differs from the rule that our code does not import a slice
+    -- this is a comparison tool rather than deployed code, and comparing needs both sides in one
+    process."""
     sys.path.insert(0, str(extra_path))
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
@@ -67,7 +71,7 @@ def _same(name: str, theirs: object, ours: object) -> int:
 
 
 def _constants(cross: Any, composition: Any, commerce: Any) -> int:
-    print("상수")
+    print("constants")
     differ = _same("INGREDIENT_KEYS", cross.INGREDIENT_KEYS, crosscheck.INGREDIENT_KEYS)
     differ += _same("SUN_WORDS", cross.SUN_WORDS, crosscheck.SUN_WORDS)
     differ += _same("PAPER_HOLD", cross.PAPER_HOLD, crosscheck.PAPER_HOLD)
@@ -75,24 +79,25 @@ def _constants(cross: Any, composition: Any, commerce: Any) -> int:
     differ += _same("NEGATIVE_HINTS", commerce.NEGATIVE_HINTS, crosscheck.NEGATIVE_HINTS)
     differ += _same("NEUTRAL_HINTS", commerce.NEUTRAL_HINTS, crosscheck.NEUTRAL_HINTS)
     differ += _same("MIN_PRODUCTS", commerce.MIN_PRODUCTS, crosscheck.MIN_PRODUCTS)
-    # 해석 문구는 ydc 가 함수 안에 리터럴로 들고 있어 함수를 불러 꺼낸다.
+    # ydc holds the reading strings as literals inside a function, so the function is called to get them.
     differ += _same("reading(0.3, 12.1)", composition.reading(0.3, 12.1), crosscheck.READ_CONSUMER_ONLY)
-    # (3.0, 8.5) 여야 두 번째 갈래가 홀로 선다 -- video < 2 면 첫 갈래가 먼저 먹는다.
+    # It has to be (3.0, 8.5) for the second branch to stand alone -- with video < 2 the first branch eats it.
     differ += _same("reading(3.0, 8.5)", composition.reading(3.0, 8.5), crosscheck.READ_CONSUMER_LEAD)
     differ += _same("reading(8.9, 0.2)", composition.reading(8.9, 0.2), crosscheck.READ_CREATOR_LEAD)
-    # ydc 는 `cross_source.topic_table` 안에 리터럴로 들고 있어 함수를 못 부른다. 문턱 둘과 문구 하나를
-    # 그 파일의 소스에서 직접 읽어 맞댄다 -- 안 그러면 "차이 0" 이 이 셋을 안 덮는데 그렇게 안 읽힌다.
+    # ydc holds them as literals inside `cross_source.topic_table`, so the function cannot be called. The
+    # two thresholds and the one string are read straight from that file's source and compared -- without
+    # that, "0 differences" does not cover these three while it reads as though it does.
     body = inspect.getsource(cross.topic_table)
-    differ += _same("SPARSE_PP (topic_table 리터럴)", "video < 0.5" in body, crosscheck.SPARSE_PP == 0.5)
+    differ += _same("SPARSE_PP (topic_table literal)", "video < 0.5" in body, crosscheck.SPARSE_PP == 0.5)
     differ += _same(
-        "TALK_RATIO (topic_table 리터럴)", "comment > video * 3" in body, crosscheck.TALK_RATIO == 3
+        "TALK_RATIO (topic_table literal)", "comment > video * 3" in body, crosscheck.TALK_RATIO == 3
     )
-    differ += _same("READ_COMMENT_ONLY 문구", crosscheck.READ_COMMENT_ONLY in body, True)
+    differ += _same("READ_COMMENT_ONLY string", crosscheck.READ_COMMENT_ONLY in body, True)
     return differ
 
 
 def _rules(cross: Any, commerce: Any) -> int:
-    print("규칙")
+    print("rules")
     differ = _same(
         "ranks", cross.ranks({"a": 3.0, "b": 1.0, "c": 2.0}), crosscheck.ranks({"a": 3.0, "b": 1.0, "c": 2.0})
     )
@@ -104,8 +109,8 @@ def _rules(cross: Any, commerce: Any) -> int:
         differ += _same(
             f"reading({rate}, {gap})", commerce.reading(rate, gap), crosscheck.rating_reading(rate, gap)
         )
-    # `7c0f69d` 가 담론 매칭을 성분명 매칭에서 갈라 놓았다. 그 갈래가 ydc `count_terms` 와 같은 답인지는
-    # 여기서만 검사된다 -- 상수 비교로는 안 보인다.
+    # `7c0f69d` split discourse matching off from ingredient-name matching. Whether that branch gives the
+    # same answer as ydc's `count_terms` is checked only here -- a constant comparison does not see it.
     for text, terms in (
         ("선크림 콜라 겐 없이", ("콜라겐",)),
         ("콜라겐 좋아요", ("콜라겐",)),
@@ -121,8 +126,8 @@ def _rules(cross: Any, commerce: Any) -> int:
 
 
 def _audit(cross: Any, formula: Path) -> int:
-    """같은 성분표를 양쪽 감사에 먹인다. **이 이슈에서 가능한 유일한 1:1 이다.**"""
-    print(f"감사  {formula}")
+    """Feeds the same ingredient table to both audits. **The only 1:1 possible in this issue.**"""
+    print(f"audit  {formula}")
     rows = _read_csv(formula)
     ours = {row.key: row for row in crosscheck.audit([(r["product_name"], r["ingredient"]) for r in rows])}
     differ = 0
@@ -130,9 +135,9 @@ def _audit(cross: Any, formula: Path) -> int:
         hit = [r for r in rows if any(t in r["ingredient"].replace(" ", "").lower() for t in terms)]
         theirs = (len(hit), len({r["product_name"] for r in hit}))
         mine = (ours[key].rows, ours[key].products)
-        differ += _same(f"{key} (행, 제품)", theirs, mine)
+        differ += _same(f"{key} (rows, products)", theirs, mine)
         if ours[key].denied:
-            print(f"       [금지] {key} 가 {', '.join(ours[key].denied)} 를 잡았다")
+            print(f"       [denied] {key} caught {', '.join(ours[key].denied)}")
             differ += 1
     return differ
 
@@ -148,7 +153,8 @@ def main() -> int:
     ydc = args.ydc.expanduser().resolve()
 
     with tempfile.TemporaryDirectory() as scratch:
-        # 핀 이후의 판이라 작업 트리에 없다. 태그에서 꺼내고 원본 체크아웃은 건드리지 않는다.
+        # A revision after the pin, so it is not in the working tree. Taken from the tag, leaving the
+        # original checkout untouched.
         source = Path(scratch) / "cross_source.py"
         source.write_bytes(
             subprocess.run(  # noqa: S603

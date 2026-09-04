@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """계약 §근거 가 인용하는 픽스처 수치를 다시 잰다 (포크 #6).
 
-계약에 숫자를 적어 두고 재는 길을 남기지 않으면, 픽스처가 자라는 순간 그 숫자는 조용히 거짓이 된다
-(#41 의 `tool/compare-ydc-sensitivity` 와 같은 자리). 이 스크립트가 그 길이고,
-`tests/test_evidence_numbers.py` 가 여기 나온 값과 계약 문장을 매번 맞댄다.
+Writing a number into the contract without leaving the way to measure it makes that number quietly
+false the moment the fixture grows (the same place as `tool/compare-ydc-sensitivity` in #41). This
+script is that way, and `tests/test_evidence_numbers.py` compares the values it prints against the
+contract sentences every time.
 
-DB 를 쓰지 않는다 -- 코퍼스 CSV 만 읽고 매니페스트의 모집단 규칙을 그대로 적용한다. 그래서
-`analysis/evidence/pipeline.py` 의 SQL 과 **두 벌**이고, 그 둘이 같은 수를 내는지는 같은 테스트가
-DB 파이프라인의 `candidates`·`cells`·`rows` 와 맞대어 확인한다.
+It uses no DB -- it reads the corpus CSVs only and applies the manifest's population rules as they are.
+So it is **a second copy** of the SQL in `analysis/evidence/pipeline.py`, and whether the two produce
+the same numbers is checked by the same test against the DB pipeline's `candidates`·`cells`·`rows`.
 
 두 번째 일은 **검색이 근거 선별을 대신할 수 있는가**의 실측이다 (계약 §근거 의 `retrieval` 절, 포크 #11).
 축은 `analysis/retrieval/eval.py` 의 literal 모드와 같다 -- 질의는 별칭 하나, 정답은 주제 단위. 다른 것은
@@ -15,8 +16,8 @@ DB 파이프라인의 `candidates`·`cells`·`rows` 와 맞대어 확인한다.
 어떤 엔진도 P@10 이 0.3 을 넘지 못한다. 그래서 이 스크립트는 언제나 천장을 함께 낸다 -- 천장 없이 적은
 P@10 은 전 소스 §검색 실측(.864)과 같은 자 위에 있는 것처럼 읽힌다.
 
-    tool/measure-evidence-fixture                       # 기본 픽스처
-    tool/measure-evidence-fixture --json                # 테스트가 읽는 형식
+    tool/measure-evidence-fixture                       # the default fixture
+    tool/measure-evidence-fixture --json                # the form the tests read
     tool/measure-evidence-fixture --corpus <dir> --ydc-evidence <csv>
 """
 
@@ -66,13 +67,13 @@ def _quarter(published_at: str) -> str:
 
 
 def _dictionary():
-    from retrieval.conftest import csv_topics  # tests/retrieval/conftest.py -- 사전은 한 벌이다
+    from retrieval.conftest import csv_topics  # tests/retrieval/conftest.py -- there is one dictionary
 
     return topics.use(csv_topics())
 
 
 def candidates_of(corpus: Path, dictionary) -> tuple[list[Candidate], dict[str, str], set[str]]:
-    """(후보 전부, doc_id -> 본문, trend_use 주제). 후보는 (문서, 주제) 하나가 한 줄이다."""
+    """(all candidates, doc_id -> body, trend_use topics). One (document, topic) is one candidate row."""
     documents = _read(corpus / "document.csv")
     mentions = _read(corpus / "mention.csv")
     panel = {row["channel_id"] for row in _read(corpus / "channel.csv") if row["panel_role"] == PRODUCT}
@@ -127,7 +128,8 @@ def gates(made: list[Candidate]) -> dict[str, int]:
     for candidate in made:
         if quotable(candidate):
             pools[(candidate.topic_key, candidate.quarter)].append(candidate.like_count)
-    # 동점 = 그 셀 안에 좋아요가 **같은 후보가 둘 이상** 있는 셀. 후보가 둘 이상인 셀이 아니다.
+    # A tie = a cell holding **two or more candidates with the same likes**. Not a cell with two or more
+    # candidates.
     tied = sum(1 for likes in pools.values() if len(likes) != len(set(likes)))
     return {
         "candidates": len(made),
@@ -143,7 +145,8 @@ def gates(made: list[Candidate]) -> dict[str, int]:
 
 
 def retrieval(made: list[Candidate], texts: dict[str, str], dictionary) -> dict[str, float | int]:
-    """literal 모드와 같은 축(별칭 질의 · 주제 단위 정답)을 그 판정 모집단의 댓글에만 적용한다."""
+    """Applies the same axis as literal mode (alias query · topic-level answers) to the comments of that
+    judged population only."""
     chunk_ids: list[str] = []
     bodies: list[str] = []
     split = 0
@@ -173,7 +176,7 @@ def retrieval(made: list[Candidate], texts: dict[str, str], dictionary) -> dict[
             top_of_topic[entry["topic"]] |= set(ranked)
             found, reciprocal_rank, hit = score(ranked, answers)
             precision.append(found)
-            # 정답이 K 보다 적은 주제는 어떤 엔진도 P@K 가 |정답|/K 를 넘지 못한다.
+            # For a topic with fewer answers than K, no engine can push P@K past |answers|/K.
             ceiling.append(min(1.0, len(answers) / K))
             reciprocal.append(reciprocal_rank)
             hits += hit
@@ -202,7 +205,7 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--corpus", type=Path, default=FIXTURE / "corpus")
-    parser.add_argument("--json", action="store_true", help="테스트가 읽는 형식으로만 낸다.")
+    parser.add_argument("--json", action="store_true", help="Print only in the form the tests read.")
     args = parser.parse_args()
 
     dictionary = _dictionary()
