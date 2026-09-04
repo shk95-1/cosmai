@@ -1,7 +1,7 @@
 """stack/crontab.d actually schedules every naver Dataset (playbook T10: a collector with no cron
 line is a real recorded outage), on a minute that isn't 0 and a time that doesn't collide with any
 other collector's line -- same concern as tests/collectors/commerce/
-test_every_dataset_is_collected_and_scheduled.py (#7), kept in this file per F-4 (수정 라운드 1)
+test_every_dataset_is_collected_and_scheduled.py (#7), kept in this file per F-4 (fix round 1)
 rather than editing that one."""
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ def _entrypoints_schedule_block() -> str:
 
 def _contract_named_datasets() -> set[str]:
     """Dataset names mentioned on the `naver:` line of the §스케줄 block. Commerce and youtube state
-    a time/period per dataset there; naver states a schedule in prose (`datalab 월 1회 ...`), so this
-    checks the weaker thing prose can promise -- every dataset gets named at all."""
+    a time/period per dataset there; naver states a schedule in prose (`datalab once a month ...`), so
+    this checks the weaker thing prose can promise -- every dataset gets named at all."""
     for raw in _entrypoints_schedule_block().splitlines():
         head, sep, rest = raw.partition("naver:")
         if not sep or head.strip():

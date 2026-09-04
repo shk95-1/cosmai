@@ -1,4 +1,4 @@
-"""Exit codes (contracts/entrypoints.md 종료 코드: 0 ok, 1 partial, 2 blocked), the secret-existence
+"""Exit codes (contracts/entrypoints.md's exit codes: 0 ok, 1 partial, 2 blocked), the secret-existence
 gate (contracts/secrets.md: key names only, exit 2 when missing), and that `cosmai collect naver`
 actually reaches this module -- same form as tests/collectors/youtube/test_cli.py (#8)."""
 

@@ -11,12 +11,12 @@ import { severityOf as opsSeverityOf } from '../public/ops.js';
 const w = (stage, store) => ({ from_key: stage, from_kind: 'stage', to_key: store, to_kind: 'store' });
 const r = (store, stage) => ({ from_key: store, from_kind: 'store', to_key: stage, to_kind: 'stage' });
 
-// 운영의 모양을 줄여 옮긴 것: 수집 하나 → 표 → 분석 → 지표, 그리고 분석이 제 산출을 다시 읽는다.
+// A scaled-down copy of the ops shape: one collector → table → analyze → metrics, and analyze reads its own output back.
 const SAMPLE = [
   w('commerce:ranking', 'trend_radar.rank_snapshot'),
   r('trend_radar.rank_snapshot', 'analyze:all'),
   w('analyze:all', 'needs.need_mention'),
-  r('needs.need_mention', 'analyze:all'), // 되먹임 — 사실이고 지우지 않는다
+  r('needs.need_mention', 'analyze:all'), // feedback — a fact, not erased
   w('analyze:all', 'needs.metrics_need'),
 ];
 
@@ -56,7 +56,7 @@ test('계층은 되먹임을 뺀 그래프의 가장 긴 경로다', () => {
 });
 
 test('사이클이 있어도 계층 계산이 끝난다', () => {
-  // 되먹임을 안 빼면 여기서 무한히 돈다. 그것이 이 함수의 존재 이유다.
+  // Without removing the feedback edge this loops forever. That is this function's reason to exist.
   const cyclic = [w('a:x', 's.one'), r('s.one', 'a:x')];
   const depth = layers(cyclic);
   assert.equal(depth.get('a:x'), 0);
@@ -64,18 +64,18 @@ test('사이클이 있어도 계층 계산이 끝난다', () => {
 });
 
 test('2-사이클은 읽기 쪽을 끊는다 — 쓰는 단계가 제 산출보다 뒤에 서면 안 된다', () => {
-  // 어느 쪽을 끊든 사이클은 풀리지만 뜻이 다르다. 쓰기를 끊으면 그 단계가 "지표 다음에 도는 것"
-  // 처럼 보인다 — 운영 그래프에서 analyze:polarity_missing 이 실제로 그렇게 섰다.
+  // The cycle resolves either way it is cut, but the meaning differs. Cutting the write would make that stage look
+  // like "something that runs after the metrics" — in the real ops graph analyze:polarity_missing actually landed there that way.
   const back = feedbackEdges(SAMPLE);
   assert.equal(back.length, 1);
-  assert.equal(back[0].from_kind, 'store'); // 읽기가 끊겼다
+  assert.equal(back[0].from_kind, 'store'); // the read was cut
   const depth = layers(SAMPLE);
   assert.ok(depth.get('analyze:all') < depth.get('needs.need_mention'));
 });
 
 test('쓰기만 남은 단계는 제 산출 바로 앞으로 당겨진다', () => {
-  // 2-사이클의 읽기를 끊고 나면 이 단계는 들어오는 엣지가 없어 0열로 간다 — 수집기 옆에 서는
-  // 것은 뜻이 아니다. 제가 채우는 표 바로 앞이라야 읽힌다.
+  // Once the 2-cycle's read is cut, this stage has no incoming edge and lands in column 0 — but standing next
+  // to the collector is not the meaning. It must read as standing right before the table it fills.
   const withIncremental = [
     ...SAMPLE,
     w('analyze:polarity_missing', 'needs.need_mention'),
@@ -141,8 +141,8 @@ test('select 가 소비 함수들이 거르는 컬럼을 빠짐없이 담는다 
 });
 
 test('지도와 관제 표가 같은 행에 같은 색을 낸다 (#143)', () => {
-  // 두 화면이 같은 단계를 다른 색으로 보이면 둘 다 못 믿게 된다. 같은 모듈을 부르는 것이
-  // 그 보장이고, 여기서 그것을 잰다.
+  // If two screens showed the same stage in different colors, neither could be trusted. Calling the same module
+  // is that guarantee, and this is what measures it.
   for (const row of [
     { freshness: 'stalled', last_run_status: 'failed' },
     { freshness: 'ok', last_run_status: 'partial' },

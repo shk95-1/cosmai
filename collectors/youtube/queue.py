@@ -56,7 +56,7 @@ def enqueue(
     """One job, or a reason none was added. Every insert into `jobs` goes through here.
 
     `dataset` (#102) names which `cosmai collect youtube --dataset` verb produced this row --
-    `kind` is a different vocabulary (video.metadata 계열), not the one contracts/entrypoints.md's
+    `kind` is a different vocabulary (the video.metadata family), not the one contracts/entrypoints.md's
     collector_health arm counts by. Defaults to None so tests exercising queue mechanics don't have to
     care about it; real callers (cli.py) always pass it explicitly.
     """

@@ -8,7 +8,9 @@ changes.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import os
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,11 +22,23 @@ pytestmark = pytest.mark.postgres
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEW = REPO_ROOT / "db" / "views" / "pipeline_health.sql"
 
-NOW = datetime.now(UTC)
+# Seconds slept between the fixture insert and the view query. Zero in the suite; the knob is how the
+# time-independence of the freshness assertions below is re-proved on demand (#213).
+DELAY_ENV = "COSMAI_TEST_FRESHNESS_DELAY"
 
 
-def ago(**kw: float) -> datetime:
-    return NOW - timedelta(**kw)
+def ago(**kw: float) -> timedelta:
+    """An offset, not a timestamp: the view judges freshness against `now()` at query time, so rows dated
+    from a module-level constant are already tens of minutes old by the time a long suite reaches this file,
+    and the tightest window here (analyze:all -- a success 40 minutes back against a period of an hour, so
+    20 minutes of margin) is crossed for reasons that have nothing to do with the view (#213). The fixture
+    resolves every offset against one reading taken milliseconds before the query that reads it back."""
+    return timedelta(**kw)
+
+
+def _rows(reference: datetime, rows: tuple[tuple[Any, ...], ...]) -> list[tuple[Any, ...]]:
+    """Every offset in a fixture row becomes a timestamp against the one reference reading."""
+    return [tuple(reference - v if isinstance(v, timedelta) else v for v in row) for row in rows]
 
 
 # With every period at one hour the scale (1x, 2x) reads at a glance. The multiple rule itself is under test,
@@ -87,7 +101,7 @@ COLUMNS = (
 )
 
 
-def _build(url: str, schema: str) -> None:
+def _build(url: str, schema: str, reference: datetime, view_sql: str | None = None) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         conn.exec_driver_sql("SET ROLE needs_owner")
@@ -108,7 +122,7 @@ def _build(url: str, schema: str) -> None:
             f'INSERT INTO "{schema}".collector_health (collector, dataset, started_at, finished_at,'
             " status, requests, ok, blocked, failed, queued, p90_ms)"
             " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            list(COLLECTOR_ROWS),
+            _rows(reference, COLLECTOR_ROWS),
         )
         conn.exec_driver_sql(
             f'CREATE TABLE "{schema}".analysis_health (run_id bigint, stage text,'
@@ -117,38 +131,60 @@ def _build(url: str, schema: str) -> None:
         conn.exec_driver_sql(
             f'INSERT INTO "{schema}".analysis_health (stage, started_at, finished_at, status, note)'
             " VALUES (%s, %s, %s, %s, %s)",
-            list(ANALYSIS_ROWS),
+            _rows(reference, ANALYSIS_ROWS),
         )
-        conn.exec_driver_sql(VIEW.read_text(encoding="utf-8").replace("needs.", f'"{schema}".'))
+        sql = VIEW.read_text(encoding="utf-8") if view_sql is None else view_sql
+        conn.exec_driver_sql(sql.replace("needs.", f'"{schema}".'))
     engine.dispose()
 
 
-@pytest.fixture
-def health(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> dict[str, Any]:
-    """The role that reads the view is needs_runtime -- the same permission path the screen reads through."""
-    _build(needs_schema, _schema_name)
-    engine = create_engine(needs_runtime_url)
+def _read(url: str) -> dict[str, Any]:
+    engine = create_engine(url)
     with engine.connect() as conn:
         rows = conn.execute(text(f"SELECT {COLUMNS} FROM pipeline_health")).mappings().all()
     engine.dispose()
     return {r["stage_key"]: dict(r) for r in rows}
 
 
+@pytest.fixture
+def reference(needs_schema: str) -> datetime:
+    """The clock the fixture rows are dated from, read from the database rather than from this process: it is
+    the same `now()` the view will compare them against."""
+    engine = create_engine(needs_schema)
+    with engine.connect() as conn:
+        ref = conn.execute(text("SELECT now()")).scalar_one()
+    engine.dispose()
+    return ref
+
+
+@pytest.fixture
+def health(
+    needs_schema: str, needs_runtime_url: str, _schema_name: str, reference: datetime
+) -> dict[str, Any]:
+    """The role that reads the view is needs_runtime -- the same permission path the screen reads through."""
+    _build(needs_schema, _schema_name, reference)
+    time.sleep(float(os.environ.get(DELAY_ENV, "0")))
+    return _read(needs_runtime_url)
+
+
 def test_every_declared_stage_gets_exactly_one_row(health: dict[str, Any]):
     assert set(health) == {s[0] for s in STAGES}
 
 
-@pytest.mark.parametrize(
-    ("stage_key", "expected"),
-    [
-        ("commerce:ranking", "ok"),
-        ("commerce:review", "ok"),
-        ("commerce:review_stats", "never"),
-        ("commerce:product", "stalled"),
-        ("naver:datalab", "never"),
-        ("youtube:watch", "disabled"),
-    ],
+# One list, because the positive control at the bottom has to break exactly what these assert.
+FRESHNESS = (
+    ("commerce:ranking", "ok"),
+    ("commerce:review", "ok"),
+    ("commerce:review_stats", "never"),
+    ("commerce:product", "stalled"),
+    ("naver:datalab", "never"),
+    ("youtube:watch", "disabled"),
+    ("analyze:all", "ok"),
+    ("analyze:polarity_missing", "stalled"),
 )
+
+
+@pytest.mark.parametrize(("stage_key", "expected"), FRESHNESS)
 def test_freshness_reads_the_last_success_against_the_expected_interval(
     health: dict[str, Any], stage_key: str, expected: str
 ):
@@ -186,10 +222,10 @@ def test_the_run_statistics_come_from_the_last_run_not_the_last_success(health: 
     assert (row["requests"], row["ok"], row["failed"]) == (5, 0, 5)
 
 
-def test_a_row_with_no_dataset_lands_on_no_stage(health: dict[str, Any]):
+def test_a_row_with_no_dataset_lands_on_no_stage(health: dict[str, Any], reference: datetime):
     # An old row with an empty dataset (before #101) attaching to a stage would make that stage falsely
     # fresh.
-    assert health["commerce:ranking"]["last_run_at"] > ago(minutes=31)
+    assert health["commerce:ranking"]["last_run_at"] > reference - timedelta(minutes=31)
     assert health["commerce:ranking"]["requests"] == 30
 
 
@@ -206,3 +242,26 @@ def test_runs_that_are_not_cron_stages_are_ignored(health: dict[str, Any]):
     # eval:* · trend-quarter:* and polarity without missing= ran 2-3 minutes ago. Had any of them landed on a
     # stage, the freshness of the analyze side would flip to ok.
     assert health["analyze:polarity_missing"]["freshness"] == "stalled"
+
+
+# The one branch the assertions above are made of: every freshness value other than never and disabled hangs
+# off this comparison.
+OK_BRANCH = "now() - o.at <= s.expected_interval"
+
+
+def test_the_freshness_expectations_fail_when_the_view_stops_measuring_the_period(
+    needs_schema: str, needs_runtime_url: str, _schema_name: str, reference: datetime
+):
+    """A positive control (#213): assertions made time-independent must not have become time-blind. With the
+    period comparison widened until every enabled stage is inside its window, the two stages that are behind
+    theirs have to stop matching FRESHNESS -- and the rest have to keep matching, so what moved is named."""
+    view = VIEW.read_text(encoding="utf-8")
+    assert view.count(OK_BRANCH) == 1, "the branch this control breaks moved -- point it at the new one"
+    _build(
+        needs_schema, _schema_name, reference, view.replace(OK_BRANCH, "now() - o.at <= interval '100 years'")
+    )
+    broken = _read(needs_runtime_url)
+    assert [k for k, expected in FRESHNESS if broken[k]["freshness"] != expected] == [
+        "commerce:product",
+        "analyze:polarity_missing",
+    ]

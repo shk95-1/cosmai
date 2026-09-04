@@ -28,12 +28,12 @@ test('freshness 가 ok 여도 마지막 run 이 통째로 실패했으면 문제
 });
 
 test('partial 은 배너를 빨갛게 만들지 않는다 — 돌았고 대부분을 걷었다 (#156)', () => {
-  // commerce:product 는 4일 중 3일이 partial 이다(89 중 84~86 을 걷는다). 그것을 막힌 단계로
-  // 세면 배너가 매일 빨갛고, #154 가 뷰에서 없앤 함정이 화면에서 한 칸 위로 옮겨질 뿐이다.
+  // commerce:product is partial 3 days out of 4 (collecting 84-86 of 89). Counting that as a stuck stage
+  // would turn the banner red every day, and the trap #154 removed from the view would just move up one level to the screen.
   const partial = row({ freshness: 'ok', last_run_status: 'partial' });
   assert.equal(isProblem(partial), false);
   assert.equal(problemCount([partial]), 0);
-  // 사라지지는 않는다: 여전히 '주의' 색이라 전체 목록에서 눈에 띄고, failed 건수는 통계에 남는다.
+  // It does not disappear, though: it still stands out in the full list with the warning color, and the failed count stays in the stats.
   assert.equal(severityOf(partial), 1);
 });
 
@@ -56,19 +56,19 @@ test('나쁜 것이 위로 서고, 동률은 stage_key 로 깨져 순서가 흔�
     row({ stage_key: 'b', freshness: 'late' }),
   ];
   assert.deepEqual(sortByWorst(rows).map((r) => r.stage_key), ['m', 'a', 'b', 'z']);
-  // 같은 입력을 순서만 바꿔 넣어도 결과가 같아야 한다.
+  // The result must be the same even when the same input is fed in a different order.
   assert.deepEqual(sortByWorst([...rows].reverse()).map((r) => r.stage_key), ['m', 'a', 'b', 'z']);
 });
 
 test('색을 고르는 심각도는 두 값 중 나쁜 쪽이고, 둘은 같은 자로 잰다', () => {
-  // "3일째 정지" 와 "방금 실패" 는 둘 다 위급이다 — 어느 쪽이 더 빨간지는 물을 것이 아니다.
-  // 화면이 둘을 구분하는 것은 색이 아니라 두 값을 나란히 보이는 것으로 한다(#138).
+  // "Stalled for 3 days" and "just failed" are both critical — which one is redder is not a question to ask.
+  // The screen tells them apart not by color but by showing both values side by side (#138).
   assert.equal(severityOf(row({ freshness: 'stalled', last_run_status: 'ok' })), 0);
   assert.equal(severityOf(row({ freshness: 'ok', last_run_status: 'failed' })), 0);
   assert.equal(severityOf(row({ freshness: 'late', last_run_status: 'ok' })), 1);
   assert.equal(severityOf(row({ freshness: 'ok', last_run_status: 'ok' })), 3);
   assert.equal(severityOf(row({ freshness: 'disabled', last_run_status: null })), 4);
-  // 소스 락에 밀려 물러난 run 은 고장이 아니다(#78) — 정상과 같은 자리에 선다.
+  // A run that stepped aside for a source lock is not a failure (#78) — it stands at the same level as ok.
   assert.equal(severityOf(row({ freshness: 'ok', last_run_status: 'yielded' })), 3);
 });
 
@@ -95,7 +95,7 @@ test('상대시각은 없을 때 대시를 내고 미래로 그리지 않는다'
   assert.equal(relativeTime('2026-08-26T11:58:00Z', NOW), '2분 전');
   assert.equal(relativeTime('2026-08-26T09:00:00Z', NOW), '3시간 전');
   assert.equal(relativeTime('2026-08-24T12:00:00Z', NOW), '2일 전');
-  // 시계가 어긋나 미래 시각이 와도 '-3분 전' 같은 것을 그리지 않는다.
+  // Even a clock skew producing a future time never draws something like '-3 minutes ago.'
   assert.equal(relativeTime('2026-08-26T12:03:00Z', NOW), '방금');
 });
 
@@ -109,8 +109,8 @@ test('주기는 사람이 읽는 말로 바뀌고 모르는 모양은 그대로 
 });
 
 test('select 가 소비 함수들이 거르는 컬럼을 빠짐없이 담는다 (#130 이 데인 자리)', () => {
-  // 소비 함수가 보는 키를 여기 적어 두면, 그 함수가 새 컬럼을 보게 됐는데 select 에 안 넣은
-  // 변경이 여기서 걸린다. select 에 없으면 응답 행에 키가 없고 비교는 언제나 거짓이 된다.
+  // Writing down here the keys a consuming function reads catches a change where the function starts reading a
+  // new column but select was never updated. Without it in select, the response row has no such key and the comparison is always false.
   for (const key of ['freshness', 'last_run_status', 'arm', 'stage_key', 'last_success_at']) {
     assert.ok(OPS_QUERY.select.includes(key), `select 에 ${key} 가 없다`);
   }

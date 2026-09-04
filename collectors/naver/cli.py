@@ -1,5 +1,5 @@
 """`cosmai collect naver` -- wired for #9. No live transport: `fetcher` is the seam a real cutover
-(#10, "라이브 호출 없음" here) plugs a `Fetcher` backed by the Naver API Hub into; tests plug a
+(#10, "no live calls" here) plugs a `Fetcher` backed by the Naver API Hub into; tests plug a
 fixture-backed fake in, the same shape `collectors.commerce.cli`'s `Fetcher` uses.
 
 Two datasets, matching contracts/entrypoints.md's `naver datasets: datalab | blog`. `datalab` asks
@@ -7,7 +7,7 @@ one request per category (keywords.json's groups all fit in one call -- scope.js
 max_groups_per_request is the vendor's own cap, and keywords.json's one category has exactly that
 many groups). `blog` pages through every keyword-group term, one query at a time (the blog search
 endpoint takes a single `query` string, unlike DataLab's grouped keywords). Exit codes follow
-contracts/entrypoints.md 종료 코드: 0 ok, 1 partial, 2 blocked.
+contracts/entrypoints.md's exit codes: 0 ok, 1 partial, 2 blocked.
 """
 
 from __future__ import annotations

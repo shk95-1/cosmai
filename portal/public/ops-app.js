@@ -1,8 +1,8 @@
-// 관제 페이지의 배선. 판단이 필요한 계산은 전부 ops.js/query.js 의 순수 함수이고 여기서는
-// 그것을 DOM 과 fetch 에 엮는다 — app.js 와 같은 분리라서 이 파일에는 테스트가 없다.
+// Wiring for the ops screen. Judgement-bearing computation is entirely pure functions in ops.js/query.js, and here
+// it is only wired to DOM and fetch — the same split as app.js, so this file has no tests.
 //
-// 지표 페이지(index.html)와 부팅을 나눈 이유: 관제만 보려고 열어도 metrics_need 세 벌을 받는
-// 일이 없어야 한다. 이 페이지가 받는 것은 pipeline_health 한 표뿐이다(#139).
+// Why boot is split from the metrics page (index.html): opening the ops page alone must not also pull in the
+// three metrics_need sets. All this page fetches is the single pipeline_health table (#139).
 import { buildQuery, PAGE_SIZE, nextPageOffset, describeError, OPS_QUERY } from './query.js';
 import { problems, problemCount, byArm, disabled, relativeTime, describeInterval } from './ops.js';
 import { severityClass } from './severity.js';
@@ -24,7 +24,7 @@ async function apiAll(basePath, { select, order }) {
     }
     if (!res.ok) {
       let body = {};
-      try { body = await res.json(); } catch { /* JSON 아닌 오류 본문 */ }
+      try { body = await res.json(); } catch { /* not a JSON error body */ }
       throw new Error(describeError(body));
     }
     rows.push(...(await res.json()));
@@ -47,8 +47,8 @@ function statsOf(row) {
 }
 
 function rowHtml(row, now) {
-  // 절대시각은 title 로 남긴다 — 본문이 상대시각이라야 늦었는지를 사람이 계산하지 않는다.
-  // 기준 TZ 는 #89 가 정하고, 그때 이 자리도 함께 고친다.
+  // The absolute time is kept in the title — the main text must be relative so a person does not have to work
+  // out whether it is late. The reference TZ is decided by #89, and this spot changes with it then.
   const when = relativeTime(row.last_success_at, now);
   return `<tr class="${severityClass(row)}">
     <td>${esc(row.arm)} · ${esc(row.dataset)}</td>
@@ -70,7 +70,7 @@ function render(rows, now) {
     ? `<p class="banner banner-ok">${rows.length}개 단계 모두 정상</p>`
     : `<p class="banner banner-bad">막힌 단계 ${count}개</p>`;
 
-  // 문제가 없으면 절이 통째로 사라진다.
+  // If there are no problems, the whole section disappears.
   $('ops-problems').innerHTML = count === 0 ? '' : `<h2>지금 볼 것</h2>${table(bad, now)}`;
 
   $('ops-arms').innerHTML = byArm(rows)

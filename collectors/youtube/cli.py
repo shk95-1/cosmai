@@ -1,11 +1,11 @@
-"""`cosmai collect youtube` -- wired for #8. `fetcher` is the seam a live cutover (#10, "라이브 yt-dlp
-호출 없음" here) plugs a real yt-dlp-backed `Fetcher` into; tests plug a fixture-backed fake in, the same
+"""`cosmai collect youtube` -- wired for #8. `fetcher` is the seam a live cutover (#10, "no live yt-dlp
+calls" here) plugs a real yt-dlp-backed `Fetcher` into; tests plug a fixture-backed fake in, the same
 shape collectors/commerce/cli.py uses for its `Fetcher`.
 
 Four datasets, matching contracts/entrypoints.md's `youtube datasets: watch | work | flatten | prune`:
 `watch` only enqueues (issue #8's fan-out cap lives entirely in `queue.py`, exercised here); `work`
 claims queued jobs and collects them; `flatten` turns their artifacts into the snapshot tables; `prune`
-ages artifacts and finished jobs out. Exit codes follow contracts/entrypoints.md 종료 코드: 0 ok, 1
+ages artifacts and finished jobs out. Exit codes follow contracts/entrypoints.md's exit codes: 0 ok, 1
 partial, 2 blocked.
 """
 
@@ -123,7 +123,7 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
         # A job carries exactly one follow_up_kind, so a directive naming several is several listing
         # jobs -- same rule the archived cli._watch_pass used. `refresh` (index == 0) is written for
         # shape parity with the archived Job.refresh column but read by nothing here: since the #8
-        # 수정 라운드 2 freshness cache, whether a listing actually re-fetches is decided entirely by
+        # fix round 2 freshness cache, whether a listing actually re-fetches is decided entirely by
         # `_fresh_artifact`'s `fresh_until > now`, not by which enqueue set this flag.
         for index, follow_up in enumerate(directive.follow_ups or (None,)):
             outcome = queue.enqueue(
@@ -248,7 +248,7 @@ def _normalize(kind: str, dump: dict[str, Any]) -> Any:
 
 
 def _elapsed_ms(started_at: datetime, now: datetime) -> int:
-    """#101 결정: elapsed_ms is the whole job's wall time (claim to finish), not just the fetch
+    """#101 decision: elapsed_ms is the whole job's wall time (claim to finish), not just the fetch
     round trip -- unlike commerce's fetch_log.elapsed_ms, a youtube job's cache hit spends no fetch
     at all, so a fetch-only measure would leave every cache-hit row NULL. Both timestamps come from
     the same injected `now`/`started_at` clock the rest of this module already uses, so this value
@@ -263,7 +263,7 @@ def _collect_one(
     if cached is not None:
         # A fresh artifact already answers this question -- no fetch, no new artifact row. This is
         # what keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in
-        # one watch pass (#8 수정 라운드 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
+        # one watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
         payload = payloads.get(job.kind, cached.digest)
         digest, byte_count = cached.digest, cached.byte_count
     else:

@@ -1,14 +1,14 @@
 ---
-name: 메모 (memo)
-about: 완료 기준 없는 관찰·제안. 채널·부모 없음, 블로커 불가, ready 제외. 승격 = 새 이슈 재발행.
+name: Memo (memo)
+about: An observation or proposal with no done-when. No channel, no parent, cannot block, excluded from ready. Promotion = republish as a new issue.
 labels: memo
 ---
 
-## 관찰
-<!-- path:line 근거 -->
+## Observation
+<!-- path:line evidence -->
 
-## 왜 지금 이슈가 아닌가
-<!-- 완료 기준이 생기는 순간 이슈다 — 그때 등록 5단계로 재발행하고 이 메모는 닫는다 -->
+## Why this is not an issue yet
+<!-- The moment it has a done-when, it is an issue — republish it through registration step 5 then, and close this memo -->
 
-## 관련 채널
-<!-- 있으면 ch:<경로> 이름만 (라벨은 붙이지 않는다) -->
+## Related channel
+<!-- If any, just the ch:<path> name (do not attach the label) -->

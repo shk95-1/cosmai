@@ -48,12 +48,12 @@ jobs = Table(
     # (#10 §A-2 근거 2), not start, so collector_health's youtube arm needs this to compute p90_ms.
     sa.Column("started_at", sa.DateTime(timezone=True)),
     sa.Column("elapsed_ms", sa.Integer),
-    # #102: which `cosmai collect youtube --dataset` verb produced this row -- `kind` (video.metadata
-    # 계열) uses a different vocabulary than contracts/entrypoints.md's dataset names, so
+    # #102: which `cosmai collect youtube --dataset` verb produced this row -- `kind` (the video.metadata
+    # family) uses a different vocabulary than contracts/entrypoints.md's dataset names, so
     # collector_health's youtube arm needs this column, not `kind`, to count by dataset.
     sa.Column("dataset", sa.String(16)),
     # Written on every enqueue (watchlist.py, queue.enqueue) but read by nothing in this
-    # package -- #8 수정 라운드 2 made freshness (artifacts.fresh_until) the sole re-fetch
+    # package -- #8 fix round 2 made freshness (artifacts.fresh_until) the sole re-fetch
     # decision. Kept as a column (not dropped) only because the DDL diff-0 bar this issue is
     # held to forbids removing a column the archived schema still has.
     sa.Column("refresh", sa.Boolean, nullable=False, default=False),
