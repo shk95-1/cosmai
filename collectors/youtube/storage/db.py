@@ -1,5 +1,5 @@
-"""The Postgres connection -- production URL only. #8 has no live transport (issue #8: "라이브 yt-dlp
-호출 없음"), so unlike collectors/commerce there is no engine/journal here: tests inject a fake fetcher
+"""The Postgres connection -- production URL only. #8 has no live transport (issue #8: "no live yt-dlp
+calls"), so unlike collectors/commerce there is no engine/journal here: tests inject a fake fetcher
 straight into `cli.run` and write through the plain SQLAlchemy connection they already hold.
 
 origin: service/yt-scrapper/src/tubedepth/database.py -- ported for #8, pointed at this repo's
@@ -7,7 +7,7 @@ origin: service/yt-scrapper/src/tubedepth/database.py -- ported for #8, pointed 
 TUBEDEPTH_DB_RUNTIME secret, not the repo's general COSMA_DB_RUNTIME: the old stack still runs
 tubedepth_runtime with its own password from its own `.env`, distinct from both COSMA_DB_RUNTIME
 and trend_radar_runtime's password, so the shared key connected with the wrong password (#29).
-tubedepth's own runtime role -- epic #16 판정 1's "tubedepth pattern".
+tubedepth's own runtime role -- epic #16 ruling 1's "tubedepth pattern".
 """
 
 from __future__ import annotations

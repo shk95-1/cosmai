@@ -1,4 +1,4 @@
-"""#8 수정 라운드 2: `_fresh_artifact` is a real cache, not a permanent one -- an artifact past its
+"""#8 fix round 2: `_fresh_artifact` is a real cache, not a permanent one -- an artifact past its
 `models.FRESHNESS` window must be refetched, not served forever."""
 
 from __future__ import annotations

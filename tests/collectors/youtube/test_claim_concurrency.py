@@ -1,4 +1,4 @@
-"""F-2 (issue #8 수정 라운드 1): two concurrent claimants must not land on the same job -- the
+"""F-2 (issue #8 fix round 1): two concurrent claimants must not land on the same job -- the
 archived worker.py held `FOR UPDATE SKIP LOCKED` for exactly this, and `_claim`'s original
 select-then-update in this port did not. Overlapping crons (a slow `work` pass still running when
 the next tick fires) or a live worker daemon started alongside the batch CLI (#10) are the real
