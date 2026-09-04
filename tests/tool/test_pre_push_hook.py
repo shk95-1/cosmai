@@ -13,6 +13,7 @@ by a repository-relative path, so the fixture repo carries its own.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,6 +22,15 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK = REPO_ROOT / ".githooks" / "pre-push"
 TESTED_TREE = REPO_ROOT / "tool" / "checks" / "tested-tree"
+# The hook works out what a push earns before it trusts a cache entry (#215 review C2), so the
+# fixture repo carries the real classifier and the real map, not a stand-in for either.
+CARRIED = (
+    "tests/scope.toml",
+    "tool/change_scope.py",
+    "tool/invariants.py",
+    "tool/checks/invariants",
+    "tool/checks/prerequisite",
+)
 
 ZERO = "0" * 40
 
@@ -38,7 +48,11 @@ if [ "${FAKE_SUITE_FAILS:-0}" = 1 ]; then
     exit 1
 fi
 if [ -r tool/checks/tested-tree ]; then
-    tested_tree_record "${FAKE_SUITE_CLASS:-A}"
+    if [ "${FAKE_SUITE_CLASS:-A}" = none ]; then
+        tested_tree_record
+    else
+        tested_tree_record "${FAKE_SUITE_CLASS:-A}"
+    fi
 fi
 """
 
@@ -56,6 +70,10 @@ def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
     checks = root / "tool" / "checks"
     checks.mkdir(parents=True)
+    for carried in CARRIED:
+        target = root / carried
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / carried, target)
     (checks / "tested-tree").write_text(TESTED_TREE.read_text(encoding="utf-8"), encoding="utf-8")
     suite = checks / "test"
     suite.write_text(FAKE_SUITE, encoding="utf-8")
@@ -110,11 +128,15 @@ def suite_runs(repo: Path) -> int:
     return len(marker.read_text(encoding="utf-8").splitlines()) if marker.exists() else 0
 
 
+def origin_main(repo: Path, sha: str) -> None:
+    subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", sha], check=True)
+
+
 def test_an_untested_tree_runs_the_suite(repo: Path):
     sha = commit(repo, "one")
     done = run_hook(repo, sha)
     assert done.returncode == 0, done.stderr
-    assert "untested, running the suite" in done.stdout, done.stdout
+    assert "untested for class" in done.stdout, done.stdout
     assert suite_runs(repo) == 1
 
 
@@ -173,7 +195,7 @@ def test_a_commit_ahead_of_origin_main_still_runs_the_suite(repo: Path):
     new = commit(repo, "two")
     subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", old], check=True)
     done = run_hook(repo, new)
-    assert "untested, running the suite" in done.stdout, done.stdout
+    assert "untested for class" in done.stdout, done.stdout
     assert suite_runs(repo) == 1
 
 
@@ -182,7 +204,7 @@ def test_one_untested_ref_among_tested_ones_runs_the_suite(repo: Path):
     run_hook(repo, tested)
     fresh = commit(repo, "two")
     done = run_hook(repo, tested, fresh)
-    assert "untested, running the suite" in done.stdout, done.stdout
+    assert "untested for class" in done.stdout, done.stdout
     assert suite_runs(repo) == 2
 
 
@@ -268,11 +290,71 @@ def test_the_hook_asks_for_the_verification_this_change_needs(repo: Path):
     assert marker == "--changed origin/main", marker
 
 
-def test_the_skip_line_says_which_class_the_tree_was_verified_at(repo: Path):
-    # A tree green for class C answered a smaller question, and the line that skips the suite has to
-    # say which question that was -- otherwise "tested" reads as "fully tested" every time.
-    sha = commit(repo, "one")
+def prose(repo: Path, text: str) -> str:
+    """A commit whose only change is prose with no test behind it: the cheapest class there is."""
+    (repo / "notes.md").write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "docs: notes"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def ddl(repo: Path, text: str) -> str:
+    target = repo / "contracts" / "ddl" / "needs" / "030_a.sql"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "feat: ddl"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_a_class_c_entry_does_not_skip_a_push_that_earns_class_a(repo: Path):
+    # #215 review C2: the entry named the class but the hook read only the stamp, so 38 seconds of
+    # format, lint and three snapshot tests skipped the suite for a DDL change.
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = ddl(repo, "CREATE TABLE a (id int);\n")
+    run_hook(repo, sha, klass="C")
+    assert suite_runs(repo) == 1
+
+    done = run_hook(repo, sha)
+    assert suite_runs(repo) == 2, "a class-C entry skipped a class-A push"
+    assert "untested for class A" in done.stdout, done.stdout
+
+
+def test_a_class_a_entry_skips_a_push_that_earns_class_c(repo: Path):
+    # The other direction is sound: a tree the whole suite proved green answers the smaller question.
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = prose(repo, "# notes\n")
+    run_hook(repo, sha, klass="A")
+    assert suite_runs(repo) == 1
+
+    done = run_hook(repo, sha)
+    assert suite_runs(repo) == 1, done.stdout
+    assert "skipping the suite" in done.stdout, done.stdout
+
+
+def test_a_class_c_entry_skips_another_class_c_push(repo: Path):
+    # The skip line names the class too: "tested" alone reads as "fully tested" every time.
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = prose(repo, "# notes\n")
     run_hook(repo, sha, klass="C")
     done = run_hook(repo, sha)
-    assert "skipping the suite" in done.stdout, done.stdout
-    assert "class C" in done.stdout, done.stdout
+    assert suite_runs(repo) == 1, done.stdout
+    assert "class C, skipping the suite" in done.stdout, done.stdout
+
+
+def test_an_entry_from_before_the_class_was_recorded_never_skips(repo: Path):
+    # Rank 0: an entry that names no class is not evidence about any class.
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = prose(repo, "# notes\n")
+    run_hook(repo, sha, klass="none")
+    assert suite_runs(repo) == 1
+    run_hook(repo, sha)
+    assert suite_runs(repo) == 2, "a class-less entry was read as evidence"

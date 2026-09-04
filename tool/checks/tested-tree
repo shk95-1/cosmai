@@ -27,6 +27,26 @@ tested_tree_stamp() {
     cat "$(tested_tree_dir)/$1" 2>/dev/null || true
 }
 
+# A ≥ B ≥ C: a run that answered a bigger question answers a smaller one, never the other way round
+# (#215 review C2). An entry that names no class -- one written before the class was recorded, or by
+# a caller that named none -- proves nothing about any class and ranks below all of them.
+tested_tree_rank() {
+    case "$1" in
+        A) printf '3\n' ;;
+        B) printf '2\n' ;;
+        C) printf '1\n' ;;
+        *) printf '0\n' ;;
+    esac
+}
+
+# The class out of an entry line ("<UTC> class B" -> "B"), empty when the entry names none.
+tested_tree_class() {
+    case "$1" in
+        *' class '*) printf '%s\n' "${1##* class }" ;;
+        *) printf '\n' ;;
+    esac
+}
+
 # Captured before the suite starts. Read at the end instead, it would stamp whatever HEAD became
 # during seventeen minutes of testing -- a rebase, a checkout -- and certify a tree nothing ever ran
 # against. Uncommitted changes are refused for the same reason: what was tested is not what HEAD is,
