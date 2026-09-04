@@ -30,7 +30,8 @@ remote.
 
 ## Paths the fork owns
 
-Everything PR #59 (`3b464fa...5c04ef5`) added that upstream had no file for, grouped by directory.
+Everything PR #59 (`3b464fa...5c04ef5`) added that upstream had no file for, grouped by directory,
+plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests).
 The fork writes these without asking; upstream does not edit them outside a merge.
 
 ```ownership:fork-owned
@@ -44,12 +45,15 @@ analysis/sensitivity/
 analysis/trend/
 contracts/ddl/needs/0[2-9]*.sql
 db/corpus/
+db/seed/mfds.py
 db/seed/panel.py
 db/views/metrics_topic_quarter_violation.sql
 db/views/topic_quarter_evidence_quote.sql
 db/views/topic_quarter_evidence_violation.sql
 db/views/topic_quarter_judgement_violation.sql
+eval/mfds/
 eval/panel/
+tests/fixtures/mfds/
 tests/fixtures/trend_sample/
 tests/fixtures/yt_handoff/
 tests/retrieval/
@@ -60,6 +64,7 @@ tests/test_evidence_*.py
 tests/test_holdout_*.py
 tests/test_judge_*.py
 tests/test_judgement_contract.py
+tests/test_mfds_seed.py
 tests/test_month_grain_regression.py
 tests/test_panel_quarter_contract.py
 tests/test_panel_seed.py
