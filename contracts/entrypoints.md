@@ -346,6 +346,7 @@ cosmai retrieval search --query <q> [--engine <e>] [--source <s>]... [--top <n>]
 cosmai retrieval eval   --mode <m> [--engine <e>] [--source <s>]... [--out <csv>] [--vectors <path>]
 cosmai retrieval embed  [--model <m>] [--device <d>] [--batch <n>] [--vectors <path>]
 cosmai retrieval terms  [--source <s>]... [--top <n>]
+cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--model <m>] [--dry-run] [--vectors <path>]
   source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
   engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
 ```
@@ -445,11 +446,29 @@ cosmai retrieval terms  [--source <s>]... [--top <n>]
 - **기본 `--engine bm25` 는 literal 용도 기준이다** — heldout 에서 bm25 는 P@10 0.000·Hit 0%, vector 는
   0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다(여섯 줄 전부는 `contracts/interfaces.md`
   §검색 실측). 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
+- **`ask` summarizes retrieval results; it is not a verdict** (fork #73, ydc `rag/generate.py`). The same
+  evidence a person gets from `search` — gate included — is folded to one item per document (chunks of a
+  document concatenated in rank order) and an LLM writes three fixed sections, `## Core` · `## Evidence
+  summary` · `## Limits`, in the language of the query, citing `[Source: doc_id]`. Nothing downstream reads
+  the answer: it stands on retrieved chunks, a different denominator from the verdict table (§Evidence's
+  three grounds), and the Limits section says so. Engine as `search` (`--engine`, default `bm25`, no router);
+  sources as `search`. `--model` defaults to `claude-sonnet-5`; `--dry-run` prints the prompt and the folded
+  evidence and calls nothing. Every real call is reserved on the shared `needs.llm_usage` ledger **before**
+  it goes out and settled after (`purpose='retrieval_ask'`, the $10 hard stop of `analysis/polarity/pricing`),
+  and leaves one row in `needs.retrieval_ask_log` (DDL 026) written after the round trip; the prompt rules,
+  the note and the log columns are `interfaces.md` §Answer layer.
 - 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음 — 근거 없는 질의가 막힌 것도 여기다, `eval` 의 채점된 질의 0개와
   `terms` 의 훑은 문서 0건 — 둘 다 청크가 비었다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수
   없음 — 파일이 없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이
   행렬과 어긋난 것이 같은 자리다, **활성 주제 사전 없음** — `cosmai lexicon load/activate` 를 아직 안
   돌렸다는 뜻이라 실패가 아니라 막힘이다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
+  `ask`: 0 an answer (or a dry run that had evidence) · 1 no evidence — the gate blocked the query or it had
+  0 hits, and the fixed refusal still goes to stdout — and an answer the model cut off at `max_tokens` or
+  left empty, which is settled and logged but never passed off as complete · 2 blocked — no active topic
+  lexicon, the vector store unreadable, the ledger's hard stop (`BudgetExceeded`, before any call), a model
+  `pricing.py` has no price for, or no `CLAUDE_API_KEY` outside `--dry-run`. stdout carries only the
+  three-section markdown (or the refusal, or the dry-run dump); the version note and the cost line go to
+  stderr, like `cards`.
 - **A coverage warning goes to stderr and does not change the exit code** — the vector and hybrid paths of
   `search`·`eval` compare the chunk count the store covers and the manifest's `chunked_at_max` against
   **the same query** the BM25 cache key uses (`count(*)`·`max(chunked_at)`), and on a mismatch print one
