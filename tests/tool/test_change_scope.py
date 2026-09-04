@@ -216,3 +216,39 @@ def test_the_class_and_the_reason_are_the_first_two_lines(repo: Path):
     assert scope.code == 0, scope.stderr
     assert scope.klass in {"A", "B", "C"}, scope.raw
     assert scope.reason, "the class without a reason is a verdict nobody can check"
+
+
+def test_an_unknown_argument_to_the_gate_is_refused():
+    # A mistyped flag that quietly ran the whole suite would be a twenty-minute surprise; one that
+    # quietly ran nothing would be worse. The gate takes `--changed [<base>]` or nothing at all.
+    done = subprocess.run(
+        ["sh", str(REPO_ROOT / "tool" / "checks" / "test"), "--whatever"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 2, done.stdout + done.stderr
+    assert "usage:" in done.stderr, done.stderr
+
+
+def test_a_classifier_that_cannot_answer_falls_back_to_the_whole_suite(tmp_path: Path):
+    # No answer is not the same as "small": a classifier that crashes must cost the full suite, not
+    # silently let a change through on the cheapest class.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (bin_dir / "python3").chmod(0o755)
+    (bin_dir / "git").symlink_to(shutil.which("git") or "/usr/bin/git")
+    done = subprocess.run(
+        ["/bin/sh", str(REPO_ROOT / "tool" / "checks" / "test"), "--changed", "origin/main"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": str(bin_dir), "HOME": str(tmp_path)},
+    )
+    assert "verification: class A" in done.stdout, done.stdout + done.stderr
+    # And it stops there: with no uv and no docker on this PATH, the run is unverified (69), never
+    # a pass. A green here would mean the fallback ran nothing at all.
+    assert done.returncode == 69, done.stdout + done.stderr

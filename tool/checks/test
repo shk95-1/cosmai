@@ -29,10 +29,17 @@ if [ "$1" = "--changed" ]; then
     require_command python3 git
     # Three lines: the class, the reason, the test paths. The classifier is the only thing that
     # decides this, so a checkout where it cannot run has no partial mode -- it has the full suite.
-    change_scope=$(python3 tool/change_scope.py "${2:-origin/main}")
-    change_class=$(printf '%s\n' "$change_scope" | sed -n 1p)
-    change_reason=$(printf '%s\n' "$change_scope" | sed -n 2p)
-    change_tests=$(printf '%s\n' "$change_scope" | sed -n 3p)
+    if change_scope=$(python3 tool/change_scope.py "${2:-origin/main}"); then
+        change_class=$(printf '%s\n' "$change_scope" | sed -n 1p)
+        change_reason=$(printf '%s\n' "$change_scope" | sed -n 2p)
+        change_tests=$(printf '%s\n' "$change_scope" | sed -n 3p)
+    else
+        change_reason="the classifier could not answer, so the change is worth the whole suite"
+    fi
+    case "$change_class" in
+        A | B | C) ;;
+        *) change_reason="the classifier said '$change_class', which is not a class"; change_class=A ;;
+    esac
 elif [ -n "$1" ]; then
     printf 'usage: tool/checks/test [--changed [<base>]]\n' >&2
     exit 2
@@ -171,12 +178,18 @@ case "$change_class" in
         tool/checks/lint
         printf '→ lang\n'
         tool/checks/lang
-        printf '→ pytest %s\n' "$change_tests"
-        uv run pytest $change_tests
+        if [ -n "$change_tests" ]; then
+            printf '→ pytest %s\n' "$change_tests"
+            uv run pytest $change_tests
+        fi
         ;;
     B)
-        printf '→ pytest %s\n' "$change_tests"
-        uv run pytest $change_tests
+        # An entry can map to no tests at all (a directory nothing imports), and a bare `uv run
+        # pytest` there would collect the whole suite -- the opposite of what this class is for.
+        if [ -n "$change_tests" ]; then
+            printf '→ pytest %s\n' "$change_tests"
+            uv run pytest $change_tests
+        fi
         # The whole suite minus the part that needs the database: a package's own tests say the
         # package is right, and this says nothing else in the tree noticed. The marker expression
         # repeats the two the ini file excludes, because -m on the command line replaces it.
