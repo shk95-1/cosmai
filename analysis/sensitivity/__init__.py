@@ -1,8 +1,9 @@
 """민감도·후향 검증 셋 — `contracts/interfaces.md` §민감도 가 정본이다 (포크 #41).
 
-The rules come from ydc `analysis/slices/ydc/panel_sensitivity.py` · `backtest.py` · `spam_ad_flags.py`
-(v0.2) and were written over rather than imported from the slices (the way `analysis/trend/` and
-`analysis/judge/` did it).
+The rules come from ydc `panel_sensitivity.py` · `backtest.py` · `spam_ad_flags.py`
+(shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`, the TEAM_DECISIONS v0.2 definition; unchanged through the import
+pin `v0.4.0`, `contracts/versioning.md`) and were written over rather than imported from the pinned copy
+`analysis/slices/ydc/` (deleted, #9) (the way `analysis/trend/` and `analysis/judge/` did it).
 
 All three **make no new metrics**: they rerun the same `analysis.trend` formulas and the same
 `analysis.judge` rules with only the population changed, and measure whether the conclusion wobbles on that

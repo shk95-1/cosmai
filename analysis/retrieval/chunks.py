@@ -1,5 +1,5 @@
 """The chunks that go into embedding and indexing, and the validator of their contract
-(slices/ydc/chunks.py).
+(ydc chunks.py, v0.1.0 02440ab; changed later in v0.2.0).
 
 The contract has five columns: chunk_id (`{doc_id}#{ordinal}`) · doc_id · source · ordinal (from 0, with no
 gaps) · text (put through normalize_text). doc_id is common to all sources, so merging sources is a

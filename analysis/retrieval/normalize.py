@@ -1,5 +1,5 @@
 """Text normalization. The same surface form however many sources are added (normalize_text in
-slices/ydc/trend.py)."""
+ydc trend.py, v0.1.0 02440ab)."""
 
 from __future__ import annotations
 

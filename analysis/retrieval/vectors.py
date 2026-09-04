@@ -1,4 +1,4 @@
-"""The vector store and RRF fusion (slices/ydc/{encode_chunks,hybrid}.py).
+"""The vector store and RRF fusion (ydc encode_chunks.py · hybrid.py, v0.1.0 02440ab).
 
 **The vectors live in a file.** pgvector was put off to next time -- taking the extension would mean bringing
 the shared postgres up again, and measuring "do the vectors beat BM25" first is the right order. The storage

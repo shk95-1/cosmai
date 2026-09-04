@@ -1,4 +1,4 @@
-"""Turns chunks into vectors (slices/ydc/encode_chunks.py). **One model, one setting, in one run.**
+"""Turns chunks into vectors (ydc encode_chunks.py, v0.1.0 02440ab). **One model, one setting, in one run.**
 
 Encoding in pieces means model revision · prefix · L2 normalization · dtype · text normalization · input
 field -- **one of the six out of step** and the vectors cannot be merged. And being out of step raises **no

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Re-runs the full comparison: ydc's three scripts against `cosmai trend crosscheck` (fork #7).
 
-**The promoted source is not the pin (`v0.1.0 02440ab`).** `cross_source.py` had its ingredient-key
+**The promoted source is not the pinned copy (`v0.1.0 02440ab`) and not the import pin (`v0.4.0 76db718`,
+`contracts/versioning.md`).** `cross_source.py` had its ingredient-key
 mismatch and its sunscreen context corrected afterwards in `v0.3.0` (`e5a1b00`), and that is the
 revision that was promoted. So this script takes that file out of the tag and runs it **untouched** --
 what is read is always the ydc checkout `--ydc` points at (the pinned copy `analysis/slices/ydc/` was
@@ -41,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from analysis import crosscheck  # noqa: E402
 
+# cross_source.py did not change between v0.3.0 and v0.4.0, so this default still matches the import pin.
 DEFAULT_TAG = "v0.3.0"
 DEFAULT_FORMULA = "data/external/product_ingredient_function_repaired.csv"
 

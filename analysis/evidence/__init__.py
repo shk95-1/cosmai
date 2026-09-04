@@ -1,7 +1,9 @@
 """판정 셀을 받치는 소비자 발화의 선별 — `contracts/interfaces.md` §근거 가 정본이다 (포크 #6).
 
-The rules come from ydc `analysis/slices/ydc/evidence_comments.py` and were written over rather than imported
-from the slice (the way `analysis/trend` and `analysis/judge` did it). This module knows no DB: it takes a
+The rules come from ydc `evidence_comments.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`; unchanged through
+the import pin `v0.4.0`, `contracts/versioning.md`) and were written over rather than imported from the
+pinned copy `analysis/slices/ydc/` (deleted, #9) (the way `analysis/trend` and `analysis/judge` did it).
+This module knows no DB: it takes a
 candidate list, so the same rules run on the stored corpus and on ydc's raw collection CSV, and that is where
 the golden comparison stands.
 

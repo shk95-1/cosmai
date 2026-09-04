@@ -1,4 +1,5 @@
-"""BM25 lexical search (slices/ydc/bm25.py). The baseline the vectors have to beat.
+"""BM25 lexical search (ydc bm25.py, v0.1.0 02440ab; changed later in v0.3.0). The baseline the vectors
+have to beat.
 
 정확 일치가 정답인 말이 많다 -- `에칠헥실트리아존` · `SPF50+` · 브랜드명. 벡터에 넣으면
 성분이 다른 것을 비슷하다고 하므로 그건 순위 문제가 아니라 오답이다. 그쪽을 이 파일이 맡는다.
