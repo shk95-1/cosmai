@@ -212,7 +212,10 @@ for schema in trend_radar tubedepth; do
       # -o /dev/null: the dump opens with `SELECT pg_catalog.set_config('search_path', ...)` and its
       # one-row result is not something a deploy log should carry. Errors are on stderr and stay.
     } | superuser_psql -o /dev/null || {
-        superuser_psql -o /dev/null -c "DROP SCHEMA IF EXISTS $schema CASCADE" < /dev/null \
+        # RESTRICT, not CASCADE: the transaction rolled back, so the schema is empty and RESTRICT
+        # succeeds. If it does not, something is in there that this run did not put there, and the
+        # right answer is to refuse rather than to sweep it away.
+        superuser_psql -o /dev/null -c "DROP SCHEMA IF EXISTS $schema RESTRICT" < /dev/null \
             || echo "$prefix: and the schema it had made could not be dropped either" >&2
         echo "$prefix: could not stand up the schema; it was dropped, so re-running starts over" >&2
         exit 1

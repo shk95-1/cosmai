@@ -25,5 +25,7 @@
   this repo writes that table, and a rebuilt database is therefore not a database alembic could
   resume. There is no ledger either (`needs.schema_migration` is the needs schema's alone), because
   `db/migrate.sh` step (0) is all-or-nothing: it composes the two schemas on a database that has
-  neither and skips a database that has them (#178).
+  neither and skips a database that has them (#178). That question is asked of `alembic_version`
+  rather than of the schema name -- the table is the baseline's own marker, so a schema standing
+  without it is a build that died part-way and not a schema to leave alone.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).

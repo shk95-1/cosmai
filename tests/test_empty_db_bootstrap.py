@@ -65,6 +65,18 @@ TABLES = """
 """
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_planted_ddl_outlives_the_session() -> Iterator[None]:
+    """The failure test below plants a broken additive file in contracts/ddl/tubedepth/ and removes
+    it in its own `finally` -- but a run killed in between would leave it in the checkout, where the
+    next deploy would fail on it and `git status` would offer it for commit. Removing it before this
+    file's first test and again at the end means an interrupted run is cleaned up by the next one
+    (#178 re-review 6)."""
+    BROKEN_DDL.unlink(missing_ok=True)
+    yield
+    BROKEN_DDL.unlink(missing_ok=True)
+
+
 def _psql(container: str, database: str, sql: str) -> list[list[str]]:
     done = subprocess.run(
         ["docker", "exec", container, "psql", "-U", "fleet", "-d", database]
@@ -187,6 +199,19 @@ def test_a_build_that_fails_leaves_no_schema_behind(
     done = deploy(empty_database)
     assert done.returncode == 0, done.stderr
     assert "tubedepth: created from the baseline dump + 3 additive file(s)" in done.stdout
+
+
+def test_no_source_ddl_file_ends_the_deploy_transaction_itself():
+    """What makes a failed build leave nothing is that the baseline and every additive file travel
+    inside one BEGIN...COMMIT. A file carrying its own COMMIT would end that transaction in the
+    middle, and everything before it would survive the failure of everything after -- the exact
+    state the probe above exists to make impossible."""
+    sources = [DUMPS / "app.trend_radar.sql", DUMPS / "app.tubedepth.sql"]
+    sources += sorted((REPO_ROOT / "contracts" / "ddl" / "tubedepth").glob("*.sql"))
+    for path in sources:
+        body = "\n".join(line.split("--", 1)[0] for line in path.read_text(encoding="utf-8").splitlines())
+        found = re.search(r"\b(begin|commit|rollback|savepoint)\b", body, re.I)
+        assert not found, f"{path.name} ends step (0)'s transaction itself: {found.group(0)!r}"
 
 
 def test_a_probe_that_cannot_answer_stops_before_anything_is_written(

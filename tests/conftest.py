@@ -23,6 +23,8 @@ from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from db import secrets
+
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 SNAPSHOT_UPDATE = "--snapshot-update"
@@ -379,6 +381,23 @@ DEPLOY_SLOT_TIMEOUT_ENV = "COSMAI_DEPLOY_SLOT_TIMEOUT_S"
 DEPLOY_SLOT_TIMEOUT_S = 20.0
 
 
+@pytest.fixture
+def harness_secrets(tmp_path: Path) -> dict[str, str]:
+    """HARNESS_SECRETS read back through db/secrets.py -- the same reader db/migrate.sh mirrors.
+
+    A test that looked for hardcoded passwords instead would keep passing while a key added to the
+    set above went unchecked, and the check it belongs to is the one that proves no password reaches
+    a command line (#178 re-review 7). Parsing losing a line would shrink it the same way, so that
+    is asked here rather than assumed."""
+    path = tmp_path / "harness.env"
+    path.write_text(HARNESS_SECRETS, encoding="utf-8")
+    loaded = secrets.load(path)
+    assert len(loaded) == len(HARNESS_SECRETS.strip().splitlines()), (
+        "a line of HARNESS_SECRETS did not survive db/secrets.py; anything counting these is short"
+    )
+    return loaded
+
+
 def _no_harness(reason: str) -> NoReturn:
     """Skip, unless the caller said a missing harness is a fault. A silent skip here means the
     checks that only this container can run disappear from a green suite without a word."""
@@ -401,11 +420,15 @@ def harness_container() -> str:
     return name
 
 
-def _needs_migrator_backends(container: str, database: str) -> list[str]:
+def _needs_migrator_backends(container: str) -> list[str]:
     """What is holding needs_migrator's connections right now, as psql sees it -- asked as the
-    superuser through docker exec, which spends none of the two slots being counted."""
+    superuser through docker exec, which spends none of the two slots being counted.
+
+    Which database this connects to does not matter and is not a parameter: pg_stat_activity is a
+    cluster-wide view and CONNECTION LIMIT is a cluster-wide budget, so `fleet` sees every backend
+    the role has anywhere on the server."""
     done = subprocess.run(
-        ["docker", "exec", container, "psql", "-U", "fleet", "-d", database, "-X", "-Atq"]
+        ["docker", "exec", container, "psql", "-U", "fleet", "-d", "fleet", "-X", "-Atq"]
         + [
             "-c",
             "SELECT state || ' :: ' || left(query, 100) FROM pg_stat_activity "
@@ -434,10 +457,10 @@ def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[
     ) -> subprocess.CompletedProcess[str]:
         limit = float(os.environ.get(DEPLOY_SLOT_TIMEOUT_ENV) or DEPLOY_SLOT_TIMEOUT_S)
         deadline = time.monotonic() + limit
-        held = _needs_migrator_backends(harness_container, "fleet")
+        held = _needs_migrator_backends(harness_container)
         while held and time.monotonic() < deadline:
             time.sleep(0.2)
-            held = _needs_migrator_backends(harness_container, "fleet")
+            held = _needs_migrator_backends(harness_container)
         assert not held, (
             "db/migrate.sh cannot have a needs_migrator connection: "
             f"{len(held)} of 2 are still held after {limit}s by {held}"

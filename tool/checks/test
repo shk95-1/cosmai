@@ -156,7 +156,13 @@ if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_
     COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
     TEST_POSTGRES_URL="postgresql+psycopg://needs_migrator:check@localhost:$port/fleet"
     TEST_POSTGRES_RUNTIME_URL="postgresql+psycopg://needs_runtime:check-runtime@localhost:$port/fleet"
-    export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL
+    # This branch is the only place the container is known to exist, so it is the only place that can
+    # say a harness-only test may not skip. Without it the checks that need the container -- the proof
+    # that a deploy leaves a schema production already has alone -- vanish from a green run without a
+    # word (#178 re-review 5). A run against an external TEST_POSTGRES_URL never reaches this line and
+    # keeps the skip, which is right: there is no container there to be missing.
+    COSMAI_REQUIRE_HARNESS=1
+    export TEST_POSTGRES_URL TEST_POSTGRES_RUNTIME_URL COSMAI_REQUIRE_HARNESS
 fi
 
 # Straight to the terminal, colour and stderr intact: nothing reads pytest's output, since what the

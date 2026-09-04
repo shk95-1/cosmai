@@ -25,14 +25,6 @@ from db import secrets
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATE = REPO_ROOT / "db" / "migrate.sh"
 KEY = "NEEDS_DB_RUNTIME"
-# The dummy passwords the harness container's roles carry (tests/conftest.py HARNESS_SECRETS).
-HARNESS_SECRETS_VALUES = (
-    "check",
-    "check-runtime",
-    "check-trend-radar",
-    "check-trend-radar-reader",
-    "check-tubedepth",
-)
 
 # Each case is a whole file. The last five hold the rules a `grep "^KEY="` gets wrong.
 FILES = [
@@ -100,7 +92,10 @@ def test_a_missing_collector_key_is_not_reported_as_a_needs_problem(tmp_path: Pa
 
 @pytest.mark.postgres
 def test_no_secret_value_reaches_the_docker_command_line(
-    tmp_path: Path, harness_container: str, deploy: Callable[..., subprocess.CompletedProcess[str]]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    harness_secrets: dict[str, str],
+    deploy: Callable[..., subprocess.CompletedProcess[str]],
 ):
     """A shim ahead of docker on PATH writes down one line per argument and then execs the real one,
     so what this reads is exactly what `ps` would have shown. Grepping db/migrate.sh instead would
@@ -120,18 +115,17 @@ def test_no_secret_value_reaches_the_docker_command_line(
     )
     shim.chmod(0o755)
 
-    original_path = os.environ["PATH"]
-    os.environ["PATH"] = f"{shim_dir}:{original_path}"
-    try:
-        done = deploy()
-    finally:
-        os.environ["PATH"] = original_path
+    monkeypatch.setenv("PATH", f"{shim_dir}:{os.environ['PATH']}")
+    done = deploy()
     assert done.returncode == 0, done.stderr
     arguments = log.read_text(encoding="utf-8").splitlines()
     assert any(a == "exec" for a in arguments), "the shim recorded nothing, so it proved nothing"
 
-    values = sorted(v for v in HARNESS_SECRETS_VALUES if v)
+    # Every value the harness set carries, not a list written out beside it: a key added there and
+    # forgotten here would leave this check green about one password fewer (#178 re-review 7).
+    values = sorted(v for v in harness_secrets.values() if v)
     assert values, "no secret values to look for; this check would pass on anything"
+    assert len(values) == len(harness_secrets), "a harness secret has no value to look for"
     exposed = [a for a in arguments for v in values if v in a]
     # The values are named nowhere in the failure: only how many arguments carried one.
     assert not exposed, f"{len(exposed)} argument(s) to docker carry a role password"
