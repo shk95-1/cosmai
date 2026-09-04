@@ -269,6 +269,11 @@ def trend_radar_schema(database_url_for_tests: str, _schema_name: str) -> str:
     No role switch, unlike `needs_schema`: `trend_radar` predates the needs-style owner/runtime split
     (contracts/README.md) and is already live in production without one, so the per-test schema is
     applied and read back as the same role that created it.
+
+    The deploy composes the same schema the same way -- `db/migrate.sh` step (0), which is what the
+    harness container's real `trend_radar` comes from since #178. This fixture cannot call that
+    script (its schemas are renamed and one per test), so the two are held against each other
+    instead: tests/test_empty_db_bootstrap.py compares them column by column.
     """
     schema = _schema_name
     engine = create_engine(database_url_for_tests)
@@ -292,7 +297,11 @@ TUBEDEPTH_NEEDS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" 
 
 def _apply_tubedepth_ddl(conn: Any, schema: str) -> None:
     """The current 13-table dump verbatim (same substitution `trend_radar_schema` uses), then every
-    additive file in contracts/ddl/tubedepth/ on top."""
+    additive file in contracts/ddl/tubedepth/ on top.
+
+    That order is the schema's canonical form (contracts/README.md), and `db/migrate.sh` step (0)
+    composes the deploy's copy from the same two sources -- tests/test_empty_db_bootstrap.py holds
+    the result of this function against the result of that one."""
     lines = [
         ln
         for ln in TUBEDEPTH_DDL.read_text(encoding="utf-8").splitlines()

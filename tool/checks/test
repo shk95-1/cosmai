@@ -130,36 +130,26 @@ if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_
         sleep 1
     done
     # Test-only dummy values, not secrets -- matches TEST_POSTGRES_URL/TEST_POSTGRES_RUNTIME_URL below.
+    # The three collector keys join them because this container starts empty and db/migrate.sh's
+    # step (0) therefore runs: production has trend_radar and tubedepth already and takes the skip,
+    # so it is never asked for these three.
     printf 'NEEDS_DB_MIGRATOR=check\nNEEDS_DB_RUNTIME=check-runtime\n' > "$secret_file"
-    # Harness only: collectors/commerce owns trend_radar in production, but db/views/collector_health.sql
-    # binds to it, so without the real dump here the deploy path below could only be tested by guarding
-    # the view into a silent skip -- test green, production missing.
-    docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1 \
-        < contracts/ddl/current/app.trend_radar.sql
-    # Same reason, tubedepth: since #77 the view's youtube arm binds tubedepth.jobs. Only that one
-    # table, not the whole dump -- `analyze link` reads four other tubedepth tables, and standing
-    # those up here would silently turn test_analyze_all.py's "link fails, so the CLI exits 1" green
-    # for the wrong reason. The additive files are the ones that named jobs (#101 started_at/
-    # elapsed_ms, #102 dataset); production already has both.
+    printf 'TREND_RADAR_DB_RUNTIME=check-trend-radar\nTREND_RADAR_DB_READER=check-trend-radar-reader\n' \
+        >> "$secret_file"
+    printf 'TUBEDEPTH_DB_RUNTIME=check-tubedepth\n' >> "$secret_file"
+    # The two source schemas used to be built right here, by hand: trend_radar from the whole dump,
+    # tubedepth from three hand-picked CREATE TABLE blocks cut out of its dump with sed. Both are
+    # gone -- db/migrate.sh step (0) builds them from the same baseline plus every additive file, so
+    # the harness's schemas and the deploy's are one composition and cannot drift apart (#178).
     #
-    # #144 adds two more for the same reason: db/views/{mention,collection}_lineage.sql bind
-    # tubedepth.comments (the source text behind a youtube mention) and tubedepth.artifacts (the
-    # fetch that carried it). Still table-by-table, not the whole dump, so `analyze link`'s four
-    # other tubedepth tables stay absent and test_analyze_all.py keeps failing for its own reason.
+    # What the harness gains by that: tubedepth is now the whole 13-table dump rather than jobs,
+    # comments and artifacts alone. `cosmai analyze all` over this empty container still exits 1 --
+    # aggregate refuses a run with no mentions -- but the stage that refuses is no longer link
+    # failing on absent tables; tests/test_analyze_all.py records that.
     #
-    # One live consequence to know about: analysis/polarity/pipeline.py's `_exists(conn, youtube_
-    # schema, "comments")` now answers true here, so the polarity stage's youtube arm actually runs
-    # in this harness instead of being skipped -- over an empty table, so it yields nothing and
-    # nothing changes today. A test that starts asserting "the youtube arm did not run" would be
-    # asserting the absence of a table, not a behaviour.
-    { echo 'CREATE SCHEMA IF NOT EXISTS tubedepth;'
-      for t in jobs comments artifacts; do
-          sed -n "/^CREATE TABLE tubedepth\.$t (/,/^);\$/p" contracts/ddl/current/app.tubedepth.sql
-      done
-      cat contracts/ddl/tubedepth/*_jobs_*.sql contracts/ddl/tubedepth/*_comments_*.sql
-    } | docker exec -i "$name" psql -U fleet -d fleet -q -v ON_ERROR_STOP=1
     # Run twice: production and the test harness both re-run this on every deploy, so it must be
-    # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version).
+    # idempotent (test_migrate_ledger_and_grants.py proves the ledger stays at one row per version),
+    # and the second run is also step (0) taking the skip production takes.
     COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
     # Harness only: the per-test schema fixture needs CREATE on the database.
     docker exec "$name" psql -U fleet -d fleet -q -c 'GRANT CREATE ON DATABASE fleet TO needs_migrator'

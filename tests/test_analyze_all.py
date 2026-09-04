@@ -625,9 +625,10 @@ def test_stale_and_scope_silence_both_land_in_one_note(analysis_url: str, source
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
-    # This container holds only what the production views bind (tool/checks/test): all of trend_radar is empty
-    # and tubedepth has the single jobs table -- the four tubedepth tables link reads are absent, so it fails
-    # there.
+    # The harness container holds all three schemas and no rows (db/migrate.sh step (0) builds the two
+    # source schemas whole since #178), so link now runs and finds nothing and it is aggregate that
+    # refuses -- "no mentions with extractor_version". The exit code this test is about is the same;
+    # the stage that produces it is not the one that did while tubedepth was three tables.
     assert main(["analyze", "all", "--url", analysis_url]) == 1
     assert "failed" in capsys.readouterr().out
     # A refusal before reaching a stage is blocked -- apart from the exit 1 that leaves a failed run.
