@@ -1,0 +1,49 @@
+#!/bin/sh
+# Fork -> upstream pre-PR gate for the ownership boundary (#192 methodology row 3, contracts/
+# ownership.md). Incidents #150 · #103 · #115: what only one checkout knows about is what production
+# loses, and a guard the fork edited on its own side stops guarding the other one.
+#
+#   tool/checks/ownership [<upstream-ref>]      default upstream/main
+#
+# Exit 0 nothing on the must-not-change list changed · 1 one line per file that did · 2 bad usage.
+set -e
+
+ref=${1:-upstream/main}
+[ $# -le 1 ] || { printf 'usage: tool/checks/ownership [<upstream-ref>]\n' >&2; exit 2; }
+
+# The list travels with the script, not with the working directory: audit runs this from a fork
+# checkout that has its own contracts/ownership.md, and the two must not be allowed to disagree
+# about what the boundary is.
+here=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+ownership=${COSMAI_OWNERSHIP_FILE:-$here/contracts/ownership.md}
+[ -f "$ownership" ] || { printf '✗ no ownership file at %s\n' "${ownership#"$here"/}" >&2; exit 2; }
+
+# Unknown ref rather than "nothing changed": an unfetched upstream would otherwise report a clean
+# boundary, which is the one answer this check must never give by accident.
+git rev-parse --verify -q "$ref^{commit}" >/dev/null 2>&1 \
+    || { printf '✗ %s does not resolve in this checkout — fetch upstream first.\n' "$ref" >&2; exit 2; }
+
+# Three dots: what upstream changed on its own side after the fork branched is not the fork's doing.
+changed=$(git diff --name-only "$ref...HEAD")
+patterns=$(sed -n '/^```ownership:must-not-change$/,/^```$/p' "$ownership" \
+    | sed '1d;$d' | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*\(#.*\)\?$' || true)
+[ -n "$patterns" ] || { printf '✗ the must-not-change list in %s is empty\n' "${ownership#"$here"/}" >&2; exit 2; }
+
+hits=
+for path in $changed; do
+    for pattern in $patterns; do
+        # A trailing slash means the whole directory; anything else is a glob over the full path.
+        case "$pattern" in */) pattern="$pattern*" ;; esac
+        case "$path" in
+            $pattern) hits="$hits$path
+"; break ;;
+        esac
+    done
+done
+
+[ -n "$hits" ] || exit 0
+printf '%s' "$hits"
+printf '\n✗ The fork changed %s file(s) upstream owns (contracts/ownership.md). Send the change as an\n' \
+    "$(printf '%s' "$hits" | grep -c .)" >&2
+printf '  upstream PR instead; the fork takes it back by merge.\n\n' >&2
+exit 1

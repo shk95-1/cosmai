@@ -1291,7 +1291,52 @@ def test_audit_skips_foreign_closes_without_an_upstream_remote(run, checkout: Pa
         cwd=checkout,
     )
     assert done.returncode == 0, done.stderr
-    assert done.stdout.count("(no upstream remote — skipped)") == 2, done.stdout
+    # Three fork items share the note: foreign closes, fork behind, ownership.
+    assert done.stdout.count("(no upstream remote — skipped)") == 3, done.stdout
+
+
+FAKE_OWNERSHIP = """#!/bin/sh
+printf '%s\\n' "db/migrate.sh" "STATE.md"
+exit 1
+"""
+
+
+def test_audit_carries_the_ownership_check_output_verbatim(
+    run, monkeypatch, tmp_path: Path, fork_behind_upstream: Path
+):
+    # #212: the boundary check is one script (tool/checks/ownership) and audit calls it rather than
+    # reimplementing the list, one line per file so the reader has the path and not just a count.
+    quiet = tmp_path / "fake-foreign-closes"
+    quiet.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    quiet.chmod(0o755)
+    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(quiet))
+    fake = tmp_path / "fake-ownership"
+    fake.write_text(FAKE_OWNERSHIP, encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("COSMAI_OWNERSHIP_CHECK", str(fake))
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", FORK)
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=fork_behind_upstream,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("fork changed a file upstream owns")[1].split("\n\n")[0]
+    listed = [line.strip() for line in block.splitlines() if line.strip()]
+    assert listed == ["db/migrate.sh", "STATE.md"], done.stdout
+
+
+def test_audit_skips_the_ownership_check_without_an_upstream_remote(run, checkout: Path):
+    # Same reason as foreign-closes: an upstream checkout owns everything, so there is no boundary
+    # to test and "none" would read as a verdict the check never made.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("fork changed a file upstream owns")[1].split("\n\n")[0]
+    assert "(no upstream remote — skipped)" in block, done.stdout
 
 
 def test_audit_lists_upstream_commits_on_shared_surfaces_the_fork_lacks(
