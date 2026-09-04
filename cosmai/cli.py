@@ -151,7 +151,9 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
 
     # 카드는 아무것도 쓰지 않는다. 저장된 세 표를 읽어 마크다운을 stdout 으로 낸다.
     cards = actions.add_parser("cards", help="Render the quarter's opportunity cards to stdout.")
-    cards.add_argument("--quarter", required=True, help="예: 2026Q2. 카드는 분기 단위의 물음이다.")
+    cards.add_argument(
+        "--quarter", required=True, help="e.g. 2026Q2. A card answers a quarter-level question."
+    )
     cards.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
@@ -317,7 +319,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
         print(blocked)
         return 2
     if not hits:
-        print("결과 없음")
+        print("no results")
         return 1
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
@@ -361,7 +363,7 @@ def _run_retrieval_eval(
             writer = csv.DictWriter(handle, fieldnames=retrieval_eval.FIELDS, lineterminator="\n")
             writer.writeheader()
             writer.writerows(vars(row) for row in rows)
-        print(f"{args.out} 저장")
+        print(f"saved {args.out}")
     # 질의가 하나도 채점되지 않으면 청크가 비었거나 사전이 안 얹힌 것이다. 조용히 0 을 주지 않는다.
     return 0 if rows else 1
 

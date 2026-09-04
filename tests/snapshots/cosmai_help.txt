@@ -180,7 +180,7 @@ usage: cosmai trend cards [-h] --quarter QUARTER [--url URL]
 
 options:
   -h, --help         show this help message and exit
-  --quarter QUARTER  예: 2026Q2. 카드는 분기 단위의 물음이다.
+  --quarter QUARTER  e.g. 2026Q2. A card answers a quarter-level question.
   --url URL          SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai trend crosscheck --help

@@ -126,13 +126,19 @@ def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
     index, origin = load_index(conn, None, cache_dir=cache_dir)
     conn.commit()
 
-    rows = [r for _topic, q in retrieval_eval.queries("literal", dictionary) if (r := per_query(index, origin, q, dominant, k))]
+    rows = [
+        r
+        for _topic, q in retrieval_eval.queries("literal", dictionary)
+        if (r := per_query(index, origin, q, dominant, k))
+    ]
     counted: dict[str, int] = {}
     for row in rows:
         for source, n in row["top_k"].items():
             counted[source] = counted.get(source, 0) + n
     total = sum(counted.values()) or 1
-    ranks = [rank for row in rows for source, rank in row["minority_first"].items() if row["pool"].get(source)]
+    ranks = [
+        rank for row in rows for source, rank in row["minority_first"].items() if row["pool"].get(source)
+    ]
     by_source: dict[str, dict] = {}
     for share in shares:
         if share.source == dominant:
@@ -155,7 +161,10 @@ def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
         "composition": [s._asdict() for s in shares],
         "queries": len(rows),
         "queries_without_candidates": len(retrieval_eval.queries("literal", dictionary)) - len(rows),
-        "top_k": {source: {"n": n, "share": n / total} for source, n in sorted(counted.items(), key=lambda kv: -kv[1])},
+        "top_k": {
+            source: {"n": n, "share": n / total}
+            for source, n in sorted(counted.items(), key=lambda kv: -kv[1])
+        },
         "dominant_share_in_index": index_share,
         "dominant_share_in_top_k": topk_share,
         "dominant_share_mean_per_query": statistics.mean(r["dominant_share"] for r in rows) if rows else 0.0,
@@ -173,6 +182,9 @@ def measure(conn, cache_dir: Path | None, k: int = K) -> dict:
 
 
 def report(measured: dict) -> None:
+    # Left alone rather than reflowed: a merge-session format fix must never re-stage a Korean
+    # report string (tool/checks/lang).
+    # fmt: off
     print(f"청크 {measured['chunks']:,} · 주제 사전 v{measured['dictionary']} · 질의 {measured['queries']}개"
           f" (후보 0: {measured['queries_without_candidates']}개)")
     print("\n색인 구성비")
@@ -194,10 +206,13 @@ def report(measured: dict) -> None:
               f" · 최대 {cell['max']}")
     print(f"상위 {K} 가 지배 소스뿐인 질의 {measured['queries_with_only_dominant_in_top_k']}개")
     print(f"\n판정: {measured['verdict']}  (기준: 쏠림은 색인 구성비 이상, 밀림은 중앙값 {BURIED_RANK}위 이상)")
+    # fmt: on
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--part", choices=("mix", "topk", "both"), default="both")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
@@ -224,9 +239,11 @@ def main() -> int:
     if args.json:
         print(json.dumps(measured, ensure_ascii=False, indent=2))
     elif args.part == "mix":
+        # fmt: off
         for share in measured["composition"]:
             print(f"  {share['source']:20s} 청크 {share['chunks']:>8,} {share['chunk_share'] * 100:6.2f}%"
                   f" · 문서 {share['docs']:>8,} {share['doc_share'] * 100:6.2f}%")
+        # fmt: on
     else:
         report(measured)
     return 0

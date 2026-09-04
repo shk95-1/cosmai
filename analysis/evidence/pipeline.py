@@ -64,8 +64,9 @@ SELECT c.doc_id, v.quarter, m.topic_id, c.source, c.channel_id,
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
-# TODO(#43): `content_type` 이 이 술어에도 note_of() 에도 없어, short_form 산출이 같은 run 의
-# long_form 근거를 지운다 -- `analysis/trend/pipeline.py`·`analysis/judge/pipeline.py` 와 같은 네 칸이다.
+# TODO(#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
+# deletes the same run's long_form evidence -- the same four columns as
+# `analysis/trend/pipeline.py`·`analysis/judge/pipeline.py`.
 CLEAR: LiteralString = (
     "DELETE FROM topic_quarter_evidence "
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"

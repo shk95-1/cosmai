@@ -11,8 +11,8 @@ require_command uv docker pg_isready
 printf '→ js\n'
 tool/checks/js
 
-# retrieval: analysis/retrieval 의 형태소 분석기(kiwipiepy). 빠지면 BM25 테스트가 통째로
-# ModuleNotFoundError 가 되고, 그것은 "사전이 안 얹혔다"와 구분되지 않는다 (#28).
+# retrieval: the morphological analyzer (kiwipiepy) analysis/retrieval needs. Without it the BM25
+# tests fail wholesale with ModuleNotFoundError, indistinguishable from "the dictionary was not loaded" (#28).
 uv sync --extra dev --extra retrieval --frozen
 
 # git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
@@ -26,8 +26,8 @@ if [ -z "$TEST_POSTGRES_URL" ]; then
     # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
     # COSMAI_TEST_PG_PORT still overrides it (#60 2.10).
     port=${COSMAI_TEST_PG_PORT:-$((55000 + $(pwd -P | cksum | cut -d' ' -f1) % 1000))}
-    # 벡터는 지금 파일에 있으므로 확장이 필요 없다. pgvector 로 옮기는 날 이 기본값을
-    # pgvector/pgvector:pg18 로 바꾸면 된다 (#28 후속).
+    # Vectors live in a file for now, so no extension is needed. The day this moves to pgvector,
+    # change this default to pgvector/pgvector:pg18 (#28 follow-up).
     image=${COSMAI_TEST_PG_IMAGE:-postgres:18-alpine}
     name=cosmai-test-postgres-$port
     # A different container on the same port belongs to another worktree or is a leak: name it and

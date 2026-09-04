@@ -77,10 +77,17 @@ extend-include = [
     "tool/compare-ydc-holdout",
     "tool/measure-crosscheck-keys",
     "tool/measure-lexicon-candidates",
+    "tool/measure-evidence-fixture",
+    "tool/measure-source-mix",
 ]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+# One line is over 110 columns because it is a Korean report string held under `# fmt: off` --
+# reflowing it would re-stage a Korean line and trip tool/checks/lang for no behaviour change.
+[tool.ruff.lint.per-file-ignores]
+"tool/measure-source-mix" = ["E501"]
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
