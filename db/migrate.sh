@@ -38,6 +38,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# What every message below is about. Step (0) sets it to the schema it is working on, so a missing
+# TREND_RADAR_DB_RUNTIME reports itself as a trend_radar problem rather than as a `needs` one.
+prefix=needs
+
 secret_file=${COSMAI_SECRET_FILE:-$HOME/.config/cosmai/env}
 [ -f "$secret_file" ] || {
     echo "needs: missing secret file $secret_file (need NEEDS_DB_MIGRATOR, NEEDS_DB_RUNTIME)" >&2
@@ -69,7 +73,7 @@ read_secret() {
         }
         END { if (seen) print found }
     ' "$secret_file")
-    [ -n "$value" ] || { echo "needs: missing key in $secret_file: $1" >&2; exit 1; }
+    [ -n "$value" ] || { echo "$prefix: missing key in $secret_file: $1" >&2; exit 1; }
     printf '%s' "$value"
 }
 
@@ -118,15 +122,45 @@ superuser_psql() { # psql as the database owner, no password; the SQL arrives on
 # alembic_version comes with the baseline and stays as the dump left it: the table exists and holds
 # no row, because the dump is --schema-only and the old repos' alembic never runs again. Nothing
 # here writes a version into it; from now on this schema changes by a numbered file alone.
-schema_is_present() { # $1 = schema name (a literal from the loop below, never input)
-    superuser_psql -Atq -c "SELECT 1 FROM pg_namespace WHERE nspname = '$1'" < /dev/null
+#
+# The question is the baseline table, not the namespace. CREATE SCHEMA is in the roles step, which
+# autocommits, while only the objects travel inside one transaction -- so a build whose objects
+# rolled back leaves an empty schema behind, and a namespace probe would call that "present" and
+# skip it for every run after, with a hand-approved DROP SCHEMA on production as the only way back
+# (#178 review 1). One word comes back:
+#
+#   built    the baseline's alembic_version is there -- production, and every re-run after the first
+#   empty    a schema with nothing in it
+#   partial  objects but no baseline table: a build that died between the two
+#   absent   no schema at all
+schema_state() { # $1 = schema name (a literal from the loop below, never input)
+    superuser_psql -Atq -c "SELECT CASE
+            WHEN to_regclass('$1.alembic_version') IS NOT NULL THEN 'built'
+            WHEN NOT EXISTS (SELECT FROM pg_namespace WHERE nspname = '$1') THEN 'absent'
+            WHEN EXISTS (SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                          WHERE n.nspname = '$1') THEN 'partial'
+            ELSE 'empty'
+        END" < /dev/null
 }
 
 for schema in trend_radar tubedepth; do
-    if [ -n "$(schema_is_present "$schema")" ]; then
-        echo "$schema: present, left alone"
-        continue
-    fi
+    prefix=$schema
+    # The exit status decides, never the stdout alone: a psql that cannot connect prints nothing,
+    # and "nothing" read as absent would run the unguarded half of db/bootstrap_source.sql -- the
+    # REVOKE, the GRANTs, the DEFAULT PRIVILEGES, the ALTER ROLEs -- against a live database
+    # (#178 review 2). An answer that is not one of the four words is the same kind of unknown.
+    state=$(schema_state "$schema") \
+        || { echo "$prefix: could not ask $container/$db what state the schema is in" >&2; exit 1; }
+    case "$state" in
+        built) echo "$schema: present, left alone"; continue ;;
+        absent | empty) ;;
+        partial)
+            echo "$prefix: the schema holds objects but no alembic_version -- a build died part-way," >&2
+            echo "$prefix: and nothing here can tell that from a schema someone else made. Drop or finish it by hand." >&2
+            exit 1
+            ;;
+        *) echo "$prefix: the schema probe answered '$state', which is not a state" >&2; exit 1 ;;
+    esac
     case "$schema" in
         # trend_radar's third role is trend_radar_reader: what trend-radar-dashboard logs in with and
         # the beneficiary of the schema's DEFAULT PRIVILEGES (contracts/anon_exposure.md). 8 is
@@ -155,10 +189,12 @@ for schema in trend_radar tubedepth; do
       cat db/bootstrap_source.sql
     } | superuser_psql -v schema="$schema" -v database="$db" -v reader="$reader" \
         -v runtime_limit="$runtime_limit" \
-        || { echo "needs: could not create the roles for $schema" >&2; exit 1; }
+        || { echo "$prefix: could not create the roles" >&2; exit 1; }
 
-    # One transaction for the objects: a failure part-way must leave no schema at all, or the next
-    # run would find the half-built one present and skip it forever.
+    # One transaction for the objects, and the schema goes with them when they fail: this branch is
+    # only reached for a schema that was absent or empty when the run started, so dropping it takes
+    # nothing that was not this run's own, and the next run reads `absent` again instead of finding
+    # something half-built.
     #
     # The baseline is named for production's database (app.<schema>.sql) whatever --db says, and its
     # own CREATE SCHEMA goes: db/bootstrap_source.sql has already made the schema, owned by
@@ -175,13 +211,19 @@ for schema in trend_radar tubedepth; do
       printf '\nCOMMIT;\n'
       # -o /dev/null: the dump opens with `SELECT pg_catalog.set_config('search_path', ...)` and its
       # one-row result is not something a deploy log should carry. Errors are on stderr and stay.
-    } | superuser_psql -o /dev/null || { echo "needs: could not stand up schema $schema" >&2; exit 1; }
+    } | superuser_psql -o /dev/null || {
+        superuser_psql -o /dev/null -c "DROP SCHEMA IF EXISTS $schema CASCADE" < /dev/null \
+            || echo "$prefix: and the schema it had made could not be dropped either" >&2
+        echo "$prefix: could not stand up the schema; it was dropped, so re-running starts over" >&2
+        exit 1
+    }
     for file in contracts/ddl/"$schema"/*.sql; do
         [ -e "$file" ] || continue
         added=$((added + 1))
     done
     echo "$schema: created from the baseline dump + $added additive file(s)"
 done
+prefix=needs
 
 migrator_password=$(read_secret NEEDS_DB_MIGRATOR)
 runtime_password=$(read_secret NEEDS_DB_RUNTIME)
