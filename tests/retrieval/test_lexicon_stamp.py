@@ -1,4 +1,4 @@
-"""사전 판본을 다시 찍는 길 (`tool/show-lexicon-stamp`, 포크 #62).
+"""The way to stamp the dictionary revision again (`tool/show-lexicon-stamp`, fork #62).
 
 계약(`contracts/interfaces.md` §검색 실측)이 적어 둔 사전 판본을 다시 확인하는 자리다 --
 `tool/show-vector-stamp` 가 벡터 축에서 하는 일과 같고, 내는 문자열도 `retrieval eval` 이
@@ -22,7 +22,8 @@ TOOL = ROOT / "tool" / "show-lexicon-stamp"
 
 
 def loaded() -> ModuleType:
-    """확장자가 없어 평범한 import 로는 안 들어온다 (`test_vector_floor.loaded` 와 같은 길)."""
+    """It has no extension, so a plain import does not reach it (the same way as
+    `test_vector_floor.loaded`)."""
     spec = spec_from_loader("show_lexicon_stamp", SourceFileLoader("show_lexicon_stamp", str(TOOL)))
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
@@ -31,13 +32,15 @@ def loaded() -> ModuleType:
 
 
 def test_the_tool_is_linted_like_the_rest():
-    """확장자가 없는 파일은 ruff 가 기본으로 안 본다 -- 넣지 않으면 이 도구만 검사 밖에 산다 (포크 #61)."""
+    """ruff does not look at a file with no extension by default -- without adding it, this tool alone
+    lives outside the checks (fork #61)."""
     assert TOOL.exists()
     assert f'"tool/{TOOL.name}"' in (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
 
 def test_the_csv_stamp_is_the_string_the_dictionary_itself_gives(capsys):
-    """도구가 판본 문자열을 따로 지으면 계약이 인용한 값과 평가 행의 값이 조용히 갈린다."""
+    """If the tool builds the revision string separately, the value the contract quotes and the value on the
+    evaluation rows drift apart quietly."""
     assert loaded().main(["--csv", str(topics.DICTIONARY_CSV)]) == 0
     printed = capsys.readouterr().out.strip()
     assert printed.startswith("ruleset=retrieval-topic · version=미적재")
@@ -51,7 +54,8 @@ def _csv_dictionary() -> topics.Topics:
 
 
 def test_an_unreadable_source_is_blocked_not_failed(capsys, tmp_path):
-    # 사전이 아직 없는 것은 실패가 아니라 아직 안 한 일이다 -- 벡터 저장소가 없는 것과 같은 자리다.
+    # A dictionary not there yet is not a failure but work not done -- the same place as a missing vector
+    # store.
     assert loaded().main(["--csv", str(tmp_path / "없다.csv")]) == 2
     assert loaded().main(["--csv", str(topics.DICTIONARY_CSV), "--version", "3"]) == 2
     capsys.readouterr()
@@ -71,8 +75,9 @@ def test_the_stamp_of_the_active_version_comes_from_the_database(needs_runtime_u
 
 @pytest.mark.postgres
 def test_two_versions_are_compared_on_the_axis_they_differ_on(needs_runtime_url: str, capsys):
-    """`cosmai lexicon diff` 는 행 단위라 한 주제의 별칭이 늘면 행 하나로 보이고, 순서가 갈린 것은
-    아예 안 보인다. 여섯 줄의 판본을 되짚은 것이 이 축의 대조다 (포크 #62)."""
+    """`cosmai lexicon diff` is per row, so an added alias in one topic looks like one row and a changed
+    order is not visible at all. Retracing the revision of the six lines is the comparison on this axis
+    (fork #62)."""
     from db.lexicon import activate, insert_aspects
     from db.seed._common import connect
     from tests.retrieval.conftest import csv_rows
@@ -87,6 +92,6 @@ def test_two_versions_are_compared_on_the_axis_they_differ_on(needs_runtime_url:
     out = capsys.readouterr().out
     assert "version=2" in out and "version=1" in out
     assert "~ 백탁.ko" in out
-    # 갈렸다는 것은 답이지 막힘이 아니다 -- 종료 코드는 그것으로 움직이지 않는다.
+    # A difference is an answer, not a blocker -- the exit code does not move on it.
     assert loaded().main(["--version", "1", "--against", "1", "--url", needs_runtime_url]) == 0
     assert "차이 없다" in capsys.readouterr().out

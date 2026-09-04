@@ -1,8 +1,9 @@
 """판정 셀을 받치는 소비자 발화의 선별 — `contracts/interfaces.md` §근거 가 정본이다 (포크 #6).
 
-규칙의 출처는 ydc `analysis/slices/ydc/evidence_comments.py` 이고, 슬라이스를 import 하지 않고 옮겨 적었다
-(`analysis/trend`·`analysis/judge` 가 쓴 방식). 이 모듈은 DB 를 모른다: 후보 목록을 받아 근거 행을 만들 뿐이라
-같은 규칙이 저장된 코퍼스에서도 ydc 의 원 수집 CSV 에서도 돌고, 그 자리가 골든이 성립하는 자리다.
+The rules come from ydc `analysis/slices/ydc/evidence_comments.py` and were written over rather than imported
+from the slice (the way `analysis/trend` and `analysis/judge` did it). This module knows no DB: it takes a
+candidate list, so the same rules run on the stored corpus and on ydc's raw collection CSV, and that is where
+the golden comparison stands.
 
 **근거는 검색이 아니다.** 이 파일에 순위 모델이 없는 것이 그 문장이다 — 어느 문서가 이 주제를 말했는지는
 `corpus_mention` 이 이미 답했고, 여기 남은 일은 그중 무엇을 인용할지를 좋아요로 정하는 것뿐이다. 왜
@@ -17,8 +18,9 @@ from dataclasses import dataclass
 
 from analysis.types import TopicQuarterEvidenceRow
 
-# 선별의 정의 판본. `metric`·`judgement` 와 달리 합의 문서가 아니라 코드가 정한 규칙 넷의 판본이라
-# `rule-vX.Y` 형식 그대로다 (`contracts/versioning.md`).
+# The definition revision of the selection. Unlike `metric` and `judgement` it is the revision of four rules
+# the code settles rather than an agreement document, so it keeps the `rule-vX.Y` form
+# (`contracts/versioning.md`).
 EVIDENCE_VERSION = "rule-v0.1"
 
 # 셀당 몇 건을 남기는가. 카드 한 장에 들어가는 수이고, 025 의 CHECK 이 아니라 여기가 그 수의 자리다 --
@@ -31,13 +33,14 @@ QUOTABLE_FLAGS = ""
 
 @dataclass(frozen=True)
 class Candidate:
-    """근거가 될 수 있는 (문서, 주제) 하나. 한 문서가 여러 주제에 걸리면 그만큼 후보가 된다."""
+    """One (document, topic) that could be evidence. A document hitting several topics becomes that many
+    candidates."""
 
     doc_id: str
-    quarter: str  # 부모 영상의 분기다 -- 댓글 자기 시각이 아니다 (코퍼스 규칙 3)
+    quarter: str  # the quarter of the parent video -- not the comment's own time (corpus rule 3)
     topic_key: str
     source: str
-    channel_id: str  # 댓글도 부모 영상의 채널을 싣는다 (023)
+    channel_id: str  # a comment carries the parent video's channel as well (023)
     like_count: int
     author_channel_hash: str
     quality_flags: str
@@ -45,16 +48,18 @@ class Candidate:
 
 
 def author_hash(channel_id: str) -> str:
-    """수집기가 댓글 작성자 채널 ID 를 해시한 것과 같은 규칙(ydc `youtube_collector.py`).
+    """The same rule the collector used to hash a comment author's channel ID (ydc
+    `youtube_collector.py`).
 
-    이 규칙이 수집기와 갈리면 제작자 댓글이 하나도 안 걸리고, 그 통과는 조용하다 -- 근거가 소비자
-    발화가 아니게 되는데 산출물은 그대로 그럴듯하다.
+    If this rule drifts from the collector's, not one creator comment is caught, and that pass is quiet --
+    the evidence stops being consumer speech while the output stays just as plausible.
     """
     return hashlib.sha256(f"youtube:{channel_id}".encode()).hexdigest()[:24]
 
 
 def is_creator(candidate: Candidate) -> bool:
-    """그 영상 채널 본인의 댓글인가. 좋아요 상위가 대부분 고정 댓글이라 소비자 발화가 아니다."""
+    """Is it a comment by the video's own channel. Most of the top-liked ones are pinned comments, which are
+    not consumer speech."""
     return candidate.author_channel_hash == author_hash(candidate.channel_id)
 
 
@@ -80,7 +85,8 @@ def select(
     cells: Collection[tuple[str, str, str]],
     top: int = TOP_PER_CELL,
 ) -> list[TopicQuarterEvidenceRow]:
-    """후보 전부를 받아 셀마다 상위 `top` 건을 근거 행으로. `cells` 는 판정된 (주제, 분기, source) 다.
+    """Takes every candidate and turns the top `top` per cell into evidence rows. `cells` are the judged
+    (topic, quarter, source).
 
     격자 밖 후보를 여기서 떨어뜨리는 것은 025 의 FK 가 거절할 행을 만들지 않기 위해서다 --
     `trend_use = false` 인 주제(`선크림`·`추천_재구매`)에는 판정 셀이 아예 없다.

@@ -1,7 +1,7 @@
-"""RuleLinker: 브랜드·엔티티 링크(p3 규칙)와 사이트 간 제품 식별(p2 규칙).
+"""RuleLinker: brand and entity linking (the p3 rules) and cross-site product identification (the p2 rules).
 
-규칙은 analysis/slices/p3-youtube-brand-link/link_brands.py 와
-analysis/slices/p2-ranking-dynamics/build_product_ref.py 를 옮긴 것이다(슬라이스는 import 하지 않는다).
+The rules are carried over from analysis/slices/p3-youtube-brand-link/link_brands.py and
+analysis/slices/p2-ranking-dynamics/build_product_ref.py (the slices are not imported).
 """
 
 from __future__ import annotations
@@ -24,9 +24,10 @@ from analysis.types import (
 
 LINKER_VERSION = "rule-v1.0"
 
-# 판정 3: 계약 예시가 'oy:' 다. p2 의 source[:2] 규칙에 올리브영만 예외를 둔다.
+# Decision 3: the contract example is 'oy:'. oliveyoung is the one exception to the source[:2] rule of p2.
 SOURCE_PREFIX = {"oliveyoung": "oy"}
-# 앵커 우선순위이자 사이트 쌍의 순회 순서 — 올리브영이 가장 넓은 카탈로그라 앵커다.
+# The anchor priority and the traversal order of site pairs -- oliveyoung is the anchor because it has the
+# widest catalogue.
 SITES = ("oliveyoung", "glowpick", "hwahae", "daisomall")
 
 BRAND_ALIAS = {
@@ -80,7 +81,8 @@ NON_WORD = re.compile(r"[^\w가-힣\.]+")
 BARE_DOT = re.compile(r"(?<!\d)\.|\.(?!\d)")
 NUMBER = re.compile(r"[\d\.]+")
 SPACES = re.compile(r"\s+")
-# 제형·재질 일반명사. 이것만 겹치는 두 이름은 같은 제품의 증거가 아니다.
+# Generic nouns for formulation and material. Two names overlapping only in these are no evidence of the
+# same product.
 STOP_TOK = frozenset({
     "크림", "세럼", "토너", "로션", "앰플", "에센스", "마스크", "패드", "샴푸", "선크림", "수분", "진정",
     "미스트", "클렌저", "젤", "오일", "밤", "팩", "워시", "바디", "헤어", "립", "페이셜", "스킨", "케어",
@@ -103,7 +105,8 @@ FORM_MAP = {
     "크림미스트": "미스트", "쉐도우": "섀도우", "폼": "클렌징폼", "클렌저": "클렌징폼", "수분크림": "크림",
     "마스크시트": "마스크", "팩": "마스크", "톤업선크림": "선크림",
 }  # fmt: skip
-# 한쪽에만 있으면 다른 제품인 토큰(라인 변형·색·부위). 숫자 토큰도 같은 역할을 한다.
+# Tokens that mean a different product when only one side has them (line variants, colours, body parts). A
+# numeric token plays the same role.
 DISCRIM = frozenset({
     "톤업", "포맨", "맨", "미니", "미니어처", "대용량", "리필", "키즈", "베이비", "프로", "플러스", "라이트",
     "딥", "오일프리", "젤", "쿨링", "워터프루프", "더마", "클리어", "수딩", "모공", "탄력", "흔적", "미백",
@@ -111,7 +114,7 @@ DISCRIM = frozenset({
     "핸드", "풋", "스칼프", "두피", "선", "마일드", "센서티브", "인텐시브", "리치", "프레쉬", "매트",
     "글로우", "글로시", "벨벳", "샤인", "멜팅", "젤리", "워터", "밀크", "오일", "엠디", "md", "패드",
 })  # fmt: skip
-# 대괄호 안에 규격을 적는 사이트는 대괄호째 지우면 이름이 비어 버린다.
+# On a site that writes the specification inside brackets, deleting the whole bracket empties the name.
 KEEP_BRACKET_SOURCES = frozenset({"glowpick", "hwahae"})
 
 
@@ -167,7 +170,7 @@ def _bigrams(name_norm: str) -> frozenset[str]:
 
 def _form(name_norm: str) -> str:
     found = [FORM_MAP.get(m.group(), m.group()) for m in FORM_RE.finditer(name_norm.replace(" ", ""))]
-    return found[-1] if found else ""  # 마지막 제형 토큰이 주 제형이다
+    return found[-1] if found else ""  # the last formulation token is the main formulation
 
 
 def normalized(name: str, brand: str | None, source: str, product_key: str = "") -> Normalized:
@@ -192,14 +195,16 @@ def _dice(a: frozenset[str], b: frozenset[str]) -> float:
 
 
 def accepts(a: Normalized, b: Normalized) -> Match:
-    """p2 v2 규칙: 주 제형 일치 + 변별·숫자 토큰 불일치 없음 + (자카드 | Dice) 문턱."""
+    """The p2 v2 rule: matching main formulation + no mismatch of distinguishing or numeric tokens +
+    (Jaccard | Dice) threshold."""
     shared = a.tokens & b.tokens
     sig = a.significant & b.significant
     dice = round(_dice(a.bigrams, b.bigrams), 3)
     union = a.significant | b.significant
     jaccard = len(sig) / len(union) if union else 0.0
     glued_a, glued_b = a.name_norm.replace(" ", ""), b.name_norm.replace(" ", "")
-    # 토큰으로는 어긋나도 글자로는 양쪽에 다 있는 변별어는 어긋난 것이 아니다.
+    # A distinguishing word that mismatches by token but is present on both sides by characters has not
+    # mismatched.
     differing = {t for t in (a.significant ^ b.significant) & DISCRIM if (t in glued_a) != (t in glued_b)} | (
         a.numbers ^ b.numbers
     )
@@ -226,14 +231,14 @@ class _Union:
 
 
 class RuleLinker:
-    """`Linker` 프로토콜의 규칙 구현."""
+    """The rule implementation of the `Linker` protocol."""
 
     def __init__(self, version: str = LINKER_VERSION) -> None:
         self.version = version
         self._kinds: dict[int, dict[str, str]] = {}
 
     def _kind_of(self, lexicon: Lexicon) -> dict[str, str]:
-        """표면 → kind. surface_re 는 ingredient 표면까지 물기 때문에 히트마다 되짚어야 한다."""
+        """Surface -> kind. surface_re bites ingredient surfaces too, so every hit has to be traced back."""
         cached = self._kinds.get(lexicon.version)
         if cached is None:
             cached = {}
@@ -275,7 +280,8 @@ class RuleLinker:
         groups = _Union(len(rows))
         seen: dict[tuple[str, str, str], int] = {}
         for i, norm in enumerate(norms):
-            # 사이트 안의 기획·용량 변형과 중복 키는 정규화 이름이 같다 — 먼저 한 덩어리로 접는다.
+            # Bundle and volume variants within a site, and duplicate keys, have the same normalized name --
+            # they are folded into one group first.
             key = (norm.source, normalize_brand(brands[i]), norm.name_norm)
             if key in seen:
                 groups.union(i, seen[key])
@@ -285,12 +291,13 @@ class RuleLinker:
         return ProductMatch(
             refs=tuple(self._refs(rows, norms, brands, groups)),
             members=tuple(self._members(rows, norms, groups, candidates)),
-            variants=(),  # B3: 산출 알고리즘이 없어 이 유닛의 범위 밖이다
+            variants=(),  # B3: no output algorithm exists, so it is outside this unit
             candidates=tuple(candidates),
         )
 
     def _brands(self, rows: list[ProductRow]) -> list[str]:
-        """다이소몰은 브랜드 컬럼이 없다 — 이름 앞토막이 올리브영 브랜드면 그것으로 본다."""
+        """Daisomall has no brand column -- if the head of the name is an oliveyoung brand, that is taken as
+        the brand."""
         catalogue = sorted(
             {p.brand for p in rows if p.source == "oliveyoung" and p.brand}, key=len, reverse=True
         )
@@ -347,7 +354,7 @@ class RuleLinker:
         out: list[ProductRefRow] = []
         for members in _clusters(rows, groups):
             sources = {rows[i].source for i in members}
-            if len(sources) < 2:  # 한 사이트 안의 변형만 모인 덩어리는 사이트 간 식별이 아니다
+            if len(sources) < 2:  # a group of variants inside one site is not cross-site identification
                 continue
             anchor = next((i for i in members if rows[i].source == "oliveyoung"), members[0])
             out.append(
@@ -370,7 +377,8 @@ class RuleLinker:
         groups: _Union,
         candidates: list[ProductCandidateRow],
     ) -> list[ProductMemberRow]:
-        # A13: match_score 는 같은 쌍의 후보 dice 다. 한 제품이 여러 쌍에 걸리면 가장 높은 것을 쓴다.
+        # A13: match_score is the candidate dice of the same pair. When one product falls in several pairs the
+        # highest is used.
         best: dict[tuple[str, str], float] = {}
         for c in candidates:
             if not c.mutual:

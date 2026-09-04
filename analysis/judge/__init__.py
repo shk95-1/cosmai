@@ -1,9 +1,9 @@
 """트렌드 유형 7종 판정과 두 점수 — `contracts/interfaces.md` §판정 이 정본이다 (포크 #40).
 
-규칙의 출처는 ydc `analysis/slices/ydc/judge.py`(v0.2)이고, 슬라이스를 import 하지 않고 옮겨 적었다
-(`analysis/trend/` 가 쓴 방식). 이 모듈은 DB 를 모른다: 지표 행(`MetricsTopicQuarterRow`)을 받아 판정
-행을 만들 뿐이라, 같은 규칙을 저장된 표에서도 원 수집 CSV 에서도 같은 코드로 돌릴 수 있다 — 골든
-대조가 성립하는 자리가 그것이다.
+The rules come from ydc `analysis/slices/ydc/judge.py` (v0.2) and were written over rather than imported from
+the slice (the way `analysis/trend/` did it). This module knows no DB: it takes metric rows
+(`MetricsTopicQuarterRow`) and produces judgement rows, so the same rules run on the stored table and on the
+raw collection CSV with the same code -- that is where the golden comparison stands.
 
 판정 상수 다섯의 근거와 채택/재적합 판단은 계약 §판정 의 표가 지고, `tests/test_judge_constants.py`
 가 그 표와 이 파일의 수를 대조한다. 값만 여기 있고 근거가 계약에 없으면 "왜 0.35 인가"에 답할 자리가
@@ -19,8 +19,9 @@ from collections.abc import Mapping, Sequence
 from analysis.trend import MIN_MENTIONS
 from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
 
-# 판정의 정의 판본. `metric` 과 따로 있는 것이 뜻이다 — 지표를 다시 세지 않고 기준만 바꾸는 것이
-# 두 단계를 갈라 둔 이유이고, 그때 움직이는 것은 이 키 하나다 (`contracts/versioning.md`).
+# The definition revision of the judgement. Being separate from `metric` is the point -- changing only the
+# criteria without recounting the metrics is why the two stages are apart, and this one key is what moves
+# then (`contracts/versioning.md`).
 JUDGEMENT_VERSION = "v0.2"
 
 # --- 상수 (근거와 채택 판단은 계약 §판정 의 표) ---
@@ -28,7 +29,8 @@ TAU = 0.35
 DIFFUSION_TAU = 0.089
 EVIDENCE_FLOOR = 50.0
 NEW_TOPIC_MAX_SHARE = 0.01
-# 지표 표의 표본 게이트와 같은 수다. 여기서 다시 정의하면 022 의 CHECK 과 조용히 갈릴 수 있다.
+# The same number as the sample gate of the metrics table. Redefining it here could drift quietly from the
+# CHECK of 022.
 MIN_DOCUMENTS = MIN_MENTIONS
 W_EVIDENCE: Mapping[str, float] = {"documents": 43.75, "channels": 31.25, "unique": 25.0}
 W_SCORE: Mapping[str, float] = {
@@ -40,7 +42,7 @@ W_SCORE: Mapping[str, float] = {
 # 저장 자리수 (계약 §판정 "판정 자리수", 024 의 numeric(p,s)).
 DIGITS: Mapping[str, int] = {"evidence_strength": 1, "opportunity_score": 1, "gap_pp": 2}
 
-# --- 어휘 ---
+# --- vocabulary ---
 SURGE = "급상승"
 FADING = "사라짐"
 STICKY = "지속 인기"
@@ -71,10 +73,11 @@ class SparseGrid(LookupError):
 
 
 class MissingValue(LookupError):
-    """비율 칸이 비어 있다. 024 는 그 칸들을 nullable 로 두지만 판정은 다 찬 행 위에서만 뜻이 있다."""
+    """A ratio column is empty. 024 leaves those columns nullable, but a judgement only means something on a
+    row that is filled."""
 
 
-# 지표 행의 완전한 키. 판정이 이 키로 그 행에 1:1 로 붙는다 (024 의 FK).
+# The complete key of a metric row. A judgement attaches 1:1 to that row by this key (the FK of 024).
 Key = tuple[int, str, str, str, str, str, int, str]
 
 
@@ -86,12 +89,12 @@ def _key(row: MetricsTopicQuarterRow) -> Key:
 
 
 def _population(row: MetricsTopicQuarterRow) -> tuple[int, str, str, int, str, str]:
-    """백분위와 0~100 정규화가 도는 범위. 한 source 의 산출 한 벌이다."""
+    """The range the percentile and the 0-100 normalization run over. One output set of one source."""
     return (row.run_id, row.scope, row.content_type, row.panel_version, row.panel_role, row.source)
 
 
 def _cell(row: MetricsTopicQuarterRow) -> tuple[int, str, str, int, str, str, str]:
-    """source 를 뺀 자리. `gap_pp` 가 두 source 행을 여기서 만난다."""
+    """The place with source taken out. `gap_pp` meets the two source rows here."""
     return (
         row.run_id, row.scope, row.content_type, row.panel_version,
         row.panel_role, row.topic_key, row.quarter,
@@ -106,15 +109,17 @@ def _number(row: MetricsTopicQuarterRow, name: str) -> float:
 
 
 def previous_year_quarter(quarter: str) -> str:
-    """비교 상대가 인접 분기가 아니라 전년 동분기인 것은 선케어가 계절 상품이기 때문이다."""
+    """The comparison is against the same quarter a year earlier rather than the adjacent quarter because
+    suncare is a seasonal product."""
     return f"{int(quarter[:4]) - 1}Q{quarter[5]}"
 
 
 def percentile_rank(sorted_values: Sequence[int], value: int) -> float:
-    """그 source 안에서 value 가 놓인 위치(0~1). 같은 값이 여럿이면 그 구간의 중간을 준다.
+    """Where value sits inside that source (0-1). With several equal values it gives the middle of that band.
 
-    절대 기준을 하나 쓰지 않는 것은 소스별 스케일이 다르기 때문이다 — 이 코퍼스 실측으로 영상 중앙
-    16 대 댓글 중앙 62 라, 한 기준을 쓰면 영상 셀이 통째로 낮게 나온다.
+    One absolute criterion is not used because the scale differs per source -- measured on this corpus the
+    video median is 16 against a comment median of 62, so one criterion would put the video cells wholesale
+    at the bottom.
     """
     if len(sorted_values) <= 1:
         return 1.0
@@ -124,7 +129,7 @@ def percentile_rank(sorted_values: Sequence[int], value: int) -> float:
 
 
 def evidence_strength(doc_rank: float, channel_ratio: float, unique_ratio: float) -> float:
-    """0~100. 세 항을 각각 0~1 로 두고 가중합한다.
+    """0-100. The three terms are each put on 0-1 and summed with weights.
 
     `channel_ratio` 는 `channel_count / denom_channels` 이고, 이것은 `channel_diffusion` 이 쓰는 두
     채널 비율과 **또 다른 세 번째** 비율이다 (계약 §판정 의 표). 영상 행에서는 첫 두 비율이 우연히
@@ -195,7 +200,8 @@ def _classify(
         return FADING, ""
 
     if velocity < -TAU:
-        # 두 조건을 함께 요구해서 가장 큰 하락이 여기로 떨어진다. 규칙은 그대로 두고 사유만 남긴다.
+        # Requiring both conditions together drops the largest fall here. The rule is left as it is and only
+        # the reason is recorded.
         return HELD, ABOVE_HALF_PEAK
     if abs(velocity) <= TAU and persist < 3:
         return HELD, WITHIN_TAU_SHORT_PERSISTENCE
@@ -208,7 +214,8 @@ def _score(
     verdicts: Mapping[Key, tuple[str, str]],
     last: str,
 ) -> dict[Key, float]:
-    """네 항을 0~1 로 맞춰 가중합한 뒤 그 source 안에서 0~100 으로 정규화한다 — run 상대인 눈금이다."""
+    """The four terms are put on 0-1 and summed with weights, then normalized to 0-100 inside that source --
+    a scale relative to the run."""
     scored = [
         cell
         for cell in cells
@@ -238,7 +245,8 @@ def _score(
 
 
 def _gaps(rows: Sequence[MetricsTopicQuarterRow]) -> dict[tuple[int, str, str, int, str, str, str], float]:
-    """댓글 구성비 - 영상 구성비. 갭 자체가 신호라 두 계열을 가중합으로 섞지 않는다."""
+    """Comment share minus video share. The gap itself is the signal, so the two series are not mixed by a
+    weighted sum."""
     compositions: dict[tuple[int, str, str, int, str, str, str], dict[str, float]] = defaultdict(dict)
     for row in rows:
         compositions[_cell(row)][row.source] = _number(row, "composition")
@@ -250,10 +258,11 @@ def _gaps(rows: Sequence[MetricsTopicQuarterRow]) -> dict[tuple[int, str, str, i
 
 
 def judge(rows: Sequence[MetricsTopicQuarterRow]) -> list[TopicQuarterJudgementRow]:
-    """한 run 의 지표 행 전부를 받아 같은 키로 판정 행을 낸다 (1:1, 024 의 FK).
+    """Takes every metric row of one run and emits judgement rows under the same key (1:1, the FK of 024).
 
-    행 하나만으로는 판정할 수 없다 — 근거 수 백분위도 기회 점수의 0~100 도 그 source 의 행 집합
-    전체가 있어야 정해진다. 판정이 run 단위 파생인 이유가 그것이다.
+    One row on its own cannot be judged -- both the evidence-count percentile and the 0-100 of the
+    opportunity score are settled only with the whole row set of that source. That is why the judgement is a
+    run-level derivation.
     """
     populations: dict[tuple[int, str, str, int, str, str], list[MetricsTopicQuarterRow]] = defaultdict(list)
     for row in rows:

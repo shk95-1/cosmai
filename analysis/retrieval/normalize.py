@@ -1,4 +1,5 @@
-"""텍스트 정규화. 소스가 늘어도 같은 표면형을 만든다 (slices/ydc/trend.py normalize_text)."""
+"""Text normalization. The same surface form however many sources are added (normalize_text in
+slices/ydc/trend.py)."""
 
 from __future__ import annotations
 
@@ -10,8 +11,8 @@ CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 WHITESPACE_RE = re.compile(r"\s+")
 
 
-# 고정점 반복 상한. 실측으로 2회면 멎는다(이중 이스케이프 `&amp;lt;`가 최악). 상한을 두는
-# 이유는 적대적 입력(`&amp;amp;amp;...`)이 루프를 길게 끄는 것을 막기 위해서다.
+# Fixed-point iteration cap. Measured, it settles after 2 rounds (double escaping, `&amp;lt;`, is the worst).
+# The cap is there to stop an adversarial input (`&amp;amp;amp;...`) from dragging the loop out.
 _MAX_ROUNDS = 4
 
 
@@ -24,7 +25,8 @@ def _once(text: str) -> str:
 
 
 def normalize_text(value: str | None) -> str:
-    """HTML 엔티티 해제 -> NFKC -> 제어문자 제거 -> 공백 축약. **고정점까지 돌린다.**
+    """HTML entities unescaped -> NFKC -> control characters removed -> whitespace collapsed. **Run to the
+    fixed point.**
 
     한 번만 돌리면 멱등이 아니다 -- `&amp;lt;` 는 한 번에 `&lt;` 까지만 풀린다. 그런데
     chunks.check_rows 가 `text != normalize_text(text)` 로 계약 위반을 판정하므로, 한 번만

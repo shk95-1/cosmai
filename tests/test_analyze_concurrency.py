@@ -35,11 +35,12 @@ GEMMA4 = OWNERS[SUNBLOCK].version
 BOOM = "polarity boom"
 SOURCE_TABLES = ("review", "rank_snapshot", "product")
 TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"
-# 덤프 전체를 한 스키마에 부으면 trend_radar 와 부딪힌다 — polarity 가 읽는 두 표만 세운다.
+# Pouring the whole dump into one schema collides with trend_radar -- only the two tables polarity reads are
+# stood up.
 TUBEDEPTH_TABLES = ("comments", "video_snapshots")
-# link 은 제목·자막·댓글 셋을 모두 돈다 (analysis/linker/pipeline.py DOCUMENTS).
+# link walks all three of titles, transcripts and comments (DOCUMENTS in analysis/linker/pipeline.py).
 LINK_TUBEDEPTH_TABLES = ("comments", "video_snapshots", "transcripts")
-# aggregate 의 run_ranking 이 읽는 나머지 두 표 (analysis/aggregate/ranking.py).
+# The other two tables run_ranking of aggregate reads (analysis/aggregate/ranking.py).
 RANKING_TABLES = ("price_point", "review_stats")
 
 # P1 은 선블록(주인 있는 scope), P2 는 샴푸(주인 없는 scope) — 한 페이지에 둘 다 실려야 규칙 실행도
@@ -56,7 +57,7 @@ PRODUCTS = (
 
 RIVAL_NOTE = f"analyze:polarity:{GEMMA4}"
 RULE_NOTE = f"analyze:polarity:{RulePolarity.version}"
-RIVAL_VERSIONS = '{"polarity": "%s"}' % GEMMA4  # noqa: UP031 - jsonb 리터럴이라 f-string 이 읽기 나쁘다
+RIVAL_VERSIONS = '{"polarity": "%s"}' % GEMMA4  # noqa: UP031 - a jsonb literal reads badly as an f-string
 OPEN_RUN = "INSERT INTO analysis_run (versions, note) VALUES (%s::jsonb, %s) RETURNING run_id"
 GRANTED = (
     "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = %s AND objid = %s "
@@ -66,10 +67,10 @@ GRANTED = (
 
 @pytest.fixture
 def loaded(needs_schema: str, trend_radar_schema: str, _schema_name: str, needs_runtime_url: str) -> str:
-    """needs + trend_radar 가 한 스키마에 있다 — 운영에서는 두 스키마다 (run_stage 의 인자).
+    """needs + trend_radar are in one schema -- in production they are two (the arguments of run_stage).
 
-    tubedepth 는 세우지 않는다: 이 파일의 관심은 겹침이고, comments 표가 없으면 polarity 의 유튜브
-    가지는 통째로 건너뛴다 (`_exists`).
+    tubedepth is not stood up: this file cares about overlap, and without the comments table the YouTube
+    branch of polarity is skipped wholesale (`_exists`).
     """
     seed.run_all(needs_runtime_url, only=("lexicon",))
     engine = create_engine(needs_schema)
@@ -102,10 +103,11 @@ def loaded(needs_schema: str, trend_radar_schema: str, _schema_name: str, needs_
 
 @pytest.fixture
 def half_wired_youtube(loaded: str, needs_schema: str, _schema_name: str) -> str:
-    """tubedepth 의 두 표를 세우되 `video_snapshots` 의 SELECT 는 열지 않는다.
+    """It stands the two tubedepth tables up but does not open SELECT on `video_snapshots`.
 
-    운영에서 새 표의 grant 를 빠뜨리면(db/grants/needs_runtime_reader.sql) polarity 의 yt_comment
-    가지가 정확히 `_channels` 에서 psycopg.Error 로 죽는다 — 리뷰 가지를 다 쓴 직후다.
+    Missing the grant of a new table in production (db/grants/needs_runtime_reader.sql) makes the yt_comment
+    branch of polarity die exactly at `_channels` with a psycopg.Error -- right after it has used up the
+    review branch.
     """
     dump = TUBEDEPTH_DDL.read_text(encoding="utf-8")
     ddl = "\n".join(
@@ -134,8 +136,9 @@ def _open(url: str, schema: str, table: str) -> None:
 
 
 class _Interrupt:
-    """첫 판정 호출에서 `during` 을 부르고, 부르라면 죽는다 — 두 실행이 동시에 열린 순간을 결정적으로
-    만든다. 스레드가 아니라 콜백인 이유: 겹침의 시각이 아니라 겹침의 상태가 결함의 원인이다."""
+    """It calls `during` on the first classification call and dies if told to -- it makes the moment two runs
+    are open at once deterministic. A callback rather than a thread because the cause of the defect is the
+    state of the overlap, not its timing."""
 
     def __init__(self, during: Callable[[], None], version: str, explode: bool = True) -> None:
         self.version = version
@@ -165,7 +168,7 @@ def _rows(url: str) -> dict[int, tuple[str, str, bool]]:
 
 
 def _open_rival(url: str, note: str) -> int:
-    """남의 실행이 이미 연 run — 이 행은 아무도 건드리면 안 된다."""
+    """A run someone else's execution already opened -- nobody may touch this row."""
     with connect(url) as conn, conn.cursor() as cur:
         cur.execute(OPEN_RUN, (RIVAL_VERSIONS, note))
         row = cur.fetchone()
@@ -176,7 +179,7 @@ def _open_rival(url: str, note: str) -> int:
 
 @pytest.fixture
 def held_elsewhere(runtime_url_for_tests: str) -> Iterator[None]:
-    """다른 프로세스가 analyze 락을 쥔 상태. 세션 스코프라 커넥션이 사는 동안 유지된다."""
+    """Another process holds the analyze lock. It is session-scoped, so it lasts as long as the connection."""
     classid, objid = advisory_key(ANALYZE)
     with connect(runtime_url_for_tests) as conn:
         conn.autocommit = True
@@ -190,7 +193,7 @@ def held_elsewhere(runtime_url_for_tests: str) -> Iterator[None]:
                 cur.execute("SELECT pg_advisory_unlock(%s, %s)", (classid, objid))
 
 
-# --- 결함 1: 실행은 자기가 연 run 만 닫는다 -------------------------------------------------------
+# --- Defect 1: a run closes only the run it opened itself ----------------------------------------
 
 
 def test_a_dying_manual_pass_leaves_the_rule_run_it_overlapped_alone(loaded: str, _schema_name: str):
@@ -213,11 +216,11 @@ def test_a_dying_manual_pass_leaves_the_rule_run_it_overlapped_alone(loaded: str
     assert found.status == "failed" and BOOM in found.detail
     rows = _rows(loaded)
     assert rival, "the stub never ran, so nothing overlapped"
-    # 남의 run 은 여전히 도는 중이고 note 도 그대로다.
+    # Someone else's run is still going and its note is unchanged.
     assert rows[rival[0]] == ("running", RULE_NOTE, False)
     mine = [run_id for run_id in rows if run_id != rival[0]]
     assert len(mine) == 1, rows
-    # 그리고 자기 run 은 열린 채 남지 않는다.
+    # And its own run is not left open.
     assert rows[mine[0]][0] == "failed" and rows[mine[0]][2]
 
 
@@ -274,11 +277,11 @@ def test_a_failed_solo_pass_keeps_the_version_it_was_labelling_with(loaded: str,
         assert cur.fetchone() == ("failed", GEMMA4)
 
 
-# --- 결함 3: analyze 끼리 락 하나로 겹침을 막는다 -------------------------------------------------
+# --- Defect 3: one lock stops two analyze runs overlapping -----------------------------------------
 
 
 def test_an_analyze_run_holds_the_analyze_lock_while_a_stage_works(loaded: str, _schema_name: str):
-    """락이 실제로 잡히는지 — 단계가 도는 도중의 pg_locks 를 남의 세션이 읽는다."""
+    """Is the lock really taken -- another session reads pg_locks while a stage is running."""
     classid, objid = advisory_key(ANALYZE)
     seen: list[int] = []
 
@@ -299,9 +302,10 @@ def test_an_analyze_run_holds_the_analyze_lock_while_a_stage_works(loaded: str, 
             polarity=polarity,
             owners=NO_OWNERS,
         )
-        # 놓아줬는지는 락을 쥔 커넥션이 살아 있는 동안 물어야 한다 — 세션이 닫히면 서버가 회수하므로
-        # 닫은 뒤의 pg_locks 는 unlock 이 있든 없든 0 이다(진공 단언). 같은 세션 재획득도 못 잡는다:
-        # pg_try_advisory_lock 은 재진입 가능해서 두 번 잡아도 granted 는 1 이다.
+        # Whether it was released has to be asked while the connection holding it is alive -- the server
+        # reclaims it when the session closes, so pg_locks after closing is 0 with or without the unlock (a
+        # vacuous assertion). Reacquiring on the same session cannot catch it either:
+        # pg_try_advisory_lock is reentrant and granted is 1 even taken twice.
         with conn.cursor() as cur:
             cur.execute(GRANTED, (classid, objid & 0xFFFFFFFF))
             row = cur.fetchone()
@@ -314,8 +318,9 @@ def test_an_analyze_run_holds_the_analyze_lock_while_a_stage_works(loaded: str, 
 def test_a_lock_that_went_missing_mid_run_is_said_out_loud(
     runtime_url_for_tests: str, capsys: pytest.CaptureFixture[str]
 ):
-    """수집기와 같은 한 줄이다 (collectors/commerce/storage/locks.py): `pg_advisory_unlock` 이 false 면
-    락은 실행 도중에 갔고, 2.5~4시간짜리 실행에서 그 한 줄이 "둘이 겹쳤을 수 있다"의 유일한 사후 증거다.
+    """The same one line as the collectors (collectors/commerce/storage/locks.py): if `pg_advisory_unlock` is
+    false the lock went during the run, and on a 2.5-4 hour run that one line is the only evidence after the
+    fact of "the two may have overlapped".
     """
     classid, objid = advisory_key(ANALYZE)
     with connect(runtime_url_for_tests) as conn, analyze_lock(conn) as held:
@@ -337,7 +342,7 @@ def test_a_second_analyze_run_yields_instead_of_interleaving(
     assert found.status == "partial", found.status
     assert "skipped" in found.note and ANALYZE in found.note
     with connect(loaded) as conn, conn.cursor() as cur:
-        # 사유는 크론 메일만이 아니라 운영 뷰(analysis_health)에도 남는다.
+        # The reason stays not only in the cron mail but in the production view (analysis_health).
         cur.execute("SELECT status, note FROM analysis_run")
         rows = cur.fetchall()
         cur.execute("SELECT count(*) FROM metrics_need")
@@ -348,7 +353,7 @@ def test_a_second_analyze_run_yields_instead_of_interleaving(
 def test_a_polarity_pass_that_cannot_take_the_lock_writes_no_rows(
     loaded: str, _schema_name: str, held_elsewhere: None
 ):
-    """양보한 실행은 한 달도 지우지 않는다 — 반쯤 지운 채 물러나면 결함 2 를 스스로 만든다."""
+    """A run that yielded deletes not one month -- withdrawing half-deleted would create defect 2 itself."""
     with connect(loaded) as conn:
         found = run_stage(
             conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=NO_OWNERS
@@ -359,12 +364,12 @@ def test_a_polarity_pass_that_cannot_take_the_lock_writes_no_rows(
         assert cur.fetchone() == (0,)
 
 
-# --- 결함 2: 반쯤 다시 쓰인 달이 조용하지 않다 ----------------------------------------------------
+# --- Defect 2: a half-rewritten month is not silent -------------------------------------------------
 
 
 def test_the_month_being_rewritten_is_named_on_the_open_run(loaded: str, _schema_name: str):
-    """`replace_stale` 은 한 달치를 지우고 커밋한 뒤 페이지별로 다시 쓴다 — 그 사이가 부분만 남은 창이다.
-    그 창 안에 있다는 사실은 DB 가 스스로 말해야 한다."""
+    """`replace_stale` deletes a month, commits, and rewrites it page by page -- in between is the window
+    where only part of it is left. That it is inside that window has to be said by the DB itself."""
     seen: list[str] = []
 
     def observe() -> None:
@@ -384,7 +389,7 @@ def test_the_month_being_rewritten_is_named_on_the_open_run(loaded: str, _schema
         )
     assert found.status == "ok", found.detail
     assert seen == [f"{RULE_NOTE} rewriting=review/{MONTH}"], seen
-    # 다 쓰고 나면 표식은 사라진다 — 끝난 달이 계속 부분으로 보이면 안 된다.
+    # Once it is fully written the mark disappears -- a finished month must not keep looking partial.
     with connect(loaded) as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM analysis_run WHERE note LIKE '%rewriting=%'")
         assert cur.fetchone() == (0,)
@@ -404,7 +409,8 @@ def test_a_month_left_half_written_by_a_dead_pass_is_reported_not_swallowed(load
     assert found.status == "partial", found.status
     assert f"review/{MONTH}/{SUNBLOCK}" in found.note
     rows = _rows(loaded)
-    # 그 run 은 영원히 running 이 아니라 닫힌다. 표식은 note 에 남아 어느 달인지 계속 말한다.
+    # That run is closed rather than running forever. The mark stays in the note and keeps saying which
+    # month.
     assert rows[dead][0] == "failed" and rows[dead][2]
     assert f"rewriting=review/{MONTH}/{SUNBLOCK}" in rows[dead][1]
 
@@ -428,15 +434,15 @@ def test_a_caught_failure_leaves_a_half_month_the_next_run_finds(loaded: str, _s
         )
     assert died.status == "failed" and died.run_id is not None
     assert f"rewriting=review/{MONTH}/{SUNBLOCK}" in _rows(loaded)[died.run_id][1]
-    # 다음 밤의 규칙 실행이 그 표식을 찾아 이름으로 말한다.
+    # The next night's rule run finds that mark and names it.
     with connect(loaded) as conn:
         next_night = run_stage(
             conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=OWNERS
         )
     assert next_night.status == "partial", next_night.note
     assert f"review/{MONTH}/{SUNBLOCK}" in next_night.note
-    # 한 번만 말한다 — 주인이 다시 돌 때까지 메워지지 않는 달이라 매일 밤 같은 partial 을 내면
-    # partial 이 아무 뜻도 없어진다.
+    # It is said once -- the month is not filled until the owner runs again, and emitting the same partial
+    # every night would make partial mean nothing.
     with connect(loaded) as conn:
         after = run_stage(
             conn, "polarity", commerce_schema=_schema_name, youtube_schema=_schema_name, owners=OWNERS
@@ -459,7 +465,7 @@ def test_a_month_finished_before_the_run_died_is_not_called_stale(
     assert died.status == "failed" and "permission denied" in died.detail
     assert died.run_id is not None
     assert "rewriting=" not in _rows(half_wired_youtube)[died.run_id][1]
-    # grant 를 채우면 다음 실행은 성공한다 — 그리고 다 쓴 달을 stale 이라 말하지 않는다.
+    # Fill the grant and the next run succeeds -- and does not call a fully written month stale.
     _open(needs_schema, _schema_name, "video_snapshots")
     with connect(half_wired_youtube) as conn:
         found = run_stage(
@@ -468,14 +474,16 @@ def test_a_month_finished_before_the_run_died_is_not_called_stale(
     assert found.status == "ok", found.note
 
 
-# --- 결함 4: 단독 stage 실행의 partial 이 운영 뷰에 남는다 ----------------------------------------
-# 종료 코드는 크론 메일에만 있다. 계약이 "운영자가 보는 것은 그 행이다"라고 한 곳은 analysis_run 이고,
-# 아무도 메우지 않는 유일한 종류의 구멍(주인 있는 scope 의 반쪽 달)을 찾아내는 실행이 바로 단독 실행이다.
+# --- Defect 4: the partial of a standalone stage run stays in the production view -------------------
+# The exit code is only in the cron mail. Where the contract says "what the operator looks at is that row" is
+# analysis_run, and the run that finds the one kind of hole nobody fills (a half month of an owned scope) is
+# exactly the standalone run.
 
 
 @pytest.fixture
 def wired_youtube(loaded: str, needs_schema: str, _schema_name: str) -> str:
-    """link 이 읽는 tubedepth 세 표가 다 서 있고 다 열린 상태 (analysis/linker/pipeline.py DOCUMENTS)."""
+    """All three tubedepth tables link reads are standing and open (DOCUMENTS in
+    analysis/linker/pipeline.py)."""
     dump = TUBEDEPTH_DDL.read_text(encoding="utf-8")
     ddl = "\n".join(
         dump.split(f"CREATE TABLE tubedepth.{table} (")[1]
@@ -495,7 +503,7 @@ def wired_youtube(loaded: str, needs_schema: str, _schema_name: str) -> str:
 
 
 def _reported(url: str, dead: int) -> list[tuple[str, str, bool]]:
-    """죽은 run 이 아닌 행 중 그 달을 이름으로 말하는 partial 행."""
+    """The partial row that names that month, among the rows that are not the dead run."""
     return [
         row
         for run_id, row in _rows(url).items()
@@ -519,7 +527,8 @@ def test_a_solo_polarity_pass_closes_its_own_run_as_partial(loaded: str, _schema
     assert status == "partial", f"analysis_health still says {status} for run {found.run_id}"
     assert f"review/{MONTH}/{SUNBLOCK}" in note and finished
     assert dead != found.run_id
-    # 판본은 그대로다 — 닫는 쪽이 versions 를 덮으면 무엇으로 라벨했는지가 뷰에서 사라진다.
+    # The revision is unchanged -- if the closing side overwrote versions, what it labelled with would
+    # disappear from the view.
     with connect(loaded) as conn, conn.cursor() as cur:
         cur.execute("SELECT versions ->> 'polarity' FROM analysis_run WHERE run_id = %s", (found.run_id,))
         assert cur.fetchone() == (RulePolarity.version,)
@@ -528,13 +537,14 @@ def test_a_solo_polarity_pass_closes_its_own_run_as_partial(loaded: str, _schema
 def test_a_solo_aggregate_run_reports_the_half_month_without_taking_its_notes_key(
     loaded: str, needs_schema: str, _schema_name: str
 ):
-    """aggregate 의 note 는 `_run_id` 가 run 을 되찾는 자연키다 — 거기에 보고를 적으면 다음 실행이
-    그 행을 못 찾아 run 을 하나 더 쌓는다. 그래서 보고는 락 양보와 같은 자리에 자기 행으로 남는다.
+    """The note of aggregate is the natural key `_run_id` uses to find the run again -- writing the report
+    there leaves the next run unable to find that row and piling up another run. So the report stays as a row
+    of its own, in the same place as the lock yield.
     """
     for table in RANKING_TABLES:
         _open(needs_schema, _schema_name, table)
     with connect(loaded) as conn:
-        # aggregate 는 자기가 셀 언급이 없으면 실패한다 — 먼저 규칙 패스가 한 달을 라벨해 둔다.
+        # aggregate fails when there is no mention for it to count -- a rule pass labels one month first.
         assert (
             run_stage(
                 conn,
@@ -555,8 +565,8 @@ def test_a_solo_aggregate_run_reports_the_half_month_without_taking_its_notes_ke
 
 
 def test_a_solo_link_run_reports_the_half_month_it_found(wired_youtube: str, _schema_name: str):
-    """link 은 자기 run 행이 없다 — 그래도 구멍은 말해야 하고, 말할 자리는 락을 양보한 실행이 이미
-    쓰는 그 자리다 (analysis_run 의 partial 행 하나)."""
+    """link has no run row of its own -- the hole still has to be said, and the place to say it is the place
+    the run that yielded the lock already writes (one partial row of analysis_run)."""
     dead = _open_rival(wired_youtube, f"{RIVAL_NOTE} rewriting=review/{MONTH}/{SUNBLOCK}")
     with connect(wired_youtube) as conn:
         found = run_stage(conn, "link", commerce_schema=_schema_name, youtube_schema=_schema_name)

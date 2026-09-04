@@ -1,4 +1,4 @@
-"""코퍼스에 없는 이름이 든 질의를 검색이 막는가 (포크 #48).
+"""Does the search block a query holding a name that is not in the corpus (fork #48).
 
 하한선은 못 쓴다(계약 §벡터 하한선). 코사인이 안 갈리는 자리에서 갈리는 것은 **문서빈도**이고, 이
 파일은 그 게이트가 **막아야 하는 것을 막고 막으면 안 되는 것을 통과시키는지**를 본다. 둘 다 실측이
@@ -88,8 +88,8 @@ def test_the_gate_reads_df_on_the_index_axis_not_the_query_stopword_axis(index: 
 
 
 def test_the_search_path_stops_before_it_prints_anything(monkeypatch: pytest.MonkeyPatch, capsys):
-    """게이트가 `ranked_chunks` 앞에 서야 한다. 뒤에 서면 순위를 다 매긴 뒤에 버리는 것이라 느리고,
-    무엇보다 그 순위가 어딘가에 인쇄될 길이 남는다."""
+    """The gate has to stand before `ranked_chunks`. Behind it, it throws the ranking away after computing
+    it, which is slow and, above all, leaves a path for that ranking to be printed somewhere."""
     from analysis.retrieval import pipeline
 
     built = bm25.Index([f"d:{i}#0" for i in range(len(CORPUS))], list(CORPUS))
@@ -104,7 +104,7 @@ def test_the_search_path_stops_before_it_prints_anything(monkeypatch: pytest.Mon
 
 
 def test_the_search_path_still_answers_a_grounded_query(monkeypatch: pytest.MonkeyPatch):
-    """막는 쪽만 시험하면 게이트를 항상-막힘으로 고쳐도 초록이다."""
+    """Test only the blocking side and fixing the gate to always-block stays green."""
     from analysis.retrieval import pipeline
 
     built = bm25.Index([f"d:{i}#0" for i in range(len(CORPUS))], list(CORPUS))
@@ -140,7 +140,8 @@ def test_the_search_path_still_answers_a_grounded_query(monkeypatch: pytest.Monk
     assert pipeline.search(cast(Any, Conn()), "백탁 없는 선크림", engine="vector") == [
         ("d:0#0", 1.5, CORPUS[0])
     ]
-    # 게이트가 이미 연 색인을 넘겨야 한다 -- 안 넘기면 bm25·hybrid 가 같은 색인을 두 번 연다.
+    # The index the gate already opened has to be handed over -- otherwise bm25 and hybrid open the same
+    # index twice.
     assert handed["index"] is built
 
 
@@ -154,7 +155,7 @@ def test_bm25_is_not_gated_because_it_answers_with_the_words_that_remain(
 
     query = "퀀텀펩타이드사이드 백탁"
     assert not grounding.check(query, index).ok, "게이트 자체는 이 질의를 막는다"
-    # 그런데 bm25 는 실제로 답을 낸다. 이 줄이 무너지면 위 결정의 근거가 사라진 것이다.
+    # And yet bm25 really does answer. If this line falls, the ground for the decision above is gone.
     lexical = index.search(query, k=3)
     assert lexical and lexical[0][0] in {"d:0#0", "d:1#0"}
 
@@ -187,8 +188,8 @@ def test_bm25_is_not_gated_because_it_answers_with_the_words_that_remain(
 
 
 def test_a_blocked_query_is_partial_at_the_command_line(monkeypatch: pytest.MonkeyPatch, capsys):
-    """막힌 질의의 답은 결과 0건이고, 그 자리의 종료 코드는 이미 계약에 있다(1) -- 게이트가 새 코드를
-    늘리지 않는다는 것을 명령줄 끝에서 확인한다."""
+    """The answer to a blocked query is 0 results, and the exit code for that place is already in the
+    contract (1) -- that the gate adds no new code is confirmed at the command line."""
     from analysis.retrieval import pipeline
     from cosmai import cli
 
@@ -210,8 +211,8 @@ def test_a_blocked_query_is_partial_at_the_command_line(monkeypatch: pytest.Monk
 
 
 def test_the_search_section_carries_the_gate_and_what_it_costs():
-    """`--engine vector` 가 색인을 열게 된 것은 사람이 겪는 변화다 -- 계약에 없으면 캐시 없는 호스트에서
-    십수 분을 만나고 나서야 알게 된다."""
+    """`--engine vector` having come to open the index is a change a person lives through -- not in the
+    contract, a host with no cache learns it only after meeting ten-odd minutes of it."""
     body = (ROOT / "contracts" / "entrypoints.md").read_text(encoding="utf-8")
     start = body.index("## 검색 (")
     search = body[start : body.index("\n## ", start)]
@@ -219,7 +220,8 @@ def test_the_search_section_carries_the_gate_and_what_it_costs():
     assert "**`bm25` 의 동작은 이 이슈 전과 같다.**" in search
     assert "새 코드가 늘지 않는다" in search
     assert "`--engine vector` 도 BM25 색인을 연다" in search
-    # 캐시가 --source 조합마다 따로라는 것을 안 적으면 "캐시가 있으면 싸다"가 그 경우를 덮는다.
+    # Without writing down that the cache is separate per --source combination, "with a cache it is cheap"
+    # covers that case.
     assert "캐시는 `--source` 조합마다 따로다" in search
     assert "첫 호출이 무조건 십수" in search
     assert "`retrieval eval` 은 이 게이트를 타지 않는다" in search
@@ -230,7 +232,7 @@ def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():
     start = body.index("### 그러면 근거 없는 질의는 무엇이 막는가")
     section = body[start : body.index("\n## ", start)]
     assert f"길이 ≥ {grounding.ZERO_DF_MINLEN} (`ZERO_DF_MINLEN`)" in section
-    # 규칙을 고르며 버린 두 갈래가 왜 버려졌는지가 이 절의 절반이다.
+    # Half of this section is why the two branches dropped while choosing the rule were dropped.
     assert "이득 0 · 손해 2" in section
     assert '"전부 0" 갈래는 두지 않는다' in section
     assert "토큰이 0개인 질의는 빈도로 판정하지 않는다" in section
@@ -238,8 +240,8 @@ def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():
     # 범위 한정과 그 근거(이슈 #48 §범위 확장). 빠지면 다음 사람이 bm25 에도 건다.
     assert "`bm25` 의 동작은 **이 이슈 전과\n같다**" in section
     assert "남은 낱말로 답하므로" in section
-    # 세는 단위를 안 적으면 `docs_with_tokens` 와 같은 것으로 읽힌다.
+    # Without writing down the unit counted, it reads as the same thing as `docs_with_tokens`.
     assert '**"df" 라 부르지만 세는 단위는 청크다.**' in section
-    # 이 표를 스위트가 다시 재지 못한다는 사실이 표 옆에 있어야 한다.
+    # That the suite cannot measure this table again has to sit next to the table.
     assert "이 표는 스위트가 다시 재지 못한다" in section
     assert "공유DB\n와 세워진 BM25 색인" in section

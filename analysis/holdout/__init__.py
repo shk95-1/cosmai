@@ -1,14 +1,15 @@
 """새 표본으로 되묻는다 — `contracts/interfaces.md` §홀드아웃 이 정본이다 (포크 #51).
 
-규칙의 출처는 ydc `holdout_commerce.py`(v0.3.0)이고, 슬라이스를 import 하지 않고 옮겨 적었다
-(`analysis/crosscheck` · `analysis/sensitivity` 가 쓴 방식).
+The rules come from ydc `holdout_commerce.py` (v0.3.0) and were written over rather than imported from the
+slice (the way `analysis/crosscheck` and `analysis/sensitivity` did it).
 
-**지표를 새로 만들지 않는다**: 같은 사전으로 같은 단위(리뷰 1건)를 세되, **한 번도 안 본 리뷰만** 따로
-세서 기존 비율이 재현되는지 본다. 재현되면 결론이 표본에 얹혀 있지 않다는 뜻이고, 안 되면 그것이 더
-중요한 발견이다. 그래서 이 모듈이 다루는 것은 언제나 **두 팔**이고, 그 행들은 저장되지 않는다.
+**It makes no new metrics**: it counts the same unit (one review) with the same dictionary, but counts **only
+the reviews never seen before** separately and looks at whether the existing ratios reproduce. Reproduced
+means the conclusion is not resting on the sample, and not reproduced is the more important finding. So what
+this module handles is always **two arms**, and those rows are not stored.
 
-여기는 규칙만 산다. DB 는 `analysis/holdout/pipeline.py` 이고, 그쪽이 두 팔을 갈라 이 함수들에 먹인다 --
-`analysis/crosscheck` 와 같은 가름이다.
+Only the rules live here. The DB is `analysis/holdout/pipeline.py`, and that side splits the two arms and
+feeds these functions -- the same split as `analysis/crosscheck`.
 """
 
 from __future__ import annotations
@@ -42,7 +43,8 @@ VERDICT_THIN = "순위 없음"
 
 @dataclass(frozen=True)
 class Review:
-    """홀드아웃이 세는 단위. 원천 표가 아니라 이 모양이 규칙의 입력이다 -- 같은 코드가 두 팔에 돈다."""
+    """The unit the holdout counts. The input of the rules is this shape rather than a source table -- the
+    same code runs on both arms."""
 
     platform: str
     product_key: str
@@ -72,7 +74,8 @@ class Arm:
 
 @dataclass(frozen=True)
 class TopicRow:
-    """한 주제를 두 팔에서. `rate` 와 `share` 는 분모가 다르므로 차를 분모를 넘어 내지 않는다."""
+    """One topic on both arms. `rate` and `share` have different denominators, so a difference is never taken
+    across denominators."""
 
     topic_key: str
     seen_documents: int
@@ -86,7 +89,7 @@ class TopicRow:
 
     @property
     def rate_diff_pp(self) -> float:
-        """ydc 의 축에서의 차. **판정이 보는 수다.**"""
+        """The difference on ydc's axis. **This is the number the judgement looks at.**"""
         return self.holdout_rate - self.seen_rate
 
     @property
@@ -110,7 +113,8 @@ class PlatformRow:
 
 @dataclass(frozen=True)
 class StandardRow:
-    """기존 팔의 플랫폼 구성비로 재가중한 홀드아웃. 구성 효과를 뺀 값이다."""
+    """The holdout reweighted by the platform composition of the existing arm. The composition effect is
+    removed."""
 
     topic_key: str
     seen_rate: float
@@ -119,7 +123,7 @@ class StandardRow:
 
     @property
     def residual_pp(self) -> float:
-        """구성 효과를 뺀 뒤 남는 차. **이것이 실제 변화다.**"""
+        """What is left after the composition effect is removed. **This is the real change.**"""
         return self.standardized_rate - self.seen_rate
 
 
@@ -143,7 +147,8 @@ class BasketRow:
 
     @property
     def diff_pp(self) -> float:
-        """바스켓 효과를 뺀 차. 두 값 모두 **공통 제품**의 리뷰만 센 것이다."""
+        """The difference with the basket effect removed. Both values count reviews of **the common products**
+        only."""
         return self.holdout_rate_shared - self.seen_rate_shared
 
 
@@ -215,7 +220,8 @@ def arm(name: str, reviews: Sequence[Review], topic_keys: Sequence[str]) -> Arm:
 
 
 def mix(counted: Arm) -> dict[str, float]:
-    """플랫폼 구성비(%). 표준화의 가중치이자 표의 한 열이라 백분율 하나로 든다."""
+    """The platform composition (%). It is both the weight of the standardization and a column of the table,
+    so it is carried as one percentage."""
     return {name: rate(count, counted.reviews) for name, count in counted.platforms.items()}
 
 
@@ -247,7 +253,8 @@ def topics(seen: Arm, holdout: Arm, topic_keys: Sequence[str]) -> tuple[TopicRow
 
 
 def platforms(seen: Arm, holdout: Arm) -> tuple[PlatformRow, ...]:
-    """두 팔의 플랫폼 구성. 목록은 **읽어서 만든다** -- ydc 는 셋을 상수로 박았지만 우리 소스는 는다."""
+    """The platform composition of the two arms. The list is **built by reading** -- ydc nailed three down as
+    constants, but our sources grow."""
     seen_mix, hold_mix = mix(seen), mix(holdout)
     names = sorted(set(seen.platforms) | set(holdout.platforms))
     return tuple(
@@ -277,10 +284,12 @@ def _by_platform(reviews: Sequence[Review]) -> dict[str, list[Review]]:
 def standardize(
     seen: Sequence[Review], holdout: Sequence[Review], topic_keys: Sequence[str]
 ) -> tuple[StandardRow, ...]:
-    """기존 팔의 플랫폼 구성비로 홀드아웃을 재가중한다. **구성 효과를 뺀 값이 남는 실제 변화다.**
+    """Reweights the holdout by the platform composition of the existing arm. **What is left with the
+    composition effect removed is the real change.**
 
-    가중치는 기존 팔에 있는 플랫폼의 것이므로, 홀드아웃에 그 플랫폼의 리뷰가 하나도 없으면 그 칸은
-    0 으로 들어간다 (ydc `by_platform` 과 같다) -- 조용한 0 이 아니라 `PlatformRow` 가 말하는 0 이다.
+    The weights are those of the platforms present in the existing arm, so when the holdout has not one review
+    from such a platform that cell enters as 0 (the same as ydc `by_platform`) -- not a quiet 0 but a 0
+    `PlatformRow` states.
     """
     weights = mix(arm("", seen, topic_keys))
     hold_by = _by_platform(holdout)
@@ -302,10 +311,11 @@ def standardize(
 def basket(
     seen: Sequence[Review], holdout: Sequence[Review], topic_keys: Sequence[str]
 ) -> tuple[Basket, tuple[BasketRow, ...]]:
-    """**수집 과정이 관측값을 만든다.** 두 팔이 공유하는 제품만으로 다시 세어 바스켓 효과를 뺀다.
+    """**The collection process makes the observation.** It recounts on the products the two arms share and
+    removes the basket effect.
 
-    교집합이 비면 표를 세우지 않는다 -- 0% 는 답이 아니라 없음이고, 그것을 행으로 실으면 "같은 제품에서
-    아무도 그 말을 안 한다"로 읽힌다.
+    With an empty intersection no table is built -- 0% is absence rather than an answer, and carrying it as a
+    row reads as "nobody says that about the same products".
     """
     seen_products = {review.product_key for review in seen}
     hold_products = {review.product_key for review in holdout}
@@ -359,7 +369,8 @@ def verdict(rows: Sequence[TopicRow]) -> str:
 
 
 def compare(seen: Sequence[Review], holdout: Sequence[Review], topic_keys: Sequence[str]) -> Comparison:
-    """두 팔 한 벌. 이 함수 안의 비교는 언제나 **같은 함수를 탄 두 팔 사이**에서만 한다."""
+    """One set of two arms. Every comparison inside this function is only **between two arms that went
+    through the same function**."""
     seen_arm, hold_arm = arm(SEEN, seen, topic_keys), arm(HOLDOUT, holdout, topic_keys)
     rows = topics(seen_arm, hold_arm, topic_keys)
     made, basket_rows = basket(seen, holdout, topic_keys)

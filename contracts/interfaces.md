@@ -1779,7 +1779,7 @@ same budget; an answer the model cut off (`stop_reason == max_tokens`) or left e
 the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
 not set until #74 has measured the cost per query.
 
-**Log** — `needs.retrieval_ask_log` (DDL 026, append-only, `needs_runtime` can `SELECT, INSERT`): `id` ·
+**Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
 `called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
 `bm25.tokenize_query`, which drops query stopwords; the gate reads the index axis, so `gate_ok` can be true
 on a token absent from this map) · `doc_ids` (text[], folded, rank order) · `index_fingerprint` ·

@@ -1,14 +1,18 @@
-"""`analyze polarity` 한 단계 — 추출과 판정을 한 번에 돌려 need_mention·wish_mention 을 채운다 (T14).
+"""One `analyze polarity` stage — extraction and classification in one pass, filling need_mention and
+wish_mention (T14).
 
-진입점은 run(conn, ...) 하나다: cosmai/cli.py 의 stage 배선은 #5 가 세 유닛을 한 곳에서 묶는다.
+There is one entry point, run(conn, ...): the stage wiring in cosmai/cli.py is where #5 ties the three units
+together.
 
-needs_runtime 의 시간 제한(statement_timeout 30s · transaction_timeout 60s ·
-idle_in_transaction 15s, db/bootstrap.sql)에 맞춰 읽기는 키셋 페이징으로, 쓰기는 배치 커밋으로
-쪼갠다 — analysis/linker/pipeline.py 가 같은 제약을 같은 모양으로 푼다.
-자기 버전 계열(rule-v*)의 행만 지우고 갱신한다: 시드(slice-*)는 삭제도 갱신도 되지 않는다
-(삭제는 NEED_DELETE 의 LIKE 필터가, 삽입은 extractor_version 을 품은 005 의 자연키가 막는다).
-같은 계열 안에서 두 극성 구현이 공존하는 자리는 (scope, 기간)으로 갈린다 — 소유 표(ownership.py)가
-배정한 lexicon_category 의 since 이후 달은 그 주인만 쓰고 지우고, 그 앞의 달은 규칙이 계속 갱신한다.
+To fit the time limits of needs_runtime (statement_timeout 30s · transaction_timeout 60s ·
+idle_in_transaction 15s, db/bootstrap.sql) reads are split by keyset paging and writes by batch commits —
+analysis/linker/pipeline.py solves the same constraint in the same shape.
+Only rows of its own version family (rule-v*) are deleted and refreshed: the seed (slice-*) is neither
+deleted nor refreshed (the LIKE filter of NEED_DELETE stops the delete, and the natural key of 005, which
+carries extractor_version, stops the insert).
+Where two polarity implementations coexist inside one family they are split by (scope, period) — the months
+from the `since` of a lexicon_category the ownership table (ownership.py) assigned are written and deleted by
+that owner alone, and the months before it are kept up to date by the rules.
 """
 
 from __future__ import annotations
@@ -41,16 +45,16 @@ from analysis.units import CategoryMap, comment_unit, load_category_map, month_o
 
 COMMERCE_SCHEMA = "trend_radar"
 YOUTUBE_SCHEMA = "tubedepth"
-BATCH = 2000  # #2 와 같은 값: 한 트랜잭션이 60s 안에 끝나는 크기
-FIRST = ""  # 키셋 페이징의 첫 키 (원천 키는 전부 text 다)
+BATCH = 2000  # The same value as #2: a size one transaction finishes inside 60s
+FIRST = ""  # The first key of the keyset paging (every source key is text)
 FIVE = 5.0
 
 REVIEW_COLUMNS = ("source", "product_key", "review_key", "rating", "body", "written_at", "captured_at")
-REVIEW_KEY = ("source", "review_key")  # trend_radar.review 의 PK
-REVIEW_KEY_AT = (0, 2)  # REVIEW_COLUMNS 안에서의 자리
-REVIEW_REF_AT = (1, 2)  # need_mention.ref 를 이루는 자리 (product_key/review_key)
+REVIEW_KEY = ("source", "review_key")  # The PK of trend_radar.review
+REVIEW_KEY_AT = (0, 2)  # Their positions inside REVIEW_COLUMNS
+REVIEW_REF_AT = (1, 2)  # The positions that make up need_mention.ref (product_key/review_key)
 COMMENT_COLUMNS = ("video_id", "comment_id", "text", "like_count", "published_at", "first_seen_at")
-COMMENT_KEY = ("video_id", "comment_id")  # tubedepth.comments 의 PK
+COMMENT_KEY = ("video_id", "comment_id")  # The PK of tubedepth.comments
 COMMENT_KEY_AT = (0, 1)
 
 RUN_START: LiteralString = "INSERT INTO analysis_run (versions, note) VALUES (%s::jsonb, %s) RETURNING run_id"
@@ -58,13 +62,15 @@ RUN_END: LiteralString = (
     "UPDATE analysis_run SET finished_at = now(), status = 'ok', note = %s WHERE run_id = %s"
 )
 RUN_NOTE: LiteralString = "UPDATE analysis_run SET note = %s WHERE run_id = %s"
-# `replace_stale` 의 DELETE 커밋과 그 달의 마지막 flush 사이가 그 달이 부분만 남아 있는 창이다. 실행이
-# 그 안에서 죽으면 원천은 그대로여도 그 달의 need_mention 은 반쪽이고, 주인 있는 scope 는 규칙이
-# 배제하므로(#31) 사람이 다시 돌릴 때까지 아무도 메우지 않는다. 창 안에 있다는 사실을 DB 가 말한다.
+# The window in which a month is only half there runs from the DELETE commit of `replace_stale` to the last
+# flush of that month. A run that dies inside it leaves the source intact but that month's need_mention in
+# halves, and because the rules exclude a scope that has an owner (#31) nobody fills it until a person runs it
+# again. That the run is inside the window is said by the DB.
 MARKER = "rewriting="
-# ownership.py 의 may_write 를 SQL 로 옮긴 술어 하나 — 삭제문과 DO UPDATE 가 같은 것을 쓴다. 앞 줄이
-# 남의 (scope, 기간) 행을 밖에 두고(lexicon_category 가 NULL 이면 맞는 쌍이 없어 통과한다), 뒷 줄이
-# 표에 오른 구현을 자기 (scope, 기간) 안에 가둔다. 두 배열이 다 비면 소유 이전의 동작 그대로다.
+# One predicate carrying may_write from ownership.py into SQL — the delete statement and DO UPDATE use the
+# same one. The first line keeps rows of someone else's (scope, period) out (a NULL lexicon_category matches
+# no pair and passes), and the second confines a registered implementation to its own (scope, period). With
+# both arrays empty this is exactly the behaviour from before ownership.
 OWNED: LiteralString = """(
   NOT EXISTS (SELECT 1 FROM unnest(%s::text[], %s::text[]) AS theirs(scope, since)
               WHERE theirs.scope = need_mention.lexicon_category AND need_mention.month >= theirs.since)
@@ -80,33 +86,38 @@ AND """
     + OWNED
     + "\n"
 )
-# --scope 실행이 다시 쓰는 것은 그 lexicon_category 뿐이다 — 삭제를 같이 좁히지 않으면 다시 쓰지 않을
-# 행까지 지운다. 규칙으로 돌 때만 무해했다: polarity_version 이 바뀌는 순간 그 달 전체가 stale 이 된다.
+# A --scope run rewrites only that lexicon_category — without narrowing the delete the same way it removes
+# rows it will not write again. This was harmless only for rule runs: the moment polarity_version changes the
+# whole month becomes stale.
 NEED_DELETE_SCOPED: LiteralString = NEED_DELETE + "AND lexicon_category = %s\n"
-# `--since D` 는 읽기만 잘랐다(`_months`·`_pages`): D 가 든 달의 삭제는 그대로 전량이라, 매 실행이 그
-# 달의 D 이전 행을 지우고 D 이후만 다시 썼다 — 크론에 그대로 넣으면 매일 구멍을 판다 (#98).
-# 축은 삭제문 쪽 `observed_at` 이고 그 값은 원천의 `coalesce(written_at, captured_at)` 이라 두 필터가
-# 같은 행 집합을 가리킨다 (analysis/units.py).
+# `--since D` cut only the reads (`_months` · `_pages`): the delete for the month D falls in stayed whole, so
+# every run deleted that month's rows before D and rewrote only those after it — put into cron as it was, it
+# digs a hole every day (#98).
+# The axis is `observed_at` on the delete side and its value is the source's `coalesce(written_at,
+# captured_at)`, so both filters point at the same set of rows (analysis/units.py).
 DELETE_SINCE: LiteralString = "AND observed_at >= %s\n"
 WISH_DELETE: LiteralString = """
 DELETE FROM wish_mention WHERE src = %s AND month = %s AND extractor_version LIKE 'rule-v%%'
 AND extractor_version <> %s
 """
-# 증분 실행이 페이지마다 묻는 한 줄: 이 (src, ref) 들 중 이 실행이 *지금 쓸 모양 그대로* 이미 쓴 것.
-# 두 버전을 다 거는 것은 그것이 이 실행이 만들 행의 모양이기 때문이다 — 어느 쪽이 올라도 새 행이 생기므로
-# "이미 했다"가 거짓이 된다. 005 의 자연키 인덱스(src, ref, need_key, extractor_version, md5(sentence))의
-# 앞 컬럼을 그대로 타서 한 페이지분이 30s 한도 안에 들어온다.
+# The one line an incremental run asks per page: which of these (src, ref) it has already written *in exactly
+# the shape it would write now*. Both versions are in it because that is the shape of the row this run would
+# make — if either goes up a new row appears, so "already done" becomes false. It rides the leading columns of
+# the natural-key index of 005 (src, ref, need_key, extractor_version, md5(sentence)), so one page's worth
+# comes in inside the 30s limit.
 MINE_ALREADY: LiteralString = (
     "SELECT DISTINCT ref FROM need_mention WHERE src = %s AND ref = ANY(%s::text[]) "
     "AND extractor_version = %s AND polarity_version = %s"
 )
-# 규칙과 표에 없는 구현에는 소유가 없어 '내 판본 행'이 곧 규칙 모집단 전량이다 — 증분이 뜻을 잃는다.
+# The rules and any implementation outside the table own nothing, so 'the rows of my version' is the whole
+# rule population — the incremental run loses its meaning.
 NO_MISSING = (
     "--missing needs an owned (scope, since): {version} owns none, so 'the rows of my version' is the "
     "whole rule population; register it in analysis/polarity/ownership.py or drop --missing"
 )
-# 005 로 extractor_version 이 자연키에 들어간 뒤로 시드 행(slice-*)은 이 INSERT 와 애초에 충돌하지
-# 않는다 — 충돌하는 행은 반드시 이 실행과 같은 버전이므로 DO UPDATE 에 버전 필터가 필요 없다.
+# Since 005 put extractor_version into the natural key, a seed row (slice-*) never collides with this INSERT
+# in the first place — a colliding row is always the same version as this run, so DO UPDATE needs no version
+# filter.
 NEED_UPSERT: LiteralString = (
     """
 INSERT INTO need_mention
@@ -127,10 +138,12 @@ WHERE """
     + OWNED
     + "\n"
 )
-# 마지막 줄이 NEED_DELETE 와 같은 술어다 — 저장된 lexicon_category·month 가 남의 자리면 갱신도 하지 않는다.
-# 저장된 scope 와 지금 매핑이 갈리면(rank_snapshot 최신 행·category_map 이 매일 다시 계산한다) 이 실행은
-# 그 문장을 자기 것으로 보고 다시 뽑는다: 두 구현이 같은 need_key 를 고르면 자연키가 통째로 겹쳐, 삭제를
-# 피한 주인의 행을 제자리 upsert 가 갈아 끼운다. WISH_UPSERT 가 쓰는 그 자리(DO UPDATE ... WHERE)다.
+# The last line is the same predicate as NEED_DELETE — when the stored lexicon_category · month belong to
+# someone else it is not refreshed either. When the stored scope and the current mapping diverge (the newest
+# rank_snapshot row; category_map recomputes it daily) this run takes that sentence for its own and extracts
+# it again: if two implementations pick the same need_key the natural key overlaps entirely and an in-place
+# upsert swaps out the owner's row, the one that escaped the delete. That is the place WISH_UPSERT uses
+# (DO UPDATE ... WHERE).
 WISH_UPSERT: LiteralString = """
 INSERT INTO wish_mention
   (src, ref, video_id, channel_id, channel_is_brand_owner, product_ref, observed_at,
@@ -156,14 +169,15 @@ class StageResult:
     need_rows: int
     wish_rows: int
     replaced: int
-    captured_at_fallbacks: int  # formats.md: 0 이 아니게 되는 순간이 시간 규칙을 다시 볼 때다
+    captured_at_fallbacks: int  # formats.md: the moment this stops being 0 is when to revisit the time rule
     polarity_version: str = RulePolarity.version
     missing: bool = False
 
     @property
     def note(self) -> str:
-        # 증분 실행은 replaced=0 을 언제나 낸다 — 그것만으로는 '지울 것이 없었다'와 구별되지 않아,
-        # 무엇이 이 run 의 T 를 만들었는지 원장에서 되짚을 수 없다 (#32 가 이 명령의 T 를 잰다).
+        # An incremental run always reports replaced=0 — on its own that is indistinguishable from 'there was
+        # nothing to delete', so the ledger cannot say what made this run's T (#32 measures the T of this
+        # command).
         mode = " missing=1" if self.missing else ""
         return (
             f"analyze:polarity:{self.polarity_version}{mode} units={self.units} need={self.need_rows} "
@@ -174,7 +188,8 @@ class StageResult:
 
 @dataclass(frozen=True)
 class _Pending:
-    """한 페이지분의 후보 — 판정은 페이지가 다 모인 뒤에 사전별로 한 번씩 간다 (classify_many)."""
+    """One page's worth of candidates — classification goes once per lexicon after the whole page is in
+    (classify_many)."""
 
     unit: TextUnit
     lexicon_category: str | None
@@ -240,7 +255,7 @@ def _pages(
     since: date | None,
     batch: int,
 ) -> Iterator[list[tuple[Any, ...]]]:
-    """한 달치를 PK 키셋으로 잘라 읽는다 — 한 달이 통째로 30s 안에 들어온다는 보장이 없다."""
+    """Reads one month sliced by the PK keyset — there is no guarantee a whole month comes in inside 30s."""
     selected = pgsql.SQL(", ").join(pgsql.Identifier(c) for c in columns)
     ordering = pgsql.SQL(", ").join(pgsql.Identifier(c) for c in key)
     where = pgsql.SQL("({}) > ({}) AND {} = %s").format(
@@ -259,7 +274,8 @@ def _pages(
         with conn.cursor() as cur:
             cur.execute(query, params)
             page = cur.fetchall()
-        # 읽자마자 닫는다: 판정하는 동안 열려 있으면 idle_in_transaction 15s 가 세션을 끊는다.
+        # Closed as soon as it is read: held open during classification, idle_in_transaction 15s cuts the
+        # session.
         conn.rollback()
         if not page:
             return
@@ -270,7 +286,7 @@ def _pages(
 
 
 def _refs_of(page: Sequence[tuple[Any, ...]], at: Sequence[int]) -> list[str]:
-    """need_mention.ref 는 원천 키 둘을 '/' 로 이은 것이다 (analysis/units.py 의 review_unit)."""
+    """need_mention.ref is the two source keys joined with '/' (review_unit in analysis/units.py)."""
     first, second = at
     return [f"{row[first]}/{row[second]}" for row in page]
 
@@ -278,7 +294,8 @@ def _refs_of(page: Sequence[tuple[Any, ...]], at: Sequence[int]) -> list[str]:
 def _product_facts(
     conn: psycopg.Connection[Any], schema: str
 ) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], str]]:
-    """제품의 최신 카테고리와 이름 — 리뷰 행에는 둘 다 없다 (p1 extract_candidates 와 같은 재료)."""
+    """A product's newest category and name — a review row has neither (the same material as p1
+    extract_candidates)."""
     categories: dict[tuple[str, str], str] = {}
     names: dict[tuple[str, str], str] = {}
     if _exists(conn, schema, "rank_snapshot"):
@@ -321,7 +338,7 @@ def _channels(conn: psycopg.Connection[Any], schema: str) -> dict[str, tuple[str
 
 
 class PolarityStage:
-    """사전·규칙을 한 번만 만들고 src×월 배치를 돌린다."""
+    """Builds the lexicons and the rules once, then runs the src x month batches."""
 
     def __init__(
         self,
@@ -333,13 +350,14 @@ class PolarityStage:
         self.conn = conn
         self.batch = batch
         self.extractor = RuleExtractor()
-        # 규칙 인스턴스는 판정자가 바뀌어도 남는다: aspect_scope 는 사전이 말하는 사실이지 판정 결과가 아니다.
+        # The rule instance stays even when the classifier changes: aspect_scope is a fact the lexicon states,
+        # not a result of classification.
         self.rule = RulePolarity()
         self.polarity: Polarity = polarity or self.rule
         self.owners = owners
-        # 남이 주인인 (scope, 기간) — 이 실행은 그 자리를 쓰지도 지우지도 않는다 (ownership.py).
+        # (scope, period) owned by someone else — this run neither writes nor deletes there (ownership.py).
         self.foreign: Scopes = scopes_of(owners, self.polarity.version, mine=False)
-        # 이 실행이 주인인 (scope, 기간) — 비어 있지 않으면 이 실행은 그 안에서만 쓰고 지운다.
+        # (scope, period) owned by this run — when it is not empty this run writes and deletes only inside it.
         self.owned: Scopes = scopes_of(owners, self.polarity.version, mine=True)
         self.aspects: dict[str, AspectLexicon] = {
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
@@ -356,35 +374,41 @@ class PolarityStage:
         }
 
     def _owner_args(self) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
-        """OWNED 술어가 받는 다섯 인자 — 남의 쌍 둘, 내 쌍 셋(cardinality 검사가 첫 배열을 한 번 더 본다)."""
+        """The five arguments the OWNED predicate takes — two pairs of theirs, three of mine (the cardinality
+        check looks at the first array once more)."""
         theirs = [list(part) for part in zip(*self.foreign, strict=True)] or [[], []]
         mine = [list(part) for part in zip(*self.owned, strict=True)] or [[], []]
         return (theirs[0], theirs[1], mine[0], mine[0], mine[1])
 
     def owns(self, lexicon_category: str | None, month: str) -> bool:
-        """읽기 건너뛰기가 묻는 것 — 삭제문·갱신문의 OWNED 와 같은 술어다 (ownership.py 의 may_write)."""
+        """What the read skip asks — the same predicate as OWNED in the delete and update statements
+        (may_write in ownership.py)."""
         return may_write(self.owners, self.polarity.version, lexicon_category, month)
 
     def floor(self, scope: str | None) -> str | None:
-        """이 실행이 한 행이라도 쓸 수 있는 첫 달 — 주인이 아니면 없다(모든 달이 규칙의 몫이다).
+        """The first month this run may write a single row in — none when it is not an owner (every month is
+        the rules').
 
-        주인은 자기 `since` 앞의 달에 아무것도 쓰지 못하고(`owns`), 그 달의 삭제문도 같은 술어에 걸려
-        0행이다. 그래서 그 달을 도는 것은 DELETE 한 번과 페이징 한 번의 순수한 비용이고, #31 의 26개
-        카테고리를 꺼내면 매일 그만큼 곱해진다. `ALWAYS` 는 어떤 YYYY-MM 보다 작아 아무것도 자르지 않는다.
+        An owner can write nothing in the months before its `since` (`owns`), and the delete statement for
+        those months is caught by the same predicate and touches 0 rows. Walking those months is therefore the
+        pure cost of one DELETE and one paging pass, multiplied daily once the 26 categories of #31 are taken
+        out. `ALWAYS` is smaller than any YYYY-MM and cuts nothing.
         """
         reach = [since for owned, since in self.owned if scope is None or owned == scope]
         return min(reach) if reach else None
 
     def already(self, src: str, refs: Sequence[str]) -> frozenset[str]:
-        """이 원천 행들 중 이 실행이 지금 쓸 모양으로 **이미** 행을 가진 것 — 증분이 건너뛸 자리다.
+        """Which of these source rows **already** have a row in the shape this run would write now — where the
+        incremental run skips.
 
-        후보가 하나도 없는 리뷰는 어느 실행도 행을 만들지 않아(need_key='' 센티널조차 후보가 있어야
-        생긴다) 매번 여기 걸리지 않고 추출을 다시 탄다 — 추출은 규칙이라 싸고, 판정은 부르지 않는다.
+        A review with no candidate at all gets a row from no run (even the need_key='' sentinel needs a
+        candidate), so it never matches here and goes through extraction every time — extraction is rules and
+        cheap, and the classifier is not called.
         """
         with self.conn.cursor() as cur:
             cur.execute(MINE_ALREADY, (src, list(refs), RuleExtractor.version, self.polarity.version))
             found = frozenset(row[0] for row in cur.fetchall())
-        # 읽자마자 닫는다 — `_pages` 와 같은 이유다 (idle_in_transaction 15s).
+        # Closed as soon as it is read — the same reason as `_pages` (idle_in_transaction 15s).
         self.conn.rollback()
         return found
 
@@ -402,7 +426,8 @@ class PolarityStage:
         ]
 
     def need_rows(self, pending: Sequence[_Pending]) -> list[NeedMentionRow]:
-        """사전별로 묶어 classify_many 한 번씩 — 배치 API 를 가진 구현(#6)은 문장마다 왕복하면 정가다."""
+        """Grouped per lexicon, one classify_many each — for an implementation with a batch API (#6) a round
+        trip per sentence is full price."""
         grouped: dict[str, list[int]] = {}
         for i, item in enumerate(pending):
             grouped.setdefault(ruleset_for(item.lexicon_category), []).append(i)
@@ -433,11 +458,11 @@ class PolarityStage:
             src=unit.src,
             site=unit.site,
             ref=unit.ref,
-            product_ref=None,  # #2 의 linker 가 analyze link 에서 채운다
+            product_ref=None,  # the linker of #2 fills it in analyze link
             source_product_key=unit.product_key,
             category=unit.category,
             lexicon_category=item.lexicon_category,
-            need_key=found.aspect or "",  # B8: aspect 없음은 '' 센티널
+            need_key=found.aspect or "",  # B8: no aspect is the '' sentinel
             aspect_scope=self._scope_of(aspects, item.lexicon_category, found.aspect)
             if found.aspect
             else None,
@@ -464,7 +489,7 @@ class PolarityStage:
             ref=unit.ref,
             video_id=unit.ref.split("/", 1)[0],
             channel_id=unit.channel_id,
-            channel_is_brand_owner=None,  # 브랜드 채널 판정은 링커(#2)의 브랜드 사전이 필요하다
+            channel_is_brand_owner=None,  # deciding a brand channel needs the linker's brand lexicon (#2)
             product_ref=None,
             observed_at=unit.observed_at,
             observed_at_resolution=unit.observed_at_resolution,
@@ -480,10 +505,11 @@ class PolarityStage:
         )
 
     def replace_stale(self, src: str, month: str, scope: str | None = None, since: date | None = None) -> int:
-        """자기 버전 계열의 옛 행 중 이 실행이 다시 쓸 것만 지운다 — 그 자체로 한 트랜잭션이다.
+        """Deletes only the old rows of its own version family that this run will write again — a transaction
+        of its own.
 
-        `since` 는 다시 쓸 자리를 정확히 그만큼 좁히므로 삭제도 같이 좁힌다 (#98): 좁히지 않으면 그 달의
-        D 이전 행은 지워지고 다시 쓰이지 않는다.
+        `since` narrows what is to be rewritten by exactly that much, so the delete narrows with it (#98):
+        without that, the rows of that month before D are deleted and never written again.
         """
         need: LiteralString = NEED_DELETE if scope is None else NEED_DELETE_SCOPED
         wish: LiteralString = WISH_DELETE
@@ -496,8 +522,9 @@ class PolarityStage:
         with self.conn.cursor() as cur:
             cur.execute(need, args)
             replaced = cur.rowcount
-            # wish_mention 에는 lexicon_category 가 없고 스코프 실행은 wish 행을 하나도 만들지 않는다.
-            # 주인 있는 구현도 마찬가지다 — 소유가 성립하지 않는 표라 그 행은 규칙의 것이다.
+            # wish_mention has no lexicon_category and a scoped run creates no wish row at all.
+            # The same holds for an implementation with an owner — ownership does not hold on that table, so
+            # those rows are the rules'.
             if scope is None and not self.owned:
                 cur.execute(wish, wish_args)
                 replaced += cur.rowcount
@@ -505,7 +532,8 @@ class PolarityStage:
         return replaced
 
     def _write(self, statement: LiteralString, rows: Sequence[Any], extra: tuple[Any, ...] = ()) -> None:
-        # INSERT 의 컬럼 순서 = 계약 dataclass 의 필드 순서 (interfaces.md) + DO UPDATE 의 술어 인자.
+        # The INSERT column order = the field order of the contract dataclass (interfaces.md) + the predicate
+        # arguments of DO UPDATE.
         for start in range(0, len(rows), self.batch):
             with self.conn.cursor() as cur:
                 cur.executemany(statement, [astuple(r) + extra for r in rows[start : start + self.batch]])
@@ -529,24 +557,27 @@ def run(
     owners: Mapping[str, Owner] = OWNERS,
     on_run_open: Callable[[int], None] | None = None,
 ) -> StageResult:
-    """`on_run_open` 은 run 행이 열린 그 순간 호출자에게 run_id 를 넘긴다 — 이 단계 안에서 죽어도
-    호출자가 *자기* run 을 안다. 그것을 모르면 닫을 행을 표에서 되찾아야 하고, 동시에 도는 남의 run 과
-    구별할 단서가 표에 없다 (analysis/pipeline.py)."""
+    """`on_run_open` hands the caller the run_id at the moment the run row is opened — so the caller knows
+    *its own* run even when this stage dies inside. Without it the row to close has to be found again in the
+    table, and the table holds no clue to tell it from someone else's run going at the same time
+    (analysis/pipeline.py)."""
     stage = PolarityStage(conn, batch, polarity, owners)
     version = stage.polarity.version
-    # since 와 무관하게 남의 scope 면 거절한다: 주인의 기간 앞 달은 스코프 없는 05:00 줄이 도는 자리라,
-    # 그 이름을 --scope 로 부르는 한 줄은 어느 달을 노렸든 손실행이다.
+    # Someone else's scope is refused regardless of since: the months before an owner's period are where the
+    # scope-less 05:00 line runs, so naming it with --scope is a lost hand run whatever month it aimed at.
     if scope is not None and any(taken == scope for taken, _ in stage.foreign):
-        # 조용한 무동작이 아니라 거절이다 — `--impl` 을 빠뜨린 손실행이 여기서 멈춰야 표를 본다.
+        # A refusal, not a silent no-op — a hand run missing `--impl` has to stop here to see the table.
         raise ValueError(
             f"{scope} is owned by {owners[scope].version} since {owners[scope].since}, not {version} "
             "(analysis/polarity/ownership.py)"
         )
-    # 남의 scope 거절과 같은 자리·같은 모양이다: run 이 열리기 전에 멈춰야 운영자가 표를 본다.
+    # Same place and same shape as the refusal of someone else's scope: stopping before the run is opened is
+    # what makes the operator look at the table.
     if missing and not stage.owned:
         raise ValueError(NO_MISSING.format(version=version))
-    # 배선이 끊긴 밤이 첫 배치까지 가서 죽으면 `--missing` 은 rewriting 표식을 안 달아 그 죽음을 되짚을
-    # 자리가 없다 — 규칙에는 없는 선택 훅이라 이름으로 찾는다 (analysis/polarity/ollama.py 의 preflight).
+    # When a night with broken wiring dies at the first batch, `--missing` puts no rewriting mark on it and
+    # there is nowhere to trace that death — an optional hook the rules do not have, so it is found by name
+    # (preflight in analysis/polarity/ollama.py).
     if (probe := getattr(stage.polarity, "preflight", None)) is not None:
         probe()
     floor = stage.floor(scope)
@@ -571,8 +602,9 @@ def run(
             if floor is not None and month < floor:
                 continue
             months += 1
-            # 증분은 없는 것을 더할 뿐 갈아끼우지 않는다 — 지우지 않으니 그 달이 반쪽으로 남는 창도 없고,
-            # 그래서 rewriting 표식도 달지 않는다 (달면 `_abandoned` 가 멀쩡한 달을 stale 로 보고한다).
+            # The incremental run only adds what is not there, it swaps nothing out — nothing is deleted, so
+            # there is no window leaving the month in halves and no rewriting mark either (with one,
+            # `_abandoned` would report a healthy month as stale).
             if not missing:
                 _note(conn, run_id, _rewriting(base_note, "review", month, scope))
                 replaced += stage.replace_stale("review", month, scope, since)
@@ -589,8 +621,9 @@ def run(
                 batch,
             ):
                 pending: list[_Pending] = []
-                # 고르는 기준이 날짜가 아니라 이것이다: 수집은 늦게 와 written_at 으로는 "안 한 것"을
-                # 못 고르고, 같은 문장의 재판정은 gemma4 가 비결정이라 라벨을 바꿔놓는다 (#98).
+                # This, not a date, is what picks them: collection arrives late so written_at cannot pick out
+                # "the ones not done", and reclassifying the same sentence changes the label because gemma4 is
+                # non-deterministic (#98).
                 done = stage.already("review", _refs_of(page, REVIEW_REF_AT)) if missing else frozenset()
                 for source, product_key, review_key, rating, body, written_at, captured_at in page:
                     fallbacks += written_at is None
@@ -607,8 +640,9 @@ def run(
                     lexicon_category = stage.categories.lexicon_category(
                         source, unit.category, names.get((source, product_key))
                     )
-                    # 주인이 따로 있는 (scope, 달)은 판정 자체를 하지 않는다: 자연키에 polarity_version 이
-                    # 없어 여기서 한 줄만 흘러도 upsert 가 주인의 라벨을 제자리에서 덮는다.
+                    # A (scope, month) that has another owner is not classified at all: the natural key has no
+                    # polarity_version, so a single row leaking through here has its upsert overwrite the
+                    # owner's label in place.
                     if (
                         not stage.owns(lexicon_category, month_of(unit.observed_at))
                         or (scope and lexicon_category != scope)
@@ -623,9 +657,10 @@ def run(
             if not missing:
                 _note(conn, run_id, base_note)
 
-    # 댓글에는 제품 카테고리가 없어 스코프 실행은 여기서 한 행도 만들 수 없다 — 그런 실행이 이 가지에
-    # 들어가면 지우기만 하고 나온다 (yt_comment 의 need 행과 wish 행이 그 달에서 사라진다). 주인 있는
-    # 구현도 같다: lexicon_category 가 없는 행에는 소유가 성립하지 않아 판정이 한 줄도 통과하지 못한다.
+    # A comment has no product category, so a scoped run can create no row here — such a run entering this
+    # branch would only delete and leave (the need rows and wish rows of yt_comment vanish for that month).
+    # The same holds for an implementation with an owner: ownership does not hold on a row without a
+    # lexicon_category, so not one classification gets through.
     if scope is None and not stage.owned and _exists(conn, youtube_schema, "comments"):
         videos = _channels(conn, youtube_schema)
         table = _table(youtube_schema, "comments")
@@ -660,7 +695,8 @@ def run(
                         channel_id=channel_id,
                         view_count=view_count,
                     )
-                    # 댓글에는 제품 카테고리가 없다 — 카테고리 사전 없이 generic 규칙만 돈다.
+                    # A comment has no product category — only the generic rules run, without a category
+                    # lexicon.
                     units += 1
                     pending.extend(stage.candidates(unit, None))
                     wish = stage.wish_row(unit)

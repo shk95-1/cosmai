@@ -1,7 +1,8 @@
-"""주제 사전 v3 의 판정 원장이 사전과 같은 것을 말하는가 (포크 #56).
+"""Does the decision ledger of topic dictionary v3 say the same thing as the dictionary (fork #56).
 
-#37 이 ydc `lexicon.json` 을 폐기하며 별칭 5종을 "갈 자리가 없다"로 남겼고, `protected` 32 에서 후보
-7종을 남겼다. 이 이슈가 그 열둘(+ #37 이 이미 기각한 3종)에 **등재 / 보류 / 미등재** 하나씩을 붙인다.
+When #37 discarded ydc `lexicon.json` it left 5 alias kinds as "there is nowhere for them to go" and 7
+candidate kinds out of the 32 in `protected`. This issue attaches one of **listed / held / unlisted** to each
+of those twelve (plus the 3 kinds #37 already rejected).
 원장은 `tool/measure-lexicon-candidates` 의 `LEDGER` 이고 계약 문장은 `contracts/formats.md`
 §주제 사전 v3 다. 여기서 되묻는 것은 셋이다.
 
@@ -39,7 +40,8 @@ TOOL = ROOT / "tool" / "measure-lexicon-candidates"
 
 
 def _tool() -> Any:
-    """도구를 모듈로 연다 -- 이름에 하이픈이 있어 import 할 수 없다(`test_query_routing.py` 와 같은 길)."""
+    """Opens the tool as a module -- its name has a hyphen so it cannot be imported (the same way as
+    `test_query_routing.py`)."""
     spec = spec_from_loader(
         "measure_lexicon_candidates", SourceFileLoader("measure_lexicon_candidates", str(TOOL))
     )
@@ -57,7 +59,8 @@ NOT_LISTED = [row for row in LEDGER if row.verdict != "등재"]
 
 
 def expected_entries() -> list[dict]:
-    """얼어붙은 v1 + 이 원장이 적은 것. `test_topics.py` 가 적재 원본과 DB 판을 이것과 맞댄다."""
+    """The frozen v1 plus what this ledger writes down. `test_topics.py` matches the load source and the DB
+    version against this."""
     added: list[dict] = []
     for frozen in frozen_topics.TOPICS:
         entry = {key: list(value) if isinstance(value, list) else value for key, value in frozen.items()}
@@ -75,12 +78,12 @@ def _rows_by_term() -> dict[str, tuple[Any, ...]]:
     return {str(row[pattern]): row for row in csv_rows()}
 
 
-# ---------- 원장과 적재 원본이 같은 것을 말하는가 ----------
+# ---------- does the ledger say the same thing as the load source ----------
 
 
 def test_every_listed_term_lives_as_a_row_in_the_loading_source():
-    """등재 판정은 파일의 한 줄로 살아야 한다 -- 판정만 이슈에 적히면 #9 가 슬라이스를 지우는 순간
-    그 표면형이 사라진다(#37 1c 가 남긴 바로 그 자리)."""
+    """A listing decision has to live as a line in a file -- with the decision written only in the issue, the
+    moment #9 deletes the slice that surface form disappears (exactly the place #37 1c left behind)."""
     from db.lexicon import ASPECT_COLUMNS
 
     aspect, extra = (ASPECT_COLUMNS.index(c) for c in ("aspect", "extra"))
@@ -93,7 +96,7 @@ def test_every_listed_term_lives_as_a_row_in_the_loading_source():
 
 
 def test_no_refused_term_slipped_into_the_loading_source():
-    """보류·미등재는 근거가 있는 판정이다 -- 행이 조용히 생기면 그 근거가 거짓이 된다."""
+    """Held and unlisted are decisions with grounds -- a row appearing quietly makes those grounds false."""
     rows = _rows_by_term()
     assert [row.term for row in NOT_LISTED if row.term in rows] == []
 
@@ -116,7 +119,7 @@ def test_the_ledger_only_touches_topics_that_already_exist():
     assert [row.term for row in LEDGER if row.place not in known] == []
 
 
-# ---------- 미등재 근거를 코드가 되묻는가 ----------
+# ---------- does the code ask the unlisted grounds back ----------
 
 
 def test_a_term_its_topic_already_sees_earns_no_row():
@@ -166,10 +169,11 @@ def test_a_stop_tier_canonical_keeps_every_surface_of_its_out_of_the_linker():
     assert compile_lexicon(linkable, 1).surface_re.search("올영 세일 갔어요") is not None
 
 
-# ---------- 도구가 세는 규칙 ----------
+# ---------- the rule the tool counts by ----------
 
 
-# 인계본과 같은 열 순서. 손으로 다시 적으면 도구가 읽는 스키마와 픽스처가 조용히 갈린다.
+# The same column order as the handover copy. Written out by hand, the schema the tool reads and the fixture
+# drift apart quietly.
 CORPUS_HEADER = (ROOT / "tests" / "fixtures" / "yt_handoff" / "document.csv").read_text(
     encoding="utf-8-sig"
 ).splitlines()[0] + "\n"
@@ -190,8 +194,9 @@ def _corpus(tmp_path: Path) -> Path:
 
 
 def test_the_tool_counts_latin_on_the_boundary_rule_the_dictionary_matches_on(tmp_path):
-    """`sunscreen` 원장 값이 81 이 아니라 76 인 이유. 부분문자열로 세면 복수형 `sunscreens` 가 끼는데
-    사전은 경계로 매칭하므로 그 문서는 사전이 안 보는 문서다 -- 두 수를 나란히 놓으면 축이 갈린다."""
+    """Why the `sunscreen` ledger value is 76 rather than 81. Counted as a substring the plural `sunscreens`
+    slips in, but the dictionary matches on boundaries so that document is one the dictionary does not see --
+    put the two numbers side by side and the axes are split."""
     tool = _tool()
     measured = tool.measure(_corpus(tmp_path), tool.baseline())
     assert measured["documents"] == len(PROBES)
@@ -210,7 +215,7 @@ def test_the_tool_separates_what_a_row_adds_from_what_the_topic_already_sees(tmp
 
 
 def test_the_tool_refuses_when_a_listed_term_falls_through_the_floor(tmp_path):
-    """코퍼스가 자라 원장이 거짓이 되는 자리. 종료 코드 1 = 이 산출을 믿지 마라."""
+    """Where a growing corpus makes the ledger false. Exit code 1 = do not trust this output."""
     tool = _tool()
     assert tool.main(["--corpus", str(_corpus(tmp_path)), "--json"]) == 1
     measured = tool.measure(_corpus(tmp_path), tool.baseline())
@@ -218,9 +223,10 @@ def test_the_tool_refuses_when_a_listed_term_falls_through_the_floor(tmp_path):
 
 
 def _ledger_corpus(tmp_path: Path, tool: Any, repeats: dict[str, int] | None = None) -> Path:
-    """원장의 `df`·`new` 를 **정확히** 재현하는 코퍼스. 표기마다 `new` 편은 그 표기만 담고(그 주제가
-    못 보는 문서), `df - new` 편은 그 주제의 첫 별칭을 덧붙인다(이미 보는 문서). 빨간 자리만 있고
-    초록이 도달 불가하면 위 테스트들은 항등식이다."""
+    """A corpus that reproduces the ledger's `df` and `new` **exactly**. Per spelling, the `new` side holds
+    that spelling alone (a document that topic does not see) and the `df - new` side adds the topic's first
+    alias (a document it already sees). With only the red place present and green unreachable, the tests
+    above are identities."""
     known = tool.baseline()
     filler = {entry["topic"]: entry["ko"][0] for entry in known.entries}
     lines = []
@@ -243,8 +249,9 @@ def test_the_tool_is_green_on_a_corpus_that_matches_the_ledger(tmp_path, capsys)
 
 
 def test_the_tool_compares_the_ledgers_own_numbers_and_not_only_the_verdicts(tmp_path, monkeypatch):
-    """이 도구의 존재 이유가 원장의 수를 다시 재 **맞대는** 것이다. 대조가 없으면 원장에 아무 수나
-    적어도 초록이라 계약이 인용하는 df 가 조용히 거짓이 된다(레포의 다른 measure-* 는 전부 정확 일치).
+    """The reason this tool exists is to measure the ledger's numbers again and **match them**. Without the
+    comparison, any number written in the ledger stays green and the df the contract quotes goes quietly
+    false (every other measure-* in the repo is an exact match).
 
     변이: `썬쿠션 116` 을 `9116` 으로 바꾸면 그 한 줄이 `count` 로 나온다.
     """
@@ -292,8 +299,8 @@ def test_the_tool_counts_the_topic_totals_the_contract_quotes(tmp_path, capsys):
 
 
 def test_the_tool_reads_the_repo_csv_as_its_baseline_dictionary():
-    """기준 사전이 원장의 표기를 하나도 갖지 않는다 -- 가지면 등재한 뒤 `new` 가 전부 0 이 되어
-    "이 행이 무엇을 관측하는가"를 다시 물을 수 없다."""
+    """The base dictionary holds not one of the ledger's spellings -- holding one, every `new` becomes 0
+    after listing and "what does this row observe" can no longer be asked."""
     tool = _tool()
     aliases = {a for e in tool.baseline().entries for a in e["ko"] + e["latin"]}
     assert not aliases & {row.term for row in LEDGER}
@@ -303,7 +310,8 @@ def test_the_tool_reads_the_repo_csv_as_its_baseline_dictionary():
 
 
 def test_the_tool_is_wired_to_the_read_only_handoff_corpus():
-    """기본 경로가 레포 안이면 26만 문서가 아니라 픽스처를 재고 그 수가 원장에 실린다."""
+    """With the default path inside the repo it measures the fixture rather than 260k documents, and that
+    number goes into the ledger."""
     tool = _tool()
     assert tool.CORPUS.name == "document.csv"
     assert "yt-handoff" in str(tool.CORPUS)
@@ -311,15 +319,15 @@ def test_the_tool_is_wired_to_the_read_only_handoff_corpus():
         tool.measure(Path("/nonexistent/document.csv"), tool.baseline())
 
 
-# ---------- 적재 전후로 무엇이 움직이는가 (포크 #58 의 첫 실측) ----------
+# ---------- what moves across a load (the first measurement of fork #58) ----------
 
 
 @pytest.mark.postgres
 def test_raising_the_aspect_dictionary_to_v3_does_not_move_the_run_stamp(needs_runtime_url: str):
-    """포크 #58 은 `entity_lexicon` 의 번호표가 kind 를 안 가린다고 적는다. **주제 사전은 그 자리를
-    밟지 않는다** -- `aspect_lexicon` 은 다른 표라 `versions.lexicon`(`aggregate/pipeline.py:149` 의
-    `SELECT max(version) FROM entity_lexicon`)을 나눠 갖지 않는다. 코디네이터가 v3 를 켤 때 무엇이
-    움직이고 무엇이 안 움직이는지가 이 테스트의 답이다.
+    """Fork #58 writes that the number of `entity_lexicon` does not pick by kind. **The topic dictionary does
+    not step on that place** -- `aspect_lexicon` is a different table, so it does not share
+    `versions.lexicon` (the `SELECT max(version) FROM entity_lexicon` at `aggregate/pipeline.py:149`). What
+    moves and what does not when the coordinator switches v3 on is the answer of this test.
 
     변이: `entity_lexicon` 에 v3 를 한 행 넣으면 (활성이 아니어도) 그 칸이 3 이 된다 -- #58 이 고칠
     자리가 실제로 무는 것을 여기서 본다.
@@ -351,7 +359,7 @@ def test_raising_the_aspect_dictionary_to_v3_does_not_move_the_run_stamp(needs_r
         assert load_aspects(conn, topic_registry.RULESET).version == 3
         assert topic_registry.load(conn).version == 3
         assert stamp(cur) == 1, "aspect v3 가 entity 의 번호표를 움직였다"
-        # 변이: entity 쪽에 v3 가 한 행이라도 들어오면 (안 켜도) 그 칸이 움직인다 (#58).
+        # Variant: one v3 row arriving on the entity side moves that column (even unswitched) (#58).
         insert_entities(cur, [("brand", "라네즈", "라네즈", "normal", "oliveyoung", None)], 3, active=False)
         conn.commit()
         assert stamp(cur) == 3

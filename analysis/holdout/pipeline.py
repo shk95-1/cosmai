@@ -1,4 +1,4 @@
-"""청크 색인이 가른 두 팔 → 홀드아웃 대조 (포크 #51).
+"""The two arms split by the chunk index -> the holdout comparison (fork #51).
 
 **이 파이프라인은 아무것도 쓰지 않는다.** 이 답의 행은 (팔, 주제)가 키인데 `팔` 의 경계가 청크 색인이라
 `cosmai retrieval chunk` 가 한 번 돌 때마다 움직인다 -- 오늘의 홀드아웃이 내일의 기존이다
@@ -8,10 +8,11 @@
 모집단은 §대조 의 술어 그대로다(`crosscheck.pipeline.sun_params`) -- 두 팔이 같은 술어 위에 서야 차이가
 표본의 것이지 필터의 것이 아니다.
 
-**네 읽기(청크 명부 · 리뷰 키 명부 · 빈 본문 수 · 모집단)는 한 트랜잭션 스냅샷 안에서 한다.** 수집기와
-청커는 계속 도는 중이라 밖에 두면 그 넷이 서로 다른 모집단을 가리키고, 그때 `seen + holdout + empty` 는
-어떤 모집단의 크기도 아니다. ydc 가 손으로 얹은 정지·전순서 정렬·행수 대조 셋이 여기서 각각 어디로
-가는지는 계약의 표가 든다 -- 그대로 옮기면 이 자리에서는 항등식이라 검사가 아니다.
+**The four reads (the chunk roster · the review-key roster · the empty-body count · the population) are done
+inside one transaction snapshot.** The collectors and the chunker keep running, so left outside it the four
+point at different populations and `seen + holdout + empty` is then the size of no population at all. Where
+the three things ydc added by hand (a freeze, a total-order sort, a row-count comparison) each go here is in
+the table of the contract -- carried over as they were, they are identities here and not checks.
 """
 
 from __future__ import annotations
@@ -35,7 +36,8 @@ from analysis.retrieval import topics as topic_registry
 # 커머스 청크의 `doc_id` 가 곧 **분석이 실제로 본 리뷰의 명부**다. 이것이 우리 컷오프이고, 날짜가 아닌
 # 이유는 계약 §홀드아웃 이 든다 -- `captured_at` 은 수집 시각이지 우리가 본 시각이 아니다.
 CHUNKED: LiteralString = "SELECT DISTINCT doc_id FROM retrieval_chunk WHERE source = %s"
-# 원천에 없는 커머스 청크를 찾기 위한 명부. 청크에는 외래키가 없다(020) -- 그래서 이 대조가 필요하다.
+# The roster for finding commerce chunks that are not in the source. A chunk has no foreign key (020) --
+# which is why this comparison is needed.
 ALL_KEYS = "SELECT source, review_key FROM {review}"
 # 본문이 빈 리뷰는 두 팔 모두에서 뺀다: 빈 본문은 청크를 만들지 않으므로, 남기면 "안 본 리뷰" 가 아니라
 # "볼 것이 없는 리뷰" 가 홀드아웃을 채운다 (계약 §홀드아웃).
@@ -48,12 +50,12 @@ EMPTY = "SELECT count(*) FROM {review} r" + SUN_JOIN + " WHERE coalesce(r.body, 
 
 
 class NoHoldout(LookupError):
-    """되물을 것이 아직 없다. 실패가 아니라 막힘이라 CLI 에서는 blocked(2) 다."""
+    """There is nothing to ask back yet. Blocked rather than a failure, so in the CLI it is blocked(2)."""
 
 
 @dataclass(frozen=True)
 class Built:
-    """홀드아웃 한 벌. 아무것도 쓰지 않으므로 이것이 산출의 전부다."""
+    """One holdout set. Nothing is written, so this is the whole output."""
 
     comparison: Comparison
     dropped_empty: int = 0
@@ -61,7 +63,8 @@ class Built:
 
     @property
     def violations(self) -> tuple[str, ...]:
-        # 위반 줄은 **이 산출을 믿지 마라** 하나만 뜻한다. 재현 실패는 여기 실리지 않는다.
+        # A violation line means only **do not trust this output**. A reproduction failure is not carried
+        # here.
         if not self.orphans:
             return ()
         return (
@@ -115,7 +118,7 @@ class Outcome:
 
 @contextmanager
 def _snapshot(conn: psycopg.Connection[Any]) -> Iterator[None]:
-    """네 읽기가 같은 시점을 보게 한다.
+    """Makes the four reads see the same moment.
 
     **이 절의 유일한 기계 방어다.** 수집기와 청커는 계속 도는 중이라, 밖에 두면 팔의 크기와 뺀 빈 본문
     수와 고아 청크 수가 서로 다른 모집단의 수가 된다. ydc 는 PostgREST 위에서 이것을 못 가져 정지를
@@ -123,7 +126,7 @@ def _snapshot(conn: psycopg.Connection[Any]) -> Iterator[None]:
     검사가 아니다 (계약 §홀드아웃).
     """
     previous = conn.isolation_level
-    conn.rollback()  # 트랜잭션이 열려 있으면 격리 수준을 바꿀 수 없다
+    conn.rollback()  # the isolation level cannot be changed with a transaction open
     conn.isolation_level = IsolationLevel.REPEATABLE_READ
     try:
         yield
@@ -232,7 +235,8 @@ def _when(stamp: Any) -> str:
 
 
 def render(built: Built) -> list[str]:
-    """사람이 읽는 답. **분모는 열마다 머리글이 적는다** -- 적지 않으면 두 축이 섞여 읽힌다."""
+    """The answer a person reads. **The denominator is written in each column heading** -- unwritten, the two
+    axes read as mixed."""
     made = built.comparison
     seen, hold = made.seen, made.holdout
     lines = [

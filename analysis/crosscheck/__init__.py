@@ -1,4 +1,4 @@
-"""소스를 나란히 놓고 어긋나는 자리를 찾는다 (포크 #7). **합산하지 않는다.**
+"""Puts the sources side by side and finds where they disagree (fork #7). **Nothing is summed.**
 
 규칙의 출처는 ydc `source_composition.py` · `commerce_crosscheck.py` · `cross_source.py` 이고, 슬라이스를
 import 하지 않고 옮겨 적었다. **핀(`v0.1.0` `02440ab`)이 아니라 `v0.3.0`(`e5a1b00`)이다** — 성분 키와
@@ -9,8 +9,8 @@ import 하지 않고 옮겨 적었다. **핀(`v0.1.0` `02440ab`)이 아니라 `v
 `topic_group` 안의 응답 비중, 성분 담론은 문서 수다. 더하거나 평균 내면 그 순간 뜻이 없어진다. 그래서
 **크기가 아니라 순위와 방향**을 본다 (`contracts/interfaces.md` §대조).
 
-여기는 규칙만 산다. DB 는 `analysis/crosscheck/pipeline.py` 이고, 그쪽이 이 함수들에 값을 먹인다 --
-`analysis/sensitivity` 와 같은 가름이다.
+Only the rules live here. The DB is `analysis/crosscheck/pipeline.py`, and that side feeds these functions
+their values -- the same split as `analysis/sensitivity`.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 
-# ---------------------------------------------------------------- 구성 (ydc source_composition.py)
+# ---------------------------------------------------------- composition (ydc source_composition.py)
 
 COMMENT = "youtube_comment"
 TRANSCRIPT = "youtube_transcript"
@@ -51,7 +51,7 @@ READ_COMMENT_ONLY = "영상은 안 다루는데 댓글·리뷰에는 있음"
 
 @dataclass(frozen=True)
 class SourceShare:
-    """한 주제가 소스마다 차지하는 자리. 소스 간 문서 수를 합산하지 않는다."""
+    """The place one topic takes on each source. Document counts are not summed across sources."""
 
     topic_key: str
     documents: Mapping[str, int]
@@ -60,7 +60,7 @@ class SourceShare:
     reading: str = ""
 
 
-# ---------------------------------------------------------------- 평가 (ydc commerce_crosscheck.py)
+# ---------------------------------------------------------- rating (ydc commerce_crosscheck.py)
 
 # 커머스 topic_group -> 우리 topic_id. 대응이 없는 것은 넣지 않는다 (전량에서 `피부타입` 이 그 자리다).
 GROUP_MAP = {
@@ -97,7 +97,8 @@ READ_SATURATED = "만족도 높고 갭 작음 · 포화"
 
 @dataclass(frozen=True)
 class RatingRow:
-    """한 주제에 대한 플랫폼 속성 평가와 그 run 의 판정. 값이 아니라 방향을 본다."""
+    """The platform attribute ratings for one topic and the judgement of that run. The direction is looked at,
+    not the value."""
 
     topic_key: str
     commerce_groups: tuple[str, ...]
@@ -115,7 +116,7 @@ class RatingRow:
         return self.products_rated < MIN_PRODUCTS
 
 
-# ---------------------------------------------------------------- 성분 (ydc cross_source.py 성분 축)
+# ------------------------------------------------ ingredients (the ingredient axis of ydc cross_source.py)
 
 # NAVER 성분 그룹 -> 성분표에서 찾을 이름 조각. 소문자·공백 제거 후 부분문자열로 본다.
 #
@@ -188,14 +189,15 @@ KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.cs
 # 성분표를 성분명으로 쪼개는 규칙 둘. 우리 원천에만 있는 함정이라 ydc 에 대응이 없다 (계약 §성분).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 STAR_NOTE_RE = re.compile(r"^[^\S\n]*\*.*$", re.MULTILINE)
-# 쉼표 없이 공백으로만 나열한 성분표는 한 덩어리로 남는다. 조용히 쪼개면 배합 순위가 틀린 값으로 서므로
-# 세기만 한다.
+# An ingredient list written with spaces and no commas stays one lump. Splitting it quietly would stand the
+# blending order on a wrong value, so it is only counted.
 RUN_ON_SPACES = 5
 
 
 @dataclass(frozen=True)
 class KeyAudit:
-    """키 하나가 실제로 무엇을 잡는가. **부분문자열 오매칭 전용 검사다** -- 수치만 봐서는 못 잡는다."""
+    """What one key actually catches. **A check for substring mismatches alone** -- the numbers cannot catch
+    it."""
 
     key: str
     terms: tuple[str, ...]
@@ -206,13 +208,15 @@ class KeyAudit:
 
     @property
     def suspect(self) -> bool:
-        """사람이 한 번 확인해 금지한 성분명을 잡았는가. 0행은 오매칭이 아니라 부재라 통과다."""
+        """Did it catch an ingredient name a person checked once and forbade. 0 rows is absence rather than a
+        mismatch, so it passes."""
         return bool(self.denied)
 
 
 @dataclass(frozen=True)
 class IngredientRow:
-    """성분 하나의 담론 셋. 처방·논문 칸은 잠겨 있어 None 이다 (FORMULA_HOLD · PAPER_HOLD)."""
+    """The three discourse counts of one ingredient. The formulation and paper columns are locked, so they
+    are None (FORMULA_HOLD · PAPER_HOLD)."""
 
     ingredient: str
     talk_youtube: int
@@ -243,7 +247,8 @@ class Ingredients:
 
 
 def ranks(values: Mapping[str, float]) -> dict[str, int]:
-    """큰 값이 1위. 비교는 크기가 아니라 순위로 한다 (ydc `cross_source.ranks`)."""
+    """The largest value is rank 1. The comparison is by rank rather than by size (ydc
+    `cross_source.ranks`)."""
     order = sorted(values, key=lambda key: -values[key])
     return {key: place + 1 for place, key in enumerate(order)}
 
@@ -278,7 +283,8 @@ def composition(
 
 
 def share_reading(shares: Mapping[str, float]) -> str:
-    """어느 쪽이 그 주제를 담는 그릇인가 (ydc `source_composition.reading` + `cross_source` 한 줄)."""
+    """Which side is the vessel for that topic (ydc `source_composition.reading` + one line of
+    `cross_source`)."""
     creator, consumer = shares.get(CREATOR, 0.0), shares.get(CONSUMER, 0.0)
     comment = shares.get(COMMENT, 0.0)
     if consumer >= LEAD_PP and creator < THIN_PP:
@@ -287,8 +293,8 @@ def share_reading(shares: Mapping[str, float]) -> str:
         return READ_CONSUMER_LEAD
     if creator - consumer >= LEAD_PP:
         return READ_CREATOR_LEAD
-    # ydc `cross_source.topic_table` 의 한 줄. 실사용 쪽이 0 이면 붙지 않는다 -- 아무도 말하지 않는
-    # 주제는 제작자의 사각이 아니다.
+    # One line of ydc `cross_source.topic_table`. It is not attached when the usage side is 0 -- a topic
+    # nobody speaks of is not a creator's blind spot.
     if consumer > 0 and creator < SPARSE_PP and comment > creator * TALK_RATIO:
         return READ_COMMENT_ONLY
     return ""
@@ -296,7 +302,7 @@ def share_reading(shares: Mapping[str, float]) -> str:
 
 @lru_cache(maxsize=1)
 def confirmed_polarity() -> dict[tuple[str, str], str]:
-    """(topic_group, topic_name) -> 사람이 확인한 극성. 힌트보다 **먼저** 답한다."""
+    """(topic_group, topic_name) -> the polarity a person confirmed. It answers **before** the hints."""
     with POLARITY_CSV.open(encoding="utf-8-sig", newline="") as handle:
         return {(row["topic_group"], row["topic_name"]): row["polarity"] for row in csv.DictReader(handle)}
 
@@ -318,7 +324,7 @@ def polarity(topic_name: str, *, topic_group: str | None = None) -> str:
 
 
 def positive_rate(choices: Sequence[tuple[str, float]], *, topic_group: str | None = None) -> float | None:
-    """한 제품·한 topic_group 안에서 긍정 선택지가 차지하는 비중."""
+    """The share the positive choices take inside one product and one topic_group."""
     total = sum(share for _name, share in choices)
     if not total:
         return None
@@ -327,10 +333,10 @@ def positive_rate(choices: Sequence[tuple[str, float]], *, topic_group: str | No
 
 
 def rating_reading(positive_rate_mean: float, gap_pp: float | None) -> str:
-    """언급이 많은데 만족도가 낮으면 개선 여지, 둘 다 높으면 이미 해결된 강점.
+    """Many mentions with low satisfaction is room to improve; both high is a strength already solved.
 
-    갭을 모르는 셀(판정 행이 없다)은 갭이 큰 쪽으로 읽지 않는다 -- 모른다와 작다는 다르지만, 모르는
-    것을 크다고 읽으면 없는 근거로 공백을 주장하게 된다.
+    A cell whose gap is unknown (there is no judgement row) is not read as the large-gap side -- unknown and
+    small are different, and reading the unknown as large claims a gap on grounds that do not exist.
     """
     wide = gap_pp is not None and gap_pp > GAP_PP_MATERIAL
     if wide:
@@ -342,7 +348,7 @@ def ratings(
     rated: Mapping[tuple[str, str, str], Sequence[tuple[str, float]]],
     judged: Mapping[str, tuple[int | None, float | None, float | None, str]],
 ) -> tuple[RatingRow, ...]:
-    """(소스, 제품, topic_group) -> 선택지들, 그리고 그 run 의 판정 -> 주제마다 한 줄."""
+    """(source, product, topic_group) -> the choices, and the judgement of that run -> one line per topic."""
     per_topic: dict[str, list[float]] = {}
     groups: dict[str, set[str]] = {}
     for (_source, _product, group), choices in rated.items():
@@ -377,7 +383,8 @@ def ratings(
 
 
 def parse_ingredients(text: str) -> list[str]:
-    """성분표 한 장을 성분명으로. 대괄호 구간 표시는 버리고 괄호 안의 쉼표는 자르지 않는다."""
+    """One ingredient list into ingredient names. A bracketed section marker is dropped and a comma inside
+    parentheses is not cut."""
     body = BRACKET_RE.sub(" ", STAR_NOTE_RE.sub(" ", text or ""))
     out: list[str] = []
     depth, current = 0, []
@@ -396,12 +403,14 @@ def parse_ingredients(text: str) -> list[str]:
 
 
 def run_on(name: str) -> bool:
-    """쉼표 없이 공백으로만 나열한 성분표 한 덩어리인가. 조용히 쪼개지 않고 세기만 한다."""
+    """Is it one lump of an ingredient list written with spaces and no commas. It is only counted, not split
+    quietly."""
     return name.count(" ") >= RUN_ON_SPACES
 
 
 def known_names(path: Path | None = None) -> dict[str, frozenset[str]]:
-    """키 -> 그 키가 잡는다고 확인된 성분명. 키가 하나도 안 잡는 것도 빈 집합으로 답한다."""
+    """Key -> the ingredient names it is confirmed to catch. A key that catches nothing answers with an empty
+    set."""
     found: dict[str, set[str]] = {key: set() for key in INGREDIENT_KEYS}
     with (path or KNOWN_NAMES_CSV).open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
@@ -423,7 +432,8 @@ def mentions_term(text: str, terms: Iterable[str]) -> bool:
 
 
 def denied_in(key: str, names: Iterable[str]) -> tuple[str, ...]:
-    """이 키가 잡은 이름들 중 금지에 걸리는 것. 매처와 같은 폭(공백·대소문자를 접은 부분문자열)이다."""
+    """Which of the names this key caught fall under the ban. The same width as the matcher (a substring with
+    whitespace and case folded)."""
     forbidden = {**DENIED_NAMES, **DENIED_FOR.get(key, {})}
     found = list(names)
     return tuple(sorted({bad for bad in forbidden if any(matches(hit, (bad,)) for hit in found)}))

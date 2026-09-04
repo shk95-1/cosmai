@@ -1,4 +1,4 @@
-"""`analyze aggregate` 단계의 진입점. #5 의 `analyze all` 이 run(conn, ...) 한 줄로 부른다."""
+"""The entry point of the `analyze aggregate` stage. `analyze all` of #5 calls run(conn, ...) in one line."""
 
 from __future__ import annotations
 
@@ -61,13 +61,13 @@ SET mentions = EXCLUDED.mentions, channels = EXCLUDED.channels, videos = EXCLUDE
 
 
 def _float(value: Any) -> float | None:
-    """numeric 컬럼은 Decimal 로 돌아오지만 계약의 행 타입은 float 다 (interfaces.md)."""
+    """A numeric column comes back as Decimal, but the contract's row type is float (interfaces.md)."""
     return None if value is None else float(value)
 
 
 def load_needs(cur: psycopg.Cursor[Any], population: Sequence[str]) -> list[NeedMentionRow]:
     cur.execute(
-        f"SELECT {NEED_COLUMNS} FROM need_mention "  # noqa: S608 - 컬럼은 이 모듈의 상수다
+        f"SELECT {NEED_COLUMNS} FROM need_mention "  # noqa: S608 - the columns are constants of this module
         "WHERE extractor_version = ANY(%s) ORDER BY mention_id",
         (list(population),),
     )
@@ -117,7 +117,8 @@ def load_canonical(cur: psycopg.Cursor[Any]) -> dict[str, str]:
 
 
 def population_of(cur: psycopg.Cursor[Any], extractors: Sequence[str] | None) -> tuple[str, ...]:
-    """무엇을 집계했는지가 run 에 남아야 한다 — 두 추출 버전을 한 scope 에 조용히 섞지 않는다."""
+    """What was aggregated has to stay on the run — two extractor versions are not mixed into one scope
+    quietly."""
     cur.execute(
         "SELECT extractor_version FROM need_mention "
         "UNION SELECT extractor_version FROM wish_mention ORDER BY 1"
@@ -139,7 +140,8 @@ def population_of(cur: psycopg.Cursor[Any], extractors: Sequence[str] | None) ->
 def _versions(
     aggregator: RuleAggregator, cur: psycopg.Cursor[Any], population: Sequence[str]
 ) -> dict[str, Any]:
-    """versions 는 이 run 이 실제로 읽은 산출물의 버전이다 — 분석 재현의 유일한 단서 (versioning.md)."""
+    """versions is the version of the output this run actually read — the only clue for reproducing an
+    analysis (versioning.md)."""
     cur.execute(
         "SELECT DISTINCT extractor_version, polarity_version FROM need_mention "
         "WHERE extractor_version = ANY(%s)",
@@ -151,7 +153,7 @@ def _versions(
     cur.execute("SELECT DISTINCT linker_version FROM product_ref")
     return {
         "linker": ";".join(sorted(v for (v,) in cur.fetchall())) or None,
-        # 이 run 이 고른 모집단 그대로다 — 나중에 "무엇을 집계했나"를 이 값 하나로 답한다.
+        # Exactly the population this run picked — later "what was aggregated" is answered by this one value.
         "extractor": ";".join(population) or None,
         "polarity": ";".join(sorted({p for _, p in pairs})) or None,
         "aggregate": aggregator.version,
@@ -160,7 +162,8 @@ def _versions(
 
 
 def _run_id(cur: psycopg.Cursor[Any], note: str, versions: dict[str, Any]) -> int:
-    """note 로 찾고 없을 때만 만든다 — 재실행이 run 을 쌓으면 멱등이 관측되지 않는다."""
+    """Found by note and created only when there is none — piling up runs on a rerun makes idempotence
+    unobservable."""
     cur.execute("SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1", (note,))
     found = cur.fetchone()
     payload = json.dumps(versions, ensure_ascii=False)
@@ -202,7 +205,7 @@ def _wish_values(row: MetricsWishRow, run_id: int) -> tuple[Any, ...]:
 def _write(
     conn: psycopg.Connection[Any], statement: LiteralString, rows: list[tuple[Any, ...]], batch: int
 ) -> None:
-    """ranking.py 의 _write 와 같은 모양 — 한 번의 executemany 로 전 scope 를 밀면 60s 를 넘긴다."""
+    """The same shape as _write in ranking.py — pushing every scope in one executemany goes past 60s."""
     for start in range(0, len(rows), batch):
         with conn.cursor() as cur:
             cur.executemany(statement, rows[start : start + batch])
@@ -224,8 +227,9 @@ def scopes_for(scope: str | None, mentions: Sequence[NeedMentionRow]) -> list[st
     is what `_amend_silent_scope` (analysis/pipeline.py) reports rather than closing quietly.
     """
     if scope:
-        # 셈은 그대로다: 펼침은 어느 카테고리에 쓸지를 고를 뿐, 그 안에서 무엇이 세어지는지는 스코프
-        # 없는 실행이 그 카테고리에 쓰는 것과 같다 (need_metrics 는 category 로만 거른다).
+        # The counting is unchanged: the expansion only picks which category to write under, and what is
+        # counted inside it is the same as what a run without a scope writes to that category (need_metrics
+        # filters on category alone).
         return sorted({m.category for m in mentions if m.category and m.lexicon_category == scope} | {scope})
     return sorted({m.category for m in mentions if m.category} | {ROLLUP_SCOPE})
 
@@ -239,15 +243,17 @@ def run(
     extractors: Sequence[str] | None = None,
     batch: int = WRITE_BATCH,
 ) -> int:
-    """run_id 를 주면 그 run 에 쓰고 상태는 두 번 건드리지 않는다 — #5 가 세 stage 를 한 run 으로 묶는다."""
+    """Given a run_id it writes to that run and does not touch the status twice — #5 ties three stages into
+    one run."""
     with conn.cursor() as cur:
         aggregator = RuleAggregator(canonical=load_canonical(cur))
         population = population_of(cur, extractors)
     conn.rollback()
     if commerce_schema is not None:
         run_ranking(conn, aggregator.version, captured_at or date.today(), commerce_schema)
-    # 한 표씩 읽고 바로 닫는다: fetchall 뒤의 행 조립도 트랜잭션 안이고, 그 동안 세션은 idle in
-    # transaction 이다 (db/bootstrap.sql 의 15s 는 job 이 아니라 statement 크기에 맞춘 값이다).
+    # One table is read and closed right away: assembling the rows after fetchall is inside the transaction
+    # too, and for that while the session is idle in transaction (the 15s in db/bootstrap.sql is sized to a
+    # statement, not to a job).
     with conn.cursor() as cur:
         mentions = load_needs(cur, population)
     conn.commit()
@@ -266,10 +272,10 @@ def run(
 
     scopes = scopes_for(scope, mentions)
     need_rows = [r for s in scopes for r in aggregator.need_metrics(mentions, denominators, s)]
-    # wish scope 는 카테고리 축이 아니다 — --scope 로 좁혀도 같은 세 scope 를 그대로 낸다.
+    # A wish scope is not a category axis — narrowing with --scope still emits the same three scopes.
     wish_rows = [r for s in WISH_SCOPES for r in aggregator.wish_metrics(wishes, s)]
 
-    # 이 run 의 행은 전부 이 실행이 만든다 — 지우고 다시 넣어야 사라진 키가 남지 않는다.
+    # Every row of this run is made by this run — deleting and reinserting is what keeps a vanished key out.
     with conn.cursor() as cur:
         cur.execute("DELETE FROM metrics_need WHERE run_id = %s", (run_id,))
         cur.execute("DELETE FROM metrics_wish WHERE run_id = %s", (run_id,))

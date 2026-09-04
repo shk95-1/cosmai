@@ -24,8 +24,8 @@ from analysis.types import TopicQuarterJudgementRow
 from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
 
-# 판정과 지표를 한 번에. 카드의 표에 서는 구성비·velocity·언급 수는 판정 표에 없고 지표 표에 있다
-# (024 는 세는 칸을 하나도 들지 않는다).
+# The judgement and the metrics in one. The share, velocity and mention counts that stand in a card's table
+# are not in the judgement table but in the metrics table (024 holds not one counted column).
 CELLS: LiteralString = """
 SELECT j.topic_key, j.source, j.trend_type, j.judged, j.evidence_strength, j.single_source,
        j.opportunity_score, j.gap_pp, j.hold_reason,
@@ -39,13 +39,14 @@ SELECT j.topic_key, j.source, j.trend_type, j.judged, j.evidence_strength, j.sin
  WHERE j.run_id = %(run_id)s AND j.scope = %(scope)s AND j.panel_version = %(panel_version)s
    AND j.panel_role = %(panel_role)s AND j.quarter = %(quarter)s
 """
-# 격자에 있는 분기. 없는 분기를 물었을 때 "judge 를 돌려라"가 아니라 있는 분기를 말해 주기 위한 것이다.
+# The quarters that are in the grid. It is there so that asking for a quarter that is not says which quarters
+# there are rather than "run judge".
 QUARTERS: LiteralString = (
     "SELECT DISTINCT quarter FROM topic_quarter_judgement "
     "WHERE run_id = %(run_id)s AND scope = %(scope)s AND panel_version = %(panel_version)s "
     "AND panel_role = %(panel_role)s"
 )
-# 셀에서 근거 원문까지 한 줄 (db/views/topic_quarter_evidence_quote.sql).
+# From a cell to the evidence text in one line (db/views/topic_quarter_evidence_quote.sql).
 QUOTES: LiteralString = """
 SELECT topic_key, rank, like_count, matched_term, text, parent_video_url
   FROM topic_quarter_evidence_quote
@@ -60,7 +61,7 @@ class CardOutcome:
     run_id: int
     quarter: str
     cards: list[Card] = field(default_factory=list)
-    # 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 (주제, 분기).
+    # The (topic, quarter) that matched the rules but could not stand as a card for want of evidence text.
     unquoted: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -84,7 +85,8 @@ class CardOutcome:
 
     @property
     def violations(self) -> list[str]:
-        """카드는 표를 만들지 않으므로 되물을 뷰가 없다. 잘린 자리를 같은 어휘로 싣는다."""
+        """Cards make no table, so there is no view to ask back. The truncated places are carried in the same
+        vocabulary."""
         return [f"unquoted_cell {quarter} topic={topic}" for topic, quarter in self.unquoted]
 
 
@@ -120,7 +122,8 @@ def collect(
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> CardOutcome:
-    """그 분기의 카드. 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다 (15초 타임아웃)."""
+    """The cards of that quarter. It commits as soon as it has read and does not look at the DB after that
+    (the 15-second timeout)."""
     with conn.cursor() as cur:
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
@@ -150,8 +153,9 @@ def collect(
     conn.commit()
 
     if not rows:
-        # 이 분기가 격자에 없다는 뜻일 수도 있다 -- judge 는 이미 돌았는데 그 분기에 모집단 영상이 없는
-        # 것이 이 표본에서 실제로 일어난다(2025Q1). 두 갈래를 한 문장으로 말하면 헛걸음을 시킨다.
+        # It may also mean this quarter is not in the grid -- judge has already run and there are simply no
+        # population videos in that quarter, which really happens in this sample (2025Q1). Saying the two
+        # branches in one sentence sends people on a wasted trip.
         cur_quarters = sorted(quarter for (quarter,) in known_quarters)
         if cur_quarters:
             raise NoEvidence(

@@ -1,4 +1,5 @@
-"""가격표와 LLM_BUDGET_USD 하드스톱. 돈이 걸린 유일한 기계 검사라 가짜 usage 로 누적과 차단을 함께 잰다."""
+"""The price table and the LLM_BUDGET_USD hard stop. The only machine check with money on it, so a fake usage
+measures the running total and the block together."""
 
 from __future__ import annotations
 
@@ -73,8 +74,9 @@ class TestTheLedger:
     def test_the_hard_stop_refuses_before_the_call_that_would_cross_the_budget(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
             ledger = UsageLedger(conn)
-            # LLM_BUDGET_USD 값이 바뀌어도 거짓 통과하지 않도록 상수에서 토큰 수를 역산한다:
-            # 예산 바로 아래까지 쓰고 나면 남은 돈으로는 100만 출력 토큰짜리 호출을 시작할 수 없다.
+            # The token count is derived from the constant so that a changed LLM_BUDGET_USD cannot make this
+            # pass falsely: once spending has come to just under the budget, what is left cannot start a call
+            # of one million output tokens.
             sonnet_output_rate = PRICES["claude-sonnet-5"].output_usd
             tokens_just_under_budget = int(LLM_BUDGET_USD / sonnet_output_rate * ONE_MILLION) - 1
             ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=tokens_just_under_budget))
@@ -83,7 +85,7 @@ class TestTheLedger:
             with pytest.raises(BudgetExceeded) as blocked:
                 ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=ONE_MILLION))
             assert f"{LLM_BUDGET_USD:.2f}" in str(blocked.value)
-            # 거절은 원장을 늘리지 않는다 — 호출이 없었기 때문이다.
+            # A refusal does not grow the ledger — because there was no call.
             assert ledger.spent() == spent
 
     def test_a_call_that_fits_in_what_is_left_is_let_through(self, needs_runtime_url: str):
@@ -97,14 +99,16 @@ class TestTheLedger:
     def test_a_reservation_counts_against_the_budget_before_any_result_comes_back(
         self, needs_runtime_url: str
     ):
-        """타임아웃·Ctrl-C 로 응답을 못 받아도 청구는 일어난다 — 예약이 남아야 다음 실행이 그것을 본다."""
+        """A timeout or a Ctrl-C with no response is still billed — the reservation has to stay for the next
+        run to see it."""
         with connect(needs_runtime_url) as conn:
-            # LLM_BUDGET_USD 와 별개인 좁은 예산을 줘서, 그 상수가 얼마든 경계 검사가 계속 뜻을 갖게 한다.
+            # A narrow budget independent of LLM_BUDGET_USD keeps the boundary check meaningful whatever that
+            # constant is.
             ledger = UsageLedger(conn, budget=Decimal("7.00"))
             ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=400_000))  # $6.00
             assert ledger.spent() == Decimal("6.00")
             with pytest.raises(BudgetExceeded):
-                ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=100_000))  # $1.50 > $1.00 남음
+                ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=100_000))  # $1.50 > $1.00 left
 
     def test_settling_replaces_the_reservation_instead_of_adding_a_second_row(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
@@ -121,7 +125,7 @@ class TestTheLedger:
             assert ledger.spent() == Decimal("0.0075")
 
     def test_a_reservation_is_found_again_by_its_batch_id(self, needs_runtime_url: str):
-        """제출과 수거가 다른 실행이어도 정산이 붙는다 — batch_id 가 그 주소다."""
+        """Settlement attaches even when submit and collect are different runs — batch_id is that address."""
         with connect(needs_runtime_url) as conn:
             ledger = UsageLedger(conn)
             made = ledger.reserve("claude-opus-5", "eval", Usage(output_tokens=10), batch=True)
