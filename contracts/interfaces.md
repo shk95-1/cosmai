@@ -1753,7 +1753,10 @@ ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector
 
 ## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
 The LLM is the last layer and makes no conclusion: `search` finds the evidence, the code folds it to one item
-per document, and the model only says what that evidence says. The grounding gate is engine-independent here
+per document, and the model only says what that evidence says. Since fork #77 the evidence can be an MFDS
+filing (`source='mfds'`, BM25 only — `entrypoints.md`, the retrieval block): a report number or a registered product name
+is answered from the ledger, and the chunk text ends with the snapshot label so the answer says which copy it
+read; "recent" and formulation properties (inorganic, SPF) are not in the ledger and stay unanswered from it. The grounding gate is engine-independent here
 (#76): `ask` checks it before searching whatever `--engine` says, because the call is paid and a df-0 name makes
 the model refuse anyway (row 1 of the #74 table on #69); `search` itself keeps #48's rule and leaves bm25 ungated. The decision that this layer
 exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 17 listed queries
