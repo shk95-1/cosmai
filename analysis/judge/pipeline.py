@@ -1,12 +1,13 @@
-"""`needs.metrics_topic_quarter` → `needs.topic_quarter_judgement` (포크 #40).
+"""`needs.metrics_topic_quarter` → `needs.topic_quarter_judgement` (fork #40).
 
-판정은 지표를 다시 세지 않는다. ydc 가 `trend.py` 와 `judge.py` 를 갈라 둔 이유가 그것이고 -- 판정
-기준(tau·가중치·유형 이름)은 팀 합의로 바뀌지만 그때 지표는 그대로다 -- 이 파이프라인은 그 분리를
-저장에서도 지킨다: 입력은 문서가 아니라 **그 run 이 이미 저장한 행**이고, 산출은 그 행과 1:1 이다.
+A judgement does not recount the metrics. That is why ydc kept `trend.py` and `judge.py` apart -- the
+judgement criteria (tau · weights · type names) change by team agreement while the metrics stay as they are
+-- and this pipeline keeps that separation in storage as well: the input is not documents but **the rows that
+run already stored**, and the output is 1:1 with those rows.
 
-읽기는 한 run 의 지표 행 전부(전량 338행)라 파이썬으로 끌어와도 작다. 그래도 읽자마자
-`conn.commit()` 하는 것은 `needs_runtime` 의 `idle_in_transaction_session_timeout` 이 15초여서다
-(`analysis/trend/pipeline.py` 와 같은 자리).
+The read is every metric row of one run (338 rows in total), so it is small even pulled into Python. It still
+does `conn.commit()` as soon as it has read, because `needs_runtime`'s
+`idle_in_transaction_session_timeout` is 15 seconds (the same place as `analysis/trend/pipeline.py`).
 """
 
 from __future__ import annotations
@@ -34,8 +35,9 @@ SELECT_METRICS: LiteralString = (
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
 )
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
-# 판정 행은 지표 행과 같은 run 에 산다(FK 가 run_id 를 포함한다). 그래서 판본도 그 run 의 versions 에
-# 키 하나로 얹힌다 -- 지표를 다시 세지 않고 기준만 바꾸면 움직이는 것은 이 키다 (versioning.md).
+# A judgement row lives in the same run as the metric row (the FK includes run_id). So its revision is
+# carried in that run's versions under one key as well -- changing only the criteria without recounting the
+# metrics moves that key (versioning.md).
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
@@ -56,13 +58,14 @@ VIOLATIONS: LiteralString = (
 
 
 class NoJudgement(LookupError):
-    """판정할 지표 행이 없다. 아직 안 세운 것이라 실패가 아니라 막힘이다 -- 0행을 조용히 쓰면
-    `unjudged_cell` 불변식이 참인 채로 표가 비어 버린다."""
+    """There is no metric row to judge. It has not been counted yet, so this is blocked rather than a failure
+    -- writing 0 rows quietly leaves the table empty with the `unjudged_cell` invariant true."""
 
 
 @dataclass(frozen=True)
 class Built:
-    """적재 전의 판정 한 벌. 골든과 테스트는 DB 에 쓰지 않고 이것만 본다."""
+    """One judgement set before loading. The golden set and the tests write nothing to the DB and look only
+    at this."""
 
     run_id: int
     snapshot_id: int
@@ -99,7 +102,8 @@ class JudgeOutcome:
 def _metric_rows(
     cur: psycopg.Cursor[Any], run_id: int, scope: str, version: int, role: str
 ) -> list[MetricsTopicQuarterRow]:
-    """numeric 은 Decimal 로 온다 -- 계약의 dataclass 는 float 이고, 판정 수식도 float 위에서 돈다."""
+    """numeric comes back as Decimal -- the contract's dataclass is float, and the judgement formulas run on
+    float too."""
     cur.execute(SELECT_METRICS, (run_id, scope, version, role))
     made: list[MetricsTopicQuarterRow] = []
     for row in cur.fetchall():
@@ -118,7 +122,8 @@ def build(
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> Built:
-    """그 run 의 지표 행을 읽고, 트랜잭션을 닫고, 판정한다. run 을 찾는 길은 `trend quarter` 와 같다."""
+    """Reads that run's metric rows, closes the transaction, and judges. The run is found the same way as
+    `trend quarter`."""
     with conn.cursor() as cur:
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
@@ -157,7 +162,8 @@ def run(
     snapshot_id: int | None = None,
     panel_version: int | None = None,
 ) -> JudgeOutcome:
-    """그 (run, scope, 명부) 의 판정 행을 통째로 다시 쓴다 -- 부분 갱신이면 1:1 이 깨진다."""
+    """Rewrites the judgement rows of that (run, scope, roster) wholesale -- a partial update breaks the
+    1:1."""
     made = build(
         conn, scope=scope, panel_role=panel_role, snapshot_id=snapshot_id, panel_version=panel_version
     )
@@ -169,7 +175,8 @@ def run(
         cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(STAMP_VERSION, (payload, made.run_id))
-        # 계약 문장이 아니라 저장된 행이 답한다 -- 지표 행과 1:1 인가, gap_pp 가 두 행에서 같은가.
+        # The stored rows answer, not a sentence of the contract -- is it 1:1 with the metric rows, is gap_pp
+        # the same on both rows.
         cur.execute(VIOLATIONS, (made.run_id,))
         violations = [f"{name} {quarter or '-'} {detail}" for name, quarter, detail in cur.fetchall()]
     conn.commit()

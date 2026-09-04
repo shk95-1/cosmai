@@ -1,7 +1,7 @@
-"""원천 -> 청크 -> needs.retrieval_chunk, 그리고 그 청크 위에 세우는 BM25 검색.
+"""Source -> chunks -> needs.retrieval_chunk, and the BM25 search built on those chunks.
 
-배치마다 커밋한다. needs_runtime 의 transaction_timeout 이 60초라 30만 행을 한 트랜잭션에
-담으면 끝까지 가지 못한다 -- analysis/aggregate·polarity 가 같은 이유로 같은 모양이다.
+Committed per batch. needs_runtime's transaction_timeout is 60s, so 300k rows in one transaction do not make
+it to the end -- analysis/aggregate and analysis/polarity take the same shape for the same reason.
 """
 
 from __future__ import annotations
@@ -41,8 +41,9 @@ WHERE retrieval_chunk.text_md5 IS DISTINCT FROM EXCLUDED.text_md5
 
 PRUNE = "DELETE FROM retrieval_chunk WHERE doc_id = %(doc_id)s AND ordinal >= %(ordinal)s"
 
-# 훑은 소스에 청크가 남아 있는 doc_id 를 키셋으로 되짚는다. 38만 청크를 한 문장으로 훑으면
-# needs_runtime 의 statement_timeout(30초)에 걸린다 -- corpus.py 의 페이징과 같은 이유, 같은 모양이다.
+# The doc_ids that still have chunks in the scanned sources are walked back with a keyset. Walking 380k
+# chunks in one statement hits needs_runtime's statement_timeout (30s) -- the same reason and the same shape
+# as the paging in corpus.py.
 STORED_DOCS = """
 SELECT DISTINCT doc_id FROM retrieval_chunk
 WHERE source = ANY(%(sources)s) AND doc_id > %(cursor)s
@@ -51,14 +52,16 @@ ORDER BY doc_id LIMIT %(limit)s
 
 DROP_DOCS = "DELETE FROM retrieval_chunk WHERE doc_id = ANY(%(doc_ids)s)"
 
-# 문서를 통째로 지우고 다시 넣지는 않는다 -- 지웠다 넣으면 그 사이 검색이 빈다. 짧아진 문서의
-# 꼬리(새 조각 수 이상의 ordinal)가 남으면 "ordinal 은 0 부터 연속"
-# (contracts/ddl/needs/020_retrieval_chunk.sql:15)이 표 수준에서 깨진다 -- 배치만 보는 check_rows 는
-# 그 문서를 다시 다 봤으므로 위반을 못 낸다. 같은 트랜잭션에서 UPSERT 뒤에 돈다.
+# A document is not deleted wholesale and reinserted -- deleted and reinserted, the search is empty in
+# between. If the tail of a shortened document (an ordinal at or above the new piece count) is left, "ordinal
+# is contiguous from 0" (contracts/ddl/needs/020_retrieval_chunk.sql:15) breaks at the table level -- and
+# check_rows, which sees only a batch, saw that whole document again and reports no violation. It runs after
+# the UPSERT in the same transaction.
 #
-# 지우는 근거는 셋 다 **이번 실행이 훑은 범위 안에서 본 것**이다(#23). 짧아졌다·본문이 비었다는
-# 문서를 손에 들고 아는 사실이고, 사라졌다는 그렇지 않다 -- "훑기에 안 나왔다"는 증분 실행(--since)
-# 에서 "범위 밖이라 안 봤다"와 구분되지 않으므로, 그 판정은 전량 훑기에서만 선다(_drop_vanished).
+# The evidence for all three deletions is **what this run saw inside the range it scanned** (#23). Shortened
+# and emptied are facts known with the document in hand; vanished is not -- "it did not come up in the scan"
+# is indistinguishable, in an incremental run (--since), from "it was out of range so it was not looked at",
+# so that decision only stands in a full scan (_drop_vanished).
 
 
 @dataclass(frozen=True)
@@ -79,34 +82,38 @@ class ChunkOutcome:
     def note(self) -> str:
         head = f"문서 {self.documents:,} -> 청크 {self.chunks:,} (변경 {self.written:,})"
         if self.pruned:
-            # 원천이 짧아졌다는 뜻이라 조용히 넘어갈 일이 아니다 -- 수집기는 추가만 한다.
+            # It means the source got shorter, which is not something to pass over quietly -- collectors only
+            # add.
             head += f"; 짧아진 문서의 꼬리 {self.pruned:,} 삭제"
         if self.emptied:
-            # "짧아졌다"와 "통째로 비었다"는 원천에서 다른 일이라 세는 자리를 나눈다 -- 후자는
-            # 문서가 색인에서 빠졌다는 뜻이고, 그건 꼬리 몇 개보다 크게 읽혀야 한다.
+            # "Got shorter" and "went empty entirely" are different events at the source, so they are counted
+            # apart -- the latter means the document dropped out of the index, and that has to read as bigger
+            # than a few tails.
             head += f"; 본문이 빈 문서의 청크 {self.emptied:,} 삭제"
         if self.vanished:
             head += f"; 원천에서 사라진 문서의 청크 {self.vanished:,} 삭제"
         if not self.swept:
-            # 안 한 일이라 조용히 넘어가면 "매일 --since 로 돌리니 정리도 된다"로 읽힌다.
+            # Not doing it and passing over it quietly reads as "running --since daily also tidies up".
             head += "; 증분 범위라 사라진 문서는 찾지 않았다"
         if self.unscanned:
             head += f"; 문서 0건인 소스({', '.join(self.unscanned)})는 정리에서 제외"
         if self.over_target:
-            # 하드스톱(1000자) 미만이라 problems 는 아니지만, "[통과]"가 500 위반 없음으로 읽혀
-            # 남의 청크 27건이 묻힌 적이 있다(ydc v0.2.0) -- 몇 건인지는 항상 보여야 한다.
+            # Under the hard stop (1000 chars) so it is not a problem, but "[pass]" once read as no 500
+            # violations and buried 27 chunks of someone else's (ydc v0.2.0) -- how many there are always has
+            # to show.
             head += f"; 목표 상한 초과 {self.over_target:,}건 (최대 {self.over_target_max:,}자)"
         if not self.problems:
             return head
-        # problems 는 종류별 표본 몇 건이지 위반 건수가 아니다 -- 그 길이를 "종" 이라 부르면
-        # 한 종류의 표본 3건이 "3종" 으로 읽힌다(#18 M12).
+        # problems is a few samples per kind, not a violation count -- calling its length "kinds" makes 3
+        # samples of one kind read as "3 kinds" (#18 M12).
         kinds = len({problem_kind(p) for p in self.problems})
         return f"{head}; 계약 위반 {kinds}종"
 
 
 def document_rows(documents: Iterable[corpus.Document]) -> Iterator[tuple[corpus.Document, list[dict]]]:
-    """(문서, 그 문서의 청크 행). **조각이 0개인 문서도 낸다** -- 본문이 통째로 빈 문서를 여기서
-    삼키면 부르는 쪽은 그 문서를 훑었다는 사실조차 모르고, 옛 청크가 영구히 남는다(#23)."""
+    """(document, the chunk rows of that document). **A document with 0 pieces is emitted too** -- swallowing
+    a document whose body went entirely empty here leaves the caller unaware it was even scanned, and the old
+    chunks stay forever (#23)."""
     for document in documents:
         pieces = split_text(normalize_text(document.text))
         yield (
@@ -126,16 +133,18 @@ def document_rows(documents: Iterable[corpus.Document]) -> Iterator[tuple[corpus
 
 
 def chunk_rows(documents: Iterable[corpus.Document]) -> Iterator[dict]:
-    """문서 하나를 0개 이상의 청크 행으로. 빈 본문은 색인에 넣지 않는다."""
+    """One document into zero or more chunk rows. An empty body does not go into the index."""
     for _document, rows in document_rows(documents):
         yield from rows
 
 
 def _drop_vanished(conn: psycopg.Connection, sources: tuple[str, ...], kept: set[str]) -> int:
-    """훑은 소스에 남은 doc_id 중 이번 훑기에 안 나온 문서의 청크를 지우고, 지운 행 수를 준다.
+    """Deletes the chunks of the documents that did not come up in this scan among the doc_ids left in the
+    scanned sources, and gives the number of rows deleted.
 
-    **부르는 쪽이 전량 훑기임을 확인한 뒤에만 부른다.** 여기서 "사라졌다"의 근거는 "훑었는데
-    안 나왔다" 하나뿐이라, 증분 훑기(`--since`)에서 부르면 범위 밖 문서를 통째로 지운다.
+    **Called only after the caller has confirmed this is a full scan.** The only evidence for "it vanished"
+    here is "it was scanned and did not come up", so called from an incremental scan (`--since`) it deletes
+    out-of-range documents wholesale.
     """
     dropped, cursor = 0, ""
     while True:
@@ -146,11 +155,12 @@ def _drop_vanished(conn: psycopg.Connection, sources: tuple[str, ...], kept: set
             if gone:
                 cur.execute(DROP_DOCS, {"doc_ids": gone})
                 dropped += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-        # 페이지마다 커밋한다 -- 38만 청크를 한 트랜잭션에 담으면 transaction_timeout(60초)에 걸린다.
+        # Committed per page -- 380k chunks in one transaction hit transaction_timeout (60s).
         conn.commit()
         if len(stored) < corpus.BATCH:
             return dropped
-        # 커서는 doc_id 오름차순이고 지운 것은 언제나 커서 앞이라, 삭제가 다음 페이지를 건너뛰지 않는다.
+        # The cursor ascends by doc_id and what was deleted is always behind it, so a delete never makes the
+        # next page skip.
         cursor = stored[-1]
 
 
@@ -162,8 +172,8 @@ def run(
     since: date | None = None,
     sources: tuple[str, ...] = corpus.SOURCES,
 ) -> ChunkOutcome:
-    """원천을 훑어 청크를 적재한다. 계약 위반은 세어서 돌려주되 적재를 막지는 않는다 --
-    한 소스의 결함으로 나머지 세 소스의 색인이 통째로 비는 편이 더 나쁘다."""
+    """Scans the sources and loads the chunks. Contract violations are counted and returned but do not block
+    the load -- one source's defect emptying the index of the other three is worse."""
     documents = corpus.documents(
         conn,
         youtube_schema=youtube_schema,
@@ -172,19 +182,19 @@ def run(
         sources=sources,
     )
     seen_docs: set[str] = set()
-    scanned: Counter = Counter()  # 소스별로 훑어서 본 문서 수
+    scanned: Counter = Counter()  # documents seen per source in the scan
     total = written = pruned = emptied = over_target = over_target_max = checked = 0
     batch: list[dict] = []
-    empty_docs: list[str] = []  # 훑어서 본문이 빈 것을 본 문서. 다음 flush 에서 통째로 지운다
+    empty_docs: list[str] = []  # documents seen with an empty body. Deleted wholesale at the next flush
     problems: list[str] = []
-    samples: Counter = Counter()  # 종류별로 몇 건을 이미 남겼는가
+    samples: Counter = Counter()  # how many of each kind have been kept already
     seen_problems: set[str] = set()
 
     def flush() -> None:
         nonlocal written, pruned, emptied
         if not batch and not empty_docs:
             return
-        # 배치는 문서 경계에서만 끊기므로(아래) 여기 있는 문서는 조각이 다 모여 있다.
+        # A batch is cut only on a document boundary (below), so the documents here have all their pieces.
         tails: dict[str, int] = defaultdict(int)
         for row in batch:
             tails[row["doc_id"]] = max(tails[row["doc_id"]], int(row["ordinal"]) + 1)
@@ -195,8 +205,9 @@ def run(
                 cur.executemany(PRUNE, [{"doc_id": d, "ordinal": t} for d, t in tails.items()])
                 pruned += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
             if empty_docs:
-                # 조각이 0개인 문서라 꼬리 삭제와 같은 문장으로 문서 전체가 지워진다. 다만 세는
-                # 자리는 나눈다 -- 적재와 같은 트랜잭션이라 검색이 빈 청크를 보는 순간이 없다.
+                # A document with 0 pieces, so the same statement as the tail delete removes the whole
+                # document. Only the counting is kept apart -- it is the same transaction as the load, so
+                # there is no moment at which the search sees an empty chunk.
                 cur.executemany(PRUNE, [{"doc_id": d, "ordinal": 0} for d in empty_docs])
                 emptied += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         conn.commit()
@@ -205,24 +216,27 @@ def run(
 
     def validate_and_flush() -> None:
         nonlocal over_target, over_target_max, checked
-        # 좌표 없는 행에 붙는 번호는 실행 전체로 이어 센다 -- 배치마다 2 부터면 한 좌표가 여러
-        # 문서를 가리키고, 그러면 사람이 원본을 찾아가라는 메시지의 목적이 없어진다(#27).
+        # The number attached to a row with no coordinate is counted across the whole run -- starting at 2
+        # per batch, one coordinate would point at several documents, and the message telling a person to go
+        # find the original would lose its purpose (#27).
         found, _per_source, lengths, _docs = check_rows(batch, first_line=checked + 2)
         checked += len(lengths)
-        # check_rows 의 종류별 3건 상한은 배치 안에서만 걸린다 -- 실측 규모(381,950청크 = 382배치)
-        # 에서 배치마다 리셋되면 한 종류가 천 줄을 넘겨 보고가 다시 읽을 수 없게 된다(#18 M12).
+        # The 3-per-kind cap of check_rows applies only inside a batch -- at the measured scale (381,950
+        # chunks = 382 batches), reset per batch, one kind would run past a thousand lines and the report
+        # would stop being readable (#18 M12).
         for problem in found:
             kind = problem_kind(problem)
-            # 좌표가 같은 위반은 같은 행을 두 번 말하는 것이라 집합으로 거른다 -- 앞의
-            # `p not in problems` 는 problems 가 길어질수록 배치마다 다시 훑었다.
+            # Violations with the same coordinate say the same row twice, so a set filters them -- the
+            # earlier `p not in problems` rescanned problems per batch as it grew.
             if problem in seen_problems or samples[kind] >= SAMPLES_PER_KIND:
                 continue
             seen_problems.add(problem)
             samples[kind] += 1
             problems.append(problem)
-        # 하드스톱(1000자, check_rows)은 problems 로만 올린다 -- 500 을 그대로 problems 에 얹으면
-        # 우리 split_text 는 500 이하만 내놓으니 걸릴 일이 없지만, 외부 청크를 검사할 때는
-        # 지금 종료 코드 0 인 실행이 1 로 바뀐다. 그건 이 이슈가 아니라 M11 이 명시적으로 남겨둔 경계다.
+        # The hard stop (1000 chars, check_rows) is raised as problems only -- putting 500 straight into
+        # problems would never trigger for us since our split_text emits nothing over 500, but checking
+        # external chunks it would turn a run that exits 0 today into a 1. That is not this issue but the
+        # boundary M11 left explicitly.
         for length in lengths:
             if length > MAX_CHARS:
                 over_target += 1
@@ -231,15 +245,17 @@ def run(
 
     for document, rows in document_rows(documents):
         scanned[document.source] += 1
-        # 배치는 **문서 경계에서만** 끊는다. "ordinal 이 0 부터 연속"은 문서 전체에 걸린 성질이라
-        # 한 문서를 두 배치로 자르면 뒤쪽이 ordinal 5 부터 시작하는 것으로 보여 거짓 위반이 난다
-        # (실측: 자막 한 편이 최대 155조각이라 자막에서만 수십 건). 30만 행을 리스트로 물리지
-        # 않으려고 배치를 쓰는 것이므로, 상한을 넘긴 뒤 다음 문서가 시작될 때 끊는다.
+        # A batch is cut **only on a document boundary**. "ordinal is contiguous from 0" is a property of the
+        # whole document, so cutting one document into two batches makes the second look like it starts at
+        # ordinal 5 and raises a false violation (measured: one transcript runs to 155 pieces, so dozens of
+        # them in transcripts alone). Batching exists so 300k rows are not held as a list, so the cut is made
+        # when the next document starts after the cap is passed.
         if len(batch) >= WRITE_BATCH or len(empty_docs) >= WRITE_BATCH:
             validate_and_flush()
         if not rows:
-            # 본문이 빈 것을 **훑어서 직접 봤다**. 증분이든 아니든 근거가 이 실행 안에 있으므로
-            # 미룰 이유가 없다 -- 미루면 사라진 원천을 가리키는 청크가 계속 검색에 잡힌다(#23).
+            # The empty body was **seen directly in the scan**. Incremental or not, the evidence is inside
+            # this run, so there is no reason to defer it -- deferred, chunks pointing at a source that is
+            # gone keep coming up in the search (#23).
             empty_docs.append(document.doc_id)
             continue
         seen_docs.add(document.doc_id)
@@ -247,14 +263,16 @@ def run(
         batch.extend(rows)
     validate_and_flush()
 
-    # 사라진 문서 찾기는 전량 훑기에서만 선다. `--since` 는 범위 밖 문서를 아예 읽지 않으므로
-    # "안 나왔다"가 사라졌다는 근거가 되지 못한다 -- 그렇게 읽으면 증분 실행 한 번이 코퍼스를 지운다.
+    # Looking for vanished documents only stands in a full scan. `--since` does not read out-of-range
+    # documents at all, so "it did not come up" is no evidence that it vanished -- read that way, one
+    # incremental run erases the corpus.
     swept = since is None
     unscanned = tuple(name for name in sources if not scanned[name]) if swept else ()
     vanished = 0
     if swept:
-        # 훑어서 문서가 0건인 소스는 "다 사라졌다"와 "못 읽었다"(빈 스키마·안 돈 수집기)가 구분되지
-        # 않는다. 삭제는 되돌릴 수 없으므로 그 소스는 범위에서 빼고, 뺐다는 사실을 note 가 말한다.
+        # For a source scanned to 0 documents, "they all vanished" and "it could not be read" (an empty
+        # schema, a collector that did not run) are indistinguishable. A delete cannot be undone, so that
+        # source is taken out of range and note says it was.
         scope = tuple(name for name in sources if scanned[name])
         vanished = _drop_vanished(conn, scope, seen_docs) if scope else 0
     return ChunkOutcome(
@@ -276,10 +294,10 @@ CACHE_DIR = Path("var/retrieval/bm25")
 
 
 def chunk_census(conn: psycopg.Connection, sources: tuple[str, ...] | None) -> tuple[int, datetime | None]:
-    """(청크 수, 최신 `chunked_at`). 코퍼스가 지금 어디까지 와 있는지를 재는 한 자리다.
+    """(chunk count, newest `chunked_at`). The one place that measures how far the corpus has come.
 
-    BM25 캐시 키(index_signature)와 벡터 커버리지 가드(coverage_note)가 **같은 질의**를 봐야
-    한다 -- 둘이 갈리면 한쪽은 따라가고 다른 쪽은 못 따라가는 지금의 어긋남이 다시 생긴다.
+    The BM25 cache key (index_signature) and the vector coverage guard (coverage_note) have to look at **the
+    same query** -- split, the current mismatch where one follows and the other cannot comes back.
     """
     where, params = "", ()
     if sources:
@@ -287,13 +305,13 @@ def chunk_census(conn: psycopg.Connection, sources: tuple[str, ...] | None) -> t
     with conn.cursor() as cur:
         cur.execute(f"SELECT count(*), max(chunked_at) FROM retrieval_chunk {where}", params)  # noqa: S608
         count, latest = cur.fetchone() or (0, None)
-    conn.commit()  # 뒤이어 형태소 분석이나 1.2GB 행렬 읽기가 붙는다 -- 트랜잭션을 열어 둔 채로 나가지 않는다
+    conn.commit()  # morphological analysis or a 1.2GB matrix read follows -- do not leave a transaction open
     return int(count or 0), latest
 
 
 def _manifest_moment(value: object) -> datetime | None:
-    """매니페스트의 ISO 문자열을 DB 의 timestamptz 옆에 놓는다. 못 읽으면 None -- 읽을 수 없는
-    값은 어긋난 값이고, 어긋남은 아래에서 경고가 된다."""
+    """Puts the manifest's ISO string next to the DB's timestamptz. None when it cannot be read -- a value
+    that cannot be read is a value out of step, and being out of step becomes a warning below."""
     if not isinstance(value, str):
         return None
     try:
@@ -303,17 +321,19 @@ def _manifest_moment(value: object) -> datetime | None:
 
 
 def coverage_note(conn: psycopg.Connection, store) -> str | None:
-    """벡터 저장소가 지금 청크 집합을 덮는가. 덮으면 None, 아니면 사람이 읽을 한 줄.
+    """Does the vector store cover the current chunk set. None if it does, otherwise one line for a person.
 
-    **멈추지 않는다.** 옛 코퍼스를 일부러 검색하는 것도 정상 용법이라 거부하면 그 길까지 막힌다 --
-    막아야 하는 것은 조용한 것뿐이다. 어긋남을 고치는 것은 전량 재인코딩이지 이 함수가 아니다.
+    **It does not stop.** Searching an old corpus on purpose is a normal use as well, so refusing would block
+    that path too -- what has to be blocked is only the quiet case. What fixes a mismatch is a full re-encode,
+    not this function.
 
-    대조 범위는 **저장소가 태운 소스**(매니페스트 `sources`)다. 검색의 `--source` 좁힘으로 재면
-    좁힘 밖의 청크가 매번 "안 덮인다"로 나온다.
+    The comparison range is **the sources the store burned** (the manifest's `sources`). Measured against the
+    search's `--source` narrowing, chunks outside the narrowing come out as "not covered" every time.
 
-    `chunked_at_max` 는 필수 키가 아니다(vectors.REQUIRED_MANIFEST). 이 키가 생기기 전에 구운
-    저장소를 거부하면 지금 도는 vector·hybrid 검색이 통째로 멈추므로, 없으면 개수만 대조하고
-    그 사실을 말한다 -- 이 이슈가 정한 "멈추지 말고 알려라"와 같은 자리다.
+    `chunked_at_max` is not a required key (vectors.REQUIRED_MANIFEST). Refusing a store burned before that
+    key existed would stop every vector and hybrid search running today, so when it is missing only the
+    counts are compared and that fact is said -- the same place as the "do not stop, tell them" this issue
+    settled.
     """
     scope = tuple(store.manifest.get("sources") or ()) or None
     count, latest = chunk_census(conn, scope)
@@ -343,17 +363,18 @@ def coverage_note(conn: psycopg.Connection, store) -> str | None:
 
 
 def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -> str:
-    """이 색인이 무엇 위에 세워졌는지. 하나라도 달라지면 캐시를 다시 만들어야 한다.
+    """What this index was built on. One difference and the cache has to be rebuilt.
 
-    청크 수와 최신 `chunked_at` 이면 충분하다 -- UPSERT 가 본문이 바뀐 행만 `chunked_at` 을
-    올리므로 내용 변화는 최댓값을 움직이고, 삭제는 개수를 움직인다. 토큰을 정하는 입력(Kiwi 사전
-    두 벌)이 바뀌면 같은 본문이 다른 토큰이 되므로 그 해시도 넣는다(ydc bm25.py 의 캐시 키와 같은
-    발상).
+    The chunk count and the newest `chunked_at` are enough -- the UPSERT raises `chunked_at` only on rows
+    whose body changed, so a content change moves the maximum and a delete moves the count. When an input
+    that decides the tokens (the two Kiwi dictionaries) changes, the same body becomes different tokens, so
+    those hashes go in too (the same idea as the cache key in ydc bm25.py).
 
-    **주제 사전은 파일이 아니다.** 별칭은 Kiwi 사용자 단어이자 확장 목록이라 토큰을 정하는데,
-    그 원천이 `needs.aspect_lexicon` 의 활성 버전으로 옮겨간 뒤로는 `topics.py` 를 해시해도 주제
-    내용을 덮지 못한다(#8) -- 그래서 활성 버전 번호와 그 내용 지문을 함께 문다. 번호만으로는
-    모자란다: 이미 켜져 있는 버전에 행을 더 넣을 수 있고, 그러면 번호는 그대로다.
+    **The topic dictionary is not a file.** The aliases are Kiwi user words and an expansion list, so they
+    decide tokens, and since their source moved to the active version of `needs.aspect_lexicon`, hashing
+    `topics.py` no longer covers the topic content (#8) -- so the active version number and the fingerprint
+    of its content are bitten together. The number alone is not enough: rows can be added to a version that
+    is already switched on, and then the number stays.
     """
     count, latest = chunk_census(conn, sources)
     dictionary = topics.use_active(conn)
@@ -374,17 +395,20 @@ def load_index(
     *,
     cache_dir: Path | None = CACHE_DIR,
 ) -> tuple[Index, dict[str, str]]:
-    """(색인, chunk_id -> source). 청크 단위로 색인한다 -- 문서 단위로 합치면 500자 제한이
-    무의미해지고, 평가가 문서 단위를 원할 때는 `#ordinal` 을 떼어 접는다.
+    """(index, chunk_id -> source). Indexed per chunk -- merged per document the 500-character limit would
+    mean nothing, and when the evaluation wants documents the `#ordinal` is stripped and they are folded.
 
-    **캐시가 없으면 쓸 수 없다.** 실측(2026-08-25, 381,950청크)으로 형태소 분석이 10분을 넘겨
-    `cosmai retrieval search` 한 번이 그만큼 걸렸다. 피클에 담는 것은 클래스가 아니라 `state()`
-    dict 다 -- 클래스를 담으면 모듈 경로가 바뀌는 날 캐시 전체를 못 읽는다.
+    **It cannot be used without the cache.** Measured (2026-08-25, 381,950 chunks), the morphological
+    analysis ran over 10 minutes and one `cosmai retrieval search` took that long. What goes into the pickle
+    is the `state()` dict rather than the class -- put the class in and the whole cache becomes unreadable
+    the day the module path changes.
     """
-    # 캐시를 안 쓸 때도 사전은 세워야 한다 -- 토큰화가 그 아래에서 활성 사전을 읽는다.
+    # The dictionary has to be set up even when the cache is not used -- the tokenization below it reads the
+    # active dictionary.
     topics.use_active(conn)
-    # 질의 불용어도 여기서 세운다. 색인에는 안 쓰이지만 이 색인으로 도는 질의가 전부 그 아래를 타고,
-    # DB 를 여는 자리는 여기 하나다 (#46). 없으면 빈 목록이라 세우는 것 자체가 실패하지 않는다.
+    # The query stopwords are set up here too. They are not used for the index, but every query running on
+    # this index goes below it and this is the one place that opens the DB (#46). Missing, it is an empty
+    # list, so setting it up does not itself fail.
     stopwords.use_active(conn)
     cached = cache_dir / f"index-{index_signature(conn, sources)}.pkl" if cache_dir else None
     if cached and cached.exists():
@@ -397,15 +421,15 @@ def load_index(
     with conn.cursor() as cur:
         cur.execute(f"SELECT chunk_id, source, text FROM retrieval_chunk {where} ORDER BY chunk_id", params)  # noqa: S608
         rows = cur.fetchall()
-    # 색인을 세우는 동안(38만 청크면 10분을 넘는다) 트랜잭션이 열려 있으면 needs_runtime 의
-    # idle_in_transaction_session_timeout(15초)이 연결을 끊는다. 실측으로 여기서 끊겼다.
+    # With the transaction open while the index is built (over 10 minutes at 380k chunks), needs_runtime's
+    # idle_in_transaction_session_timeout (15s) cuts the connection. Measured, it was cut right here.
     conn.commit()
     ids = [r[0] for r in rows]
     index = Index(ids, [r[2] for r in rows])
     origin = {r[0]: r[1] for r in rows}
     if cached:
         cached.parent.mkdir(parents=True, exist_ok=True)
-        # 임시 파일에 쓰고 옮긴다 -- 두 실행이 겹치면 반쯤 쓰인 피클을 읽게 된다.
+        # Written to a temporary file and moved -- two overlapping runs would read a half-written pickle.
         scratch = cached.with_suffix(f".{os.getpid()}.tmp")
         scratch.write_bytes(pickle.dumps({"index": index.state(), "origin": origin}))
         scratch.replace(cached)
@@ -425,13 +449,14 @@ def ranked_chunks(
     vector_store=None,
     encoder=None,
 ) -> list[tuple[str, float]]:
-    """(chunk_id, 점수). 세 검색기가 같은 모양으로 답한다 -- eval 이 같은 잣대로 재려면 필요하다.
+    """(chunk_id, score). The three searchers answer in the same shape -- eval needs it to measure them by
+    one yardstick.
 
-    `index` · `vector_store` · `encoder` 를 넘기면 그것을 쓴다. eval 은 질의 63개를 연달아 돌리는데
-    매번 다시 읽으면 96MB 피클과 1.2GB 행렬과 모델을 61번씩 여는 셈이다.
+    Passing `index` · `vector_store` · `encoder` uses those. eval runs 63 queries in a row, and rereading
+    each time means opening a 96MB pickle, a 1.2GB matrix and the model 61 times each.
 
-    점수의 뜻은 엔진마다 다르다(BM25 는 클수록, 벡터는 코사인 거리라 작을수록 가깝다). 그래서
-    비교는 언제나 순위로 한다 -- RRF 를 쓰는 이유도 같다.
+    The meaning of the score differs per engine (higher is closer for BM25; for vectors it is a cosine
+    distance, so lower is closer). So comparison is always by rank -- the same reason RRF is used.
     """
     if engine == "bm25":
         lexical_index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
@@ -442,9 +467,10 @@ def ranked_chunks(
     out = store or vectors.DEFAULT_STORE
     loaded = vector_store
     if loaded is None:
-        loaded = vectors.load(out)  # 파일이 없으면 StoreMissing 으로 여기서 멈춘다
-        # 저장소를 연 쪽이 커버리지를 묻는다 -- eval 은 한 저장소로 질의 63개를 도므로 자기가 한 번
-        # 묻고 그 답을 채점표에 싣는다(여기서 물으면 61번 세고 같은 줄을 61번 찍는다).
+        loaded = vectors.load(out)  # with no file it stops here with StoreMissing
+        # Whoever opened the store asks for the coverage -- eval runs 63 queries on one store, so it asks
+        # once itself and puts the answer on the score sheet (asking here would count 61 times and print the
+        # same line 61 times).
         if note := coverage_note(conn, loaded):
             print(note, file=sys.stderr)
     query_vector = embed.encode_query(query, out=out, store=loaded, encoder=encoder)
@@ -455,7 +481,7 @@ def ranked_chunks(
         lexical = [c for c, _ in lexical_index.search(query, k=top * 4)]
         semantic = [c for c, _ in vectors.search(loaded, query_vector, top=top * 4, sources=sources)]
         fused = vectors.rrf(lexical, semantic)[:top]
-        # 융합 결과의 점수는 순위 자체다. 두 스케일을 섞어 적으면 읽는 쪽이 오해한다.
+        # The score of a fused result is the rank itself. Writing two mixed scales misleads the reader.
         return [(chunk_id, float(rank)) for rank, chunk_id in enumerate(fused, 1)]
     raise ValueError(f"모르는 엔진: {engine!r}")
 
@@ -470,21 +496,24 @@ def search(
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
 ) -> list[tuple[str, float, str]]:
-    """(chunk_id, 점수, 본문). `vector`·`hybrid` 는 근거 없는 질의를 순위를 매기기 전에 막는다.
+    """(chunk_id, score, body). `vector` and `hybrid` block a query with no grounding before ranking it.
 
-    **`bm25` 에는 걸지 않는다.** 어휘 검색은 df 0 인 낱말을 idf 0 으로 무시하고 **남은 낱말로 답하므로**,
-    막으면 "진짜 주제 + 코퍼스에 아직 없는 신제품 이름" 질의에서 예전에 나오던 부분 답이 0건이 된다.
-    그 손해는 아무도 재지 않았고(질의 로그가 없다), 재지 않은 손해를 감수할 이유가 없다.
+    **It is not applied to `bm25`.** Lexical search ignores a word with df 0 by giving it idf 0 and
+    **answers with the words that are left**, so blocking would turn the partial answer that used to come out
+    of a "real topic + a new product name not yet in the corpus" query into 0 results. Nobody has measured
+    that loss (there is no query log), and there is no reason to accept an unmeasured loss.
 
-    **색인은 엔진과 무관하게 연다.** bm25·hybrid 는 순위를 매기는 데 쓰고, vector 는 게이트가 보는 df
-    때문이다 -- vector 는 지금까지 색인을 안 열었으므로 그 자리가 이 이슈가 만든 비용이다. 캐시가 있으면
-    피클 한 벌, 없으면 38만 청크를 형태소 분석하는 십수 분이고, **캐시는 `--source` 조합마다 따로다**
-    (`index_signature` 가 `sources` 를 문다). 벡터 파일이 없는 호스트는 그 비용을 치른 **뒤에야**
-    `StoreMissing`(2)을 본다 -- 게이트가 저장소보다 앞이라서다.
+    **The index is opened whatever the engine.** bm25 and hybrid use it for ranking, and vector because of
+    the df the gate looks at -- vector has never opened the index until now, so that is the cost this issue
+    created. With a cache it is one pickle; without, it is the ten-odd minutes of morphological analysis over
+    380k chunks, and **the cache is separate per `--source` combination** (`index_signature` bites
+    `sources`). A host with no vector file sees `StoreMissing` (2) only **after** paying that cost -- because
+    the gate comes before the store.
     """
     index, _ = load_index(conn, sources, cache_dir=cache_dir)
     if engine in ("vector", "hybrid") and not (grounded := grounding.check(query, index)).ok:
-        # 결과 0건은 이미 계약이 아는 답이다(종료 코드 1) -- 새 코드를 늘리지 않고 이유만 말한다.
+        # 0 results is an answer the contract already knows (exit code 1) -- no new code is added, only the
+        # reason is said.
         print(grounded.note, file=sys.stderr)
         return []
     hits = ranked_chunks(
@@ -495,10 +524,10 @@ def search(
         sources=sources,
         store=store,
         cache_dir=cache_dir,
-        index=index,  # 게이트가 이미 연 것을 넘긴다 -- bm25·hybrid 가 같은 색인을 두 번 열지 않는다
+        index=index,  # hand over what the gate opened -- bm25 and hybrid do not open the same index twice
     )
-    # 벡터는 질의를 토큰화하지 않고 원문을 인코딩하므로 이 목록을 안 탄다 -- 그쪽에 이 줄을 찍으면
-    # 안 일어난 일을 말하게 된다.
+    # A vector encodes the raw query instead of tokenizing it, so it does not ride this list -- printing this
+    # line there would state something that did not happen.
     if engine != "vector" and (note := stopwords.query_note(query)):
         print(note, file=sys.stderr)
     if not hits:
@@ -509,8 +538,8 @@ def search(
             ([chunk_id for chunk_id, _ in hits],),
         )
         texts = dict(cur.fetchall())
-    # 여기서 커밋하지 않으면 부르는 쪽이 연결을 놓을 때까지 idle in transaction 으로 남는다 --
-    # 그 트랜잭션은 vacuum 을 막고 needs_runtime 의 idle_in_transaction_session_timeout(15초)이
-    # 끊을 때까지 산다(cosmai#58). 이 파일의 다른 SELECT 들은 이미 그렇게 하고 있다.
+    # Without a commit here it stays idle in transaction until the caller drops the connection -- that
+    # transaction blocks vacuum and lives until needs_runtime's idle_in_transaction_session_timeout (15s)
+    # cuts it (cosmai#58). The other SELECTs in this file already do this.
     conn.commit()
     return [(chunk_id, score, texts.get(chunk_id, "")) for chunk_id, score in hits]

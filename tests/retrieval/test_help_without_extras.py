@@ -1,4 +1,4 @@
-"""`cosmai retrieval ...` 이 retrieval·embed extra 없이도 서는가.
+"""Does `cosmai retrieval ...` stand without the retrieval and embed extras.
 
 이미지에는 extra 가 없다(pyproject `[project.optional-dependencies]`). 그런데 tool/checks/test:11
 은 `--extra retrieval` 을 깔고 도움말 스냅샷을 뜨므로(tests/test_cli_help.py), 모듈 최상단으로
@@ -17,9 +17,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-# retrieval extra 둘과 embed extra 하나, 그리고 sentence-transformers 가 끌고 오는 무거운 둘.
+# The two retrieval extras and the one embed extra, plus the two heavy ones sentence-transformers drags in.
 BLOCKED = ("kiwipiepy", "numpy", "sentence_transformers", "torch", "huggingface_hub")
-# `cosmai retrieval <무엇>` 이 실제로 끌어오는 모듈 전부(cosmai/cli.py `_run_retrieval` 계열).
+# Every module `cosmai retrieval <anything>` really pulls in (the `_run_retrieval` family in cosmai/cli.py).
 MODULES = (
     "analysis.retrieval.bm25",
     "analysis.retrieval.corpus",
@@ -30,8 +30,8 @@ MODULES = (
 )
 COMMANDS = ("retrieval", "retrieval chunk", "retrieval search", "retrieval eval", "retrieval embed")
 
-# 차단은 import 시점에 ModuleNotFoundError 를 내는 finder 로 건다 -- 빈 가짜 모듈을 심으면
-# "있는데 비었다" 가 되어 이미지의 "아예 없다" 와는 다른 상황을 시험하게 된다.
+# The block is put on with a finder that raises ModuleNotFoundError at import time -- planting an empty fake
+# module would make it "present but empty", which tests a different situation from the image's "absent".
 PROGRAM = """
 import contextlib, importlib, io, sys
 

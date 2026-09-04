@@ -1,9 +1,10 @@
-"""주제 사전을 이 디렉터리의 테스트에 세우는 자리 (#8).
+"""Where the topic dictionary is set up for the tests in this directory (#8).
 
-주제 확장의 원천은 `needs.aspect_lexicon` 의 활성 버전이다. DB 없이 도는 유닛(토큰화·질의 목록)은
-레포의 적재 원본 CSV 를 그대로 프로세스에 세워 두고, DB 를 쓰는 테스트는 `cosmai lexicon load` 가
-쓰는 바로 그 변환(`cosmai.cli._csv_rows`)으로 같은 CSV 를 스키마에 넣는다 -- 픽스처가 사전을 손으로
-다시 적으면 그 순간 사전이 두 벌이 되고, 동등성 증명이 자기 사본을 증명하게 된다.
+The source of topic expansion is the active version of `needs.aspect_lexicon`. The units that run without a
+DB (tokenization, the query list) set the repo's load-source CSV up in the process as it is, and the tests
+that use a DB put the same CSV into the schema through the very conversion `cosmai lexicon load` uses
+(`cosmai.cli._csv_rows`) -- the moment a fixture writes the dictionary out by hand there are two
+dictionaries, and the equivalence proof proves its own copy.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from analysis.retrieval import stopwords, topics
 
 
 def csv_rows(path=topics.DICTIONARY_CSV) -> list[tuple[object, ...]]:
-    """CSV 한 벌을 `db.lexicon.insert_aspects` 가 받는 행으로. CLI 와 같은 함수를 탄다."""
+    """One CSV into the rows `db.lexicon.insert_aspects` takes. It goes through the same function as the
+    CLI."""
     from cosmai.cli import _csv_rows
 
     return _csv_rows("aspect", str(path))
@@ -33,7 +35,7 @@ def csv_topics(version: int | None = 1) -> topics.Topics:
 
 
 def install_topics(conn: psycopg.Connection, version: int = 1, active: bool = True) -> None:
-    """운영에서 `cosmai lexicon load --kind aspect` + `activate` 가 하는 일."""
+    """What `cosmai lexicon load --kind aspect` + `activate` does in production."""
     from db.lexicon import insert_aspects
 
     with conn.cursor() as cur:
@@ -42,8 +44,9 @@ def install_topics(conn: psycopg.Connection, version: int = 1, active: bool = Tr
 
 
 def stopword_rows(path=None) -> list[tuple[object, ...]]:
-    """질의 불용어 CSV 한 벌을 `db.lexicon.insert_entities` 가 받는 행으로. 주제 사전과 같은 이유로
-    CLI 와 같은 함수를 탄다 -- 픽스처가 목록을 손으로 다시 적으면 사전이 두 벌이 된다."""
+    """One query-stopword CSV into the rows `db.lexicon.insert_entities` takes. It goes through the same
+    function as the CLI, for the same reason as the topic dictionary -- a fixture writing the list out by
+    hand makes two dictionaries."""
     from cosmai.cli import _csv_rows
 
     return _csv_rows(stopwords.KIND, str(path or stopwords.DICTIONARY_CSV))
@@ -55,7 +58,7 @@ def csv_stopwords(version: int = 1) -> stopwords.QueryStopwords:
 
 
 def install_stopwords(conn: psycopg.Connection, version: int = 1, active: bool = True) -> None:
-    """운영에서 `cosmai lexicon load --kind stopword` + `activate` 가 하는 일."""
+    """What `cosmai lexicon load --kind stopword` + `activate` does in production."""
     from db.lexicon import insert_entities
 
     with conn.cursor() as cur:
@@ -65,7 +68,8 @@ def install_stopwords(conn: psycopg.Connection, version: int = 1, active: bool =
 
 @pytest.fixture(autouse=True)
 def repo_dictionary() -> Iterator[topics.Topics]:
-    """DB 를 안 쓰는 테스트를 위한 활성 사전. DB 를 쓰는 입구는 자기 스키마에서 다시 세운다."""
+    """The active dictionary for tests that use no DB. An entrance that uses a DB sets it up again in its own
+    schema."""
     installed = topics.use(csv_topics())
     yield installed
     topics.forget()

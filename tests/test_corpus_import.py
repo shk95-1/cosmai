@@ -1,9 +1,11 @@
-"""2026-08-19 스냅샷이 `needs.corpus_*` 로 들어가고, 재수집분이 그 위에 얹혀도 덮지 않는다 (포크 #4).
+"""The 2026-08-19 snapshot goes into `needs.corpus_*`, and a recollection laid on top of it does not
+overwrite it (fork #4).
 
-핵심은 개수가 아니라 **덮이지 않음**이다. 재수집(#38)은 같은 유일키(`source + source_item_id`)로 같은
-영상을 다시 가져오지만 2026-08-19 의 조회수·좋아요·댓글은 재현되지 않는다 -- 그래서 옛 관측이 새
-관측에 덮이면 EPIC 의 대조군 자체가 사라진다. 그 불변식이 적재기 규율이 아니라 키에 있는지를 여기서
-묻고, 매니페스트의 `reproduces` 세 숫자가 반입분 위에서 다시 나오는지도 함께 센다.
+The point is not the counts but **not being overwritten**. A recollection (#38) fetches the same video again
+under the same unique key (`source + source_item_id`), but the views, likes and comments of 2026-08-19 are
+not reproducible -- so if the old observation is overwritten by the new one, the control group of the EPIC
+itself is gone. Whether that invariant lives in the key rather than in the loader's discipline is asked here,
+along with whether the three `reproduces` numbers of the manifest come out again over the imported set.
 """
 
 from __future__ import annotations
@@ -49,7 +51,8 @@ SNAPSHOT = (
 
 
 def _rows(cur: psycopg.Cursor[Any], where: str = "") -> list[list[tuple[Any, ...]]]:
-    """행이 다시 쓰였는지 세는 자리 -- 개수만 보면 값을 덮은 재실행이 초록으로 지나간다."""
+    """Where a rewritten row is counted -- looking only at counts, a rerun that overwrote a value passes
+    green."""
     out = []
     for query in SNAPSHOT:
         cur.execute(query if not where else query.replace(" ORDER BY", f" WHERE {where} ORDER BY"))  # type: ignore[arg-type]
@@ -59,7 +62,8 @@ def _rows(cur: psycopg.Cursor[Any], where: str = "") -> list[list[tuple[Any, ...
 
 @pytest.fixture
 def seeded(needs_runtime_url: str) -> str:
-    """분모는 명부다: 반입은 활성 패널 명부가 서 있어야 채널 역할을 대조할 수 있다 (#31)."""
+    """The denominator is the roster: an import needs an active panel roster standing to compare channel
+    roles (#31)."""
     seed.run_all(needs_runtime_url, only=("panel",))
     return needs_runtime_url
 
@@ -70,7 +74,8 @@ def _load(url: str, source_dir: Path = FIXTURE, **kwargs: Any) -> dict[str, int]
 
 
 def _rewritten(tmp_path: Path, source_dir: Path = FIXTURE) -> Path:
-    """같은 유일키에 다른 관측을 담은 재수집분. 텍스트와 조회수가 바뀐 것이 #38 의 실제 모양이다."""
+    """A recollection holding a different observation under the same unique key. Changed text and views are
+    the real shape of #38."""
     out = tmp_path / "recollected"
     out.mkdir()
     for name in ("mention.csv", "manifest.json"):
@@ -82,7 +87,7 @@ def _rewritten(tmp_path: Path, source_dir: Path = FIXTURE) -> Path:
     return out
 
 
-# ---------- 반입 ----------
+# ---------- import ----------
 @pytest.mark.postgres
 def test_the_snapshot_loads_and_a_rerun_changes_nothing(seeded: str):
     assert _load(seeded) == FIXTURE_COUNTS
@@ -90,13 +95,15 @@ def test_the_snapshot_loads_and_a_rerun_changes_nothing(seeded: str):
         before = _rows(cur)
     assert _load(seeded) == FIXTURE_COUNTS
     with connect(seeded) as conn, conn.cursor() as cur:
-        # imported_at 까지 같아야 한다: 값이 같은 UPDATE 도 행을 다시 쓰고, 그것은 변경 0 이 아니다.
+        # imported_at has to match too: an UPDATE with equal values still rewrites the row, and that is not
+        # zero changes.
         assert _rows(cur) == before
 
 
 @pytest.mark.postgres
 def test_every_document_carries_the_run_and_the_moment_it_was_observed(seeded: str):
-    """스냅샷임이 행에서 읽힌다: 어느 런에서 왔고 언제 걷힌 값인지가 JSON 안이 아니라 칸에 있다."""
+    """That it is a snapshot is readable from the row: which run it came from and when it was gathered are in
+    columns rather than inside JSON."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         cur.execute("SELECT source_run, count(*) FROM corpus_document GROUP BY source_run ORDER BY 1")
@@ -111,7 +118,8 @@ def test_every_document_carries_the_run_and_the_moment_it_was_observed(seeded: s
 
 @pytest.mark.postgres
 def test_doc_id_is_the_two_key_columns_joined_by_a_colon(seeded: str):
-    """규칙 1 의 뒷문장은 생성 열이다 -- 적재기가 만들면 두 벌의 doc_id 가 갈릴 수 있다."""
+    """The second sentence of rule 1 is a generated column -- built by the loader, two doc_id sets could
+    drift."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM corpus_document WHERE doc_id <> source || ':' || source_item_id")
@@ -123,7 +131,7 @@ def test_doc_id_is_the_two_key_columns_joined_by_a_colon(seeded: str):
 
 @pytest.mark.postgres
 def test_a_mention_without_its_document_is_refused(seeded: str):
-    """고아 언급 0 은 매니페스트가 세어 둔 값이고, 여기서는 DB 가 진다."""
+    """0 orphan mentions is a value the manifest counted, and here the DB carries it."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         with pytest.raises(psycopg.errors.ForeignKeyViolation):
@@ -134,7 +142,7 @@ def test_a_mention_without_its_document_is_refused(seeded: str):
         conn.rollback()
 
 
-# ---------- 덮이지 않는다 ----------
+# ---------- it is not overwritten ----------
 @pytest.mark.postgres
 def test_a_later_snapshot_with_the_same_unique_key_leaves_the_first_untouched(seeded: str, tmp_path: Path):
     _load(seeded)
@@ -151,7 +159,8 @@ def test_a_later_snapshot_with_the_same_unique_key_leaves_the_first_untouched(se
 
 @pytest.mark.postgres
 def test_only_one_snapshot_can_be_active_at_a_time(seeded: str, tmp_path: Path):
-    """활성 판본이 둘이면 두 관측이 한 모집단으로 읽힌다. 023 의 부분 유니크 인덱스가 그것을 막는다."""
+    """With two active versions, two observations read as one population. The partial unique index of 023
+    stops that."""
     _load(seeded)
     _load(seeded, _rewritten(tmp_path), snapshot_id=2, label="recollected", activate_snapshot=False)
     with connect(seeded) as conn, conn.cursor() as cur:
@@ -167,7 +176,7 @@ def test_only_one_snapshot_can_be_active_at_a_time(seeded: str, tmp_path: Path):
 
 @pytest.mark.postgres
 def test_activating_a_snapshot_with_no_documents_is_refused(seeded: str):
-    """빈 판본을 켜면 분석이 빈 코퍼스를 오류 없이 읽는다."""
+    """Switch an empty version on and the analysis reads an empty corpus with no error."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         with pytest.raises(LookupError):
@@ -176,7 +185,7 @@ def test_activating_a_snapshot_with_no_documents_is_refused(seeded: str):
         assert corpus.active_snapshot(cur) == 1
 
 
-# ---------- 재현 검증 ----------
+# ---------- reproduction check ----------
 @pytest.mark.postgres
 def test_the_three_reproduction_numbers_come_out_of_the_loaded_rows(seeded: str):
     _load(seeded)
@@ -188,7 +197,8 @@ def test_the_three_reproduction_numbers_come_out_of_the_loaded_rows(seeded: str)
 
 @pytest.mark.postgres
 def test_the_reproduction_reads_the_panel_through_the_active_roster(seeded: str):
-    """맨 `WHERE active` 였다면 판본이 둘일 때 분모가 두 배가 되고 이 숫자는 조용히 커진다 (#31 리뷰)."""
+    """Had it been a bare `WHERE active`, two versions would double the denominator and this number would grow
+    quietly (#31 review)."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         panel.insert(cur, panel.rows(ROOT / "eval"), version=2, note="seed:test-v2")
@@ -198,10 +208,11 @@ def test_the_reproduction_reads_the_panel_through_the_active_roster(seeded: str)
         assert verify.reproduce(conn) == FIXTURE_REPRODUCES
 
 
-# ---------- 계약과 어긋나면 거절한다 ----------
+# ---------- it refuses what is out of step with the contract ----------
 @pytest.mark.postgres
 def test_a_channel_the_active_roster_gives_another_role_is_refused(seeded: str, tmp_path: Path):
-    """역할은 분모를 정하는 값이라 한 표에만 산다. channel.csv 는 표가 되지 않고 대조만 된다."""
+    """A role is the value that sets the denominator, so it lives in one table only. channel.csv does not
+    become a table; it is only compared against."""
     source = _rewritten(tmp_path)
     body = (FIXTURE / "channel.csv").read_text(encoding="utf-8-sig")
     (source / "channel.csv").write_text("﻿" + body.replace(",product,", ",expert,", 1), encoding="utf-8")
@@ -211,7 +222,8 @@ def test_a_channel_the_active_roster_gives_another_role_is_refused(seeded: str, 
 
 @pytest.mark.postgres
 def test_a_manifest_that_declares_more_rows_than_arrive_is_refused(seeded: str, tmp_path: Path):
-    """잘려 들어온 CSV 는 행이 적을 뿐 오류가 없다 -- 그러면 이 스냅샷의 모든 비율이 조용히 달라진다."""
+    """A truncated CSV simply has fewer rows and no error -- and then every ratio of this snapshot changes
+    quietly."""
     source = _rewritten(tmp_path)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
     manifest["table_counts"]["document.csv"] += 1
@@ -222,7 +234,8 @@ def test_a_manifest_that_declares_more_rows_than_arrive_is_refused(seeded: str, 
 
 @pytest.mark.postgres
 def test_a_snapshot_whose_counts_do_not_match_never_becomes_the_active_one(seeded: str, tmp_path: Path):
-    """거절이 활성 전환보다 먼저다 -- 뒤라면 분석은 이미 그 판본을 읽고 있다."""
+    """The refusal comes before the switch to active -- after it, the analysis is already reading that
+    version."""
     _load(seeded)
     source = _rewritten(tmp_path)
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
@@ -236,7 +249,7 @@ def test_a_snapshot_whose_counts_do_not_match_never_becomes_the_active_one(seede
 
 @pytest.mark.postgres
 def test_the_declared_counts_are_the_counts_the_load_reads(seeded: str):
-    """픽스처가 자기 행수를 잘못 적으면 스위트가 다른 코퍼스를 검증하게 된다."""
+    """If the fixture writes its own row count wrong, the suite ends up validating a different corpus."""
     _load(seeded)
     manifest = json.loads((FIXTURE / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["table_counts"] == {"document.csv": 12, "mention.csv": 9, "channel.csv": 3}
@@ -250,13 +263,14 @@ def test_the_declared_counts_are_the_counts_the_load_reads(seeded: str):
 
 @pytest.mark.postgres
 def test_a_file_that_carries_the_same_unique_key_twice_is_refused(seeded: str, tmp_path: Path):
-    """ON CONFLICT DO NOTHING 은 중복을 조용히 버린다 -- 세지 않으면 잘려 들어온 것과 구분되지 않는다.
-    매니페스트의 `input_counts.duplicate_docs = 0` 이 여기서 증명된다."""
+    """ON CONFLICT DO NOTHING drops duplicates quietly -- uncounted, that is indistinguishable from a
+    truncated input. The manifest's `input_counts.duplicate_docs = 0` is proved here."""
     source = _rewritten(tmp_path)
     lines = (source / "document.csv").read_text(encoding="utf-8-sig").splitlines(keepends=True)
     (source / "document.csv").write_text("\ufeff" + "".join([*lines, lines[1]]), encoding="utf-8")
     manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    # 선언 행수도 함께 올린다 -- 안 그러면 check_counts 가 먼저 걸려 중복을 시험하지 못한다.
+    # The declared row count is raised with it -- otherwise check_counts catches it first and the duplicate
+    # is never tested.
     manifest["table_counts"]["document.csv"] += 1
     manifest["documents_by_content_type"]["video_long"] += 1
     (source / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
@@ -266,8 +280,9 @@ def test_a_file_that_carries_the_same_unique_key_twice_is_refused(seeded: str, t
 
 @pytest.mark.postgres
 def test_a_comment_whose_parent_video_is_absent_is_not_refused_by_the_database(seeded: str):
-    """계약이 `orphan_comments` 를 DB 가 진다고 적으면 거짓이 된다: 댓글의 부모는 parent_item_id 이고
-    거기엔 FK 가 없다(023 은 부분 인덱스만 둔다). FK 가 지는 것은 고아 **언급** 쪽이다."""
+    """It would be false for the contract to say the DB carries `orphan_comments`: the parent of a comment is
+    parent_item_id and there is no FK there (023 only puts a partial index on it). What the FK carries is the
+    orphan **mention** side."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         cur.execute(
@@ -285,7 +300,7 @@ def test_the_contract_does_not_claim_a_foreign_key_for_orphan_comments():
 
 
 def test_the_count_rule_is_a_sentence_in_the_formats_contract():
-    """규칙이 코드에만 있으면 다음 사람은 "빠뜨린 것" 과 구분하지 못한다."""
+    """With the rule living only in the code, the next person cannot tell it from "it was left out"."""
     assert "선언한 행수와 반입분을 대조한다" in FORMATS.read_text(encoding="utf-8")
 
 
@@ -297,11 +312,12 @@ def test_a_manifest_whose_rules_differ_is_refused(tmp_path: Path):
 
 
 def test_the_fixture_manifest_carries_the_same_rules_the_archive_manifest_does():
-    """픽스처가 계약과 다른 규칙을 실으면 이 스위트는 실제 코퍼스와 다른 것을 검증하게 된다."""
+    """If the fixture carries a different rule from the contract, this suite validates something other than
+    the real corpus."""
     contract.check(json.loads((FIXTURE / "manifest.json").read_text(encoding="utf-8")))
 
 
-# ---------- 문장이 계약에 있다 ----------
+# ---------- the sentence is in the contract ----------
 @pytest.mark.parametrize("rule", contract.RULES)
 def test_every_manifest_rule_is_a_sentence_in_the_formats_contract(rule: str):
     assert rule in FORMATS.read_text(encoding="utf-8")
@@ -317,14 +333,15 @@ def test_the_text_rule_is_a_sentence_in_the_formats_contract():
 
 
 def test_the_loaded_text_is_already_a_fixed_point_of_this_repos_normalizer():
-    """ydc 의 normalize_text 는 한 번, cosmai 의 것은 고정점까지 돈다. 두 구현이 다르므로 text 가 다른
-    뜻이 될 수 있는 자리인데, 이 코퍼스에서는 한 번으로 이미 고정점이다 -- 실측 261,317행 중 0행이
-    달라진다. 픽스처가 그 성질을 잃으면(이스케이프가 남은 표본을 넣으면) 여기서 걸린다."""
+    """ydc's normalize_text runs once and cosmai's runs to the fixed point. The two implementations differ, so
+    text could mean different things here, but on this corpus one round is already the fixed point -- 0 of the
+    measured 261,317 rows change. If the fixture loses that property (a sample with an escape left in it goes
+    in), it is caught here."""
     texts = [row["text"] for row in read_csv(FIXTURE / "document.csv")]
     assert texts and all(normalize_text(t) == t for t in texts)
 
 
-# ---------- DDL 이 이 포크의 번호 블록에 산다 ----------
+# ---------- the DDL lives in this fork's number block ----------
 def test_the_ddl_lives_in_this_forks_number_block():
     assert re.fullmatch(r"02[0-9]_\w+\.sql", DDL.name)
 
@@ -337,13 +354,14 @@ def test_the_contracts_index_carries_a_row_for_this_ddl():
 @pytest.mark.parametrize("table", corpus.TABLES)
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
 def test_the_runtime_role_may_write_the_new_tables(table: str, privilege: str):
-    """반입은 needs_runtime 으로 돈다 -- GRANT 가 빠지면 운영 적재만 실패한다. per-test 스키마는
-    ALL TABLES 를 통째로 열어 주므로 누락이 안 보이고, 그래서 실제 배포가 만든 `needs` 를 본다."""
+    """The import runs as needs_runtime -- a missing GRANT fails only the production load. A per-test schema
+    opens ALL TABLES wholesale so the omission is invisible, which is why the real deployed `needs` is looked
+    at."""
     url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
     engine = create_engine(url)
     try:
         with engine.connect() as conn:
-            conn.execute(text("SET ROLE needs_owner"))  # migrator 는 SET ROLE 밖에서 needs 에 USAGE 가 없다
+            conn.execute(text("SET ROLE needs_owner"))  # outside SET ROLE, migrator has no USAGE on needs
             allowed = conn.execute(
                 text("select has_table_privilege('needs_runtime', :t, :p)"),
                 {"t": f"needs.{table}", "p": privilege},
@@ -355,7 +373,8 @@ def test_the_runtime_role_may_write_the_new_tables(table: str, privilege: str):
 
 @pytest.mark.postgres
 def test_a_content_type_outside_the_vocabulary_is_refused(seeded: str):
-    """오타 하나가 조용히 별도 계열을 열면 그 계열은 자기만의 분모를 갖는다 (022 와 같은 문장)."""
+    """One typo quietly opening a separate family gives that family a denominator of its own (the same
+    sentence as 022)."""
     _load(seeded)
     with connect(seeded) as conn, conn.cursor() as cur:
         with pytest.raises(psycopg.errors.CheckViolation):

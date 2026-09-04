@@ -1,4 +1,4 @@
-"""질의 전용 불용어 (포크 #46). 색인에는 손대지 않는다.
+"""Query-only stopwords (fork #46). The index is not touched.
 
 자연어로 물으면 필러가 검색을 끌고 간다 -- `백탁 관련해서 소비자들이` 가 `['백탁','관련','소비자']` 로
 쪼개지고 *"후니는 우리 소비자편이야"* 가 3위에 올라온다(ydc 실측). **IDF 로는 못 걸러낸다**: ydc
@@ -13,8 +13,9 @@
 그대로여도 run 의 `versions.lexicon` 이 2 가 된다 -- 물려받은 성질이고 포크 #58 이 진다
 (`contracts/formats.md` §entity 사전의 `kind='stopword'`).
 
-**활성 목록이 없는 것은 막힘이 아니다.** 주제 사전은 없으면 정답이 0건이라 점수가 거짓이 되지만
-(`topics.NoDictionary`), 질의 불용어가 없는 검색은 이 목록 이전의 검색 그대로다.
+**A missing active list is not a blocker.** Without the topic dictionary the answer set is 0 and the score
+becomes a lie (`topics.NoDictionary`), but a search without query stopwords is the search as it was before
+this list existed.
 """
 
 from __future__ import annotations
@@ -29,8 +30,9 @@ KIND = "stopword"
 # 새로 생기고, tier 로 가르면 brand 전용 어휘와 한 칸을 나눠 쓰게 된다 (formats.md §사전 CSV).
 AXIS = "query"
 DICTIONARY_CSV = Path(__file__).resolve().parent / "dict" / "query_stopwords_v1.csv"
-# `topics.FIX` 같은 "고치는 길" 문자열이 여기 없는 것은 낼 자리가 없어서다 -- 활성 목록이 없는 것은
-# 오류가 아니라 정상 상태라(아래 `active`) 사람에게 명령을 알려줄 메시지 자체가 생기지 않는다.
+# There is no "how to fix it" string like `topics.FIX` here because there is no place to emit one -- a
+# missing active list is a normal state rather than an error (`active` below), so no message telling a person
+# what to run ever comes into being.
 
 ACTIVE_SQL: LiteralString = """
 SELECT surface, version FROM entity_lexicon
@@ -44,19 +46,19 @@ WHERE version = %s AND kind = %s AND canonical = %s ORDER BY id
 
 @dataclass(frozen=True)
 class QueryStopwords:
-    """질의에서 지울 토큰 한 벌. `version` 이 None 이면 활성 목록이 없다는 뜻이다."""
+    """One set of tokens to drop from a query. `version` None means there is no active list."""
 
     words: frozenset[str]
     version: int | None = None
 
     def keep(self, tokens: list[str]) -> list[str]:
-        """남길 토큰. **전부 불용어면 하나도 지우지 않는다** -- 토큰 0개는 결과 0건이고, 그것은
-        필러가 낀 순위보다 나쁘다."""
+        """The tokens to keep. **If they are all stopwords, none is dropped** -- 0 tokens is 0 results, and
+        that is worse than a ranking with fillers in it."""
         kept = [token for token in tokens if token not in self.words]
         return kept or tokens
 
     def dropped(self, tokens: Iterable[str]) -> list[str]:
-        """뺀 토큰. 사람에게 보여주는 용도라 순서를 지키고 중복을 접는다."""
+        """The tokens taken out. It is shown to a person, so the order is kept and duplicates are folded."""
         seen = dict.fromkeys(token for token in tokens if token in self.words)
         return list(seen)
 
@@ -65,8 +67,8 @@ NONE = QueryStopwords(frozenset())
 
 
 def from_rows(rows: Iterable[tuple[str, int]]) -> QueryStopwords:
-    """(surface, version) 행들을 목록 하나로. 행이 없으면 `NONE` 이다 -- 빈 목록과 없는 목록은
-    검색에 같은 뜻이라 둘을 가르는 상태를 만들지 않는다."""
+    """(surface, version) rows into one list. With no rows it is `NONE` -- an empty list and a missing list
+    mean the same to the search, so no state is made to tell them apart."""
     materialised = list(rows)
     if not materialised:
         return NONE
@@ -77,7 +79,8 @@ def from_rows(rows: Iterable[tuple[str, int]]) -> QueryStopwords:
 
 
 def load(conn: Any, *, version: int | None = None) -> QueryStopwords:
-    """활성 버전(또는 지정한 버전)의 질의 불용어. 읽고 나서 커밋한다 -- 뒤이어 형태소 분석이 붙는다."""
+    """The query stopwords of the active version (or a named one). Committed after the read -- morphological
+    analysis follows right after."""
     with conn.cursor() as cur:
         if version is None:
             cur.execute(ACTIVE_SQL, (KIND, AXIS))
@@ -88,14 +91,14 @@ def load(conn: Any, *, version: int | None = None) -> QueryStopwords:
     return from_rows((row[0], row[1]) for row in rows)
 
 
-# `topics` 와 달리 변경 통지(`on_change`)가 없다 -- 이 목록에서 파생되는 캐시가 하나도 없기 때문이고,
-# 그것이 색인 캐시가 이 목록을 안 무는 이유와 같다(질의 축은 색인을 만들지 않는다).
+# Unlike `topics` there is no change notification (`on_change`) -- nothing is cached off this list, which is
+# the same reason the index cache does not bite on it (the query axis builds no index).
 _active: QueryStopwords | None = None
 
 
 def use(words: QueryStopwords) -> QueryStopwords:
-    """이 목록을 프로세스의 활성 목록으로 세운다. 주제 사전과 같은 이유로 전역이다 --
-    `bm25.tokenize_query` 아래로 커넥션을 들고 다닐 자리가 없다(`topics` 의 주석)."""
+    """Makes this list the process's active list. Global for the same reason as the topic dictionary --
+    there is no place to carry a connection below `bm25.tokenize_query` (the comment in `topics`)."""
     global _active
     _active = words
     return words
@@ -107,8 +110,9 @@ def forget() -> None:
 
 
 def active() -> QueryStopwords:
-    """세우지 않은 것과 활성 버전이 없는 것은 **같은 상태**다 -- 둘 다 필터 없는 검색이고, 그것이
-    이 목록 이전의 검색이다. 그래서 주제 사전과 달리 여기서 멈추지 않는다."""
+    """Not having set one and having no active version are **the same state** -- both are a search with no
+    filter, and that is the search as it was before this list. So unlike the topic dictionary this does not
+    stop here."""
     return _active if _active is not None else NONE
 
 
@@ -117,8 +121,9 @@ def use_active(conn: Any) -> QueryStopwords:
 
 
 def query_note(query: str) -> str | None:
-    """이 질의에서 뭘 뺐는지. 뺀 것이 없으면 None -- `pipeline.coverage_note` 와 같은 모양이고,
-    같은 이유로 stderr 로 나가며 종료 코드를 바꾸지 않는다(멈춰야 할 일이 아니다)."""
+    """What was taken out of this query. None when nothing was -- the same shape as
+    `pipeline.coverage_note`, and for the same reason it goes to stderr and does not change the exit code
+    (it is not something to stop for)."""
     from analysis.retrieval.bm25 import tokenize
 
     words = active()
@@ -126,6 +131,6 @@ def query_note(query: str) -> str | None:
     dropped = words.dropped(tokens)
     if not dropped or words.keep(tokens) == tokens:
         return None
-    # 여기 왔다는 것은 목록이 비어 있지 않다는 뜻이고, 비어 있지 않은 목록은 언제나 버전 있는 행에서
-    # 온다(`from_rows`) -- 그래서 "버전 없음"을 말하는 가지가 없다.
+    # Reaching here means the list is not empty, and a list that is not empty always comes from rows that
+    # carry a version (`from_rows`) -- so there is no branch that says "no version".
     return f"질의 불용어(v{words.version})로 뺀 토큰: {dropped} -- 색인은 그대로다"

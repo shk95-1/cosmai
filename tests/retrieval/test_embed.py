@@ -1,6 +1,6 @@
-"""청크를 파일 벡터로 굽는 배관. 모델은 부르지 않는다 -- torch 는 이미지 밖이고 테스트는
-오프라인이다. 가짜 인코더를 끼워 "프리픽스가 붙는가 · 행 순서가 chunk_id 순인가 ·
-매니페스트에 설정이 남는가"를 잰다. 셋 다 어긋나도 오류가 안 나는 것들이다."""
+"""The plumbing that bakes chunks into file vectors. The model is not called -- torch is outside the image
+and the tests are offline. A fake encoder is put in and it measures "is the prefix attached · is the row
+order chunk_id order · are the settings left in the manifest". All three raise no error when out of step."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ pytestmark = pytest.mark.postgres
 
 
 class FakeEncoder:
-    """encode() 만 있으면 된다. 호출마다 다른 축을 세워 행 순서를 확인할 수 있게 한다."""
+    """Only encode() is needed. It builds a different axis per call so the row order can be checked."""
 
     def __init__(self):
         self.seen: list[str] = []
@@ -47,7 +47,7 @@ def _connect(url: str) -> psycopg.Connection:
 def conn(needs_schema: str, needs_runtime_url: str):
     connection = _connect(needs_runtime_url)
     with connection.cursor() as cur:
-        # 일부러 chunk_id 역순으로 넣는다 -- 저장 순서가 삽입 순서를 따르면 안 된다.
+        # Inserted in reverse chunk_id order on purpose -- the stored order must not follow the insert order.
         for doc, source in (("d2", "commerce_review"), ("d1", "youtube_comment")):
             cur.execute(
                 "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
@@ -79,13 +79,13 @@ def test_a_run_writes_a_store_that_loads_back(conn, fake, tmp_path):
 
 
 def test_rows_are_ordered_by_chunk_id(conn, fake, tmp_path):
-    # 다시 태울 때 같은 순서가 나와야 두 벌을 대조할 수 있다.
+    # A rebake has to give the same order for the two sets to be compared.
     embed.run(conn, out=tmp_path / "e5base")
     assert vectors.load(tmp_path / "e5base").chunk_ids == ["d1#0", "d2#0"]
 
 
 def test_documents_get_the_passage_prefix(conn, fake, tmp_path):
-    # 프리픽스가 빠지면 오류 없이 성능만 떨어진다. 그래서 여기서 세운다.
+    # Without the prefix the performance just drops, with no error. So it is pinned down here.
     embed.run(conn, out=tmp_path / "e5base")
     assert fake.seen
     assert all(text.startswith(vectors.DOC_PREFIX) for text in fake.seen)
@@ -105,7 +105,7 @@ def test_the_manifest_records_what_made_the_vectors(conn, fake, tmp_path):
 
 
 def test_the_source_of_each_row_travels_with_it(conn, fake, tmp_path):
-    # 소스가 없으면 --source 로 좁히는 벡터 검색이 DB 를 한 번 더 읽어야 한다.
+    # Without the sources, a vector search narrowed by --source has to read the DB once more.
     embed.run(conn, out=tmp_path / "e5base")
     assert vectors.load(tmp_path / "e5base").sources == ["youtube_comment", "commerce_review"]
 
@@ -126,8 +126,8 @@ def test_an_empty_corpus_still_writes_a_readable_store(needs_schema, needs_runti
 
 
 def test_the_manifest_records_how_far_the_chunks_had_been_rebuilt(conn, fake, tmp_path):
-    """`count` 만 적으면 "같은 수, 다른 집합" 을 아무도 못 잡는다 -- 커버리지 가드가 읽는 값이라
-    인코딩한 행에서 직접 뽑는다(#12)."""
+    """With only `count` written down, nobody can catch "same number, different set" -- it is the value the
+    coverage guard reads, so it is taken straight from the encoded rows (#12)."""
     embed.run(conn, out=tmp_path / "e5base")
     _, _, manifest_path = vectors.paths(tmp_path / "e5base")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -139,7 +139,8 @@ def test_the_manifest_records_how_far_the_chunks_had_been_rebuilt(conn, fake, tm
 
 
 def test_an_empty_corpus_records_no_chunked_at_max(needs_schema, needs_runtime_url, fake, tmp_path):
-    # 빈 코퍼스에는 최댓값이 없다. 모르는 것을 아는 척하는 값을 적으면 가드가 거짓으로 안심한다.
+    # An empty corpus has no maximum. Writing a value that pretends to know makes the guard falsely
+    # reassuring.
     connection = _connect(needs_runtime_url)
     try:
         embed.run(connection, out=tmp_path / "e5base")
