@@ -81,6 +81,12 @@ for pair in $pairs; do
     [ -f "$baseline" ] || { echo "ddl-drift: no baseline for $pair" >&2; exit 1; }
 
     # Expected = baseline, then every additive file the contract declares for that schema.
+    #
+    # This loop must stay *before* the db/migrate.sh call below, and not only for the dump-ordering
+    # reason above: since #178 that script has a step (0) that builds trend_radar and tubedepth
+    # itself when they are absent. Run migrate.sh first and it would compose them here, off the same
+    # baseline and additive files -- and the expected side would then be measuring this checkout
+    # against itself twice instead of against production.
     docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
         -c 'SET client_min_messages = warning' -f - < "$baseline" > /dev/null
     for add in contracts/ddl/"$schema"/*.sql; do

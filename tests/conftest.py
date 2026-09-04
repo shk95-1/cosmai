@@ -9,9 +9,12 @@ import hashlib
 import os
 import re
 import socket
-from collections.abc import Iterator
+import subprocess
+import tempfile
+import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlparse
 
 import psycopg
@@ -19,6 +22,8 @@ import pytest
 from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
+
+from db import secrets
 
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
 LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -269,6 +274,11 @@ def trend_radar_schema(database_url_for_tests: str, _schema_name: str) -> str:
     No role switch, unlike `needs_schema`: `trend_radar` predates the needs-style owner/runtime split
     (contracts/README.md) and is already live in production without one, so the per-test schema is
     applied and read back as the same role that created it.
+
+    The deploy composes the same schema the same way -- `db/migrate.sh` step (0), which is what the
+    harness container's real `trend_radar` comes from since #178. This fixture cannot call that
+    script (its schemas are renamed and one per test), so the two are held against each other
+    instead: tests/test_empty_db_bootstrap.py compares them column by column.
     """
     schema = _schema_name
     engine = create_engine(database_url_for_tests)
@@ -292,7 +302,11 @@ TUBEDEPTH_NEEDS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" 
 
 def _apply_tubedepth_ddl(conn: Any, schema: str) -> None:
     """The current 13-table dump verbatim (same substitution `trend_radar_schema` uses), then every
-    additive file in contracts/ddl/tubedepth/ on top."""
+    additive file in contracts/ddl/tubedepth/ on top.
+
+    That order is the schema's canonical form (contracts/README.md), and `db/migrate.sh` step (0)
+    composes the deploy's copy from the same two sources -- tests/test_empty_db_bootstrap.py holds
+    the result of this function against the result of that one."""
     lines = [
         ln
         for ln in TUBEDEPTH_DDL.read_text(encoding="utf-8").splitlines()
@@ -331,8 +345,141 @@ def tubedepth_side_schema(database_url_for_tests: str, _schema_name: str) -> Ite
             conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
             conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
             _apply_tubedepth_ddl(conn, schema)
+        # The pool is not held across the yield. needs_migrator has CONNECTION LIMIT 2 for the whole
+        # cluster, so an idle pooled connection is a third of the budget a test that runs
+        # db/migrate.sh needs, and the deploy then fails on "too many connections" (#178 review 4).
+        # The engine is reusable afterwards -- dispose() builds a new pool on the next checkout.
+        engine.dispose()
         yield schema
     finally:
         with engine.begin() as conn:
             conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         engine.dispose()
+
+
+# --- the harness container, and the one way to run a deploy against it -------------------------
+#
+# Three test files run `db/migrate.sh` inside the suite. Each used to find the container itself and
+# shell out itself, and each was one more place that could spend a needs_migrator connection the
+# deploy then could not get (#178 review 4). One fixture does both now.
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+REQUIRE_HARNESS_ENV = "COSMAI_REQUIRE_HARNESS"
+# The dummy values tool/checks/test writes into its throwaway secret file. Not secrets: the roles in
+# the throwaway container carry exactly these, and nothing else ever sees them.
+HARNESS_SECRETS = (
+    "NEEDS_DB_MIGRATOR=check\n"
+    "NEEDS_DB_RUNTIME=check-runtime\n"
+    "TREND_RADAR_DB_RUNTIME=check-trend-radar\n"
+    "TREND_RADAR_DB_READER=check-trend-radar-reader\n"
+    "TUBEDEPTH_DB_RUNTIME=check-tubedepth\n"
+)
+# db/bootstrap.sql gives needs_migrator CONNECTION LIMIT 2, cluster-wide, and a deploy needs one of
+# them. Waiting is what makes "the deploy cannot lose the race" true rather than likely. The
+# environment override exists so a test can ask for the timeout rather than sit through it.
+DEPLOY_SLOT_TIMEOUT_ENV = "COSMAI_DEPLOY_SLOT_TIMEOUT_S"
+DEPLOY_SLOT_TIMEOUT_S = 20.0
+
+
+@pytest.fixture
+def harness_secrets(tmp_path: Path) -> dict[str, str]:
+    """HARNESS_SECRETS read back through db/secrets.py -- the same reader db/migrate.sh mirrors.
+
+    A test that looked for hardcoded passwords instead would keep passing while a key added to the
+    set above went unchecked, and the check it belongs to is the one that proves no password reaches
+    a command line (#178 re-review 7). Parsing losing a line would shrink it the same way, so that
+    is asked here rather than assumed."""
+    path = tmp_path / "harness.env"
+    path.write_text(HARNESS_SECRETS, encoding="utf-8")
+    loaded = secrets.load(path)
+    assert len(loaded) == len(HARNESS_SECRETS.strip().splitlines()), (
+        "a line of HARNESS_SECRETS did not survive db/secrets.py; anything counting these is short"
+    )
+    return loaded
+
+
+def _no_harness(reason: str) -> NoReturn:
+    """Skip, unless the caller said a missing harness is a fault. A silent skip here means the
+    checks that only this container can run disappear from a green suite without a word."""
+    if os.environ.get(REQUIRE_HARNESS_ENV) == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
+@pytest.fixture
+def harness_container() -> str:
+    """The container tool/checks/test started, by the name it derives from the port."""
+    url = os.environ.get(TEST_DB_URL_ENV)
+    if not url:
+        _no_harness(f"set {TEST_DB_URL_ENV}, or run tool/checks/test")
+    port = urlparse(url.replace("postgresql+psycopg://", "postgresql://")).port
+    name = f"cosmai-test-postgres-{port}"
+    probe = subprocess.run(["docker", "inspect", "-f", "{{.Name}}", name], capture_output=True, text=True)
+    if probe.returncode != 0:
+        _no_harness(f"container {name} is not there -- running against an external {TEST_DB_URL_ENV}")
+    return name
+
+
+def _needs_migrator_backends(container: str) -> list[str]:
+    """What is holding needs_migrator's connections right now, as psql sees it -- asked as the
+    superuser through docker exec, which spends none of the two slots being counted.
+
+    Which database this connects to does not matter and is not a parameter: pg_stat_activity is a
+    cluster-wide view and CONNECTION LIMIT is a cluster-wide budget, so `fleet` sees every backend
+    the role has anywhere on the server."""
+    done = subprocess.run(
+        ["docker", "exec", container, "psql", "-U", "fleet", "-d", "fleet", "-X", "-Atq"]
+        + [
+            "-c",
+            "SELECT state || ' :: ' || left(query, 100) FROM pg_stat_activity "
+            "WHERE usename = 'needs_migrator'",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return [line for line in done.stdout.splitlines() if line]
+
+
+@pytest.fixture
+def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Runs db/migrate.sh the way tool/checks/test runs it, once both of needs_migrator's connection
+    slots are free.
+
+    The waiting is the point. A pooled engine still open somewhere in this session costs the deploy
+    the connection it needs, and the failure that follows is not the deploy's -- it is "too many
+    connections" from every test that comes after, until whatever held it lets go (#178 review 4).
+    Waiting turns that into either a deploy that runs or a named holder in a failure message.
+    """
+
+    def run(
+        database: str = "fleet", *, secrets_body: str = HARNESS_SECRETS
+    ) -> subprocess.CompletedProcess[str]:
+        limit = float(os.environ.get(DEPLOY_SLOT_TIMEOUT_ENV) or DEPLOY_SLOT_TIMEOUT_S)
+        deadline = time.monotonic() + limit
+        held = _needs_migrator_backends(harness_container)
+        while held and time.monotonic() < deadline:
+            time.sleep(0.2)
+            held = _needs_migrator_backends(harness_container)
+        assert not held, (
+            "db/migrate.sh cannot have a needs_migrator connection: "
+            f"{len(held)} of 2 are still held after {limit}s by {held}"
+        )
+        # Outside the checkout: a secret file inside it, even a dummy one, is a file someone
+        # eventually commits.
+        with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
+            fh.write(secrets_body)
+        secret = Path(fh.name)
+        try:
+            return subprocess.run(
+                ["db/migrate.sh", "--container", harness_container, "--db", database, "--superuser", "fleet"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "COSMAI_SECRET_FILE": str(secret)},
+                check=False,
+            )
+        finally:
+            secret.unlink(missing_ok=True)
+
+    return run
