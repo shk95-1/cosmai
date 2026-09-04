@@ -5,9 +5,10 @@
 -- are kept apart because the verdict's criteria (tau, weights, type names) change by team agreement
 -- and the metrics need not be recounted then; this table keeps that separation in storage too.
 --
--- 이 표는 집계가 아니라 파생이다: 문서를 세지 않고 needs.metrics_topic_quarter 의 한 행을 받아 한 행을
--- 낸다. 그래서 이름이 metrics_ 로 시작하지 않고, contracts/formats.md §시간 의 "집계 그레인의 정본"
--- 표에 줄을 갖지 않는다 -- 언급 수·채널 수·지속성 중 어느 것도 들지 않으므로 정본을 다툴 상대가 없다.
+-- This table is a derivation rather than an aggregate: it counts no document, takes one row of
+-- needs.metrics_topic_quarter and emits one row. So its name does not start with metrics_, and it has
+-- no line in the "canonical table per aggregate grain" table of contracts/formats.md §Time -- it
+-- carries none of mention count, channel count or persistence, so it has no rival to be canonical over.
 CREATE TABLE needs.topic_quarter_judgement (
   -- The eight columns are metrics_topic_quarter's primary key as it stands. That a verdict row
   -- cannot stand without the metric row grounding it is the FK, and that FK is the mechanical form
@@ -30,8 +31,9 @@ CREATE TABLE needs.topic_quarter_judgement (
   -- 022's sample_ok CHECK).
   judged        boolean NOT NULL
                 CHECK (judged = (trend_type NOT IN ('근거 부족','판정 보류','미확정(진행 중)'))),
-  -- 자리수가 곧 게이트의 해상도다: EVIDENCE_FLOOR 비교도 opportunity_score 의 항도 반올림된
-  -- evidence_strength 를 쓴다 (contracts/interfaces.md §판정 "판정 자리수").
+  -- The decimal places are the resolution of the gate: both the EVIDENCE_FLOOR comparison and the
+  -- opportunity_score term use the rounded evidence_strength
+  -- (contracts/interfaces.md §Verdict's "verdict decimal places").
   evidence_strength numeric(4,1) NOT NULL CHECK (evidence_strength BETWEEN 0 AND 100),
   -- An unscored cell is NULL, not 0 -- 0 says something else, "the lowest opportunity".
   opportunity_score numeric(4,1) CHECK (opportunity_score BETWEEN 0 AND 100),
@@ -53,8 +55,8 @@ CREATE TABLE needs.topic_quarter_judgement (
   FOREIGN KEY (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role)
     REFERENCES needs.metrics_topic_quarter
 );
--- 화면이 묻는 것은 "이 분기에 무엇이 급상승인가"이지 "이 run 의 이 주제"가 아니다. 기본키는 run_id 로
--- 시작해서 그 길을 못 준다 (022 의 (topic_key, quarter) 인덱스와 같은 이유).
+-- What a screen asks is "what is surging in this quarter", not "this topic of this run". The primary
+-- key starts with run_id and cannot give that path (the same reason as 022's (topic_key, quarter) index).
 CREATE INDEX ON needs.topic_quarter_judgement (trend_type, quarter);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON needs.topic_quarter_judgement TO needs_runtime;

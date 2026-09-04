@@ -153,7 +153,7 @@ CREATE TABLE needs.product_denominator (
   captured_at     date NOT NULL,
   site_review_count int,
   low_collected   int,
-  low_complete    boolean,                   -- RATING_ASC 표본에 3★이 섞임 = 1·2★ 전수
+  low_complete    boolean,                   -- a 3★ mixed into the RATING_ASC sample = every 1·2★ row is in
   site_low_est    numeric,
   PRIMARY KEY (source, product_key, captured_at)
 );
