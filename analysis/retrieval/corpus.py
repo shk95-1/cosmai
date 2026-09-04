@@ -48,7 +48,7 @@ ORDER BY video_id, comment_id LIMIT %s
 
 # video_snapshots holds the same video several times, so only the newest is used. There is no description
 # column, so only the title is used -- ydc joined title + description from the API response
-# (video_text in analysis/slices/ydc/trend.py).
+# (video_text in ydc trend.py, v0.1.0 02440ab).
 VIDEOS = pgsql.SQL("""
 SELECT DISTINCT ON (video_id) video_id, title FROM {schema}.video_snapshots
 WHERE video_id > %s AND (%s::date IS NULL OR published_at::date >= %s::date)

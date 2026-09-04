@@ -1096,10 +1096,11 @@ that `corpus_mention` has already answered "which documents speak of this topic"
   공백으로만 나열한 성분표는 성분행 22,705 중 **60**행(고유명 59)이다.
 
 ### ydc 와의 대조 (2026-08-27 실행, 38줄 **차이 0**)
-**승격 원본은 핀(`v0.1.0 02440ab`)이 아니다** — `cross_source.py` 는 그 뒤 `v0.3.0`(`e5a1b00`)에서 성분 키와
-선크림 문맥이 정정됐고 승격한 것은 그 판이다. 핀 사본(`analysis/slices/ydc/`)은 그 파일을 갖고 있지도
-않았고 #9 가 지웠다 — 태그에서 그 파일을 꺼내 **손대지 않고 돌리는** 절차와 대조 코드는
-`tool/compare-ydc-crosscheck` 한 자리에 있다. 맞대는 것 셋:
+**The promoted source is not the import pin** (`v0.4.0` `76db718`, `versioning.md`) — `cross_source.py` had its
+ingredient keys and its sunscreen context corrected in `v0.3.0` (`e5a1b00`), and that revision is what was
+promoted. The pinned copy (`analysis/slices/ydc/`, `v0.1.0`) never held that file and #9 deleted the copy — the
+procedure that takes the file out of the tag and runs it **untouched**, and the comparison code, sit in one
+place, `tool/compare-ydc-crosscheck`. Three things are put side by side:
 - **상수** 열(키 표 · `SUN_WORDS` · `PAPER_HOLD` · `GROUP_MAP` · 극성 힌트 둘 · `MIN_PRODUCTS` · 해석 문구
   셋)을 ydc 모듈에서 직접 읽어 비교한다 — 옮겨 적다 어긋난 한 글자가 여기서 걸린다.
 - **규칙** 열여덟(`ranks` · `positive_rate` · `polarity` 다섯 · 평가 해석 넷 · `count_terms` 넷)에 같은

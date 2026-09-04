@@ -1,7 +1,9 @@
 """트렌드 유형 7종 판정과 두 점수 — `contracts/interfaces.md` §판정 이 정본이다 (포크 #40).
 
-The rules come from ydc `analysis/slices/ydc/judge.py` (v0.2) and were written over rather than imported from
-the slice (the way `analysis/trend/` did it). This module knows no DB: it takes metric rows
+The rules come from ydc `judge.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`, the TEAM_DECISIONS v0.2
+definition; unchanged through the import pin `v0.4.0`, `contracts/versioning.md`) and were written over
+rather than imported from the pinned copy `analysis/slices/ydc/` (deleted, #9) (the way `analysis/trend/`
+did it). This module knows no DB: it takes metric rows
 (`MetricsTopicQuarterRow`) and produces judgement rows, so the same rules run on the stored table and on the
 raw collection CSV with the same code -- that is where the golden comparison stands.
 
