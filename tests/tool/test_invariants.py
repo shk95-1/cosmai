@@ -51,9 +51,10 @@ def commit(repo: Path, message: str) -> str:
     ).stdout.strip()
 
 
-def invariants(repo: Path, base: str, *paths: str) -> subprocess.CompletedProcess:
+def invariants(repo: Path, base: str, *paths: str, blanked: bool = False) -> subprocess.CompletedProcess:
+    flags = ["--strings-blanked"] if blanked else []
     return subprocess.run(
-        ["sh", str(CHECK), base, *paths],
+        ["sh", str(CHECK), *flags, base, *paths],
         cwd=str(repo),
         capture_output=True,
         text=True,
@@ -62,13 +63,13 @@ def invariants(repo: Path, base: str, *paths: str) -> subprocess.CompletedProces
     )
 
 
-def rewrite(repo: Path, path: str, before: str, after: str) -> subprocess.CompletedProcess:
-    """Commits `before`, replaces it with `after`, and asks whether the change was only text."""
+def rewrite(repo: Path, path: str, before: str, after: str, blanked: bool = False):
+    """Commits `before`, replaces it with `after`, and asks whether the change moved any code."""
     write(repo, path, before)
     base = commit(repo, "before")
     write(repo, path, after)
     commit(repo, "after")
-    return invariants(repo, base)
+    return invariants(repo, base, blanked=blanked)
 
 
 PY_BEFORE = '''"""One sentence of prose."""
@@ -92,10 +93,28 @@ def run(rows):
 '''
 
 
-def test_a_translated_python_file_is_invariant(repo: Path):
-    done = rewrite(repo, "analysis/thing.py", PY_BEFORE, PY_TRANSLATED)
+def test_a_python_file_whose_comments_and_docstrings_changed_is_invariant(repo: Path):
+    retold = PY_BEFORE.replace('"""One sentence of prose."""', '"""The same, said better."""').replace(
+        "# the old wording of why", "# a better why"
+    )
+    done = rewrite(repo, "analysis/thing.py", PY_BEFORE, retold)
     assert done.returncode == 0, done.stdout + done.stderr
     assert "thing.py" not in done.stdout, done.stdout
+
+
+def test_a_translated_message_is_code_until_the_reviewer_says_otherwise(repo: Path):
+    # #215 review C1: a string constant carries a SQL predicate, a regex, an env-var name, a model
+    # default. The gate cannot tell those from a message, so by default none of them are text.
+    done = rewrite(repo, "analysis/thing.py", PY_BEFORE, PY_TRANSLATED)
+    assert done.returncode == 1, done.stdout
+    assert "analysis/thing.py" in done.stdout, done.stdout
+
+
+def test_the_strings_blanked_mode_is_where_a_translation_reads_as_unchanged(repo: Path):
+    # The translation reviewer's question -- "is this the same code with different words?" -- is a
+    # smaller one than the gate's, so it lives behind a flag the gate never passes.
+    done = rewrite(repo, "analysis/thing.py", PY_BEFORE, PY_TRANSLATED, blanked=True)
+    assert done.returncode == 0, done.stdout + done.stderr
 
 
 def test_a_changed_constant_in_python_is_not_invariant(repo: Path):
@@ -104,10 +123,10 @@ def test_a_changed_constant_in_python_is_not_invariant(repo: Path):
     assert "analysis/thing.py" in done.stdout, done.stdout
 
 
-def test_a_reordered_f_string_is_invariant_but_a_new_expression_is_not(repo: Path):
-    # Korean and English put the same values in a different order, so the order inside one message is
-    # text; the set of values interpolated is code.
-    same = rewrite(repo, "a.py", 'print(f"{a} then {b}")\n', 'print(f"{b} first, {a}")\n')
+def test_a_reordered_f_string_is_text_only_under_strings_blanked(repo: Path):
+    # Korean and English put the same values in a different order, so under the reviewer's mode the
+    # order inside one message is text while the set of values interpolated is code.
+    same = rewrite(repo, "a.py", 'print(f"{a} then {b}")\n', 'print(f"{b} first, {a}")\n', blanked=True)
     assert same.returncode == 0, same.stdout
 
     other = repo / "b.py"
@@ -115,9 +134,43 @@ def test_a_reordered_f_string_is_invariant_but_a_new_expression_is_not(repo: Pat
     base = commit(repo, "two")
     other.write_text('print(f"{a} then {c}")\n', encoding="utf-8")
     commit(repo, "three")
-    done = invariants(repo, base)
+    done = invariants(repo, base, blanked=True)
     assert done.returncode == 1, done.stdout
     assert "b.py" in done.stdout, done.stdout
+
+
+def test_a_rounding_change_inside_an_f_string_is_never_invariant(repo: Path):
+    # #215 review, minor 6: format_spec and conversion decide what the value prints as, so they are
+    # part of the code in both modes.
+    for blanked in (False, True):
+        fresh = repo / f"round{int(blanked)}.py"
+        fresh.write_text('print(f"{total:.2f}")\n', encoding="utf-8")
+        base = commit(repo, "before")
+        fresh.write_text('print(f"{total:.0f}")\n', encoding="utf-8")
+        commit(repo, "after")
+        done = invariants(repo, base, blanked=blanked)
+        assert done.returncode == 1, (blanked, done.stdout)
+
+
+ADVERSARIAL = {
+    "analysis/polarity/q.py": (
+        'QUERY = "SELECT id FROM app.need WHERE tenant = %s"\n',
+        'QUERY = "SELECT id FROM app.need WHERE 1=1"\n',
+    ),
+    "analysis/polarity/model.py": ('DEFAULT_MODEL = "gpt-4o-mini"\n', 'DEFAULT_MODEL = "gpt-3.5-turbo"\n'),
+    "tests/conftest.py": ('TEST_DB_URL_ENV = "TEST_POSTGRES_URL"\n', 'TEST_DB_URL_ENV = "TEST_PG_URL"\n'),
+    "analysis/extractor/rules.py": ('PATTERN = r"^\\d{4}-\\d{2}$"\n', 'PATTERN = r"^\\d{4}-\\d{1}$"\n'),
+}
+
+
+@pytest.mark.parametrize("path", sorted(ADVERSARIAL))
+def test_behaviour_that_lives_in_a_string_is_not_invariant(repo: Path, path: str):
+    # The four the review measured: a SQL predicate, a model default, the env var the whole test
+    # harness is keyed on, and a regex. Each one is a behaviour change wearing quotation marks.
+    before, after = ADVERSARIAL[path]
+    done = rewrite(repo, path, before, after)
+    assert done.returncode == 1, done.stdout
+    assert path in done.stdout, done.stdout
 
 
 def test_unparsable_python_is_reported_rather_than_waved_through(repo: Path):
@@ -258,3 +311,31 @@ def test_only_the_named_paths_are_examined(repo: Path):
 def test_the_summary_says_how_many_files_were_compared(repo: Path):
     done = rewrite(repo, "a.py", "x = 1\n", "# why\nx = 1\n")
     assert "1 file" in done.stdout, done.stdout
+
+
+def test_a_swapped_shebang_is_not_a_comment(repo: Path):
+    # #215 review, minor 7: `#!` is read by the kernel, not by a person -- it decides what runs.
+    before = '#!/bin/sh\n# why\nexec psql -f "$1"\n'
+    done = rewrite(repo, "db/run.sh", before, before.replace("#!/bin/sh", "#!/bin/bash"))
+    assert done.returncode == 1, done.stdout
+
+
+def test_a_js_generator_method_is_not_a_block_comment_line(repo: Path):
+    before = "class Q {\n  /* how this walks\n   * one row at a time\n   */\n  *rows() {}\n}\n"
+    changed = before.replace("*rows() {}", "*items() {}")
+    assert rewrite(repo, "portal/public/gen.js", before, changed).returncode == 1
+
+    other = repo / "portal" / "public" / "two.js"
+    other.write_text(before, encoding="utf-8")
+    base = commit(repo, "two")
+    other.write_text(before.replace("* one row at a time", "* a row at a time"), encoding="utf-8")
+    commit(repo, "reworded")
+    assert invariants(repo, base).returncode == 0, "a block-comment line stopped counting as prose"
+
+
+def test_whitespace_inside_a_sql_literal_is_the_value(repo: Path):
+    # #215 review, minor 8: normalizing the whole file made 'a  b' and 'a b' the same row.
+    done = rewrite(
+        repo, "db/seed2.sql", "INSERT INTO t VALUES ('a  b');\n", "INSERT INTO t VALUES ('a b');\n"
+    )
+    assert done.returncode == 1, done.stdout

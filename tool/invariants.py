@@ -1,14 +1,19 @@
-"""Text-blind comparison of two revisions: `tool/checks/invariants <base> [paths...]` (#215).
+"""Did this change move any code? `tool/checks/invariants <base> [paths...]` (#215).
 
-The translation wave of #192 had to answer one question about every file it touched -- did anything
-but the text change? -- and answered it with three throwaway scripts. This is those three, kept:
+The translation wave of #192 had to answer that about every file it touched and answered it with
+three throwaway scripts. This is those three, kept:
 
-  python    the AST with docstrings dropped, every string constant blanked, and each f-string
-            collapsed to the SET of expressions it interpolates (a translation reorders the values
-            inside one message, so the order is text while the values are code)
-  sql       the statements with their comments stripped and their whitespace normalized
-  shell/js  the diff itself: every added and removed line must be a comment line
+  python    the AST with docstrings dropped -- and nothing else dropped. A string constant is code
+            here: a SQL literal, a regex, an env-var name and a model default all live in one, and a
+            gate that cannot see them is a gate that lets behaviour through as prose (#215 review C1)
+  sql       the statements with their comments stripped, whitespace normalized OUTSIDE quotes only
+  shell/js  the diff itself: every added and removed line must be a comment line (a shebang is not)
   markdown  the anchors and literals a translation has to carry across (`§2`, `#214`, code spans)
+
+`--strings-blanked` is the translation reviewer's mode, and only theirs: it also blanks every string
+constant and collapses each f-string to the interpolations it carries, so a re-worded message reads
+as unchanged. The push gate never passes it -- what it answers is "is this the same text?", which is
+a smaller question than the one a class decision has to ask.
 
 Every rule fails closed. A file that is new, gone, binary, unparsable or of a type no rule covers is
 reported as differing, because "nothing changed" and "I could not tell" must not share an exit status.
@@ -28,7 +33,7 @@ JS_SUFFIXES = (".js", ".mjs", ".cjs")
 # anything in backticks (a path, a command, a column name).
 MARKDOWN_LITERAL = re.compile(r"§\s?[0-9A-Za-z.\-]+|#\d+|`[^`\n]+`")
 
-COMMENT_PREFIXES = {"shell": ("#",), "js": ("//", "/*", "*", "*/")}
+COMMENT_PREFIXES = {"shell": ("#",), "js": ("//", "/*", "*/")}
 
 
 def git(*args: str) -> str:
@@ -73,8 +78,20 @@ class Blind(ast.NodeTransformer):
     """Every string constant becomes the same constant, so only the code around them is compared."""
 
     def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.AST:
+        # Read before recursing: a format_spec is itself a JoinedStr, and visiting it first would
+        # blank `.2f` and `.0f` into the same thing -- a rounding change is behaviour, not wording
+        # (#215 review, minor 6).
+        specs = [
+            (v.conversion, ast.dump(v.format_spec) if v.format_spec else "")
+            for v in node.values
+            if isinstance(v, ast.FormattedValue)
+        ]
         self.generic_visit(node)
-        parts = sorted(ast.dump(v.value) for v in node.values if isinstance(v, ast.FormattedValue))
+        values = [v for v in node.values if isinstance(v, ast.FormattedValue)]
+        parts = sorted(
+            f"{ast.dump(v.value)}!{conversion}:{spec}"
+            for v, (conversion, spec) in zip(values, specs, strict=True)
+        )
         return ast.Constant(value="<fstr:" + "|".join(parts) + ">")
 
     def visit_Constant(self, node: ast.Constant) -> ast.AST:
@@ -92,18 +109,28 @@ def strip_docstrings(tree: ast.AST) -> None:
                 node.body = node.body[1:] or [ast.Pass()]
 
 
-def python_fingerprint(text: str) -> str | None:
+def python_fingerprint(text: str, blank_strings: bool = False) -> str | None:
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return None
     strip_docstrings(tree)
-    return ast.dump(Blind().visit(tree), include_attributes=False)
+    if blank_strings:
+        tree = Blind().visit(tree)
+    return ast.dump(tree, include_attributes=False)
 
 
 def sql_fingerprint(text: str) -> str:
     kept: list[str] = []
+    code: list[str] = []
     i, end = 0, len(text)
+
+    def flush() -> None:
+        # Whitespace between tokens is layout; whitespace inside a literal is the value, so the two
+        # are normalized apart -- `'a  b'` and `'a b'` are different rows (#215 review, minor 8).
+        kept.append(" ".join("".join(code).split()))
+        code.clear()
+
     while i < end:
         if text[i] == "'":
             # A quoted literal is data: a `--` inside it is part of the value, not a comment.
@@ -116,18 +143,22 @@ def sql_fingerprint(text: str) -> str:
                     j += 1
                     break
                 j += 1
+            flush()
             kept.append(text[i:j])
             i = j
         elif text.startswith("--", i):
             newline = text.find("\n", i)
             i = end if newline < 0 else newline
+            code.append(" ")
         elif text.startswith("/*", i):
             close = text.find("*/", i + 2)
             i = end if close < 0 else close + 2
+            code.append(" ")
         else:
-            kept.append(text[i])
+            code.append(text[i])
             i += 1
-    return hashlib.md5(" ".join("".join(kept).split()).encode("utf-8")).hexdigest()
+    flush()
+    return hashlib.md5(" ".join(kept).encode("utf-8")).hexdigest()
 
 
 def markdown_literals(text: str) -> list[str]:
@@ -145,12 +176,21 @@ def changed_lines(base: str, head: str, path: str) -> list[str]:
     return out
 
 
+def is_comment_line(line: str, kind: str) -> bool:
+    if not line:
+        return True
+    if kind == "shell":
+        # `#!` is not a comment to the kernel: swapping the interpreter changes what runs.
+        return line.startswith("#") and not line.startswith("#!")
+    # A block-comment continuation is `*` alone or `* something`; `*next() {}` is a generator method.
+    return line == "*" or line.startswith("* ") or line.startswith(COMMENT_PREFIXES["js"])
+
+
 def comment_only(base: str, head: str, path: str, kind: str) -> bool:
-    prefixes = COMMENT_PREFIXES[kind]
-    return all(not line or line.startswith(prefixes) for line in changed_lines(base, head, path))
+    return all(is_comment_line(line, kind) for line in changed_lines(base, head, path))
 
 
-def differs(base: str, head: str, path: str) -> str | None:
+def differs(base: str, head: str, path: str, blank_strings: bool = False) -> str | None:
     """The reason this file is not provably unchanged, or None when it is."""
     before = blob(base, path)
     after = blob(head, path)
@@ -162,7 +202,8 @@ def differs(base: str, head: str, path: str) -> str | None:
     if not kind:
         return "no invariant covers this file type"
     if kind == "python":
-        one, two = python_fingerprint(before), python_fingerprint(after)
+        one = python_fingerprint(before, blank_strings)
+        two = python_fingerprint(after, blank_strings)
         if one is None or two is None:
             return "python that does not parse"
         return None if one == two else "the code differs (AST)"
@@ -178,8 +219,10 @@ def differs(base: str, head: str, path: str) -> str | None:
 
 
 def main(argv: list[str]) -> int:
+    blank_strings = "--strings-blanked" in argv
+    argv = [a for a in argv if a != "--strings-blanked"]
     if not argv:
-        print("usage: invariants.py <base> [paths...]", file=sys.stderr)
+        print("usage: invariants.py [--strings-blanked] <base> [paths...]", file=sys.stderr)
         return 2
     base, paths = argv[0], argv[1:]
     head = "HEAD"
@@ -189,10 +232,14 @@ def main(argv: list[str]) -> int:
         ["git", "merge-base", base, head], capture_output=True, text=True, check=False
     ).stdout.strip()
     start = merge_base or base
-    files = [f for f in git("diff", "--name-only", start, head, "--", *paths).split("\n") if f]
+    # --no-renames: a rename reaches this as a delete plus an add, and both fail closed. Detected as
+    # one move it would arrive as a single new path whose old content this cannot find.
+    files = [
+        f for f in git("diff", "--name-only", "--no-renames", start, head, "--", *paths).split("\n") if f
+    ]
     bad = 0
     for path in files:
-        reason = differs(start, head, path)
+        reason = differs(start, head, path, blank_strings)
         if reason:
             print(f"{path}: {reason}")
             bad += 1
