@@ -1,10 +1,10 @@
 # 분석 패키지 인터페이스 (Python, 타입은 dataclass/Protocol)
 
-`analysis/types.py` 와 이 코드 블록은 **같아야 한다** — `tests/test_contract_types.py` 가 dataclass 필드를 대조한다.
-감사 id(B·A·T)는 2026-08-23 계약 감사(이슈 #17)의 항목 번호다.
+`analysis/types.py` and this code block **must be the same** — `tests/test_contract_types.py` compares the dataclass fields.
+The audit ids (B·A·T) are the item numbers of the 2026-08-23 contract audit (issue #17).
 
 ```python
-# analysis/types.py — contracts/interfaces.md 의 코드 블록과 같아야 한다 (tests/test_contract_types.py).
+# analysis/types.py — must be the same as the code block in contracts/interfaces.md (tests/test_contract_types.py).
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -12,28 +12,28 @@ from datetime import date
 from typing import Protocol
 
 
-# ---------- 입력 ----------
+# ---------- input ----------
 @dataclass(frozen=True)
-class TextUnit:  # 분석 입력의 최소 단위
-    src: str  # review | yt_comment | yt_transcript | yt_title | naver_blog (예약됨, #96: formats.md §ref)
+class TextUnit:  # the smallest unit of analysis input
+    src: str  # review | yt_comment | yt_transcript | yt_title | naver_blog (reserved, #96: formats.md §ref)
     site: str
-    ref: str  # 안정 키. 문법은 formats.md §ref
+    ref: str  # a stable key. The grammar is formats.md §ref
     text: str
     observed_at: date
     observed_at_resolution: str  # day | month | year
     rating: float | None = None
     like_count: int | None = None
-    view_count: int | None = None  # A11: 자막 단위의 가중치
+    view_count: int | None = None  # A11: the weight of a transcript unit
     product_key: str | None = None
-    category: str | None = None  # 사이트 원문. 사전 선택은 lexicon_category (formats.md)
+    category: str | None = None  # the site's own string; dictionary choice is lexicon_category (formats.md)
     channel_id: str | None = None
 
 
-# ---------- 사전 ----------
+# ---------- dictionaries ----------
 @dataclass(frozen=True)
-class EntitySurface:  # 사전 한 행 = entity_lexicon
-    # product_line 은 여기 없다: 라인은 표제어가 아니라 brand + line_tokens 로 합성된다 (A14).
-    kind: str  # brand | format | attribute | ingredient | stopword | alias (001 의 CHECK 와 같은 어휘)
+class EntitySurface:  # one dictionary row = entity_lexicon
+    # product_line is not here: a line is not a headword but is composed from brand + line_tokens (A14).
+    kind: str  # brand | format | attribute | ingredient | stopword | alias (001's CHECK vocabulary)
     canonical: str
     surface: str
     tier: str | None  # brand: normal | cooc_required | stop
@@ -42,16 +42,16 @@ class EntitySurface:  # 사전 한 행 = entity_lexicon
 
 @dataclass(frozen=True)
 class Lexicon:
-    """entity_lexicon 한 버전. 링커와 바람 추출기가 필요로 하는 전부."""
+    """One entity_lexicon version. Everything the linker and the wish extractor need."""
 
     version: int
     surfaces: tuple[EntitySurface, ...]
-    surface_to_canonical: Mapping[str, str]  # lower-case 키 포함
-    surface_re: re.Pattern[str]  # 길이 내림차순 + 조사 허용
+    surface_to_canonical: Mapping[str, str]  # lower-case keys included
+    surface_re: re.Pattern[str]  # longest first, particles allowed
     stop: frozenset[str]
     cooc_required: frozenset[str]
-    product_word_re: re.Pattern[str]  # 제품어 공기 판정용
-    cooc_window: int = 25  # 좌우 25자
+    product_word_re: re.Pattern[str]  # for deciding co-occurrence with a product word
+    cooc_window: int = 25  # 25 characters either side
     format_patterns: tuple[tuple[str, re.Pattern[str]], ...] = ()
     attribute_patterns: tuple[tuple[str, re.Pattern[str]], ...] = ()
 
@@ -60,16 +60,16 @@ class Lexicon:
 class AspectPattern:
     aspect: str  # need_key
     scope: str  # generic | category
-    category: str  # scope=category 일 때만, generic 은 ''
+    category: str  # only when scope=category; '' for generic
     pattern: re.Pattern[str]
-    is_neutral_noun: bool  # 중립 명사 쌍둥이
-    priority: int  # B5: 오름차순 매칭, 동률은 id
+    is_neutral_noun: bool  # a neutral-noun twin
+    priority: int  # B5: matched in ascending order, ties by id
     ruleset: str  # B4: suncare-v2.2 | p1-v2.2 | shared
 
 
 @dataclass(frozen=True)
 class AspectLexicon:
-    """polarity.classify 와 extractor.candidates 가 함께 쓴다. 로더는 ruleset IN (요청, 'shared')."""
+    """Shared by polarity.classify and extractor.candidates. The loader reads ruleset IN (requested, 'shared')."""
 
     version: int
     ruleset: str
@@ -78,15 +78,15 @@ class AspectLexicon:
     wish_marker_re: re.Pattern[str]
 
     def for_category(self, category: str | None) -> tuple[AspectPattern, ...]:
-        """priority 오름차순, 동률은 id — category 전용이 같은 이름의 generic 을 가린다."""
+        """priority ascending, ties by id — a category-only pattern hides a generic of the same name."""
         ...
 
     def complaint_marker_re(self, category: str | None) -> re.Pattern[str]:
-        """담화 표지 | 그 카테고리의 전 패턴."""
+        """discourse markers | every pattern of that category."""
         ...
 
 
-# ---------- 제품 식별 ----------
+# ---------- product identity ----------
 @dataclass(frozen=True)
 class ProductRow:
     source: str
@@ -103,7 +103,7 @@ class ProductRow:
 class ProductRefRow:  # → needs.product_ref
     product_ref: str
     brand: str | None
-    name_norm: str  # T19: 링커가 반드시 낸다
+    name_norm: str  # T19: the linker always emits it
     name: str
     n_sites: int
     first_seen: date | None
@@ -116,11 +116,11 @@ class ProductMemberRow:  # → needs.product_member
     product_key: str
     product_ref: str
     role: str  # primary | member
-    match_score: float | None  # A13: 같은 쌍의 candidates.dice
+    match_score: float | None  # A13: the dice of the same pair in candidates
 
 
 @dataclass(frozen=True)
-class ProductVariantRow:  # → needs.product_variant (B3: 산출 알고리즘이 없어 #2 범위 밖)
+class ProductVariantRow:  # → needs.product_variant (B3: no algorithm produces it, so it is outside #2)
     source: str
     product_key: str
     variant_of: str
@@ -129,7 +129,7 @@ class ProductVariantRow:  # → needs.product_variant (B3: 산출 알고리즘�
 
 
 @dataclass(frozen=True)
-class ProductCandidateRow:  # → needs.product_ref_candidate (A13: 사람 검수 큐)
+class ProductCandidateRow:  # → needs.product_ref_candidate (A13: a human review queue)
     src_a: str
     key_a: str
     src_b: str
@@ -142,35 +142,35 @@ class ProductCandidateRow:  # → needs.product_ref_candidate (A13: 사람 검�
 
 
 @dataclass(frozen=True)
-class ProductMatch:  # B2: 한 번의 유니온-파인드가 네 가지를 동시에 낸다
+class ProductMatch:  # B2: one union-find run produces all four at once
     refs: tuple[ProductRefRow, ...]
     members: tuple[ProductMemberRow, ...]
     variants: tuple[ProductVariantRow, ...] = ()
     candidates: tuple[ProductCandidateRow, ...] = ()
 
 
-# ---------- 추출 ----------
+# ---------- extraction ----------
 @dataclass(frozen=True)
-class EntityHit:  # linker 출력
+class EntityHit:  # linker output
     kind: str  # brand | format | attribute | ingredient | product_line
     canonical: str
     surface: str
     start: int
     end: int
-    cooc: bool  # 제품어 공기 여부
+    cooc: bool  # whether a product word co-occurs
 
 
 @dataclass(frozen=True)
-class Candidate:  # extractor 출력 (문장 단위)
+class Candidate:  # extractor output (per sentence)
     unit_ref: str
     sentence: str
     kind: str  # complaint | wish | low_rating
     marker: str
-    subject: str | None = None  # A10: 제품명·영상 제목 — 사람이 후보를 읽을 때의 맥락
+    subject: str | None = None  # A10: product name or video title — context when a human reads it
 
 
 @dataclass(frozen=True)
-class PolarityRequest:  # classify_many 한 건. classify 의 인자를 그대로 묶은 것이다
+class PolarityRequest:  # one classify_many item. classify's arguments, bundled as they are
     sentence: str
     rating: float | None = None
     category: str | None = None
@@ -178,7 +178,7 @@ class PolarityRequest:  # classify_many 한 건. classify 의 인자를 그대�
 
 @dataclass(frozen=True)
 class PolarityResult:
-    aspect: str | None  # B8: 없음은 need_key='' 로 저장한다
+    aspect: str | None  # B8: absent is stored as need_key=''
     polarity: str  # 불만 | 만족 | 중립
     reason: str
     version: str  # rule-v2.2 | llm-<model>-<date>
@@ -188,13 +188,13 @@ class PolarityResult:
 class WishResult:
     wish_class: str  # a | b | c | n
     brand: str | None
-    format: str | None  # A12: ';' 구분 최대 3, 첫 번째가 주 값 (formats.md)
+    format: str | None  # A12: ';'-separated, at most 3, the first is the main value (formats.md)
     attribute: str | None
     marker: str | None
-    sentence: str = ""  # B1: 어느 문장이 걸렸는지 — wish_mention.sentence 는 NOT NULL
+    sentence: str = ""  # B1: which sentence matched — wish_mention.sentence is NOT NULL
 
 
-# ---------- 언급 행 ----------
+# ---------- mention rows ----------
 @dataclass(frozen=True)
 class NeedMentionRow:  # → needs.need_mention
     src: str
@@ -202,9 +202,9 @@ class NeedMentionRow:  # → needs.need_mention
     ref: str
     product_ref: str | None
     source_product_key: str | None
-    category: str | None  # 사이트 원문 카테고리
-    lexicon_category: str | None  # B10: 사전 선택에 쓴 카테고리
-    need_key: str  # B8: aspect 없음 = ''
+    category: str | None  # the site's own category string
+    lexicon_category: str | None  # B10: the category used to select the dictionary
+    need_key: str  # B8: no aspect = ''
     aspect_scope: str | None  # generic | category
     polarity: str  # 불만 | 만족 | 중립
     strength: float | None  # review: 1 - rating/5 · comment: like_count
@@ -231,7 +231,7 @@ class WishMentionRow:  # → needs.wish_mention
     observed_at: date
     observed_at_resolution: str
     month: str
-    wish_class: str  # a | b | c ('n' 은 저장하지 않는다)
+    wish_class: str  # a | b | c ('n' is not stored)
     brand: str | None
     format: str | None
     attribute: str | None
@@ -246,21 +246,21 @@ class DenominatorRow:  # → needs.product_denominator
     source: str
     product_key: str
     captured_at: date
-    category: str | None  # B6: 카테고리 분모 합산에 필수
+    category: str | None  # B6: required for summing the category denominator
     site_review_count: int | None
     low_collected: int | None
     low_complete: bool | None
     site_low_est: float | None
 
 
-# ---------- 집계 ----------
+# ---------- aggregates ----------
 @dataclass(frozen=True)
 class MetricsNeedRow:  # → needs.metrics_need
     run_id: int
-    scope: str  # 카테고리명 | 'all'
+    scope: str  # a category name | 'all'
     need_key: str
-    month: str = ""  # '' = 전체 기간
-    product_ref: str = ""  # '' = 카테고리 합
+    month: str = ""  # '' = the whole period
+    product_ref: str = ""  # '' = the category total
     neg: int = 0
     pos: int = 0
     yt_neg: int | None = None
@@ -301,19 +301,19 @@ class MetricsWishRow:  # → needs.metrics_wish
 
 
 @dataclass(frozen=True)
-class PanelRosterRow:  # → needs.panel_roster (포크 #3). 명부 판본 한 줄 — panel_version 이 가리킬 부모
+class PanelRosterRow:  # → needs.panel_roster (fork #3). One roster version — the parent panel_version points at
     version: int
-    note: str | None = None  # 이 판본이 무엇인지 (seed:channels_v1 …)
+    note: str | None = None  # what this version is (seed:channels_v1 …)
 
 
 @dataclass(frozen=True)
-class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 명부; 값은 시드가 채운다 (#31)
+class PanelChannelRow:  # → needs.panel_channel (fork #3). The 43-channel panel roster; the seed fills the values (#31)
     channel_id: str
     version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
-    panel_role: str  # product | expert — 명부에 없는 채널은 패널 밖이라 분모에 안 들어간다
+    panel_role: str  # product | expert — a channel off the roster is off the panel and the denominator
     handle: str | None = None
     channel_title: str | None = None
-    role_basis: str | None = None  # 역할을 그렇게 정한 근거 (team_message | name_rule_verified …)
+    role_basis: str | None = None  # why the role was set that way (team_message | name_rule_verified …)
     source_list: str | None = None
     active: bool = True
 
@@ -321,17 +321,17 @@ class PanelChannelRow:  # → needs.panel_channel (포크 #3). 43채널 패널 �
 @dataclass(frozen=True)
 class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
     run_id: int
-    scope: str  # 카테고리명 | 'all' (metrics_need.scope 와 같은 어휘)
+    scope: str  # a category name | 'all' (the metrics_need.scope vocabulary)
     # 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다
     topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
     quarter: str  # 'YYYYQn'
-    source: str  # youtube_video | youtube_comment — 영상 설명과 댓글은 합치지 않고 나란히 낸다
+    source: str  # youtube_video | youtube_comment — video descriptions and comments are shown side by side, not merged
     content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
-    panel_version: int  # 이 비율의 모집단: panel_channel.version
-    panel_role: str  # 그 명부의 어느 모집단인지. product | expert
-    mentions: int  # 분자: 이 주제가 걸린 문서 수
-    documents: int  # 그 분기 그 모집단의 문서 수
-    quarter_mentions: int  # 구성비의 분모: 그 분기 trend_use 주제들의 언급 합
+    panel_version: int  # the population of this ratio: panel_channel.version
+    panel_role: str  # which population of that roster. product | expert
+    mentions: int  # numerator: documents this topic matched
+    documents: int  # documents of that population in that quarter
+    quarter_mentions: int  # composition denominator: that quarter's trend_use topic mentions summed
     denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
     composition: float | None = None
     velocity_yoy: float | None = None
@@ -346,8 +346,8 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
 
 @dataclass(frozen=True)
 class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
-    # 앞 여덟 칸은 metrics_topic_quarter 의 기본키 그대로다. 판정은 그 표의 한 행을 받아 한 행을 내므로
-    # 이 여덟이 곧 FK 이고, 그래서 판정 행은 자기 근거가 되는 지표 행 없이 존재할 수 없다.
+    # The first eight columns are metrics_topic_quarter's primary key as they stand. A verdict takes one row
+    # of that table and emits one row, so those eight are the FK — a verdict row cannot exist without the metric row that grounds it.
     run_id: int
     scope: str
     topic_key: str
@@ -359,16 +359,16 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
     trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
     judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
     evidence_strength: float  # 0~100 (§판정)
-    single_source: bool  # 이 판정이 소스 하나만 보고 내려졌는가. v1(YouTube 단독)은 언제나 true
-    opportunity_score: float | None = None  # 제품군 내 0~100 정규화. 점수 대상이 아닌 셀은 NULL
-    gap_pp: float | None = None  # 댓글 구성비 - 영상 구성비 (%p). (주제, 분기) 사실이라 두 행이 같은 값
+    single_source: bool  # was this verdict made on one source only. v1 (YouTube alone) is always true
+    opportunity_score: float | None = None  # normalised 0-100 in the product group. NULL when unscored
+    gap_pp: float | None = None  # comment composition - video composition (%p). A (topic, quarter) fact
     hold_reason: str = ""  # `판정 보류` 의 사유 코드. 보류가 아니면 '' (§판정 의 닫힌 어휘)
 
 
 @dataclass(frozen=True)
 class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀을 받치는 소비자 발화 — §근거)
-    # 앞 여덟 칸은 topic_quarter_judgement 의 기본키 그대로다. 근거가 가리키는 것이 지표 행이 아니라
-    # 판정 셀인 것이 뜻이다 — 근거를 묻는 사람은 유형을 읽은 사람이다.
+    # The first eight columns are topic_quarter_judgement's primary key as they stand. That the evidence
+    # points at the verdict cell rather than the metric row — whoever asks for evidence read the type.
     run_id: int
     scope: str
     topic_key: str
@@ -378,54 +378,54 @@ class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀�
     panel_version: int
     panel_role: str
     rank: int  # 그 셀 안 좋아요 내림차순 자리. 1 부터 빈칸 없이 (§근거)
-    snapshot_id: int  # 근거 문서가 사는 관측 판본. doc_id 하나로는 재수집분과 갈리지 않는다
-    doc_id: str  # 본문은 여기 없다 — 코퍼스가 정본이고 뷰 topic_quarter_evidence_quote 가 잇는다
-    like_count: int  # 고른 이유. collected_at 시점의 스냅샷이라 나중에 세면 다른 수다
-    matched_term: str | None = None  # corpus_mention 이 이미 단 표현. 여기서 다시 매칭하지 않는다
+    snapshot_id: int  # the observation version the evidence document lives in. doc_id alone does not part it from a re-collection
+    doc_id: str  # the body is not here — the corpus is canonical and the view topic_quarter_evidence_quote joins them
+    like_count: int  # why it was chosen. A snapshot as of collected_at; a later count differs
+    matched_term: str | None = None  # the term corpus_mention already recorded. No rematching here
 
 
 # ---------- 민감도 (반사실 산출. 어느 표에도 저장되지 않는다 — §민감도) ----------
 @dataclass(frozen=True)
-class PanelSensitivityRow:  # 패널 구성이 결론을 바꾸는가 (ydc panel_sensitivity.py)
+class PanelSensitivityRow:  # does the panel composition change the conclusion (ydc panel_sensitivity.py)
     source: str
     topic_key: str
-    quarters_ok_product: int  # 언급이 표본 게이트를 넘는 분기 수 — product 만인 산출
-    quarters_ok_all: int  # 같은 것을 43채널 전부(product+expert)로 잰 값
-    delta_product_pp: float  # 최근 4분기 구성비 − 직전 4분기 구성비 (%p)
+    quarters_ok_product: int  # quarters whose mentions clear the sample gate — the product-only computation
+    quarters_ok_all: int  # the same measured over all 43 channels (product+expert)
+    delta_product_pp: float  # composition of the last 4 quarters − composition of the 4 before them (%p)
     delta_all_pp: float
-    difference_pp: float  # 두 델타의 차. 반올림 전 값끼리 뺀다
-    sample_ok: bool  # 충족 분기가 관측 분기의 절반을 넘는가. 아니면 애초에 판정 대상이 아니다
+    difference_pp: float  # the difference of the two deltas; the unrounded values are subtracted
+    sample_ok: bool  # do the passing quarters exceed half the observed ones. If not it is not judged
 
 
 @dataclass(frozen=True)
-class BacktestRow:  # 그때 알 수 있었는가 (ydc backtest.py)
-    cutoff: str  # 판정 대상 분기 T. 지표는 T 다음 분기까지만 알던 것처럼 다시 셌다
+class BacktestRow:  # could it have been known then (ydc backtest.py)
+    cutoff: str  # the quarter T under judgement. The metrics were recounted as if only up to the quarter after T were known
     source: str
     topic_key: str
     trend_type: str  # 방향이 있는 넷뿐이다 — 급상승·신규 등장·사라짐·단기 피크
-    before_pp: float  # 직전 4분기 평균 구성비 (기준 A)
-    before_excl_pp: float  # T 를 뺀 직전 4분기 평균 (기준 B — "올라간 수준이 유지됐는가")
-    after_pp: float  # C 이후 4분기 평균
+    before_pp: float  # mean composition of the previous 4 quarters (basis A)
+    before_excl_pp: float  # mean of the previous 4 quarters excluding T (basis B — did the level hold)
+    after_pp: float  # mean of the 4 quarters after C
     at_cutoff_pp: float  # T 분기의 구성비. `단기 피크` 의 비교 상대다
     expected: str  # 상승 유지 | 하락 유지 | 피크 소멸
     actual: str  # 상승 | 하락 (기준 A 의 비교 결과)
-    hit: bool  # 기준 A
-    hit_level: bool  # 기준 B
+    hit: bool  # basis A
+    hit_level: bool  # basis B
 
 
 @dataclass(frozen=True)
-class AdSensitivityRow:  # 광고·협찬을 빼도 결론이 같은가 (ydc spam_ad_flags.py)
+class AdSensitivityRow:  # is the conclusion the same with ads and sponsorships removed (ydc spam_ad_flags.py)
     variant: str  # ad_video | creator_comment | promo_comment | all_flagged
     source: str
     topic_key: str
-    composition_base_pp: float  # 최근 4분기 구성비 (기저)
-    composition_kept_pp: float  # 같은 것을 그 변형에서 잰 값
+    composition_base_pp: float  # composition of the last 4 quarters (the baseline)
+    composition_kept_pp: float  # the same measured under that variant
     diff_pp: float
-    judged_cells: int  # 그 (source, 주제) 에서 기저가 판정한 셀 수
-    flipped_cells: int  # 그중 유형이 바뀐 셀 수. 표본 미달로 사라진 셀은 여기 들지 않는다
+    judged_cells: int  # cells the baseline judged in that (source, topic)
+    flipped_cells: int  # of those, cells whose type changed. Cells lost to the sample gate are not in it
 
 
-# ---------- 프로토콜 ----------
+# ---------- protocols ----------
 class Linker(Protocol):
     version: str
 
@@ -440,15 +440,15 @@ class Extractor(Protocol):
     def wishes(self, unit: TextUnit, lexicon: Lexicon) -> WishResult | None: ...
 
 
-class Polarity(Protocol):  # ← LLM 삽입점. 규칙 구현과 LLM 구현이 같은 시그니처
+class Polarity(Protocol):  # ← the LLM insertion point. Rules and LLM share this signature
     version: str
 
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
-    ) -> PolarityResult: ...  # category 는 lexicon_category 다 (사이트 원문 아님)
+    ) -> PolarityResult: ...  # category is the lexicon_category (not the site's own string)
     def classify_many(
         self, items: Sequence[PolarityRequest], aspects: AspectLexicon
-    ) -> list[PolarityResult]: ...  # 배치 API 를 가진 구현(#6)만 이득이다. 입력과 같은 길이·순서
+    ) -> list[PolarityResult]: ...  # only a batch-API implementation (#6) gains. Same length and order
 
 
 class Aggregator(Protocol):
@@ -460,34 +460,39 @@ class Aggregator(Protocol):
     def wish_metrics(self, wishes: Iterable[WishMentionRow], scope: str) -> list[MetricsWishRow]: ...
 
 
-# ---------- 평가 ----------
+# ---------- evaluation ----------
 @dataclass(frozen=True)
-class LabeledRow:  # needs.labeled_set 한 행. eval 하네스가 구현체에 넘기는 유일한 입력
+class LabeledRow:  # one needs.labeled_set row. The only input the eval harness passes on
     task: str
     ref: str
     split: str
     gold: str
     text: str
-    extra: Mapping[str, object]  # 셋 이름(`set`)·rating·in_final 등 원본 CSV 의 나머지 열
+    extra: Mapping[str, object]  # the set name (`set`), rating, in_final and the other CSV columns
 
 
-class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 길이·순서로 라벨을 돌려준다
+class Predictor(Protocol):  # an eval implementation. Batch in, labels in the same length and order
     def __call__(self, rows: Sequence[LabeledRow]) -> Sequence[str]: ...
 ```
 
 ## 수식 (구현이 이 정의를 따른다)
 
 - **population_share_pct** (`metrics_need`) = `100 * (low_mentioning / denom_low) * site_low_pct`
-  - `low_mentioning` = 그 카테고리의 저평점 전수(`low_complete`) 제품에서 이 need_key 를 언급한 ≤2★ 리뷰 수
-  - `denom_low` = 같은 제품 집합의 `low_collected` 합 · `denom_site` = 같은 집합의 `site_review_count` 합
-  - `site_low_pct` = 제품 단위로 `(review_stats.pct_1 + review_stats.pct_2) / 100` (사이트가 보고한
-    저평점 비율). `metrics_need` 의 행은 제품이 아니라 카테고리이므로 그 집계는 제품들의 단순 평균이
-    아니라 **리뷰수 가중 평균**이다: `Σ site_low_est / denom_site`, 합의 범위는 위 두 분모와 같은
-    `low_complete` 제품 집합이고 `site_low_est` = `round(site_review_count × site_low_pct)` 가 그
-    제품 단위 값이다 (`product_denominator.site_low_est`). 분자는 그 집합이 사이트에 가진 ≤2★ 리뷰의
-    추정 총수이고, 제품 하나짜리 집합에서는 제품 단위 정의로 그대로 되돌아간다.
-  - `low_share` = `low_mentioning / denom_low` (저평점 표본 내 비율)
-  - B7: 시드의 `seed:slice-p1` 행은 이 식이 아니라 수집 표본 근사(`100 * low_mentioning / denom_site`)로 계산된 값이다. 2차 패스 목표는 두 값의 차 ±0.05 이고 골든이 아니다.
+  - `low_mentioning` = the number of ≤2-star reviews mentioning this need_key among the products of that
+    category whose low-rating rows are complete (`low_complete`)
+  - `denom_low` = the sum of `low_collected` over the same product set · `denom_site` = the sum of
+    `site_review_count` over the same set
+  - `site_low_pct` = per product, `(review_stats.pct_1 + review_stats.pct_2) / 100` (the low-rating share
+    the site reports). A `metrics_need` row is a category rather than a product, so that aggregate is not
+    a plain mean over products but a **review-count weighted mean**: `Σ site_low_est / denom_site`, summed
+    over the same `low_complete` product set as the two denominators above, where
+    `site_low_est` = `round(site_review_count × site_low_pct)` is the per-product value
+    (`product_denominator.site_low_est`). The numerator is the estimated total of ≤2-star reviews that set
+    has on the site, and over a one-product set it collapses back to the per-product definition.
+  - `low_share` = `low_mentioning / denom_low` (the share within the low-rating sample)
+  - B7: the seed's `seed:slice-p1` rows were computed not by this formula but by a collection-sample
+    approximation (`100 * low_mentioning / denom_site`). The second pass targets a difference of ±0.05
+    between the two values, and it is not a golden.
 - 분기 입자의 수식은 전부 **패널**을 분모로 쓴다 (`metrics_topic_quarter`, formats.md §패널 명부 CSV).
   모집단은 행 안에 있다: `panel_version`(어느 명부인지) · `panel_role`(그 명부의 어느 모집단인지) ·
   `denom_channels`(그 분기에 실제로 산출에 든 채널 수) · `documents` · `quarter_mentions`. 분모는 **장문
@@ -519,55 +524,66 @@ class Predictor(Protocol):  # eval 구현체. 배치로 받고 입력과 같은 
   2. 분모가 닫힌다: 한 분기의 `sum(mentions)` 가 그 분기 행들이 다 같이 들고 있는 `quarter_mentions` 다.
   저장된 표에 `SUM(mentions) GROUP BY quarter` 를 돌리는 사람이 맞으려면 그 둘이 서 있어야 한다. 언급 0 셀을
   지우면 첫째가 깨지고 `persistence` 의 기준선이 함께 올라간다.
-- **composition** (`metrics_topic_quarter`) = `mentions / quarter_mentions` — 문서 기준 share 가 아니라
-  **주제 간 구성비**다. 유튜버 설명란 길이 중앙값이 3년간 1,253자 → 709자로 줄어, share 는 분자만 줄고
-  분모는 그대로여서 13개 주제 중 10개가 동반 하락한다(합계 -28.6%p). 구성비는 분자·분모가 같이 줄어 상쇄된다.
-  `quarter_mentions` 가 0인 분기에서는 NULL 이 아니라 `0` 이다.
+- **composition** (`metrics_topic_quarter`) = `mentions / quarter_mentions` — not a document-based share
+  but **the composition across topics**. The median YouTuber description length fell from 1,253 to 709
+  characters over three years, so a share loses only its numerator while the denominator stands and 10 of
+  the 13 topics fall together (-28.6%p in total). A composition cancels because numerator and denominator
+  shrink together. In a quarter where `quarter_mentions` is 0 it is `0`, not NULL.
 - **velocity_yoy** (`metrics_topic_quarter`) = `ln(composition[q]) - ln(composition[전년 동분기])`. 조건은
   셋이다: 전년 동분기가 그 산출에 **존재하는 분기**여야 하고(없으면 비교 상대가 없다), **양쪽 분기 모두
   `mentions >= 5`** 여야 한다. 하나라도 아니면 NULL — 표본 부족을 급등으로 읽지 않는다. 전년 동분기인 것은
   계절성 때문이다 (formats.md §시간).
-- **persistence** (`metrics_topic_quarter`) = 창 안에서 `composition` 이 그 주제의 전 기간 중앙값을 넘은
-  분기의 비율. 창은 **그 행의 분기에서 끝나는, 존재하는 분기 최대 4개**이고(전역 최신 4분기가 아니다)
-  `window_quarters` 가 그 길이다. 기준선의 "전 기간"은 그 산출에 존재하는 분기 전부이고 **언급 0 분기도
-  든다**. 기준선과 창은 `source` 별로 따로 잡는다. 그래서 이 값은 **run 상대**다 — 분기가 더 붙은 다음
-  run 은 같은 분기에 다른 값을 정당하게 내고, `run_id` 가 키에 있어 둘 다 남는다. 판정 규칙이 개수 단위로
-  쓰여 있어 `persist_quarters`·`window_quarters` 로 개수도 남긴다 — 창이 짧은 초기 분기에서는 비율만으로
-  개수를 복원할 수 없다.
-- **unique_ratio** (`metrics_topic_quarter`) = `mentions / 중복 포함 언급 수`. 한 영상 안에서 정규화 후 같은
-  댓글은 한 번만 세고(복붙 스팸, 실측 1.1%), 영상 간 중복은 지우지 않는다 — 다른 영상에 달린 같은 말은
-  각각 실제 반응이다. 중복 포함 언급 수가 0인 칸에서는 NULL 이 아니라 `1` 이다.
-- **sample_ok** — `mentions >= 5`. `velocity_yoy` 를 내는 조건과 같은 수이고, 022 의 CHECK 이 그 등식을
-  강제한다. 이 칸은 NOT NULL 이라 정의가 없으면 행이 자기 이름과 다른 것을 말한다.
+- **persistence** (`metrics_topic_quarter`) = the share of quarters in the window whose `composition`
+  exceeded that topic's median over the whole period. The window is **at most 4 existing quarters ending
+  at that row's quarter** (not the globally latest 4) and `window_quarters` is its length. The baseline's
+  "whole period" is every quarter existing in that computation and **includes quarters with zero
+  mentions**. Baseline and window are taken separately per `source`. So this value is **relative to the
+  run** — a later run with more quarters legitimately gives a different value for the same quarter, and
+  `run_id` being in the key keeps both. The verdict rules are written in counts, so
+  `persist_quarters`·`window_quarters` keep the counts too — in an early quarter with a short window the
+  counts cannot be recovered from the ratio alone.
+- **unique_ratio** (`metrics_topic_quarter`) = `mentions / mentions including duplicates`. Within one
+  video, comments identical after normalisation are counted once (copy-paste spam, measured at 1.1%),
+  while duplicates across videos are not removed — the same words under different videos are each a real
+  reaction. In a cell where the duplicate-inclusive mention count is 0 it is `1`, not NULL.
+- **sample_ok** — `mentions >= 5`. The same number as the condition for emitting `velocity_yoy`, and
+  022's CHECK enforces that equality. This column is NOT NULL, so without the definition a row would say
+  something other than its own name.
 - **channel_diffusion** (`metrics_topic_quarter`) =
-  `0.5 * (그 주제를 낸 패널 채널 수 / denom_channels) + 0.5 * 정규화 섀넌 엔트로피(채널별 언급 분포)`.
-  두 항 다 **영상에서 나온 채널 분포**를 쓴다 — 그 분기 그 주제가 걸린 영상을 채널마다 몇 편씩 냈는지의
-  분포다. 그래서 이 컬럼은 `source` 에 의존하지 않고, 같은 (주제, 분기)의 `youtube_comment` 행은
-  `youtube_video` 행과 **같은 값**을 갖는다. 엔트로피의 정규화 분모는 `ln(그 분포에 든 채널 수)` 이지
-  `denom_channels` 가 아니다 — 한 채널이 독점하면 0, 그 채널들에 고르게 퍼지면 1이다. 그 분기에 패널 영상이
-  하나도 없으면 첫 항은 0이다. 옆 칸 `channel_count` 는 **다른 수**다: 그 행의 `source` 에서 그 주제를 낸
-  채널 수이고(`youtube_comment` 행에서는 그 주제의 댓글이 달린 영상들의 채널 수), 이름이 비슷하다고 첫 항의
-  분자로 쓰면 댓글 행의 확산도가 달라진다.
+  `0.5 * (panel channels that produced that topic / denom_channels) + 0.5 * normalised Shannon entropy (the per-channel mention distribution)`.
+  Both terms use **the channel distribution taken from the videos** — how many videos per channel that
+  quarter matched that topic. So this column does not depend on `source`, and the `youtube_comment` row
+  of the same (topic, quarter) holds **the same value** as the `youtube_video` row. The entropy's
+  normalising denominator is `ln(the number of channels in that distribution)`, not `denom_channels` —
+  one channel monopolising gives 0, an even spread across those channels gives 1. When there is no panel
+  video at all in that quarter the first term is 0. The neighbouring `channel_count` is **a different
+  number**: the count of channels that produced that topic on that row's `source` (on a
+  `youtube_comment` row, the channels of the videos the topic's comments hang on), and using it as the
+  first term's numerator because the names look alike changes the comment rows' diffusion.
 - **저장 자리수** (`metrics_topic_quarter` 의 비율 칸) — 아래 자리수로 반올림해 저장한다. 판정 임계값(ydc
   `judge.py` 의 `TAU`·`DIFFUSION_TAU`)이 반올림된 값 위에서 맞춰진 수라, 자리수가 곧 그 게이트의 해상도다.
   022 가 `numeric(p,s)` 로 그 자리수를 들고 있어, 저장이 자리수를 지키는 것은 DDL 이 강제한다.
   자리수: `composition` 5 · `velocity_yoy` 4 · `persistence` 3 · `unique_ratio` 4 · `channel_diffusion` 3.
-- **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: 슬라이스에 cap 이 없어 상수를 계약이 정한다). 상한을 쓰지 않는 구현은 이 컬럼을 NULL 로 둔다.
-- **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — RATING_ASC 표본 안에 3★ 이 섞였거나 ≤2★ 가 150 미만이면 ≤2★ 는 전수다. 150 은 수집 표본 상한(`REVIEW_PAGES 3 x 50`)이고 `collectors/commerce/scope.json`(#7)과 `formats.md` 가 같은 값을 갖는다.
+- **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: the slice has no cap, so the contract sets the constant). An implementation that uses no cap leaves this column NULL.
+- **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — if a 3-star review is mixed into the RATING_ASC sample, or there are fewer than 150 at ≤2 stars, then the ≤2-star rows are complete. 150 is the collection sample ceiling (`REVIEW_PAGES 3 x 50`) and `collectors/commerce/scope.json` (#7) and `formats.md` hold the same value.
 
 ## `metrics_need` 의 월 행 (`month <> ''`, #129)
 
-`month <> ''` 행은 **카테고리 합(`product_ref = ''`)만** 존재한다 — 제품 축은 전체 기간 행만 갖는다.
-월 행은 그 달의 언급만으로 다시 잰 값이고, 그 달에 존재하지 않는 값은 0 이 아니라 NULL 이다:
-`low_share`·`population_share_pct`·`low_mentioning`·`denom_low`·`denom_site` 는 `product_denominator`
-가 `captured_at` 스냅샷이라 "그 달의 분모" 라는 것이 없어서, `persist_*` 는 한 달짜리 모집단에서
-`persist_months` 가 늘 1 이라 뜻이 없어서 NULL 이다. `unresolved_new` 는 월 행에서도 NULL 이지만
-이유가 다르다 — 제품의 first_seen 을 구현이 아직 받지 못해 전체 기간 행에서도 NULL 이다.
-`yt_neg`·`yt_pos` 는 `observed_at_resolution = 'month'` 인 댓글만 세고, 그 달의 댓글에 그렇지 않은
-것이 하나라도 섞이면 그 달의 두 값은 NULL 이다 (상대시간 복원분은 수집 기준월 한 칸에 뭉친다 —
-`formats.md`). 리뷰의 `neg`·`pos` 는 거르지 않는다: 그쪽 폴백은 `day` 해상도라 달은 언제나 맞다.
-전체 기간 행(`month = ''`)은 이 규칙에 영향받지 않고 전 댓글을 센다 — 그래서 월 행 `yt_*` 의 합은
-전체 기간 행의 `yt_*` 보다 작거나 NULL 일 수 있다.
+`month <> ''` rows exist **only as the category total (`product_ref = ''`)** — the product axis has
+whole-period rows alone. A month row is remeasured from that month's mentions alone, and a value that
+does not exist for that month is NULL rather than 0:
+`low_share`·`population_share_pct`·`low_mentioning`·`denom_low`·`denom_site` are NULL because
+`product_denominator` is a `captured_at` snapshot and there is no such thing as "that month's
+denominator", and `persist_*` are NULL because `persist_months` is always 1 over a one-month
+population and so means nothing. `unresolved_new` is NULL on a month row too, but for a different
+reason — the implementation has not been given a product's first_seen yet, so it is NULL on the
+whole-period row as well. `yt_neg`·`yt_pos` count only comments with
+`observed_at_resolution = 'month'`, and if even one of that month's comments is otherwise both values
+for that month are NULL (restored relative times pile into the one collection-basis month —
+`formats.md`). A review's `neg`·`pos` are not filtered: that fallback is `day` resolution, so the
+month is always right. The whole-period row (`month = ''`) is unaffected by this rule and counts every
+comment — so the sum of the month rows' `yt_*` can be smaller than, or NULL against, the whole-period
+row's `yt_*`.
 ## 판정 (트렌드 유형 7종과 두 점수 — `topic_quarter_judgement`, 포크 #40)
 
 판정은 **집계가 아니라 파생**이다. 입력이 문서가 아니라 한 run 의 `metrics_topic_quarter` 행 전부이고,
