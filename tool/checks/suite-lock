@@ -19,10 +19,21 @@ suite_lock_root() {
     printf '%s\n' "${COSMAI_SUITE_LOCK_DIR:-/tmp/cosmai-suite-lock}"
 }
 
+# Every one of the three environment overrides below ends up in arithmetic, in `test` or in `find
+# -mmin`, and each of those answers a fractional or non-numeric value differently: an aborted run, a
+# loop that never times out, an expiry that silently stops happening. One gate for all three.
+suite_lock_whole() {
+    case "$1" in
+        '' | *[!0-9]*) printf '%s\n' "$2" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}
+
 # A slot older than the longest possible run belongs to nothing: drop it before counting, out loud,
 # because a silently vanishing lock and a silently held one are equally hard to reason about.
 suite_lock_expire() {
-    suite_lock_age=${COSMAI_SUITE_LOCK_STALE_MINUTES:-$SUITE_LOCK_STALE_MINUTES}
+    suite_lock_age=$(suite_lock_whole "${COSMAI_SUITE_LOCK_STALE_MINUTES:-$SUITE_LOCK_STALE_MINUTES}" \
+        "$SUITE_LOCK_STALE_MINUTES")
     find "$(suite_lock_root)" -mindepth 1 -maxdepth 1 -type d -mmin "+$suite_lock_age" 2>/dev/null \
     | while read -r suite_lock_stale; do
         rmdir "$suite_lock_stale" 2>/dev/null \
@@ -51,12 +62,7 @@ suite_lock_count() {
 }
 
 suite_lock_acquire() {
-    # A fractional or empty interval would abort the run inside the arithmetic below, so anything
-    # that is not a whole number of seconds falls back to the default.
-    suite_lock_interval=${COSMAI_SUITE_WAIT_SECONDS:-15}
-    case "$suite_lock_interval" in
-        '' | *[!0-9]*) suite_lock_interval=15 ;;
-    esac
+    suite_lock_interval=$(suite_lock_whole "${COSMAI_SUITE_WAIT_SECONDS:-15}" 15)
     # One line a minute rather than one a poll: a twenty-minute wait must not scroll the terminal.
     if [ "$suite_lock_interval" -ge 1 ]; then
         suite_lock_every=$((60 / suite_lock_interval))
@@ -66,7 +72,8 @@ suite_lock_acquire() {
         suite_lock_tick=1
     fi
     [ "$suite_lock_every" -ge 1 ] || suite_lock_every=1
-    suite_lock_timeout=${COSMAI_SUITE_WAIT_TIMEOUT_SECONDS:-$SUITE_LOCK_TIMEOUT_SECONDS}
+    suite_lock_timeout=$(suite_lock_whole "${COSMAI_SUITE_WAIT_TIMEOUT_SECONDS:-$SUITE_LOCK_TIMEOUT_SECONDS}" \
+        "$SUITE_LOCK_TIMEOUT_SECONDS")
 
     suite_lock_polls=0
     suite_lock_waited=0
