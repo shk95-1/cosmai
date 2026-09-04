@@ -310,27 +310,33 @@ def run(
     count, _latest = pipeline.chunk_census(conn, sources)
     # load_index installed the active query stopword list, which tokenize_query reads.
     frequency = token_frequency(index, query)
-    # The gate is `search`'s, checked here only to record its answer: bm25 is not gated at all
-    # (`pipeline.search`), so for that engine there is nothing to ask.
-    gate = grounding.check(query, index) if engine != "bm25" else None
-    gate_ok = gate is None or gate.ok
+    # The paid path is gated whatever the engine, because a df-0 name makes the model refuse anyway
+    # (#76, row 1 of the #74 table); `search` keeps #48's rule for the unpaid path.
+    gate = grounding.check(query, index)
+    gate_ok = gate.ok
     # The store is opened after the gate and before `search`, which keeps `search`'s own order (a
     # host with no vector file sees StoreMissing only once the gate has passed) while opening the
     # 1.2GB matrix once. `search` prints no coverage line when it is handed a store, so the warning
     # below is the only one.
     loaded = _open_store(store) if engine != "bm25" and gate_ok else None
     stamp, coverage = (loaded.stamp, pipeline.coverage_note(conn, loaded) or "") if loaded else ("", "")
-    hits = pipeline.search(
-        conn,
-        query,
-        engine=engine,
-        top=top,
-        sources=sources,
-        store=store,
-        cache_dir=cache_dir,
-        index=index,
-        vector_store=loaded,
-    )
+    if gate_ok:
+        hits = pipeline.search(
+            conn,
+            query,
+            engine=engine,
+            top=top,
+            sources=sources,
+            store=store,
+            cache_dir=cache_dir,
+            index=index,
+            vector_store=loaded,
+        )
+    else:
+        # Said here because the corpus is no longer searched at all -- this is the line `search`
+        # printed for the vector path, and it is the only reason the person gets for the refusal.
+        print(gate.note, file=sys.stderr)
+        hits = []
     evidence = fold(hits, origin)
     note = "note: " + " · ".join(
         part

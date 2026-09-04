@@ -1752,10 +1752,12 @@ ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector
 §검색 실측 여섯 줄이고, §근거 가 자기 두 줄에 대해 못 박은 것과 같은 자리다.
 
 ## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
-The LLM is the last layer and makes no conclusion: `search` finds the evidence (gate included), the code folds
-it to one item per document, and the model only says what that evidence says. The decision that this layer
-exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 20 queries
-re-measured on our corpus — is fork #74 and is **not** in this section. The origin is ydc `rag/generate.py`
+The LLM is the last layer and makes no conclusion: `search` finds the evidence, the code folds it to one item
+per document, and the model only says what that evidence says. The grounding gate is engine-independent here
+(#76): `ask` checks it before searching whatever `--engine` says, because the call is paid and a df-0 name makes
+the model refuse anyway (row 1 of the #74 table on #69); `search` itself keeps #48's rule and leaves bm25 ungated. The decision that this layer
+exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 17 listed queries
+re-measured on our corpus — is fork #74 (done 2026-09-04, the table is on #69) and is **not** in this section. The origin is ydc `rag/generate.py`
 (v0.4.0 `76db718`), with two corrections the promotion required: text blocks only out of a response that mixes
 thinking blocks (the shape `analysis/polarity/llm.py` already uses), and "no key" as an option (`--dry-run`),
 not a fallback path.
@@ -1794,14 +1796,17 @@ characters × the polarity rate + the output ceiling), `settle` after, `purpose=
 total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
 same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
 the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
-not set until #74 has measured the cost per query.
+not set yet: #74 measured $0.025 mean · $0.042 max per call over 17 calls (2026-09-04), and the value is fork
+#78's decision.
 
 **Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
 `called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
 `bm25.tokenize_query`, which drops query stopwords; the gate reads the index axis, so `gate_ok` can be true
 on a token absent from this map) · `doc_ids` (text[], folded, rank order) · `index_fingerprint` ·
 `dictionary_stamp` · `store_stamp` (null on `bm25`) · `model` · `usd` · `answer_chars`. One row per real
-call — not on `--dry-run`, not on the 0-evidence path (no call was made) — inserted after `settle` in its own
+call — not on `--dry-run`, not on the 0-evidence path, not on a gated query (no call was made; since #76 the gate precedes the call for
+every engine, so `gate_ok` is true on every row — DDL 026's column comment, which says bm25 is never gated,
+predates that) — inserted after `settle` in its own
 short transaction, outside the LLM round trip (the 15-second idle-in-transaction rule). These columns are what
 lets the next judgment be measured: the partial answers BM25 gives on the query axis (`pipeline.search`'s
 "unmeasured loss") and the actual query distribution behind fork #11.

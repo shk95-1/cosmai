@@ -2,7 +2,8 @@
 
 **The gate applies to `vector` and `hybrid` only** (`pipeline.search`). `bm25` ignores a word with df 0 by
 giving it idf 0 and answers with the words that are left, so the gate would turn a partial answer into 0
-results, and that loss is not worth it.
+results, and that loss is not worth it. `ask` applies it to every engine (#76): the LLM call is paid, and
+a df-0 name makes the model refuse anyway.
 
 **코사인 하한선 대신이다.** 계약 §벡터 하한선 이 재기 전에 정한 판정으로 하한선을 버렸다 -- 진짜
 질의(주제 별칭 61개)와 코퍼스에 없는 성분명의 최고 코사인 분포가 갈리지 않아서, 문턱은 무관한 결과를

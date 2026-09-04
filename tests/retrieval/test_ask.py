@@ -172,6 +172,21 @@ def test_a_query_the_gate_blocks_never_reaches_the_model(loaded):
     assert log_rows(loaded) == []
 
 
+def test_bm25_is_gated_in_ask_because_the_call_is_paid(loaded):
+    """`pipeline.search` keeps #48's rule -- bm25 answers with the words that remain. `ask` does not:
+    the call is paid, and rule 6 makes the model refuse a df-0 name anyway, so a bm25 query carrying
+    one buys a refusal (#76). It ends where the vector-gated case above ends: no call, no row."""
+    client = FakeClient()
+    # The shape #48 measured: a name the corpus never says beside a word it does say, which is the
+    # only query bm25 still answers -- and so the only one that reaches the model today.
+    answer = ask_it(loaded, f"{ABSENT} {QUERY}", engine="bm25", client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence"
+    assert answer.text == ask.CANNOT_ANSWER
+    assert answer.evidence == ()
+    assert log_rows(loaded) == []
+
+
 def test_chunks_of_one_document_become_one_piece_of_evidence(loaded):
     client = FakeClient()
     answer = ask_it(loaded, client=client)
