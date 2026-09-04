@@ -1788,7 +1788,8 @@ Past four sentences the core is cut.
 one document are folded into one piece of evidence with their texts concatenated in rank order, so a long
 document is one citation, not several.
 
-**Version note** — one stderr line per run: `note: index=<pipeline.index_signature> · chunks=<count> ·
+**Version note** — one stderr line per run (on the vector path `index` and `chunks` both stand on the encoded
+sources the gate read, #77): `note: index=<pipeline.index_signature> · chunks=<count> ·
 dictionary=<topics stamp>[ · store=<vectors stamp>][ · <coverage note>]`. The lexicon and the signature are
 read **once, right after the index is opened and before the search**, so the row and the note stand on the
 lexicon the evidence stood on (the same rule `eval.run` keeps; fork #62, #68). The index and the vector store

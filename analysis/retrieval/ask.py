@@ -313,7 +313,9 @@ def run(
     # The fingerprint names the index that was opened, not the one the flags asked for: on the vector
     # path those differ, and a row claiming an index nobody built cannot be traced back.
     signature = pipeline.index_signature(conn, grounded_in)
-    count, _latest = pipeline.chunk_census(conn, sources)
+    # The census stands on the same set as the fingerprint, or the note's chunk count describes an index
+    # the fingerprint does not (chunk_census's own docstring guards that pairing).
+    count, _latest = pipeline.chunk_census(conn, grounded_in)
     # load_index installed the active query stopword list, which tokenize_query reads.
     frequency = token_frequency(index, query)
     # The paid path is gated whatever the engine, because a df-0 name makes the model refuse anyway
