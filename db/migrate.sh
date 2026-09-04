@@ -42,24 +42,74 @@ secret_file=${COSMAI_SECRET_FILE:-$HOME/.config/cosmai/env}
 
 read_secret() {
     # Only the key name ever reaches a message; the value is never echoed or logged.
-    value=$(grep "^$1=" "$secret_file" | tail -1 | cut -d= -f2-)
+    #
+    # The parsing rule is db/secrets.py's load(), line for line, because the two readers must not
+    # disagree about the same file (#20, #42 M3): blank, comment and "="-less lines are skipped, the
+    # key is what stands before the first "=" with whitespace stripped, the last match wins, and the
+    # value is stripped of surrounding whitespace and then of surrounding quotes.
+    # tests/test_secret_file_rule.py holds the two implementations against one table of lines.
+    value=$(awk -v want="$1" '
+        {
+            line = $0
+            gsub(/^[ \t\r\v\f]+|[ \t\r\v\f]+$/, "", line)
+            if (line == "" || line ~ /^#/ || index(line, "=") == 0) next
+            key = substr(line, 1, index(line, "=") - 1)
+            value = substr(line, index(line, "=") + 1)
+            gsub(/^[ \t\r\v\f]+|[ \t\r\v\f]+$/, "", key)
+            if (key != want) next
+            gsub(/^[ \t\r\v\f]+|[ \t\r\v\f]+$/, "", value)
+            sub(/^[\047"]+/, "", value)
+            sub(/[\047"]+$/, "", value)
+            found = value
+            seen = 1
+        }
+        END { if (seen) print found }
+    ' "$secret_file")
     [ -n "$value" ] || { echo "needs: missing key in $secret_file: $1" >&2; exit 1; }
     printf '%s' "$value"
+}
+
+psql_set() { # $1 = psql variable name, $2 = its value -- emitted as one \set line for psql's stdin
+    # A password given as `psql -v name=value` stands in the host's `ps` for the length of the call
+    # (#20). psql's own \set does the same job from the stream the SQL is already travelling on.
+    # Inside single quotes psql's lexer honours backslash escapes, so the two metacharacters are
+    # escaped here -- backslash first, or the escape of the quote would be escaped again.
+    psql_set_value=$(printf '%s' "$2" | sed -e 's/\\/\\\\/g' -e "s/'/\\\\'/g")
+    printf "\\\\set %s '%s'\n" "$1" "$psql_set_value"
+}
+
+psql_as() { # $1 = role, $2 = its password, rest = psql arguments; the SQL arrives on stdin
+    # Same reason as psql_set, one layer out: `docker exec -e PGPASSWORD=...` is argv too, so the
+    # value travels as stdin's first line and the shell inside the container moves it into the
+    # environment there. Every caller pipes SQL in, so the `cat` below always has a stream.
+    psql_as_role=$1
+    psql_as_password=$2
+    shift 2
+    { printf '%s\n' "$psql_as_password"; cat; } | docker exec -i "$container" sh -c '
+        IFS= read -r password || exit 1
+        PGPASSWORD=$password
+        export PGPASSWORD
+        role=$1
+        database=$2
+        shift 2
+        exec psql -U "$role" -d "$database" -X -q -v ON_ERROR_STOP=1 "$@"
+    ' sh "$psql_as_role" "$db" "$@"
+}
+
+superuser_psql() { # psql as the database owner, no password; the SQL arrives on stdin
+    docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 "$@"
 }
 
 migrator_password=$(read_secret NEEDS_DB_MIGRATOR)
 runtime_password=$(read_secret NEEDS_DB_RUNTIME)
 
 # a. roles + schema + runtime grants (idempotent; passwords are not rewritten for existing roles).
-docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
-    -v schema=needs -v database="$db" \
-    -v migrator_password="$migrator_password" -v runtime_password="$runtime_password" \
-    < db/bootstrap.sql
+{ psql_set migrator_password "$migrator_password"
+  psql_set runtime_password "$runtime_password"
+  cat db/bootstrap.sql
+} | superuser_psql -v schema=needs -v database="$db"
 
-migrator_psql() {
-    docker exec -i -e PGPASSWORD="$migrator_password" "$container" \
-        psql -U needs_migrator -d "$db" -X -q -v ON_ERROR_STOP=1 "$@"
-}
+migrator_psql() { psql_as needs_migrator "$migrator_password" "$@"; }
 
 # b. migration ledger, owner-owned.
 migrator_psql <<'SQL'
@@ -96,13 +146,11 @@ for file in contracts/ddl/needs/*.sql; do
 done
 
 # d. postgrest_anon direct SELECT whitelist (stage 1 has no needs_reader role).
-docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
-    < db/grants/postgrest_anon_needs.sql
+superuser_psql < db/grants/postgrest_anon_needs.sql
 
 # e. analysis reader: SELECT on the source schemas. Superuser, not migrator -- needs_migrator owns
 # neither trend_radar nor tubedepth, and the file no-ops where those schemas are absent.
-docker exec -i "$container" psql -U "$superuser" -d "$db" -X -q -v ON_ERROR_STOP=1 \
-    < db/grants/needs_runtime_reader.sql
+superuser_psql < db/grants/needs_runtime_reader.sql
 
 # f. operational views, owner-owned. Each file drops and recreates its own view, so re-applying a
 # deploy is a no-op and a view whose columns changed still deploys (CREATE OR REPLACE would not).
