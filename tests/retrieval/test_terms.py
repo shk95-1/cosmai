@@ -1,9 +1,10 @@
-"""미포착 표현 목록 (#8).
+"""The list of unmatched expressions (#8).
 
-사전은 자기가 못 잡는 말을 스스로 말하지 못한다 -- 사전 밖의 성분·제형은 검색에도 트렌드 판정에도
-아예 관측되지 않고, 그 사실은 어떤 숫자로도 나타나지 않는다. 이 목록이 그 천장을 사람에게 보이는
-유일한 자리라, 여기서 붙드는 것은 "무엇이 후보에서 빠지는가"다: 사전에 이미 걸린 말과 대조군에도
-흔한 일반어.
+A dictionary cannot say by itself what it fails to catch -- an ingredient or a formulation outside the
+dictionary is not observed at all, by the search or by the trend judgement, and that fact shows up in no
+number. This list is the only place that puts that ceiling in front of a person, so what is held here is
+"what drops out of the candidates": a word the dictionary already catches, and a general word that is common
+in the control group too.
 """
 
 from __future__ import annotations
@@ -51,7 +52,8 @@ def corpus(needs_schema: str, needs_runtime_url: str):
 
 
 def test_a_noun_the_dictionary_already_catches_is_not_a_candidate(corpus):
-    # 사전에 있는 말이 후보에 남으면 목록이 "천장"이 아니라 사전 사본이 된다.
+    # A word that is in the dictionary left among the candidates makes the list a copy of the dictionary
+    # rather than its "ceiling".
     found = {row.term for row in terms.unmatched(terms.scan(corpus))}
     assert "백탁" not in found
     assert "병원" in found
@@ -65,7 +67,8 @@ def test_a_word_that_is_just_as_common_outside_the_topics_is_not_a_candidate(cor
 
 
 def test_every_dictionary_term_gets_a_row_even_when_it_never_appears(corpus):
-    """등장 0건도 남긴다 -- 식약처 성분명이 유튜브에 안 나온다는 사실이 매핑이 필요하다는 근거다."""
+    """A count of 0 is kept too -- that an MFDS ingredient name does not appear on YouTube is the ground for
+    needing a mapping."""
     rows = {(row.topic, row.term): row for row in terms.ingredients(terms.scan(corpus))}
     assert rows[("유기자차", "에칠헥실트리아존")].docs == 1
     assert rows[("무기자차", "티타늄디옥사이드")].docs == 1
@@ -74,13 +77,14 @@ def test_every_dictionary_term_gets_a_row_even_when_it_never_appears(corpus):
 
 
 def test_a_latin_term_keeps_its_boundary_match(corpus):
-    # 부분문자열로 세면 PA 가 coupang 에 걸려 오탐 16% 가 그대로 표에 실린다.
+    # Counted as a substring, PA hits coupang and 16% false positives go straight into the table.
     rows = {(row.topic, row.term): row for row in terms.ingredients(terms.scan(corpus))}
     assert rows[("SPF_PA", "PA")].docs == 0
 
 
 def test_the_report_says_how_to_put_a_term_into_the_dictionary(corpus):
-    # 목록은 사람이 사전에 넣는 입력이다 -- 넣는 길이 적혀 있지 않으면 그 길을 각자 발명한다.
+    # The list is the input a person puts into the dictionary -- without the way in written down, everyone
+    # invents their own.
     rendered = terms.render(terms.scan(corpus))
     assert "cosmai lexicon" in rendered
     assert terms.DICTIONARY_CSV.name in rendered

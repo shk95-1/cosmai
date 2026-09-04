@@ -1,4 +1,5 @@
-"""점수 계산. DB 도 CLI 도 모르는 순수 함수라 고정 벡터로 검사한다."""
+"""Score computation. Pure functions that know neither the DB nor the CLI, so they are checked with fixed
+vectors."""
 
 from __future__ import annotations
 
@@ -9,7 +10,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class ClassScore:
     label: str
-    support: int  # gold 에서 이 라벨의 개수
+    support: int  # how many of this label there are in gold
     predicted: int
     hit: int
     precision: float
@@ -24,7 +25,8 @@ class Scores:
 
 
 def _ratio(hit: int, total: int) -> float:
-    """분모 0 은 0.0 — 아무도 예측하지 않은 라벨의 정밀도는 표에서 빈칸이 아니라 0 이어야 비교가 된다."""
+    """A denominator of 0 is 0.0 -- the precision of a label nobody predicted has to be 0 rather than a blank
+    in the table for it to be comparable."""
     return hit / total if total else 0.0
 
 
@@ -58,6 +60,7 @@ def score(pairs: Sequence[tuple[str, str]]) -> Scores:
 def precision_over(
     pairs: Sequence[tuple[str, str]], accepted: Collection[str], correct: Collection[str]
 ) -> float:
-    """예측이 accepted 인 행만 분모로 세는 정밀도 — 분모가 40행이 아니라 채택 집합이다 (interfaces.md)."""
+    """Precision counting only the rows predicted accepted in the denominator -- the denominator is the
+    accepted set, not the 40 rows (interfaces.md)."""
     chosen = [gold for gold, pred in pairs if pred in accepted]
     return _ratio(sum(1 for gold in chosen if gold in correct), len(chosen))

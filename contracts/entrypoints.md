@@ -620,12 +620,15 @@ cosmai trend cards --quarter <q> [--url <url>]
   matched a rule but could not stand as a card because the evidence's original text is missing** — that
   alone is a truncated output) · 2 blocked (connection refused, the run has no verdict rows, that quarter
   is not in this run's grid — the message tells the last two apart).
-- **"규칙에 걸린 셀이 없다"는 1 이 아니다.** 그것은 규칙이 다 돌고 나온 정상적으로 계산된 답이고, 이 파일
-  맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 바로 위 §민감도 의 "흔들린다는 1 이 아니다"와
-  **같은 자리, 같은 문장**이다. 실측으로도 그렇다: 표본 골든 11분기 중 **8분기가 0장**이라 1 로 내면 평상
-  상태의 73%가 실패로 읽히고, `cards` 는 사람이 한 번 치는 탐색 명령이 아니라 `quarter → judge → evidence
-  → cards` 의 마지막 칸이라 `set -e` 셸·make·크론이 그 줄에서 멈춘다(upstream #55 의 착수 조건이 "S6 자동
-  소비자"다). 몇 장인지는 종료 코드가 아니라 stderr 의 `note` 가 싣는다.
+- **"No cell caught by the rules" is not a 1.** It is the normally computed answer after every rule has
+  run, and in this file's common convention at the top a 1 means "the output is not whole" — the same seat
+  and the same sentence as "shaking is not a 1" in the sensitivity section just above. The measurement says
+  so too: in the sample golden **9 of 13 quarters have no card**, so a 1 would read 69% of the normal state
+  as failure, and `cards` is not an exploratory command a person runs once but the last cell of
+  `quarter → judge → evidence → cards`, where a `set -e` shell, make or cron would stop on that line
+  (upstream #55's start condition is "S6 automatic consumer"). How many cards there were is carried by the
+  stderr `note`, not by the exit code.
+
 - **stdout is the markdown output and nothing else.** The `note` and the truncated-cell lines go to
   stderr — a redirected `.md` must not have `trend cards run=…` left in it, so that the file is the
   document as it stands.

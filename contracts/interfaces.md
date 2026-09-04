@@ -767,10 +767,11 @@ stdout). 쓰지 않는 덕에 이 명령은 운영 DB 에 그대로 돌아간다
 | 판정 대상 게이트 | 관측 분기의 **절반 초과** | ydc 는 13분기 산출에서 `>= 7` 로 박아 뒀다. 같은 문장을 관측 분기 수에서 유도하면 13분기에서 7 이 나온다 | 유도로 채택. 값으로 박으면 분기가 늘어난 산출에서 조용히 헐거워진다 |
 | `MIN_MENTIONS` | `5` | §수식 의 표본 게이트와 **같은 수**다 | 따로 정의하지 않는다 — `analysis.trend.MIN_MENTIONS` 를 그대로 든다 |
 
-- **표본 골든이 못 보는 갈래 둘**(`sample_ok` 가 서는 셀 · 홍보 댓글)은 `tests/test_sensitivity_golden.py`
-  가 "없다"고 **명시적으로 주장**해서 표본이 바뀌는 날 그 줄이 먼저 깨지게 해 뒀다. 밟게 만드는 것은 #57 이
-  진다 — product 모집단을 건드리면 골든을 **다섯 벌**(#5 · #40 · #41 셋) 한 번에 재생성해야 하고, 그 비용이
-  이 갈래들이 지금까지 미뤄진 이유다.
+- **The two branches the sample golden could not see** (a cell where `sample_ok` stands · a promo comment)
+  were asserted absent by `tests/test_sensitivity_golden.py`, so that line broke first the day the sample
+  changed. #57 re-cut the sample (product channels 4 → 11) and both branches are live — the flip verdict
+  runs and reaches a cell, and promo rows move — with the seven goldens (#5 · #40 · #41's three · #6's two)
+  regenerated at once by `tool/measure-trend-sample`.
 - **전량 대조는 CI 가 지킬 수 없다**(261,317문서는 `archive/` 에 있고 읽기 전용이다). 절차와 대조 코드는
   `tool/compare-ydc-sensitivity` 한 자리에 있다 — ydc 세 스크립트를 손대지 않고 돌려 산출본 셋을 만들고 행
   단위로 맞댄다. 2026-08-26 실행: 패널 26행 · 후향 11행 · 표시 104행, **차이 0**.
@@ -794,17 +795,19 @@ stdout). 쓰지 않는 덕에 이 명령은 운영 DB 에 그대로 돌아간다
   1. 후보는 그 셀의 `source` 가 낸 문서 중 `quality_flags = ''` 인 것이다. 빈 본문(`empty_text`)과 같은
      영상 안 복붙(`duplicate_in_parent`)은 인용하지 않는다 — 지표는 후자를 `unique_ratio` 의 분모에
      세지만(§수식) 그것은 세는 일이고 인용은 다른 일이다.
-  2. **제작자 본인 댓글은 뺀다.** 그 영상 채널의 해시(`sha256('youtube:' || channel_id)` 앞 24자, 수집기가
-     작성자 채널 ID 를 해시한 그 규칙)와 `source_metadata.author_channel_hash` 가 같으면 본인이다.
-     좋아요 상위가 대부분 고정 댓글(타임라인·인사말·요약)이라 소비자 발화가 아니다. 픽스처의 후보 댓글
-     147건 중 **14건**(후보 쌍으로는 281 중 32)이 여기서 빠진다.
+  2. **The creator's own comments are dropped.** The author is the creator when the hash of the
+     video's channel (`sha256('youtube:' || channel_id)`, first 24 characters — the collector's own rule
+     for hashing the author channel id) equals `source_metadata.author_channel_hash`. Most top-liked
+     comments are pinned ones (timelines, greetings, summaries), not consumer speech. Of the fixture's
+     719 candidate comments, **21** are dropped here (41 of 1216 candidate pairs).
   3. 주제는 `corpus_mention` 이 이미 단 것을 쓰고 본문을 다시 매칭하지 않는다. `matched_term` 도 그 행의
      값이다 — 다시 매칭하면 지표가 센 언급과 근거가 고른 언급이 다른 규칙 위에 서게 된다.
-  4. 순서는 `like_count` 내림차순이고 **동점은 `doc_id`** 다. 2차 키가 계약인 것은 ydc 가 CSV 읽기 순서에
-     기대고 있기 때문이다(파이썬 정렬은 안정적이라 동점의 승자를 파일 순서가 정한다). 저장되는 표는
-     재실행이 같은 행을 내야 하므로 그 자리를 비워 둘 수 없다: 근거가 선 픽스처 46셀 중 **23셀**에 동점이
-     있고(동점 = 그 셀 안에 좋아요가 **같은 후보가 둘 이상** 있는 셀이다. 후보가 둘 이상인 셀이 아니다),
-     2차 키를 넣으면 102행 중 **24행**에서 고르는 문서가 달라진다. 달라지지 않는 것은 좋아요 사다리다.
+  4. The order is `like_count` descending and **ties break on `doc_id`**. The second key is a contract
+     because ydc leaned on CSV read order (Python's sort is stable, so file order decided the winner of a
+     tie). A stored table must yield the same rows on a rerun, so that seat cannot be left empty: of the
+     96 fixture cells that carry evidence, **71** have a tie (a tie is a cell with **two or more
+     candidates on the same like count**, not merely a cell with two or more candidates), and with the
+     second key **57** of the 251 rows pick a different document. What does not change is the like ladder.
   - 셀당 상한은 `TOP_PER_CELL = 3`. 카드 한 장에 들어가는 수라 025 의 CHECK 이 아니라 여기가 그 자리다 —
     DDL 은 추가만이라 한번 적은 상한을 되돌릴 수 없다. **그 수의 자리는 여기 하나여야 한다**: 카드가 인용
     상한을 따로 들면 근거만 늘려도 카드는 셋에 머문다. `analysis/cards.build` 의 기본값이 이 상수를
@@ -819,8 +822,9 @@ stdout). 쓰지 않는 덕에 이 명령은 운영 DB 에 그대로 돌아간다
   `corpus_document (snapshot_id, parent_item_id) WHERE content_type='comment'` 부분 인덱스를 탄다) 이고
   `cosmai trend evidence` 전체가 프로세스 기동까지 **0.52s** · 최대 상주 **73MB** 다. 본문을 싣지 않고
   포인터와 좋아요만 끌어오기 때문이고, 이 수가 없으면 "가볍다"는 잰 적 없는 단언이다.
-- **축은 판정 격자다.** `trend_use = false` 인 주제(`선크림`·`추천_재구매`)는 판정 셀이 없으니 근거도 없다.
-  ydc 는 15주제 139행을 냈고 그중 13주제 **102행**만 이 표에 자리가 있다.
+- **The axis is the verdict grid.** Topics with `trend_use = false` (the sunscreen and
+  repurchase-recommendation topics) have no verdict cell, so no evidence either. ydc produced 313 rows over
+  15 topics; only **251 rows** over 13 topics have a seat in this table.
 - **좋아요는 행에 남긴다.** collected_at 시점의 스냅샷이라(§모집단의 한계) 나중에 다시 세면 다른 수가
   나온다 — 그때 이 정렬을 설명할 수 있는 것은 저장된 값뿐이다.
 
@@ -829,8 +833,8 @@ stdout). 쓰지 않는 덕에 이 명령은 운영 DB 에 그대로 돌아간다
 - **모집단**: `retrieval_chunk` 의 원천은 수집기 스키마(`tubedepth`·`trend_radar`, `analysis/retrieval/corpus.py`)
   이고 지표·판정의 원천은 `needs.corpus_*` 의 2026-08-19 관측 판본이다. 검색이 낸 댓글이 그 셀의 분모에
   든 문서라는 보장이 없고, 보장이 없는 근거는 근거가 아니다.
-- **단위**: 검색의 답은 `chunk_id` 이고 근거의 단위는 문서다. 500자를 넘는 댓글은 조각으로 쪼개진다
-  (픽스처의 모집단 댓글 418건 중 15건).
+- **Unit**: search answers with a `chunk_id`; the unit of evidence is the document. A comment over 500
+  characters is split into pieces (30 of the fixture's 2605 population comments).
 - **순서**: 검색은 질의와의 어휘 유사도로, 근거는 좋아요로 줄을 세운다. 그리고 "이 주제를 말한 문서"는
   `corpus_mention` 이 이미 답한 것이라, 검색을 다시 돌리는 것은 같은 질문에 **다른 규칙으로** 두 번째
   답을 만드는 일이다.
@@ -841,19 +845,21 @@ literal 모드와 같지만 코퍼스가 다르다 — 전 소스 381,950청크�
 못한다. 그래서 아래는 언제나 천장을 함께 적는다. 천장 없이 옮겨 적으면 전 소스의 `.864` 와 나란히 놓여
 "BM25 가 약하다"로 읽히는데, 그것은 이 표가 하는 말이 아니다.
 
-실측 (2026-08-27 · 주제 사전 **v3** · 픽스처의 모집단 댓글 418건 = 청크 439개 · 질의는 주제 별칭 63개 · `analysis/retrieval/bm25`
-의 색인과 `analysis/retrieval/eval` 의 채점, 정답은 `corpus_mention`. 재는 길은
-`tool/measure-evidence-fixture` 이고 `tests/test_evidence_numbers.py` 가 이 표와 맞댄다):
+Measured (2026-09-04 on the #57 re-cut, first measured 2026-08-27 · topic lexicon **v3** · the fixture's
+population comments 2605 = 2646 chunks · the queries are the 63 topic aliases · the index of
+`analysis/retrieval/bm25` and the scoring of `analysis/retrieval/eval`, gold from `corpus_mention`. The way
+to re-measure is `tool/measure-evidence-fixture`, and `tests/test_evidence_numbers.py` holds this table to it):
 
 | 무엇을 재는가 | 값 |
 |---|---|
-| BM25 top-10 이 `corpus_mention` 의 답과 겹치는 정도 | P@10 **.612** (이 코퍼스의 천장 **.895**) · MRR@10 .606 · Hit@10 66.7% |
-| 고른 근거 102행이 그 주제 **어느 별칭의** top-10 안에라도 드는 비율 | **79/102 = 77.5%** |
+| How far BM25's top-10 overlaps `corpus_mention`'s answer | P@10 **.770** (this corpus's ceiling **1.000**) · MRR@10 .771 · Hit@10 84.1% |
+| Share of the 251 chosen evidence rows inside the top-10 of **any alias** of their topic | **103/251 = 41.0%** |
 
-둘째 줄이 이 절의 답이다 — 천장이 없는 수이고, 검색으로 갈아끼우면 근거 다섯 중 하나가 사라진다는 뜻이다.
-그것도 별칭 합집합(주제마다 최대 10질의 × 10건)이라는 후한 조건에서이고, top-10 하나로 좁히면 더 내려간다.
-첫째 줄은 그 둘째 줄이 엔진의 고장에서 온 것이 아님을 보이려고 있다: BM25 는 천장의 68% 를 가져왔고,
-남은 몫은 "이 주제를 말한 문서"라는 물음에 이미 `corpus_mention` 이 다른 규칙으로 답해 두었기 때문이다.
+The second row is this section's answer — a number with no ceiling, and it says that swapping search in
+would lose three evidence rows in five. That is under the generous condition of the alias union (up to
+10 queries × 10 hits per topic); narrowed to one top-10 it goes lower still. The first row is there to
+show that the second does not come from a broken engine: BM25 took 77% of the ceiling, and the rest is
+that `corpus_mention` has already answered "which documents speak of this topic" by a different rule.
 
 **엔진 선택**: 이 용도는 셋 중 **하나도 쓰지 않는다.** 답을 이미 `corpus_mention` 이 갖고 있어서 고를
 순위가 없다. S6 이 #11 에 주는 것은 기본 엔진의 근거가 아니라 그 반대다: **근거 수집이라는 구체적 용도가
@@ -863,10 +869,11 @@ literal 모드와 같지만 코퍼스가 다르다 — 전 소스 381,950청크�
 넘은 자리다(§검색 실측).
 
 ### 기회 카드 (유형은 규칙이 정한다 — `cosmai trend cards`, ydc `cards.py`)
-- **카드 0건은 실패가 아니다.** 규칙이 다 돌고 나온 정상적으로 계산된 답이고, 이 표본에서도 11분기 중
-  8분기가 0장이다. 종료 코드로 그것을 말하지 않는 이유와 그 대신 `partial(1)` 이 되는 하나(**규칙에
-  걸렸는데 근거 원문이 없어 카드로 서지 못한 셀**)는 `entrypoints.md` §근거·카드 가 든다 — #41 이
-  §민감도 에서 "흔들린다는 1 이 아니다"로 못 박은 그 자리와 같은 자리다.
+- **Zero cards is not a failure.** It is the normally computed answer after every rule has run, and in
+  this sample too 9 of 13 quarters have none. Why the exit code does not say so, and the one case that
+  becomes `partial(1)` instead (**a cell the rules caught but with no evidence text to stand a card on**),
+  are in the evidence-and-cards section of `entrypoints.md` — the same seat #41 pinned in the sensitivity
+  section with "shaking is not a 1".
 - **카드는 행을 만들지 않는다.** 이미 저장된 세 표(`metrics_topic_quarter` · `topic_quarter_judgement` ·
   `topic_quarter_evidence`)를 읽어 렌더한 것이고, 표를 하나 더 두면 같은 수가 두 곳에 살아 어느 쪽이
   정본인지 다툰다 — ydc `cards.py` 의 설계 원칙 2("모든 수치는 이미 만든 산출물에서 그대로 가져온다")가
@@ -1788,7 +1795,7 @@ same budget; an answer the model cut off (`stop_reason == max_tokens`) or left e
 the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
 not set until #74 has measured the cost per query.
 
-**Log** — `needs.retrieval_ask_log` (DDL 026, append-only, `needs_runtime` can `SELECT, INSERT`): `id` ·
+**Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
 `called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
 `bm25.tokenize_query`, which drops query stopwords; the gate reads the index axis, so `gate_ok` can be true
 on a token absent from this map) · `doc_ids` (text[], folded, rank order) · `index_fingerprint` ·

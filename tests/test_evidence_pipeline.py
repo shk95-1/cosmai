@@ -1,11 +1,14 @@
-"""근거의 적재: 판정 셀을 찾고, 코퍼스에서 후보를 읽고, 통째로 다시 쓰고, 저장된 행에 되묻는다 (포크 #6).
+"""Loading the evidence: it finds the judged cells, reads candidates from the corpus, rewrites wholesale and
+asks the stored rows back (fork #6).
 
-판정(#40)과 갈리는 자리가 여기다 -- 근거는 **코퍼스를 훑는다.** 그래서 #5 가 실측한 두 함정이 그대로
-붙는다: 댓글 질의의 부분 인덱스(`content_type = 'comment'`)와 `idle_in_transaction_session_timeout`
-(15초). 이 파일이 그 두 자리와, 근거가 판정 셀 없이는 설 수 없다는 사실을 붙든다.
+This is where it parts from the judgement (#40) -- evidence **scans the corpus**. So the two traps #5
+measured come with it: the partial index of the comment query (`content_type = 'comment'`) and
+`idle_in_transaction_session_timeout` (15 seconds). This file holds those two places, and the fact that
+evidence cannot stand without a judged cell.
 
-픽스처 코퍼스를 실제로 반입한다 -- 후보를 손으로 심으면 모집단 CTE 를 공유한다는 계약 문장이 검사되지
-않는다. 그 대신 이 파일은 값이 아니라 **모양**을 보고, 값은 골든(`tests/test_evidence_golden.py`)이 진다.
+The fixture corpus is really imported -- planting candidates by hand would leave the contract sentence about
+sharing the population CTE unchecked. In exchange this file looks at the **shape** rather than the values,
+and the values are carried by the golden set (`tests/test_evidence_golden.py`).
 """
 
 from __future__ import annotations
@@ -37,7 +40,8 @@ VIEWS = (
     ROOT / "db" / "views" / "topic_quarter_evidence_violation.sql",
 )
 OWNER = text("SET ROLE needs_owner")
-# 한 행만 건드린다 -- 전량 UPDATE 는 기본키에서 먼저 부딪혀 보려던 제약에 닿지 못한다.
+# Only one row is touched -- a full UPDATE hits the primary key first and never reaches the constraint it
+# meant to try.
 ONE_ROW = (
     "UPDATE topic_quarter_evidence SET {set} WHERE ctid = (SELECT ctid FROM topic_quarter_evidence LIMIT 1)"
 )
@@ -56,7 +60,8 @@ def _install_views(url: str, schema: str) -> None:
 
 @pytest.fixture
 def judged(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
-    """`cosmai trend quarter` 다음 `judge` 까지 간 스키마. 근거가 붙을 셀이 서 있는 상태다."""
+    """The schema after `cosmai trend quarter` and then `judge`. The cells the evidence attaches to are
+    standing."""
     _install_views(needs_schema, _schema_name)
     seed.run_all(needs_runtime_url, only=("panel",))
     where = ["--kind", "aspect", "--version", "1", "--url", needs_runtime_url]
@@ -69,7 +74,8 @@ def judged(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
 
 
 def test_a_run_without_judgement_rows_is_blocked_not_failed(judged: str):
-    """판정을 아직 안 한 것이라 0행을 조용히 쓰면 안 된다 -- 빈 표 위에서도 불변식은 참이다."""
+    """The judgement simply has not been made yet, so 0 rows must not be written quietly -- the invariants
+    are true over an empty table too."""
     with connect(judged) as conn, pytest.raises(NoEvidence):
         build(conn)
 
@@ -80,7 +86,8 @@ def test_the_evidence_lands_on_the_run_the_judgement_already_has(judged: str):
         outcome = run(conn)
         assert outcome.run_id == verdicts.run_id
         assert outcome.violations == []
-        # 셀마다 최대 셋. 후보가 모자란 셀이 있으므로 곱셈은 상한이지 등식이 아니다.
+        # At most three per cell. Some cells are short of candidates, so the product is a cap, not an
+        # equality.
         assert 0 < outcome.written <= outcome.cells * TOP_PER_CELL
         with conn.cursor() as cur:
             cur.execute("SELECT versions->>'evidence' FROM analysis_run WHERE run_id = %s", (outcome.run_id,))
@@ -88,7 +95,7 @@ def test_the_evidence_lands_on_the_run_the_judgement_already_has(judged: str):
 
 
 def test_running_twice_rewrites_the_same_rows(judged: str):
-    """부분 갱신이면 자리(rank)의 사다리가 조용히 구멍 난다."""
+    """A partial update puts a quiet hole in the ladder of ranks."""
     with connect(judged) as conn:
         judge_run(conn)
         first = run(conn)
@@ -100,7 +107,8 @@ def test_running_twice_rewrites_the_same_rows(judged: str):
 
 
 def test_the_evidence_only_stands_on_a_judged_cell(judged: str):
-    """`파생`이 아니라 `포인터`여도 근거는 자기가 받치는 셀 없이 설 수 없다 -- 025 의 첫 FK 다."""
+    """Pointer rather than derived, evidence still cannot stand without the cell it supports -- that is the
+    first FK of 025."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -110,7 +118,8 @@ def test_the_evidence_only_stands_on_a_judged_cell(judged: str):
 
 
 def test_the_quote_must_be_a_document_of_that_snapshot(judged: str):
-    """판본 없는 doc_id 는 재수집분의 같은 문서와 갈리지 않는다 -- 두 번째 FK 가 그것을 든다."""
+    """A doc_id with no version does not part from the same document of a recollection -- the second FK
+    carries that."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -120,7 +129,7 @@ def test_the_quote_must_be_a_document_of_that_snapshot(judged: str):
 
 
 def test_the_ddl_refuses_a_quote_from_another_source(judged: str):
-    """댓글을 영상 셀의 근거로 다는 일이 행 하나 안에서 막힌다."""
+    """Attaching a comment as evidence for a video cell is blocked inside one row."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -130,7 +139,8 @@ def test_the_ddl_refuses_a_quote_from_another_source(judged: str):
 
 
 def test_the_view_notices_a_ladder_with_a_hole(judged: str):
-    """유일키는 자리의 중복만 막는다. 1위가 사라지면 카드는 남은 것을 상위로 읽는다."""
+    """The unique key stops only duplicate ranks. With the first place gone, the card reads what is left as
+    the top."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -142,12 +152,14 @@ def test_the_view_notices_a_ladder_with_a_hole(judged: str):
 
 
 def test_the_view_notices_a_quote_that_belongs_to_another_cell(judged: str):
-    """FK 는 "그 판본에 그런 문서가 있다"까지만 지킨다 -- 그 문서가 이 주제를 말했는지는 묻지 않는다."""
+    """The FK keeps only "that document exists in that version" -- whether that document said this topic is
+    not asked."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
         with conn.cursor() as cur:
-            # 판정 셀은 있는데 이 문서가 말하지 않은 주제로 한 행을 옮긴다. FK 는 통과하고 뷰만 잡는다.
+            # The judged cell exists but one row is moved to a topic this document did not say. The FK passes
+            # and only the view catches it.
             cur.execute(
                 "SELECT j.topic_key FROM topic_quarter_judgement j"
                 " JOIN topic_quarter_evidence e ON e.run_id = j.run_id AND e.quarter = j.quarter"
@@ -170,7 +182,8 @@ def test_the_view_notices_a_quote_that_belongs_to_another_cell(judged: str):
 
 
 def test_one_where_on_the_view_reaches_the_quote_from_a_judged_cell(judged: str):
-    """이 이슈의 완료 기준 그대로 -- 셀 하나에서 근거 원문까지 사람이 조인을 쓰지 않는다.
+    """Exactly the completion criterion of this issue -- from one cell to the evidence text, a person writes
+    no join.
 
     그 한 줄에 `run_id` 가 드는 것도 계약이다(§근거): 뷰는 run 을 가리지 않으므로 한 스냅샷·명부에
     run 이 둘이면 같은 셀이 겹쳐 나오고 `rank` 가 1..n 이 아니게 된다.
@@ -226,7 +239,8 @@ def test_the_candidate_query_takes_the_partial_index_the_corpus_declares(judged:
 
 
 def test_the_population_is_the_one_the_metrics_were_counted_on():
-    """다시 적으면 카드가 인용하는 발화와 카드에 적힌 숫자가 다른 분모 위에 선다."""
+    """Written out again, the speech a card quotes and the numbers written on that card stand on different
+    denominators."""
     from analysis.evidence import pipeline
     from analysis.trend import pipeline as quarter
 
@@ -234,7 +248,8 @@ def test_the_population_is_the_one_the_metrics_were_counted_on():
 
 
 def test_the_read_is_closed_before_the_fold(judged: str):
-    """15초 함정. 후보를 커서로 들고 접기 시작하면 연결이 끊긴다 -- build 는 커밋한 뒤에 고른다."""
+    """The 15-second trap. Holding the candidates on a cursor and starting to fold them cuts the connection --
+    build picks after it commits."""
     with connect(judged) as conn:
         judge_run(conn)
         made = build(conn)
@@ -243,7 +258,8 @@ def test_the_read_is_closed_before_the_fold(judged: str):
 
 
 def test_a_quote_carries_no_copy_of_the_document(judged: str):
-    """본문을 베끼면 원문이 두 벌이 되고, 코퍼스가 정본이라는 문장이 그 자리에서 거짓이 된다."""
+    """Copying the body makes two originals, and the sentence that the corpus is canonical goes false right
+    there."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -263,12 +279,13 @@ def test_the_cli_writes_the_evidence_and_then_renders_the_cards(judged: str, cap
         judge_run(conn)
     assert main(["trend", "evidence", "--url", judged]) == 0
     assert "trend evidence run=" in capsys.readouterr().out
-    # 2026Q2 는 이 표본에서 규칙에 걸리는 셀이 있는 분기다 (골든이 그 값을 진다).
+    # 2026Q2 is the quarter with a cell that matches the rule in this sample (the golden set carries that
+    # value).
     assert main(["trend", "cards", "--quarter", "2026Q2", "--url", judged]) == 0
     printed = capsys.readouterr()
     assert "# R&D Opportunity Card — 2026Q2" in printed.out
     assert "**소비자 발화 (좋아요 상위)**" in printed.out
-    # stdout 은 마크다운뿐이다 -- 리다이렉트한 `.md` 안에 note 가 남으면 그 파일은 그대로 문서가 아니다.
+    # stdout is markdown alone -- a note left inside the redirected `.md` makes that file not a document.
     assert "trend cards run=" not in printed.out
     assert "trend cards run=" in printed.err
     # **카드 0건은 실패가 아니다.** 규칙이 다 돌고 나온 답이고, #41 이 §민감도 에서 못 박은 자리와 같다.
@@ -277,7 +294,8 @@ def test_the_cli_writes_the_evidence_and_then_renders_the_cards(judged: str, cap
 
 
 def test_a_ruled_cell_with_no_quote_left_is_the_one_partial_the_cards_have(judged: str, capsys):
-    """잘린 산출은 하나뿐이다 -- 규칙에 걸렸는데 근거 원문이 없어 카드로 서지 못한 셀."""
+    """There is only one truncated output -- a cell that matched the rule but could not stand as a card
+    because the evidence text is missing."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)
@@ -287,12 +305,13 @@ def test_a_ruled_cell_with_no_quote_left_is_the_one_partial_the_cards_have(judge
     assert main(["trend", "cards", "--quarter", "2026Q2", "--url", judged]) == 1
     printed = capsys.readouterr()
     assert "unquoted=" in printed.err and "unquoted_cell 2026Q2" in printed.err
-    # 그래도 stdout 은 여전히 마크다운이다(카드 0장짜리 문서).
+    # stdout is still markdown all the same (a document with 0 cards).
     assert printed.out.startswith("# R&D Opportunity Card")
 
 
 def test_a_quarter_outside_the_grid_says_so_instead_of_sending_you_back_to_judge(judged: str, capsys):
-    """judge 는 이미 돌았고 그 분기에 모집단 영상이 없을 뿐이다 -- 헛걸음을 시키지 않는다."""
+    """judge has already run and there are simply no population videos in that quarter -- nobody is sent on a
+    wasted trip."""
     with connect(judged) as conn:
         judge_run(conn)
         run(conn)

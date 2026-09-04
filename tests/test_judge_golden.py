@@ -8,9 +8,12 @@
 즉 이 파일이 대조하는 사슬은 넷이다 -- 픽스처 코퍼스 → 우리 `metrics_topic_quarter`(#5 골든) →
 우리 판정 → ydc 판정. 전량(338행) 대조는 워커가 일회용 컨테이너에서 한 번 돌려 보고했다(2026-08-26).
 
-**표본이 못 보는 자리**: 이 표본에서 영상 쪽은 전부 `근거 부족`·`미확정` 이고, `지속 인기` 는 한 셀도
-없다. `hold_reason` 도 넷 중 둘만 나온다. 그 갈래들은 `tests/test_judge_rules.py` 가 홀로 진다 --
-표본을 다시 자를 일이 있으면 근거가 두꺼운 영상 셀이 든 (주제, 분기) 를 넣어라.
+**What the sample reaches.** #57 re-cut it (11 channels -> 18, product 4 -> 11) so the branches the
+four-product cut could not touch are here: `STICKY` stands on two cells, one of them a video cell with
+thick evidence, and `ABOVE_HALF_PEAK` holds two more. Three of the four `hold_reason` values appear.
+The fourth, `NO_RULE`, is not a gap in the sample -- `analysis.judge._classify` returns on every
+velocity band before it, so no cut can reach it and `tests/test_judge_rules.py` is where it is asked
+about.
 """
 
 from __future__ import annotations
@@ -27,7 +30,9 @@ from analysis.judge import (
     DIFFUSION_TAU,
     NO_PRIOR_YEAR,
     NO_RULE,
+    STICKY,
     TAU,
+    VIDEO,
     WITHIN_TAU_SHORT_PERSISTENCE,
 )
 from analysis.judge.pipeline import build, run
@@ -168,12 +173,24 @@ def test_the_peak_ydc_writes_into_the_hold_reason_is_the_peak_of_our_metric_rows
         peak = peaks[(want["topic_id"], want["source"])]
         assert f"최고 분기({peak * 100:.1f}%)" in want["hold_reason"]
         checked += 1
-    # 이 표본에는 그 사유가 없다 -- 전량에서는 **7셀**이다(2026-08-26 포크 #41 재현. 그 전 주석의 3셀은
-    # 틀린 수였다). 표본을 다시 자를 때 이 줄을 `checked > 0` 으로 바꾸라는 표식으로 남긴다.
-    assert checked == 0, "표본이 바뀌었다 -- 위 대조가 돌기 시작했으니 이 줄을 checked > 0 으로 바꿔라"
-    # 위 대조가 0회 도는 동안 사유 파서의 이 갈래도 함께 잠들어 있었다. 표본이 못 밟는 그 한 줄만은
-    # 여기서 깨워 둔다 -- 파서가 조용히 KeyError 로 바뀌면 표본이 바뀌는 날 골든이 아니라 이 파일이 깨진다.
-    assert _reason(f"{PEAK_SENTENCE}{max(peaks.values()) * 100:.1f}%)의 절반 이상") == ABOVE_HALF_PEAK
+    # #57 re-cut the sample so this comparison runs: 2 cells here, 7 in the full population
+    # (2026-08-26, fork #41). Zero would mean the peak in the reason is again never read back.
+    assert checked > 0, "the sample lost the above_half_peak cells; this comparison idles again"
+
+
+def test_the_sample_carries_the_verdicts_and_reasons_the_four_product_cut_could_not(sampled: str):
+    """#57's gaps 1 and 3. A verdict no golden row carries is a verdict that first runs in production,
+    so the property is pinned here instead of described in the docstring -- a later cut that loses it
+    breaks this line rather than going quiet."""
+    with connect(sampled) as conn:
+        made = build(conn)
+    assert [row for row in made.rows if row.trend_type == STICKY and row.source == VIDEO], (
+        "the video series reaches no sustained-popularity cell; evidence is thin everywhere again"
+    )
+    reasons = {row.hold_reason for row in made.rows if row.hold_reason}
+    # NO_RULE is unreachable by construction, so its absence is the rule and not a hole in the cut.
+    assert reasons == {NO_PRIOR_YEAR, ABOVE_HALF_PEAK, WITHIN_TAU_SHORT_PERSISTENCE}
+    assert NO_RULE not in reasons
 
 
 def test_the_judgement_version_lands_on_the_run_the_metrics_already_carry(sampled: str):

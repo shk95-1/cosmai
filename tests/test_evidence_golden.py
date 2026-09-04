@@ -7,21 +7,31 @@
         --out .../ydc_evidence_v0.2.csv
     python cards.py --quarter <분기>            # reports/ 에 위 CSV 와 #40 의 판정 CSV 를 두고
 
-이 표본의 판정 격자에는 **2025Q1 이 없다**(그 분기에 선크림 장문 영상이 없다). 그래서 카드 골든은 11분기
-이고, 격자에 없는 분기를 물으면 카드는 막힘(2)이다 -- 그 자리는 `tests/test_evidence_pipeline.py` 가 진다.
+#57 re-cut the sample (11 channels -> 18, product 4 -> 11) and these two goldens were remade with the
+other five by `tool/measure-trend-sample`. The judgement grid now holds all 13 quarters, so the cards
+golden is 13 quarters; asking for a quarter outside the grid is blocked (2) and
+`tests/test_evidence_pipeline.py` carries that.
 
-**한 자리가 1:1 이 아니고, 그것이 이 파일의 답이다.** ydc 는 좋아요로만 정렬하고 동점의 승자를 CSV
-읽기 순서가 정한다(파이썬 정렬이 안정적이다). 저장되는 표는 재실행이 같은 행을 내야 하므로 우리는
-`doc_id` 를 2차 키로 못 박았고(계약 §근거), 그래서 **좋아요 사다리는 102/102 로 같고 자리는 24행에서
-갈린다** -- 그중 20행은 같은 셋 안의 순서 차이이고, ydc 가 아예 안 뽑은 문서를 우리가 고른 것은 4행이다.
-갈린 24행이 전부 동점 자리이고 ydc 의 문서도 그 자리의 정당한 후보라는 것을 아래가 증명한다 -- 그 성질이
-깨지면 갈린 것은 동점 처리가 아니라 규칙이다.
+**Two places are not 1:1, and saying which is this file's answer.**
+
+Ties: ydc sorts on likes alone and lets CSV read order pick the winner of a tie (python's sort is
+stable). A stored table has to give the same rows on a re-run, so `doc_id` is our second key (the
+evidence section of `contracts/interfaces.md`) -- **the like ladder is the same on all 251 rows and
+the seat differs on 57**, of which 35 are an order difference inside the same three and 22 are a
+document ydc did not pick at all. That every one of the 57 is a tie whose ydc document was a
+legitimate candidate for that seat is what the tests below prove; if that property breaks, what
+parted is the rule and not the tie-breaking.
+
+Hold reasons on a card: ydc writes the sentence a person reads and we store the token the verdict
+section of the same contract names, so the limit lines that carry a reason are compared through the
+table `tests/test_judge_golden.py` already owns rather than through a second copy of it.
 """
 
 from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -29,12 +39,14 @@ from sqlalchemy import create_engine, text
 
 from analysis.cards.pipeline import collect
 from analysis.evidence.pipeline import build, run
+from analysis.judge import HELD
 from analysis.judge.pipeline import run as judge_run
 from analysis.retrieval import topics as topic_registry
 from analysis.trend.pipeline import run as quarter_run
 from cosmai.cli import main
 from db import corpus, seed
 from db.seed._common import connect
+from tests.test_judge_golden import _reason as ydc_hold_reason
 
 pytestmark = pytest.mark.postgres
 
@@ -49,11 +61,31 @@ VIEWS = (
 OWNER = text("SET ROLE needs_owner")
 # 동점 자리에서 ydc 와 다른 문서를 고르는 행의 수. 숫자를 못 박는 것은 "조금 갈린다"가 조용히 자라지
 # 않게 하기 위해서다 -- 규칙이 바뀌면 이 수가 먼저 움직인다.
-TIED_ROWS_THAT_DIFFER = 24
-LADDER_ROWS = 102
-# 그중 ydc 가 세 자리 안에 아예 넣지 않은 문서를 고른 행. 24 는 자리가 갈린 수이고 이것은 뽑힌 집합이
-# 갈린 수다 -- 나머지 20 은 같은 셋의 순서만 다르다.
-DOCS_YDC_DID_NOT_PICK = 4
+TIED_ROWS_THAT_DIFFER = 57
+LADDER_ROWS = 251
+# Of those, the rows where we picked a document ydc did not put in the top three at all. The number
+# above is how many seats parted; this one is how many picked sets parted -- the other 35 are the same
+# three in another order.
+DOCS_YDC_DID_NOT_PICK = 22
+# How `analysis/cards` renders a hold reason, against ydc's sentence for the same fact.
+HOLD_PREFIX = f"{HELD} \u2014 "
+
+
+def _same_limit(theirs: str, ours: str) -> bool:
+    """One limit line. Only the hold-reason line can differ, and only in how the reason is spelled."""
+    if theirs == ours:
+        return True
+    label, _, reason = ours.partition(": ")
+    if not reason.startswith(HOLD_PREFIX) or not theirs.startswith(f"{label}: "):
+        return False
+    try:
+        return ydc_hold_reason(theirs.split(": ", 1)[1]) == reason[len(HOLD_PREFIX) :]
+    except KeyError:
+        return False
+
+
+def _same_limits(theirs: Sequence[str], ours: Sequence[str]) -> bool:
+    return len(theirs) == len(ours) and all(_same_limit(a, b) for a, b in zip(theirs, ours, strict=True))
 
 
 def _ydc_evidence() -> list[dict[str, str]]:
@@ -195,7 +227,7 @@ def test_the_cards_are_the_cards_ydc_cards_py_makes(quoted: str):
                     differences.append(
                         f"{quarter} {card.topic_key} {column}: ydc {want[column]!r} != {got!r}"
                     )
-            if list(want["limits"]) != list(card.limits):
+            if not _same_limits(want["limits"], card.limits):
                 differences.append(
                     f"{quarter} {card.topic_key} limits: {want['limits']} != {list(card.limits)}"
                 )
@@ -203,12 +235,12 @@ def test_the_cards_are_the_cards_ydc_cards_py_makes(quoted: str):
 
 
 def test_the_quotes_on_a_card_are_the_quotes_ydc_put_there(quoted: str):
-    """카드가 인용하는 순서는 저장된 자리(좋아요)가 아니라 (별칭 구체성, 좋아요) 다 -- 이 표본에 그 둘이
-    실제로 갈리는 카드가 있다(`자극_눈시림` 2026Q2 의 3위는 좋아요 11 로 1·2위보다 많다).
+    """A card quotes in (alias specificity, likes) order, not in the stored rank's like order.
 
-    좋아요 사다리는 네 카드 모두에서 같고, 발화 자체는 **한 카드에서만** 갈린다 -- 2025Q2 의 좋아요 2
-    동점 자리다. 근거 선별이 그 자리를 `doc_id` 로 가르는 것이 계약이므로(§근거) 이것은 어긋남이 아니라
-    적어 둘 사실이고, 갈리는 카드가 하나뿐이라는 것을 여기서 못 박는다.
+    The like ladder is identical on every card, and the utterance itself parts on two of them -- both
+    at a tie, where evidence selection breaks the seat by `doc_id` (the evidence section of
+    `contracts/interfaces.md`). So this is a fact to write down rather than a disagreement, and what
+    is pinned here is that it stays two.
     """
     moved: list[str] = []
     for quarter, wanted in _ydc_cards().items():
@@ -224,7 +256,8 @@ def test_the_quotes_on_a_card_are_the_quotes_ydc_put_there(quoted: str):
             ]
             if not (same_terms and same_text):
                 moved.append(f"{quarter} {card.topic_key}")
-    assert moved == ["2025Q2 자극_눈시림"], moved
+    # The topic ids are Korean corpus data; the quarters carry the same fact without them (#192 D12).
+    assert [line.split(" ", 1)[0] for line in moved] == ["2025Q2", "2025Q3"], moved
 
 
 def test_the_run_carries_all_three_definition_versions(quoted: str):

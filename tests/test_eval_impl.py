@@ -1,4 +1,5 @@
-"""`cosmai eval <task> --impl <spec>`: 등록된 팩터리가 그 실행의 구현체를 만든다 (#6 의 llm:<model>)."""
+"""`cosmai eval <task> --impl <spec>`: the registered factory builds the implementation of that run (the
+llm:<model> of #6)."""
 
 from __future__ import annotations
 
@@ -26,32 +27,34 @@ def oracle() -> Iterator[None]:
     def predict(rows: Sequence[LabeledRow]) -> Sequence[str]:
         return [row.gold for row in rows]
 
-    # 오라클은 진짜 구현체의 자리에 선다 — cli 의 load_implementations() 가 그 위에 규칙을 다시
-    # 꽂으면 재려던 --split 배선 대신 규칙이 돈다 (test_cli_eval.py 의 harness_only 와 같은 자리).
+    # The oracle stands in the place of a real implementation -- if load_implementations() of the cli plugs
+    # the rules back on top of it, the rules run instead of the --split wiring under measurement (the same
+    # place as harness_only in test_cli_eval.py).
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(registry, "IMPLEMENTATIONS", ())
         register("polarity", "oracle-v0", predict)
         yield
     unregister("polarity")
-    # 이 파일이 갈아 끼운 등록을 다음 테스트가 되찾을 자리 (#30).
+    # Where the next test gets back the registrations this file swapped out (#30).
     registry.load_implementations()
 
 
 def test_the_llm_factory_is_wired_by_the_implementations_list_and_not_by_the_cli():
-    """유닛은 IMPLEMENTATIONS 에 한 줄만 더한다 — #5·#9 가 같은 cli.py 를 만지고 있다."""
+    """A unit adds only one line to IMPLEMENTATIONS -- #5 and #9 are working on the same cli.py."""
     registry.load_implementations()
     built = registry.build("polarity", "llm:claude-sonnet-5")
     assert built is not None and built.version == f"llm-claude-sonnet-5-{PROMPT_DATE}"
 
 
 def test_building_does_not_open_a_connection_or_call_anything():
-    """팩터리는 이름만 만든다 — 첫 API 호출은 predict 가 불릴 때다 (오프라인 스위트가 이걸 증명한다)."""
+    """The factory builds only the name -- the first API call happens when predict is called (the offline
+    suite proves it)."""
     registry.load_implementations()
     assert registry.build("polarity", "llm:claude-opus-5") is not None
 
 
 def test_the_ollama_factory_is_wired_and_free_so_it_skips_the_split_guard():
-    """#6/#21: ollama 는 돈이 들지 않는다 — is_paid 가 False 여야 --split 강제에 걸리지 않는다."""
+    """#6/#21: ollama costs nothing -- is_paid has to be False so the forced --split does not apply."""
     registry.load_implementations()
     built = registry.build("polarity", "ollama:gemma4:latest")
     assert built is not None and built.version.startswith("llm-ollama-gemma4:latest-")
@@ -59,16 +62,17 @@ def test_the_ollama_factory_is_wired_and_free_so_it_skips_the_split_guard():
 
 
 def test_building_the_ollama_impl_does_not_open_a_connection_or_call_anything():
-    """이름만 만든다 — ollama 호출은 predict 가 불릴 때 나간다 (네트워크가 막힌 스위트가 이걸 증명한다)."""
+    """It builds only the name -- the ollama call goes out when predict is called (a suite with the network
+    blocked proves it)."""
     registry.load_implementations()
     assert registry.build("polarity", "ollama:gemma4:latest") is not None
 
 
 @pytest.mark.parametrize("spec", ["llm:", "ollama:", "ollama"])
 def test_building_without_a_model_is_refused_by_the_factory_not_the_registry(spec: str):
-    """#6: 뮤테이션이 이 가드 두 줄을 지워도 죽는 테스트가 0개였다 — 예외 타입만 보면 가드를 지워도
-    registry.build 의 "no implementation factory" LookupError 로 통과할 수 있으니, 모델 이름을
-    요구하는 메시지인지까지 단언해야 한다."""
+    """#6: mutation deleting these two guard lines killed 0 tests -- looking only at the exception type, the
+    guard can be deleted and still pass through the "no implementation factory" LookupError of
+    registry.build, so the message demanding a model name has to be asserted as well."""
     registry.load_implementations()
     with pytest.raises(LookupError) as missing_model:
         registry.build("polarity", spec)
@@ -83,7 +87,8 @@ def test_an_unknown_impl_stops_with_exit_code_2_before_anything_is_spent(capsys)
 
 @pytest.mark.postgres
 def test_a_split_limits_the_eval_sets_that_are_scored(labeled: str, oracle: None, capsys):
-    """튜닝 중에는 홀드아웃을 보지 않는다 — 점수를 숨기는 것이 아니라 아예 돌리지 않는 것이다."""
+    """The holdout is not looked at during tuning -- it is not that the score is hidden but that it is not run
+    at all."""
     assert main(["eval", "polarity", "--url", labeled, "--split", "tune"]) == 0
     out = capsys.readouterr().out
     assert "sun tune 200" in out
@@ -91,7 +96,8 @@ def test_a_split_limits_the_eval_sets_that_are_scored(labeled: str, oracle: None
 
 
 def test_the_adoption_bar_is_what_the_rule_actually_scored_not_the_contract_floor():
-    """계약 바닥은 sun .77/.89 지만 규칙은 .870/.915 를 냈다 — 교체 조건은 뒤쪽이다 (이슈 #6)."""
+    """The contract floor is sun .77/.89 but the rules produced .870/.915 -- the replacement condition is the
+    latter (issue #6)."""
     assert RULE_MEASURED["polarity"]["sun holdout 100"] == {"acc": Decimal(".870"), "P:불만": Decimal(".915")}
     floor_only = {
         "sun holdout 100": {"acc": 0.80, "P:불만": 0.90},
@@ -109,13 +115,14 @@ def test_the_adoption_bar_is_what_the_rule_actually_scored_not_the_contract_floo
 
 
 def test_a_run_that_skipped_a_holdout_set_is_an_error_not_an_adoption():
-    """튠만 돈 실행의 scores 에는 홀드아웃이 없다 — 빈 튜플을 '교체'로 읽으면 안 된다."""
+    """The scores of a tune-only run hold no holdout -- an empty tuple must not be read as 'replace'."""
     with pytest.raises(LookupError) as unusable:
         adoption_misses("polarity", {"sun holdout 100": {"acc": 0.99, "P:불만": 0.99}})
     assert "p1 blind40" in str(unusable.value)
 
 
 def test_a_paid_impl_without_a_split_is_refused_before_the_holdout_goes_out(capsys):
-    """기준선 표는 홀드아웃을 먼저 돌려준다 — --split 없이는 첫 호출이 블라인드 셋으로 나간다."""
+    """The baseline table gives the holdout back first -- without --split the first call goes out on the blind
+    set."""
     assert main(["eval", "polarity", "--impl", "llm:claude-sonnet-5"]) == 2
     assert "--split" in capsys.readouterr().out

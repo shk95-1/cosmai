@@ -1,7 +1,9 @@
-"""aggregate 한 단계가 런타임 롤의 시간 제한 안에 드는가 (db/bootstrap.sql, tests/test_ranking_scale.py 형).
+"""Whether one aggregate stage fits inside the runtime role's time limits (db/bootstrap.sql, in the form of
+tests/test_ranking_scale.py).
 
-이 세션은 idle_in_transaction_session_timeout 을 운영값보다 훨씬 짧게 조인다: 메트릭 계산이 트랜잭션
-안에서 돌면 세션이 끊겨 실패한다. 계산은 트랜잭션 밖, 쓰기는 배치 커밋이어야 통과한다.
+This session tightens idle_in_transaction_session_timeout far below the production value: if the metric
+computation runs inside a transaction the session is cut and the test fails. It passes only when the
+computation is outside the transaction and the writes are batch commits.
 """
 
 from __future__ import annotations
@@ -26,9 +28,10 @@ MONTHS = 6
 MENTIONS = 50_000
 EXTRACTOR = "scale-v1"
 BASE = date(2026, 3, 1)
-# 런타임 롤의 transaction_timeout 이 실제 예산이다. 넘기면 배치가 통째로 롤백된다.
+# The runtime role's transaction_timeout is the real budget. Going past it rolls the whole batch back.
 BUDGET_SECONDS = 60
-# 운영값은 15s 다 — 계산이 트랜잭션 밖이라는 것을 기계적으로 못 박으려고 더 조인다.
+# The production value is 15s — it is tightened further to pin down mechanically that the computation is
+# outside the transaction.
 IDLE_LIMIT = "1s"
 
 
@@ -41,7 +44,8 @@ def _load(cur: psycopg.Cursor[Any]) -> None:
         for i in range(MENTIONS):
             month = BASE + timedelta(days=31 * (i % MONTHS))
             product = f"p{i % PRODUCTS}"
-            # 카테고리와 need_key 를 서로 나눠 떨어지지 않게 뽑는다 — 겹치면 scope 수가 조용히 줄어든다.
+            # Categories and need_keys are drawn so they do not divide each other — an overlap quietly lowers
+            # the scope count.
             category = f"카테고리{i % CATEGORIES}"
             copy.write_row(
                 ("review", "oliveyoung", f"{product}/r{i}", product, category, category,
@@ -55,7 +59,8 @@ def test_seed_scale_aggregate_fits_the_runtime_budget(needs_runtime_url: str, ca
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         _load(cur)
         conn.commit()
-        # 계산이 트랜잭션 안에 있으면 여기서 세션이 끊긴다 (OperationalError), 통과가 아니라 실패다.
+        # If the computation is inside the transaction the session is cut here (OperationalError); that is a
+        # failure, not a pass.
         cur.execute(f"SET idle_in_transaction_session_timeout = '{IDLE_LIMIT}'")
         conn.commit()
         started = time.perf_counter()
@@ -64,7 +69,7 @@ def test_seed_scale_aggregate_fits_the_runtime_budget(needs_runtime_url: str, ca
         cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s", (run_id,))
         row = cur.fetchone()
 
-    assert row is not None and row[0] > 2000  # 배치(2000) 경계를 실제로 넘긴다
+    assert row is not None and row[0] > 2000  # the batch (2000) boundary is really passed
     with capsys.disabled():
         print(
             f"\naggregate {AGGREGATE_VERSION}: {MENTIONS} mentions -> {row[0]} metrics_need "

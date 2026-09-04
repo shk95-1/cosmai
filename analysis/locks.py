@@ -34,8 +34,9 @@ import psycopg
 
 __all__ = ["ANALYZE", "LOCK_CLASS", "advisory_key", "analyze_lock"]
 
-# 락을 들인 이슈 번호를 네임스페이스로 쓴다 — 수집기의 10(#10)과 같은 규약이고, classid 가 다르므로
-# 두 락은 무슨 수를 써도 부딪히지 않는다. pricing.py 의 한 인자 형태(6)와도 공간이 다르다.
+# The issue number that brought the lock in is the namespace -- the same convention as the collectors' 10
+# (#10), and since the classid differs the two locks cannot collide by any means. It is also a different
+# space from the one-argument form of pricing.py (6).
 LOCK_CLASS = 16
 ANALYZE = "analyze"
 
@@ -44,40 +45,43 @@ GIVE_BACK: LiteralString = "SELECT pg_advisory_unlock(%s, %s)"
 
 
 def advisory_key(name: str) -> tuple[int, int]:
-    """이 락이 사는 (classid, objid). blake2b 인 이유는 `hash()` 가 프로세스마다 소금을 치기 때문이다 —
-    조정해야 하는 상대가 다른 프로세스라 05:00 과 08:00 이 다른 숫자를 잠그면 아무것도 조정하지 못한다.
-    objid 가 int4 라 4바이트."""
+    """The (classid, objid) this lock lives at. It is blake2b because `hash()` is salted per process -- the
+    party to coordinate with is another process, and if 05:00 and 08:00 lock different numbers nothing is
+    coordinated at all. objid is int4, so four bytes."""
     digest = hashlib.blake2b(name.encode("utf-8"), digest_size=4).digest()
     return LOCK_CLASS, int.from_bytes(digest, "big", signed=True)
 
 
 @contextmanager
 def analyze_lock(conn: psycopg.Connection[Any], name: str = ANALYZE) -> Iterator[bool]:
-    """잡았으면 True 를 내주고 블록이 끝날 때 돌려준다. 못 잡았으면 False — 호출자가 양보한다."""
+    """Gives True when it took the lock and returns it at the end of the block. False when it did not -- the
+    caller yields."""
     classid, objid = advisory_key(name)
     with conn.cursor() as cur:
         cur.execute(TAKE, (classid, objid))
         row = cur.fetchone()
     held = bool(row and row[0])
-    # 락은 세션의 것이라 이 커밋을 넘어 남는다 — 열어 둔 채 두면 idle_in_transaction 15s 가 세션을 끊는다.
+    # The lock belongs to the session and outlives this commit -- left open, idle_in_transaction 15s cuts the
+    # session.
     conn.commit()
     try:
         yield held
     finally:
         if held:
             try:
-                conn.rollback()  # 단계가 실패한 트랜잭션을 남겼으면 여기서 아무 문장도 나가지 못한다.
+                conn.rollback()  # with a failed transaction left by the stage, no statement can go out here.
                 with conn.cursor() as cur:
                     cur.execute(GIVE_BACK, (classid, objid))
                     row = cur.fetchone()
                 conn.commit()
-                # 수집기와 같은 한 줄이다: 2.5~4시간짜리 실행에서 이것이 "둘이 겹쳤을 수 있다"의
-                # 유일한 사후 증거다 — 반환값을 버리면 그 사실을 아무도 모른다.
+                # The same one line as the collectors: on a 2.5-4 hour run this is the only evidence after
+                # the fact of "the two may have overlapped" -- throw the return value away and nobody knows.
                 if not (row and row[0]):
                     print(
                         f"{name} lock: pg_advisory_unlock says this session did not hold it, so the "
                         "lock went sometime during the run and the run was not told"
                     )
-            # 세션이 이미 갔으면 락도 같이 갔다 — 크론 메일에 트레이스백 대신 한 줄.
+            # If the session is already gone, so is the lock -- one line in the cron mail instead of a
+            # traceback.
             except psycopg.Error as unreachable:
                 print(f"analyze lock: not given back -- {str(unreachable).splitlines()[0]}")

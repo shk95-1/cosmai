@@ -3,19 +3,23 @@
 #3 등급 A 리뷰가 남긴 질문 -- "§수식이 ydc 를 옮겨 적은 것인지 서술한 것인지" -- 은 문서로는 답할 수
 없다. 답은 **같은 스냅샷에서 두 구현이 같은 수를 내는가**이고, 이 파일이 그 대조다.
 
-고정 입력은 `tests/fixtures/trend_sample/` 한 벌이다. 2026-08-19 코퍼스 전량(261,317행 · 174M)은
-`archive/` 에 있고 그 자리는 수정 금지이므로 레포에는 **대표 표본**만 둔다 -- product 채널 4개로 잘라
-모집단이 닫힌 표본이고, 두 파일은 같은 잘린 run 에서 각각 이렇게 나왔다:
+The fixed input is one set, `tests/fixtures/trend_sample/`. The whole 2026-08-19 corpus (261,317
+rows, 174M) lives in `archive/`, which is read-only, so the repository keeps a representative slice.
 
-    python to_common_schema.py <잘린 run> --out corpus              # → corpus/*
-    python trend.py <잘린 run> --panel eval/panel/channels_v1.csv   # → ydc_trend_v0.2.csv
+The cut is 18 channels of that corpus -- 11 `product` and 7 `expert` -- and it is closed at the
+channel, so every ydc script run on the same sliced run answers the sample exactly. #57 re-cut it
+(11 channels -> 18, product 4 -> 11) because the four-product cut could not reach five branches that
+fire in the full population; `tool/measure-trend-sample` is the command that made this fixture and all
+seven golden files at once, and its docstring carries the recipe:
+
+    tool/measure-trend-sample --ydc <ydc checkout> --runs <run dirs> --channels <ids> \
+        --out tests/fixtures/trend_sample
 
 전량 대조는 워커가 한 번 돌려 보고했다(2026-08-26): 338행 × 13열 전부 일치, 차이 0.
 
-표본의 코퍼스에는 expert 채널 7개가 함께 들어 있다(포크 #41 이 더했다). 판정·보고 모집단은
-`panel_role='product'` 뿐이라(코퍼스 규칙 5) 그 문서들은 이 골든의 어느 행에도 들지 않는다 --
-패널 민감도(`tests/test_sensitivity_golden.py`)가 product 만인 산출과 43채널 전부인 산출을 갈라
-보려면 표본에 두 역할이 다 있어야 해서 있는 것이다.
+The `expert` channels are in the corpus for `tests/test_sensitivity_golden.py`: the reporting
+population is `panel_role='product'` only (corpus rule 5), so those documents reach no row of this
+golden, and the panel sensitivity has nothing to measure unless both roles are in the sample.
 """
 
 from __future__ import annotations
@@ -29,7 +33,7 @@ import pytest
 from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
-from analysis.trend import METRIC_VERSION
+from analysis.trend import DIGITS, METRIC_VERSION, diffusion
 from analysis.trend.pipeline import SCOPE, build, run
 from cosmai.cli import main
 from db import corpus, seed
@@ -159,6 +163,27 @@ def test_the_metric_version_ydc_stamps_on_every_row_lands_on_the_run(sampled: st
         with conn.cursor() as cur:
             cur.execute("SELECT versions->>'metric' FROM analysis_run WHERE run_id = %s", (outcome.run_id,))
             assert cur.fetchone() == (METRIC_VERSION,)
+
+
+def test_the_sample_has_a_cell_where_one_channel_dominates_the_topic(sampled: str):
+    """#57's gap 2. `channel_diffusion` is breadth and evenness in halves (the formula section of
+    `contracts/interfaces.md`), and on a cut where
+    every (topic, quarter) is one video per channel the evenness half is 1 on every row -- so half the
+    formula is a constant and the golden cannot tell it from a formula that never runs. This asks for
+    the row where it is not a constant: a video cell whose diffusion is below what the same channel
+    count spread evenly would give."""
+    with connect(sampled) as conn:
+        made = build(conn)
+    uneven = []
+    for row in made.rows:
+        count, denom, value = row.channel_count, row.denom_channels, row.channel_diffusion
+        if row.source != "youtube_video" or count is None or count < 2 or not denom or value is None:
+            continue
+        # The evenly-spread reference goes through the same rounding as the stored value.
+        even = round(diffusion({str(i): 1 for i in range(count)}, denom), DIGITS["channel_diffusion"])
+        if float(value) < even:
+            uneven.append((row.topic_key, row.quarter, count, value, even))
+    assert uneven, "every channel distribution in this sample is uniform; the entropy term says nothing"
 
 
 def test_the_sample_sized_table_still_passes_the_two_invariants(sampled: str):

@@ -1,0 +1,348 @@
+#!/usr/bin/env python3
+"""Re-cuts `tests/fixtures/trend_sample/` from the ydc collection runs and remakes every golden (fork #57).
+
+The sample golden is a **channel-closed slice** of the 2026-08-19 corpus: keep a set of channels, keep
+those channels' whole sunscreen long-form population and every comment on it, and the same ydc scripts
+that produced the full-population reports produce the sample's golden files unchanged. #41 re-cut it by
+hand and left the recipe in a test docstring only, so the next cut had nothing to run. This is that
+recipe as a command.
+
+    tool/measure-trend-sample \
+        --ydc ~/github_prj/Main/import/youtube-data-collector \
+        --runs data/panel/run_20260819T053057Z data/panel/run_20260819T054559Z \
+        --channels-file tests/fixtures/trend_sample/corpus/channel.csv \
+        --out tests/fixtures/trend_sample
+
+`--runs` are paths relative to `--ydc` (the ydc scripts assume they run from their own directory), and
+nothing is read from this repository except the panel roster (`eval/panel/channels_v1.csv`) the ydc
+scripts take as `--panel`. The ydc slice is never imported -- every step below is a subprocess, the way
+`tool/compare-ydc-sensitivity` runs the same scripts.
+
+What one cut does, in order:
+
+  1. Slice each run by channel into `<work>/pass1/<run_id>/` with an empty `comments.csv`, and run
+     `to_common_schema.py` on it. That pass exists only to let **ydc's own matcher** say which videos
+     carry the population topic's mention -- reproducing the match here would make the sample stand
+     on a second copy of the rule.
+  2. Choose the documents to keep: every `video_long` of those channels that ydc matched to the
+     population topic, plus one witness per exclusion path (`video_short`, `video_unknown`, and a
+     `video_long` with no population mention) so the fixture shows the paths that drop a document.
+     A witness has no comment row in the run, so the sliced comment set stays exactly "the comments of
+     the population videos"; among those, one that matched the population topic and was dropped anyway
+     comes first, then the earliest publication, then `source_item_id` -- deterministic either way.
+  3. Slice each run again to those videos and their comments, into `<work>/pass2/<run_id>/`.
+  4. Run the ydc scripts on the pass-2 runs and write their outputs straight into `--out`:
+     `to_common_schema.py` (corpus/), `trend.py`, `judge.py`, `panel_sensitivity.py`, `backtest.py`,
+     `spam_ad_flags.py`, `evidence_comments.py`, and `cards.py` once per quarter of the judgement grid.
+  5. Rewrite the corpus manifest's `reproduces` block, which `to_common_schema.py` hard-codes to the
+     full population's three numbers, with the three the slice actually holds -- `db/corpus/verify.py`
+     recounts them in SQL and `tests/test_trend_golden.py` fails when they drift. The manifest is
+     written in Korean and this repository's operating surface is English (#192 D12), so the sentences
+     and the population topic come from `<out>/recut.json`, which is fixture data.
+
+`panel_sensitivity.py` exits non-zero while printing its summary when no cell is judgeable, and it has
+already written its CSV by then, so what is checked is that the file appeared, not the exit code.
+
+A cut is a function of its inputs. Measured: two runs of the 11-channel cut and two runs of the
+18-channel cut are byte-identical under `diff -r`, and so are two 18-channel runs under
+`PYTHONHASHSEED=1` and `=2`; the ydc subprocesses are pinned to `PYTHONHASHSEED=0 LC_ALL=C.UTF-8
+TZ=UTC` so that stays true, and `refuse_drift` fails the run if the two passes ever disagree on which
+documents the cut holds. Re-cutting #41's 11 channels reproduced that fixture's seven golden files
+byte for byte, which is how this implementation of the recipe was checked against the hand cut.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import shutil
+import subprocess
+import sys
+from collections.abc import Iterable, Sequence
+from pathlib import Path
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+
+LONG_FORM = "video_long"
+VIDEO_SOURCE = "youtube_video"
+# One witness per path a document can leave the denominator by (corpus manifest rules 4 and 6).
+WITNESS_PATHS = ("video_short", "video_unknown", "video_long_without_topic")
+PANEL_CSV = ROOT / "eval" / "panel" / "channels_v1.csv"
+
+VIDEO_FILE = "videos.csv"
+COMMENT_FILE = "comments.csv"
+CHANNEL_FILE = "channels.csv"
+
+# The names `cards.py` expects inside its `--reports` directory.
+CARDS_JUDGEMENT = "trend_judgement_v0.2.csv"
+CARDS_EVIDENCE = "evidence_comments.csv"
+
+# The ydc scripts run under a pinned environment so a cut is a function of its inputs and nothing else.
+# Measured on this corpus none of the three changes a byte (`match_topics` walks `TOPICS` in order, the
+# only `set` is a membership test, and `quarter()` is string arithmetic on `analysis_month`), so these
+# are a fence rather than a fix -- they keep a later ydc change from making the fixture drift silently.
+SCRIPT_ENV = {**os.environ, "PYTHONHASHSEED": "0", "LC_ALL": "C.UTF-8", "TZ": "UTC"}
+
+
+def read_csv(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def write_csv(path: Path, fields: Sequence[str], rows: Iterable[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(fields))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def header_of(path: Path) -> list[str]:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.reader(handle)
+        return next(reader)
+
+
+def run_script(ydc: Path, script: str, *args: str, allow_failure: bool = False) -> None:
+    """The ydc scripts read `seeds/` and their sibling modules by relative path, so cwd is their own."""
+    done = subprocess.run(
+        [sys.executable, script, *args], cwd=ydc, capture_output=True, text=True, env=SCRIPT_ENV
+    )
+    if done.returncode and not allow_failure:
+        sys.stderr.write(done.stdout + done.stderr)
+        raise SystemExit(f"{script} failed with {done.returncode}")
+    print(f"  {script} -> {done.returncode}")
+
+
+def slice_run(source: Path, target: Path, *, channels: set[str], videos: set[str] | None) -> None:
+    """One sliced run directory. `videos=None` keeps every video of those channels (pass 1)."""
+    processed = target / "processed"
+    processed.mkdir(parents=True, exist_ok=True)
+    origin = source / "processed"
+
+    rows = [r for r in read_csv(origin / CHANNEL_FILE) if r["channel_id"] in channels]
+    write_csv(processed / CHANNEL_FILE, header_of(origin / CHANNEL_FILE), rows)
+
+    kept_videos = [
+        r
+        for r in read_csv(origin / VIDEO_FILE)
+        if r["channel_id"] in channels and (videos is None or r["source_item_id"] in videos)
+    ]
+    write_csv(processed / VIDEO_FILE, header_of(origin / VIDEO_FILE), kept_videos)
+
+    comment_header = header_of(origin / COMMENT_FILE)
+    if videos is None:
+        # Pass 1 only asks ydc which videos matched, and reading 67MB of comments to answer that is waste.
+        write_csv(processed / COMMENT_FILE, comment_header, [])
+    else:
+        seen = {r["source_item_id"] for r in kept_videos}
+        write_csv(
+            processed / COMMENT_FILE,
+            comment_header,
+            (r for r in read_csv(origin / COMMENT_FILE) if r["video_id"] in seen),
+        )
+
+    # The run manifest travels verbatim: `db/corpus/contract.py` holds its `limitations` as contract text.
+    shutil.copyfile(source / "manifest.json", target / "manifest.json")
+
+
+def comment_counts(runs: Sequence[Path]) -> dict[str, int]:
+    counted: dict[str, int] = {}
+    for run in runs:
+        for row in read_csv(run / "processed" / COMMENT_FILE):
+            counted[row["video_id"]] = counted.get(row["video_id"], 0) + 1
+    return counted
+
+
+def population_and_witnesses(corpus: Path, comments: dict[str, int], topic: str) -> set[str]:
+    """The population videos plus one witness per exclusion path, from ydc's own conversion output."""
+    topics: dict[str, set[str]] = {}
+    for row in read_csv(corpus / "mention.csv"):
+        topics.setdefault(row["doc_id"], set()).add(row["topic_id"])
+    documents = [r for r in read_csv(corpus / "document.csv") if r["source"] == VIDEO_SOURCE]
+
+    keep: set[str] = set()
+    candidates: dict[str, list[tuple[bool, str, str]]] = {path: [] for path in WITNESS_PATHS}
+    for row in documents:
+        item, content = row["source_item_id"], row["content_type"]
+        matched = topic in topics.get(row["doc_id"], set())
+        if content == LONG_FORM and matched:
+            keep.add(item)
+            continue
+        if comments.get(item, 0):
+            # A witness with comments would drag comment rows in that no population video is parent of.
+            continue
+        path = "video_long_without_topic" if content == LONG_FORM else content
+        if path in candidates:
+            # A short that matched and was dropped anyway says more than one that never matched: the
+            # ordering puts a matching witness first, then the earliest publication, then the id.
+            candidates[path].append((not matched, row["published_at"], item))
+
+    for path, found in candidates.items():
+        if not found:
+            raise SystemExit(f"no {path} witness in these channels; the exclusion paths would go unshown")
+        keep.add(min(found)[2])
+    return keep
+
+
+def refuse_drift(corpus: Path, keep: set[str]) -> None:
+    """Pass 2 has to hold exactly the documents pass 1 chose. Two runs of `to_common_schema.py` that
+    disagreed would move a witness slot and rewrite the fixture without anything saying so, so the two
+    passes are compared instead of assumed."""
+    converted = {
+        row["source_item_id"] for row in read_csv(corpus / "document.csv") if row["source"] == VIDEO_SOURCE
+    }
+    if converted != keep:
+        raise SystemExit(
+            f"the two passes disagree on which videos the cut holds: "
+            f"only in pass 1 {sorted(keep - converted)}, only in pass 2 {sorted(converted - keep)}"
+        )
+
+
+def reproduces(corpus: Path, panel_roles: dict[str, str], topic: str) -> dict[str, int]:
+    """The three numbers `db/corpus/verify.py` recounts in SQL, over the slice this cut produced."""
+    topics: dict[str, set[str]] = {}
+    for row in read_csv(corpus / "mention.csv"):
+        topics.setdefault(row["doc_id"], set()).add(row["topic_id"])
+    documents = read_csv(corpus / "document.csv")
+    videos = {
+        row["source_item_id"]
+        for row in documents
+        if row["content_type"] == LONG_FORM
+        and panel_roles.get(row["channel_id"]) == "product"
+        and topic in topics.get(row["doc_id"], set())
+    }
+    on_them = [r for r in documents if r["content_type"] == "comment" and r["parent_item_id"] in videos]
+    return {
+        "videos": len(videos),
+        "comments": len(on_them),
+        "unique": sum(1 for r in on_them if r["quality_flags"] == ""),
+    }
+
+
+def rewrite_manifest(
+    corpus: Path, panel_roles: dict[str, str], channels: Sequence[str], words: dict[str, Any]
+) -> dict[str, int]:
+    path = corpus / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    counted = reproduces(corpus, panel_roles, words["population_topic"])
+    roles = [panel_roles.get(channel) for channel in channels]
+    said = {
+        key: text.format(
+            channels=len(channels),
+            product=roles.count("product"),
+            expert=roles.count("expert"),
+            **counted,
+        )
+        for key, text in words["reproduces"].items()
+    }
+    manifest["reproduces"] = {
+        **{words["count_keys"][key]: value for key, value in counted.items()},
+        **said,
+    }
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return counted
+
+
+def make_cards(ydc: Path, out: Path, work: Path) -> None:
+    """`cards.py` answers one quarter at a time; the golden is those answers keyed by quarter."""
+    reports = work / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(out / "ydc_judgement_v0.2.csv", reports / CARDS_JUDGEMENT)
+    shutil.copyfile(out / "ydc_evidence_v0.2.csv", reports / CARDS_EVIDENCE)
+    quarters = sorted({row["quarter"] for row in read_csv(out / "ydc_judgement_v0.2.csv")})
+    cards: dict[str, list[dict[str, object]]] = {}
+    for quarter in quarters:
+        made = work / f"cards_{quarter}.json"
+        run_script(
+            ydc, "cards.py", "--reports", str(reports), "--quarter", quarter,
+            "--out", str(work / f"cards_{quarter}.md"), "--json", str(made),
+        )  # fmt: skip
+        cards[quarter] = json.loads(made.read_text(encoding="utf-8"))
+    (out / "ydc_cards_v0.2.json").write_text(
+        json.dumps(cards, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--ydc", type=Path, required=True, help="the ydc checkout to run the scripts in")
+    parser.add_argument("--runs", type=Path, nargs="+", required=True, help="run dirs relative to --ydc")
+    parser.add_argument("--channels", nargs="+", help="channel ids to keep")
+    parser.add_argument("--channels-file", type=Path, help="a CSV with a channel_id column, instead")
+    parser.add_argument("--out", type=Path, required=True, help="the fixture directory to overwrite")
+    parser.add_argument("--work", type=Path, help="where the sliced runs land (default: <out>/../.recut)")
+    parser.add_argument("--words", type=Path, help="the manifest vocabulary (default: <out>/recut.json)")
+    args = parser.parse_args()
+
+    ydc = args.ydc.expanduser().resolve()
+    runs = [ydc / run for run in args.runs]
+    out = args.out.resolve()
+    work = (args.work or out.parent / ".recut").resolve()
+    channels = set(args.channels or ())
+    if args.channels_file:
+        channels |= {row["channel_id"] for row in read_csv(args.channels_file)}
+    if not channels:
+        raise SystemExit("no channel to keep; pass --channels or --channels-file")
+    words = json.loads((args.words or out / "recut.json").read_text(encoding="utf-8"))
+
+    if work.exists():
+        shutil.rmtree(work)
+    print(f"channels {len(channels)}")
+
+    print("pass 1: which videos does ydc match to the population topic")
+    pass1 = [work / "pass1" / run.name for run in runs]
+    for source, target in zip(runs, pass1, strict=True):
+        slice_run(source, target, channels=channels, videos=None)
+    run_script(ydc, "to_common_schema.py", *(str(p) for p in pass1), "--out", str(work / "pass1" / "corpus"))
+
+    keep = population_and_witnesses(
+        work / "pass1" / "corpus", comment_counts(runs), words["population_topic"]
+    )
+    print(f"  videos kept {len(keep)}")
+
+    print("pass 2: the sliced runs the golden stands on")
+    pass2 = [work / "pass2" / run.name for run in runs]
+    for source, target in zip(runs, pass2, strict=True):
+        slice_run(source, target, channels=channels, videos=keep)
+    sliced = [str(p) for p in pass2]
+
+    print("goldens")
+    if (out / "corpus").exists():
+        shutil.rmtree(out / "corpus")
+    run_script(ydc, "to_common_schema.py", *sliced, "--out", str(out / "corpus"))
+    run_script(ydc, "trend.py", *sliced, "--panel", str(PANEL_CSV), "--out", str(out / "ydc_trend_v0.2.csv"))
+    run_script(ydc, "judge.py", str(out / "ydc_trend_v0.2.csv"), "--out", str(out / "ydc_judgement_v0.2.csv"))
+    run_script(
+        ydc, "panel_sensitivity.py", *sliced, "--panel", str(PANEL_CSV),
+        "--out", str(out / "ydc_panel_sensitivity_v0.2.csv"), allow_failure=True,
+    )  # fmt: skip
+    if not (out / "ydc_panel_sensitivity_v0.2.csv").exists():
+        raise SystemExit("panel_sensitivity.py wrote no CSV")
+    run_script(
+        ydc, "backtest.py", *sliced, "--panel", str(PANEL_CSV),
+        "--out", str(out / "ydc_backtest_v0.2.csv"),
+    )  # fmt: skip
+    run_script(
+        ydc, "spam_ad_flags.py", *sliced, "--panel", str(PANEL_CSV),
+        "--out", str(out / "ydc_spam_ad_v0.2.csv"),
+    )  # fmt: skip
+    run_script(
+        ydc, "evidence_comments.py", "--common", str(out / "corpus"), "--top", "3",
+        "--out", str(out / "ydc_evidence_v0.2.csv"),
+    )  # fmt: skip
+    make_cards(ydc, out, work)
+
+    refuse_drift(out / "corpus", keep)
+    panel_roles = {row["channel_id"]: row["panel_role"] for row in read_csv(PANEL_CSV)}
+    print(rewrite_manifest(out / "corpus", panel_roles, sorted(channels), words))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

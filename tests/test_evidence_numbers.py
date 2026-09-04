@@ -57,12 +57,12 @@ def test_the_tool_still_runs_and_answers_in_the_shape_the_test_reads():
 @pytest.mark.parametrize(
     ("sentence", "key", "section"),
     [
-        ("후보 댓글\n     147건 중 **14건**", "comments", "gates"),
-        ("(후보 쌍으로는 281 중 32)", "candidates", "gates"),
-        ("근거가 선 픽스처 46셀 중 **23셀**에 동점이", "quoted_cells", "gates"),
-        ("102행 중 **24행**에서 고르는 문서가 달라진다", "rows", "gates"),
-        ("모집단 댓글 418건 = 청크 439개", "comments", "retrieval"),
-        ("주제 별칭 63개", "queries", "retrieval"),
+        ("Of the fixture's\n     719 candidate comments, **21** are dropped here", "comments", "gates"),
+        ("(41 of 1216 candidate pairs)", "candidates", "gates"),
+        ("96 fixture cells that carry evidence, **71** have a tie", "quoted_cells", "gates"),
+        ("**57** of the 251 rows pick a different document", "rows", "gates"),
+        ("population comments 2605 = 2646 chunks", "comments", "retrieval"),
+        ("the 63 topic aliases", "queries", "retrieval"),
     ],
 )
 def test_the_contract_still_says_what_the_fixture_measures(sentence: str, key: str, section: str):
@@ -75,13 +75,13 @@ def test_every_number_the_gates_paragraph_cites_is_the_number_the_tool_counts():
     gates = measured()["gates"]
     body = contract()
     for value, name in (
-        (147, "comments"),
-        (14, "creator_comments"),
-        (281, "candidates"),
-        (32, "creator_pairs"),
-        (46, "quoted_cells"),
-        (23, "tied_cells"),
-        (102, "rows"),
+        (719, "comments"),
+        (21, "creator_comments"),
+        (1216, "candidates"),
+        (41, "creator_pairs"),
+        (96, "quoted_cells"),
+        (71, "tied_cells"),
+        (251, "rows"),
     ):
         assert gates[name] == value, f"{name}: 계약은 {value}, 도구는 {gates[name]}"
         assert str(value) in body, f"{name}={value} 가 계약 §근거 에 없다"
@@ -92,15 +92,15 @@ def test_every_number_the_retrieval_table_cites_is_the_number_the_tool_measures(
     found = measured()["retrieval"]
     table = contract()
     assert f"P@10 **{found['p_at_10']:.3f}".replace("0.", ".") in table
-    assert f"천장 **{found['p_at_10_ceiling']:.3f}".replace("0.", ".") in table
+    assert f"ceiling **{found['p_at_10_ceiling']:.3f}".replace("0.", ".") in table
     assert f"MRR@10 {found['mrr_at_10']:.3f}".replace("0.", ".") in table
     assert f"Hit@10 {found['hit_at_10']}%" in table
     assert (
         f"**{found['evidence_in_top10']}/{found['evidence_rows']} = {found['evidence_in_top10_pct']}%**"
         in table
     )
-    assert f"댓글 {found['comments']}건 = 청크 {found['chunks']}개" in table
-    assert f"418건 중 {found['comments_split']}건" in table
+    assert f"comments {found['comments']} = {found['chunks']} chunks" in table
+    assert f"({found['comments_split']} of the fixture's {found['comments']} population comments)" in table
 
 
 def test_the_table_says_it_is_not_the_same_ruler_as_the_all_source_measurement():

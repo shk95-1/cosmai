@@ -1,4 +1,5 @@
-"""`analyze aggregate` 와 랭킹 파생이 실제 스키마에서 멱등한가 (contracts/entrypoints.md)."""
+"""Whether `analyze aggregate` and the ranking derivations are idempotent on a real schema
+(contracts/entrypoints.md)."""
 
 from __future__ import annotations
 
@@ -33,14 +34,15 @@ def _snapshots():
 
 def _dump(cur, table: str, columns: str) -> list:
     order = ", ".join(str(i + 1) for i in range(len(columns.split(","))))
-    cur.execute(f"SELECT {columns} FROM {table} ORDER BY {order}")  # noqa: S608 - 이 모듈의 상수다
+    cur.execute(f"SELECT {columns} FROM {table} ORDER BY {order}")  # noqa: S608 - constants of this module
     return cur.fetchall()
 
 
 def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
     needs_runtime_url: str, trend_radar_schema: str, database_url_for_tests: str
 ):
-    # 원본 스키마는 읽기 전용이다 — 입력은 소유 롤이 넣고, 파생은 needs_runtime 이 SELECT 로만 읽는다.
+    # The source schema is read-only — the owning role inserts the input, and the derivation has
+    # needs_runtime read it with SELECT alone.
     with connect(database_url_for_tests) as source, source.cursor() as cur:
         cur.executemany(
             "INSERT INTO rank_snapshot (source, board, category_key, product_key, captured_at, "
@@ -73,7 +75,8 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
         events = _dump(cur, "price_event", "product_key, board, t_change, direction, n_pre, n_post24")
         denoms = _dump(cur, "product_denominator", "product_key, category, low_collected, low_complete")
 
-        # 두 번째 실행은 stage 진입점을 통해 돈다 — 파생은 run() 안에서도 같은 행을 다시 쓴다.
+        # The second run goes through the stage entry point — the derivation writes the same rows again
+        # inside run() too.
         run(conn, commerce_schema="", captured_at=CAPTURED_AT, extractors=())
         second = run_ranking(conn, VERSION, CAPTURED_AT, source_schema="")
         assert first == second
@@ -82,7 +85,7 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
         assert (
             _dump(cur, "product_denominator", "product_key, category, low_collected, low_complete") == denoms
         )
-    # 'q' 는 7개 스냅샷 중 2개에만 있다; 미등장은 present_share 로만 보인다 (A16).
+    # 'q' is in only 2 of the 7 snapshots; an absence shows only in present_share (A16).
     assert [(r[0], r[3]) for r in daily] == [("p", 7), ("q", 2)]
     assert [(r[3], r[4]) for r in events] == [("drop", 3)]
     # 사이트가 발행한 경로 그대로다 — leaf 로 자르면 metrics_need.scope 와 만나지 못한다
@@ -106,7 +109,7 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str)
         assert run(conn, extractors=POPULATION) == run_id
         assert _dump(cur, "metrics_need", "scope, need_key, month, product_ref, neg, pos") == needs
         assert _dump(cur, "metrics_wish", "scope, format, attribute, brand, mentions") == wishes
-        # 분석은 새 run 을 만든다 — 시드 run 의 행은 손대지 않는다 (1단계 판정 4).
+        # The analysis creates a new run — the rows of the seed run are not touched (stage-1 decision 4).
         cur.execute("SELECT count(*) FROM metrics_need WHERE run_id <> %s", (run_id,))
         assert cur.fetchone() == (SEEDED_METRICS_NEED,)
         cur.execute("SELECT count(*) FROM metrics_wish WHERE run_id <> %s", (run_id,))
@@ -114,7 +117,8 @@ def test_analyze_aggregate_writes_one_run_and_repeats_it(needs_runtime_url: str)
         cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s", (run_id,))
         mine = cur.fetchone()
 
-        # #5 의 `analyze all` 은 run 을 스스로 만들고 넘긴다: 그 run 에 쓰되 상태는 #5 가 닫는다.
+        # `analyze all` of #5 creates the run itself and hands it over: writes go to that run, and #5 closes
+        # the status.
         cur.execute(
             "INSERT INTO analysis_run (status, versions, note) "
             "VALUES ('running', '{}'::jsonb, 'all') RETURNING run_id"
@@ -137,7 +141,7 @@ def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: 
             run(conn)
         conn.rollback()
         run_id = run(conn, scope="선블록", extractors=("slice-suncare",))
-        # 카테고리 합 행끼리 견준다 — 같은 run 이 제품 축 행도 낸다 (#41).
+        # Category total rows are compared with each other — the same run also emits product-axis rows (#41).
         cur.execute(
             "SELECT need_key, neg, pos FROM metrics_need WHERE run_id = %s AND month = '' "
             "AND product_ref = '' ORDER BY need_key",
@@ -150,7 +154,7 @@ def test_the_run_aggregates_only_the_population_it_was_given(needs_runtime_url: 
             "ORDER BY need_key"
         )
         assert got == cur.fetchall()
-        # 그 모집단은 제품 축에도 그대로 실린다 — 화면 3 이 읽는 행이다.
+        # That population is carried onto the product axis as it is — those are the rows screen 3 reads.
         cur.execute("SELECT count(*) FROM metrics_need WHERE run_id = %s AND product_ref <> ''", (run_id,))
         per_product = cur.fetchone()
         assert per_product is not None and per_product[0] > 0

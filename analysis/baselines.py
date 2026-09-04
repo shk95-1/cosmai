@@ -1,4 +1,5 @@
-"""contracts/interfaces.md 기준선 표의 코드본. 표와 어긋나면 tests/test_baselines.py 가 잡는다."""
+"""The code version of the baseline table of contracts/interfaces.md. Drift from the table and
+tests/test_baselines.py catches it."""
 
 from __future__ import annotations
 
@@ -10,20 +11,21 @@ from decimal import ROUND_HALF_EVEN, Decimal
 @dataclass(frozen=True)
 class Check:
     metric: str  # evaluate 가 내는 이름: acc | P:<라벨> | R:<라벨> | strict | 변형허용
-    # 계약 표에 적힌 글자 그대로다 — 소수 자리수가 곧 이 게이트의 해상도라 float 로는 담기지 않는다.
+    # Exactly the characters written in the contract table -- the decimal places are the resolution of this
+    # gate, so a float cannot hold them.
     threshold: Decimal
 
 
 @dataclass(frozen=True)
 class EvalSet:
-    """기준선 표의 한 행 = labeled_set 에서 골라낼 한 덩어리."""
+    """One row of the baseline table = one group to pick out of labeled_set."""
 
     task: str
     name: str
     split: str
     checks: tuple[Check, ...]
     ref_prefix: str = ""
-    extra_key: str = ""  # labeled_set.extra 의 키 — ref 접두로 가릴 수 없는 셋을 고른다
+    extra_key: str = ""  # a key of labeled_set.extra -- picks a set a ref prefix cannot separate
     extra_value: str = ""
 
 
@@ -43,8 +45,8 @@ BASELINES: tuple[EvalSet, ...] = (
         checks=(Check("acc", Decimal(".47")), Check("P:불만", Decimal(".67"))),
         ref_prefix="p1:",
     ),
-    # wish 의 ref 는 comment_id 단독이라(formats.md) holdout60 과 blind60_v2 를 접두로 가를 수 없다 —
-    # 시드가 labeled_set.extra.set 에 셋 이름을 넣는다.
+    # The ref of wish is the comment_id alone (formats.md), so holdout60 and blind60_v2 cannot be told apart
+    # by prefix -- the seed puts the set name into labeled_set.extra.set.
     EvalSet(
         task="wish_class",
         name="P9 blind60_v2",
@@ -53,7 +55,7 @@ BASELINES: tuple[EvalSet, ...] = (
         extra_key="set",
         extra_value="blind60_v2",
     ),
-    # brand_link 는 두 표본 120행 전체가 그대로 한 셋이라 고를 것이 없다.
+    # brand_link has both 120-row samples as one whole set, so there is nothing to pick.
     EvalSet(task="brand_link", name="P3 120", split="holdout", checks=(Check("P:OK", Decimal(".97")),)),
     EvalSet(
         task="product_match",
@@ -65,9 +67,10 @@ BASELINES: tuple[EvalSet, ...] = (
 )
 
 
-# 기준선이 없는 관측용 셋. 표는 홀드아웃 두 줄뿐이지만 1차 패스는 튠 셋 점수도 봐야 하고(같은 규칙이
-# 어디에 맞춰졌는지), wish 는 블라인드가 아닌 두 셋과의 차가 곧 과적합의 크기다. 기준선 표의 사본인
-# BASELINES 는 건드리지 않는다 — tests/test_baselines.py 가 표와 행 순서까지 대조한다.
+# Observation sets with no baseline. The table has only the two holdout lines, but the first pass has to see
+# the tune-set scores as well (what the same rules were fitted to), and for wish the gap against the two
+# non-blind sets is the size of the overfitting. BASELINES, the copy of the baseline table, is not touched --
+# tests/test_baselines.py compares it with the table down to the row order.
 OBSERVED: tuple[EvalSet, ...] = (
     EvalSet(task="polarity", name="sun tune 200", split="tune", checks=(), ref_prefix="sun:"),
     EvalSet(task="polarity", name="p1 crosscat 60", split="tune", checks=(), ref_prefix="p1:"),
@@ -101,16 +104,20 @@ RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, Decimal]]] = {
 
 
 def meets(metric: float, threshold: Decimal) -> bool:
-    """지표를 임계값이 적힌 자리수로 반올림한 뒤 비교한다. 표의 숫자는 규칙이 낸 원값의 반올림 표기라
-    원값과 곧이곧대로 재면 기준선을 만든 규칙 자신이 진다 (2/3 = .6667 < .67). 자리수가 해상도다:
-    `.67` 은 두 자리라 .6667 이 통과하고, `.769` 는 세 자리라 그만큼 촘촘하다. 게이트의 비교는
-    여기 한 곳이라 기준선 표와 규칙 실측 표가 같은 자를 쓴다."""
-    # 하네스가 출력하는 f"{metric:.3f}" 와 같은 반올림 — 표에 옮겨 적힌 값이 곧 통과선이다.
+    """It rounds the metric to the decimal places written at the threshold and then compares. The numbers in
+    the table are the rounded form of the raw values the rules produced, so measuring the raw value literally
+    makes the rules that built the baseline lose to it (2/3 = .6667 < .67). The decimal places are the
+    resolution: `.67` is two places so .6667 passes, and `.769` is three places and that much finer. The
+    comparison of the gate is this one place, so the baseline table and the measured-rules table use the same
+    ruler."""
+    # The same rounding as the f"{metric:.3f}" the harness prints -- the value copied into the table is the
+    # pass line.
     return Decimal(metric).quantize(threshold, rounding=ROUND_HALF_EVEN) >= threshold
 
 
 def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tuple[str, ...]:
-    """규칙에 못 미친 칸. 빈 튜플이어야 교체다 — 셋이 통째로 빠진 실행은 판정이 아니라 오류다."""
+    """The cells that fell short of the rules. It has to be an empty tuple for a replacement -- a run with a
+    whole set missing is an error, not a judgement."""
     wanted = RULE_MEASURED.get(task, {})
     absent = [name for name in wanted if name not in scores]
     if absent:
@@ -124,5 +131,5 @@ def adoption_misses(task: str, scores: Mapping[str, Mapping[str, float]]) -> tup
 
 
 def for_task(task: str) -> tuple[EvalSet, ...]:
-    """기준선 셋이 먼저다 — 채택 판정이 관측용 셋에 밀려 뒤에서 읽히지 않도록."""
+    """The baseline sets come first -- so the adoption decision is not read after the observation sets."""
     return tuple(b for b in BASELINES + OBSERVED if b.task == task)

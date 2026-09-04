@@ -1,6 +1,7 @@
-"""RuleLinker 의 두 규칙(p3 브랜드 링크·p2 제품 매칭)과 `analyze link` 의 멱등성.
+"""The two rules of RuleLinker (p3 brand linking, p2 product matching) and the idempotence of `analyze link`.
 
-순수 함수 픽스처는 평가셋(eval/brand_link, eval/product_match)에서 그대로 떠 온 행이다.
+The pure-function fixtures are rows lifted from the evaluation sets (eval/brand_link, eval/product_match) as
+they are.
 """
 
 from __future__ import annotations
@@ -27,7 +28,8 @@ from db.seed._common import connect
 
 DUMPS = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current"
 
-# 작은 사전 하나로 p3 규칙 넷을 다 볼 수 있다: 길이 우선·stop·cooc_required·brand 아닌 kind.
+# One small dictionary shows all four p3 rules: longest first · stop · cooc_required · a kind that is not
+# brand.
 SURFACES = (
     EntitySurface("brand", "라네즈", "라네즈", "normal", None),
     EntitySurface("brand", "라네", "라네", "normal", None),
@@ -73,7 +75,7 @@ def test_a_cooc_required_brand_needs_a_product_word_within_the_window(lexicon: L
 
 
 def test_an_ingredient_surface_is_linked_with_its_own_kind(lexicon: Lexicon):
-    # (d) surface_re 는 브랜드 전용이 아니다 — brand_mention 은 kind 로 걸러야 브랜드 정밀도를 잰다.
+    # (d) surface_re is not brand-only -- brand_mention has to filter by kind to measure brand precision.
     hits = RuleLinker().link(unit("징크 함량이 높아요"), lexicon)
     assert [(h.kind, h.canonical) for h in hits] == [("ingredient", "ZINC_OXIDE")]
 
@@ -84,7 +86,7 @@ def test_the_hit_span_points_at_the_surface_without_the_particle(lexicon: Lexico
     assert text[hit.start : hit.end] == "라네즈"
 
 
-# ---------- 이름 정규화 · 쌍 판정 (p2) ----------
+# ---------- name normalization · pair decision (p2) ----------
 def test_brackets_volume_and_marketing_words_leave_the_normalized_name():
     assert (
         normalize_name("[화잘먹] 조선미녀 맑은쌀 선크림 50ml+20ml 증정 기획", "조선미녀") == "맑은쌀 선크림"
@@ -117,7 +119,7 @@ def test_match_products_groups_two_sites_into_one_ref_and_leaves_variants_empty(
         ("glowpick", "G7", "member"),
         ("oliveyoung", "A0001", "primary"),
     ]
-    assert match.variants == ()  # B3: product_variant 는 #2 범위 밖
+    assert match.variants == ()  # B3: product_variant is outside the scope of #2
     assert [(c.src_a, c.key_a, c.src_b, c.key_b, c.mutual) for c in match.candidates] == [
         ("oliveyoung", "A0001", "glowpick", "G7", True)
     ]
@@ -135,7 +137,7 @@ def test_the_ref_name_norm_is_the_anchors_normalized_name():
     assert ref.name_norm == "누 글로우 화이트 쿠션"  # T19: 링커가 반드시 낸다
 
 
-# ---------- 평가 구현체 (순수) ----------
+# ---------- evaluation implementations (pure) ----------
 def row(ref: str, gold: str, text: str) -> LabeledRow:
     task = "brand_link" if "/" in ref else "product_match"
     return LabeledRow(task=task, ref=ref, split="holdout", gold=gold, text=text, extra={})
@@ -155,7 +157,8 @@ def test_the_brand_link_predictor_answers_ok_only_where_its_own_circuit_links():
         ),
         row("uniform:comment/b/올리브영", "OK(retailer)", "이 사람이랑 올리브영 가고싶음"),
     ]
-    # 두 번째는 사전이 stop 으로 끄는 유통사라 우리 회로는 링크하지 않는다 — 재현율은 잃고 정밀도는 지킨다.
+    # The second is a retailer the dictionary switches off with stop, so our circuit does not link it -- we
+    # lose recall and keep precision.
     assert list(predict(rows)) == ["OK", "FP"]
 
 
@@ -196,7 +199,8 @@ def _apply_dump(engine: Any, dump: Path, schema: str, original: str) -> None:
 
 @pytest.fixture
 def source_schemas(database_url_for_tests: str, _schema_name: str) -> Iterator[tuple[str, str]]:
-    """원천 두 스키마를 계약 덤프 그대로 세운다. 따로 두는 이유: 두 덤프가 alembic_version 을 함께 갖는다."""
+    """Stands the two source schemas up from the contract dumps as they are. They are kept apart because both
+    dumps carry alembic_version."""
     tail = hashlib.sha1(_schema_name.encode()).hexdigest()[:10]
     names = (f"tr_{tail}", f"td_{tail}")
     engine = create_engine(database_url_for_tests)
@@ -228,7 +232,8 @@ COMMENTS = (
 
 @pytest.fixture
 def sources(database_url_for_tests: str, source_schemas: tuple[str, str]) -> tuple[str, str]:
-    """원천 행은 스키마 소유자(needs_migrator)로 넣는다 — needs_runtime 은 SELECT 밖에 못 한다."""
+    """Source rows are inserted as the schema owner (needs_migrator) -- needs_runtime can do nothing but
+    SELECT."""
     commerce, youtube = source_schemas
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
@@ -265,7 +270,8 @@ SEED_REF = "oy:A0001"
 
 
 def _seed_rows(conn: psycopg.Connection[Any]) -> None:
-    """시드가 남긴 슬라이스 행. 버전이 키에 있는 표는 공존해야 하고, 없는 표는 재계산이 갱신한다."""
+    """The slice rows the seed left. A table with the version in the key has to coexist; one without it is
+    refreshed by the recomputation."""
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO product_ref (product_ref, brand, name_norm, name, n_sites, linker_version) "
@@ -290,7 +296,8 @@ def _seed_rows(conn: psycopg.Connection[Any]) -> None:
 
 
 @pytest.mark.postgres
-# batch=2 는 네 표 전부에서 배치 경계를 넘긴다 — 커밋으로 쪼갠 실행이 한 덩어리 실행과 같은 결과여야 한다.
+# batch=2 passes a batch boundary in all four tables -- a run split by commits has to give the same result as
+# one run in a single lump.
 @pytest.mark.parametrize("batch", [2, BATCH])
 def test_analyze_link_writes_rows_and_a_second_run_changes_no_count(needs_runtime_url, sources, batch):
     commerce, youtube = sources
@@ -308,10 +315,10 @@ def test_analyze_link_writes_rows_and_a_second_run_changes_no_count(needs_runtim
             ref = cur.fetchone()
     assert first == second
     assert all(first[table] > 0 for table in TABLES)
-    # PK 에 버전이 있는 표: 시드 행은 그대로 있고 새 버전 행이 더해진다.
+    # A table with the version in its PK: the seed rows stay and a new version row is added.
     assert dict(versions)["slice-p3"] == 1
     assert dict(versions)[LINKER_VERSION] > 0
-    # PK 에 버전이 없는 표: 같은 ref 는 DO UPDATE 다 (versioning.md).
+    # A table without the version in its PK: the same ref is a DO UPDATE (versioning.md).
     assert ref == (LINKER_VERSION, "누 글로우 화이트 쿠션")
 
 
@@ -324,19 +331,20 @@ def test_since_leaves_the_older_documents_out(needs_runtime_url, sources):
     with connect(needs_runtime_url) as conn:
         counts = run(conn, since=date(2026, 6, 1), commerce_schema=commerce, youtube_schema=youtube)
     assert counts["brand_mention"] == 0
-    assert counts["product_ref"] > 0  # 제품 식별은 창을 자르지 않는다 — 잘린 카탈로그는 다른 군집을 만든다
+    assert counts["product_ref"] > 0  # identification takes no window -- a cut catalogue makes other clusters
 
 
 @pytest.fixture
 def registered(needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
-    """기본 구현체는 --url 이 없으면 운영에서 사전을 읽는다 — 그 한 자리를 테스트 URL 로 돌린다."""
+    """The default implementations read the dictionary from production without --url -- that one place is
+    turned to the test URL."""
     monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
     register("brand_link", LINKER_VERSION, BrandLinkPredictor())
     register("product_match", LINKER_VERSION, ProductMatchPredictor())
     yield needs_runtime_url
     unregister("brand_link")
     unregister("product_match")
-    # 여기서 되돌리지 않으면 뒤에 도는 파일이 '등록 없음'(exit 2)을 만난다 (#30).
+    # Without restoring it here, a file running later meets 'no registration' (exit 2) (#30).
     registry.load_implementations()
 
 
@@ -356,6 +364,7 @@ def test_both_eval_tasks_score_and_land_in_analysis_run(registered: str, capsys)
     ]
     brand = runs[0][1]["scores"]["P3 120"]
     match = runs[1][1]["scores"]["P2 blind 40"]
-    # 1차 패스는 점수가 나오면 된다. 이 숫자가 지금의 규칙이고, 바뀌면 그 PR 이 기준선 표를 갱신한다.
+    # The first pass only needs a score to come out. This number is the current rule, and a change means that
+    # PR updates the baseline table.
     assert round(brand["P:OK"], 3) == 0.991
     assert (round(match["strict"], 3), round(match["변형허용"], 3)) == (0.769, 0.974)

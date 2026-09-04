@@ -1,4 +1,5 @@
-"""시드 run 3개를 골든으로 두고 RuleAggregator 가 같은 입력에서 무엇을 다르게 내는지 잰다 (#4 1차)."""
+"""Three seed runs are kept as the golden set and this measures what RuleAggregator emits differently from
+the same input (#4, first pass)."""
 
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ pytestmark = pytest.mark.postgres
 TOLERANCE = 0.01
 SAMPLES = 6
 
-# population_share_pct 는 빠져 있다: 시드의 p1 값은 계약 수식이 아니라 수집 표본 근사다 (interfaces.md B7).
+# population_share_pct is left out: the seed's p1 value is an approximation from the collection sample rather
+# than the contract formula (interfaces.md B7).
 NEED_COLUMNS = (
     "neg", "pos", "yt_neg", "yt_pos", "unresolved", "unresolved_new", "low_share", "low_mentioning",
     "denom_low", "denom_site", "strength_mean", "strength_low_rating_ratio", "persist_months",
@@ -28,23 +30,25 @@ WISH_COLUMNS = (
     "max_like", "example",
 )  # fmt: skip
 
-# 1차 패스 실측(2026-08-24, 005 적용 후 재측정). 줄어들면 2차 패스가 전진한 것이고, 늘어나면 회귀다.
+# Measured on the first pass (2026-08-24, remeasured after 005 was applied). Fewer means the second pass moved
+# forward, more is a regression.
 EXPECTED: Mapping[str, Mapping[str, int]] = {
-    # unresolved_new 는 제품의 first_seen 을 요구하는데 Aggregator 는 그것을 받지 못한다 (보고서 참조).
+    # unresolved_new needs the product's first_seen, which the Aggregator is not given (see the report).
     "suncare": {"missing": 0, "extra": 0, "unresolved_new": 15},
-    # 005 전에는 neg/pos/persist_* 도 9행씩 어긋났다: p1 이 재추출한 리뷰 548건이 옛 자연키
-    # UNIQUE (src, ref, need_key, sentence) 에서 slice-suncare 행에 흡수되어 입력에 없었다.
-    # 그 548건이 돌아오면서 그 넷은 0이 되고 low_* 만 남는다 — 골든이 세는 중립 극성 언급이
-    # need_mention 에 저장되지 않는, 005 와 무관한 두 번째 차이다.
+    # Before 005, neg/pos/persist_* were off by 9 rows each as well: the 548 reviews p1 re-extracted were
+    # absorbed into slice-suncare rows under the old natural key UNIQUE (src, ref, need_key, sentence) and so
+    # were not in the input. With those 548 back, those four become 0 and only low_* is left — the golden set
+    # counting neutral-polarity mentions that are not stored in need_mention is a second difference, one that
+    # has nothing to do with 005.
     "p1": {"missing": 0, "extra": 0, "low_mentioning": 86, "low_share": 61},
-    # 시드가 wish_mention.channel_id 를 채우지 않는다 — 채널 수는 입력에 존재하지 않는다.
+    # The seed does not fill wish_mention.channel_id — the channel count does not exist in the input.
     "p9": {"missing": 0, "extra": 0, "channels": 601},
 }
 
 
 def _golden(cur: Any, table: str, keys: str, columns: Sequence[str], note: str, extra: str = "") -> dict:
     cur.execute(
-        f"SELECT {keys}, {', '.join(columns)} FROM {table} "  # noqa: S608 - 컬럼은 이 모듈의 상수다
+        f"SELECT {keys}, {', '.join(columns)} FROM {table} "  # noqa: S608 - the columns are module constants
         f"WHERE run_id = (SELECT run_id FROM analysis_run WHERE note = %s) {extra}",
         (note,),
     )
@@ -66,7 +70,7 @@ def _measure(name: str, golden: dict, got: dict, columns: Sequence[str]) -> tupl
     for key in sorted(set(golden) & set(got), key=str):
         for column in columns:
             expected = golden[key][column]
-            if expected is None:  # 골든이 재지 않은 칸은 비교 대상이 아니다.
+            if expected is None:  # a cell the golden set did not measure is not compared
                 continue
             ok, error = _same(expected, got[key][column])
             if ok:
@@ -90,8 +94,9 @@ def _rows(rows: Iterable[Any], keys: Sequence[str], columns: Sequence[str]) -> d
 
 
 def _category_sums(rows: Iterable[Any]) -> list[Any]:
-    """골든이 재는 것은 카테고리 합 행이다 — 제품 축 행(#41)은 같은 (scope, need_key) 를 다시 쓰므로
-    걸러내지 않으면 키가 겹쳐 합 행을 덮어쓴다. 시드 쪽 질의도 product_ref = '' 만 읽는다."""
+    """What the golden set measures is the category total row — a product-axis row (#41) writes the same
+    (scope, need_key) again, so without filtering it out the keys collide and it overwrites the total row.
+    The query on the seed side reads only product_ref = '' as well."""
     return [r for r in rows if r.product_ref == "" and r.month == ""]
 
 
@@ -101,7 +106,8 @@ def test_the_aggregator_is_measured_against_the_three_seed_goldens(needs_runtime
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         denominators = load_denominators(cur)
         suncare = load_needs(cur, ("slice-suncare",))
-        # slice-p1 은 분모가 있는 올리브영만 집계했다; 다른 사이트의 같은 카테고리명은 골든에 없다.
+        # slice-p1 aggregated only oliveyoung, which has a denominator; the same category name from another
+        # site is not in the golden set.
         p1 = [m for m in load_needs(cur, ("slice-p1",)) if m.site == "oliveyoung"]
         wishes = load_wishes(cur, ("slice-p9",))
 

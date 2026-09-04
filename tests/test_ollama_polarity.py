@@ -1,4 +1,5 @@
-"""ollama 배관. 무료·로컬이고 채택 판정에는 쓰지 않는다 — 재는 것은 같은 시그니처와 왕복뿐이다."""
+"""ollama plumbing. Free, local, and not used to decide adoption — what is measured is the same signature and
+the round trip, nothing more."""
 
 from __future__ import annotations
 
@@ -83,7 +84,8 @@ def test_the_payload_turns_gemma_thinking_off():
 
 
 def test_the_ollama_version_carries_its_own_prompt_edition_not_the_shared_one():
-    """프롬프트가 Claude 경로와 갈라졌다 — 공유 PROMPT_DATE 를 주장하면 interfaces.md 가 거짓이 된다."""
+    """The prompt has diverged from the Claude path — claiming a shared PROMPT_DATE would make interfaces.md
+    false."""
     found = OllamaPolarity().version
     assert re.match(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$", found)  # contracts/versioning.md:3
     assert FEWSHOT_TAG in found
@@ -100,7 +102,8 @@ def test_the_shots_are_prior_turns_and_the_sentence_under_test_is_still_the_last
 
 
 def test_every_shot_is_a_tune_row_and_no_shot_touches_a_holdout_sentence():
-    """블라인드는 이미 2회 닳았다 — 예시가 홀드아웃에서 새면 남은 1회가 튜닝 점수가 된다."""
+    """The blind has already been spent twice — an example leaking into the holdout turns the one that is left
+    into a tuning score."""
     holdout = {
         row["sentence"]
         for name in ("suncare_holdout100.csv", "crosscat_blind40.csv")
@@ -118,9 +121,10 @@ def test_every_shot_is_a_tune_row_and_no_shot_touches_a_holdout_sentence():
             assert shot.sentence not in holdout
 
 
-# --- 시작 프로브 (#32): 못 닿으면 크게 실패한다 --------------------------------------------------
-# 스위트는 소켓을 못 연다 (tests/conftest.py 의 _no_network) — 프로브가 왕복 대신 무엇을 읽고
-# 판단하는지가 여기서 재는 것이고, 진짜 왕복은 `local_llm` 표시가 붙은 위의 테스트가 한다.
+# --- start probe (#32): fail loudly when it cannot be reached -----------------------------------
+# The suite cannot open a socket (_no_network in tests/conftest.py) — what is measured here is what the probe
+# reads and decides on instead of a round trip, and the real round trip is done by the test above marked
+# `local_llm`.
 PROBE_URL = "http://127.0.0.1:21434"
 
 
@@ -139,7 +143,7 @@ class _Answer:
 
 
 def _serving(monkeypatch: pytest.MonkeyPatch, models: list[str]) -> list[str]:
-    """`/api/tags` 가 이 모델들을 답하는 ollama. 프로브가 부른 URL 을 돌려준다."""
+    """An ollama whose `/api/tags` answers with these models. It gives back the URL the probe called."""
     called: list[str] = []
 
     def urlopen(request: Any, *args: Any, **kwargs: Any) -> _Answer:
@@ -151,7 +155,7 @@ def _serving(monkeypatch: pytest.MonkeyPatch, models: list[str]) -> list[str]:
 
 
 def _refusing(monkeypatch: pytest.MonkeyPatch) -> None:
-    """아무도 듣지 않는 주소. 배선이 끊긴 컨테이너가 내는 것과 같은 URLError(=OSError)다."""
+    """An address nobody listens on. The same URLError (= OSError) a container with broken wiring gives."""
 
     def urlopen(request: Any, *args: Any, **kwargs: Any) -> None:
         raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
@@ -162,15 +166,15 @@ def _refusing(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_probe_asks_the_tags_endpoint_of_the_address_the_classifier_will_call(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """프로브가 다른 주소를 보면 통과한 프로브가 아무것도 보장하지 않는다."""
+    """If the probe looks at a different address, a probe that passed guarantees nothing."""
     monkeypatch.setenv(OLLAMA_URL_KEY, PROBE_URL)
     called = _serving(monkeypatch, [DEFAULT_OLLAMA_MODEL])
-    OllamaPolarity().preflight()  # 조용히 돌아오는 것이 통과다
+    OllamaPolarity().preflight()  # coming back quietly is the pass
     assert called == [f"{PROBE_URL}/api/tags"]
 
 
 def test_the_probe_refuses_when_the_address_answers_but_has_no_such_model(monkeypatch: pytest.MonkeyPatch):
-    """포트가 열려 있다고 그 모델이 거기 있는 것은 아니다 — 이 갈래가 없으면 첫 배치까지 가서야 안다."""
+    """An open port does not mean the model is there — without this branch it is known at the first batch."""
     _serving(monkeypatch, ["something-else:latest"])
     with pytest.raises(LookupError) as refused:
         OllamaPolarity(base_url=PROBE_URL).preflight()
@@ -179,8 +183,10 @@ def test_the_probe_refuses_when_the_address_answers_but_has_no_such_model(monkey
 
 
 def test_the_probe_names_the_address_and_the_knob_when_nothing_answers(monkeypatch: pytest.MonkeyPatch):
-    """크론 메일에 남는 한 줄이다: 어디로 걸었는지와 그 주소를 바꾸는 노브 이름이 같이 있어야 한다.
-    타입도 정해져 있다 — LookupError 라야 단계가 잡아 run 을 failed 로 닫는다 (analysis/pipeline.py)."""
+    """The one line that stays in the cron mail: where it dialled, and the name of the knob that changes that
+    address, have to be there together.
+    The type is fixed as well — it has to be LookupError for the stage to catch it and close the run as failed
+    (analysis/pipeline.py)."""
     _refusing(monkeypatch)
     with pytest.raises(LookupError) as refused:
         OllamaPolarity(base_url=PROBE_URL).preflight()

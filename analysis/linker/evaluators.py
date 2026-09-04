@@ -1,4 +1,5 @@
-"""brand_link · product_match 평가 구현체. `analysis.registry.load_implementations()` 가 꽂는다."""
+"""The brand_link and product_match evaluation implementations. `analysis.registry.load_implementations()`
+plugs them in."""
 
 from __future__ import annotations
 
@@ -11,15 +12,15 @@ from analysis.linker import LINKER_VERSION, RuleLinker, accepts, normalized
 from analysis.registry import LabeledRow, register
 from analysis.types import Lexicon, TextUnit
 
-# labeled_set.ref 가 '<sample>:<src>/<ref_id>/<brand>' 이라 brand 는 마지막 조각이다 (formats.md).
+# labeled_set.ref is '<sample>:<src>/<ref_id>/<brand>', so the brand is the last piece (formats.md).
 BRAND_FROM_REF = 2
-# labeled_set.text 가 '<src_a>:<name_a> | <src_b>:<name_b>' 이다 (db/seed/labeled.py). extra 에는 없다 (T8).
+# labeled_set.text is '<src_a>:<name_a> | <src_b>:<name_b>' (db/seed/labeled.py). It is not in extra (T8).
 PAIR_SEPARATOR = " | "
 
 
 @dataclass(frozen=True, eq=False)
 class BrandLinkPredictor:
-    """행마다 '그 브랜드를 그 문맥에서 우리 회로가 링크하는가'를 답한다 — OK 는 채택, FP 는 비채택."""
+    """Per row it answers "does our circuit link that brand in that context" -- OK is accepted, FP is not."""
 
     lexicon: Lexicon | None = None
     linker: RuleLinker = field(default_factory=RuleLinker)
@@ -27,9 +28,10 @@ class BrandLinkPredictor:
     def _lexicon(self) -> Lexicon:
         if self.lexicon is not None:
             return self.lexicon
-        # Predictor 프로토콜은 연결을 넘겨주지 않는다 — 사전을 읽을 접속은 구현체가 연다. 그 접속의
-        # 목적지는 예측자마다 따로 들지 않고 analysis.predictors 한 자리에서 온다: 여기에 자기 url
-        # 필드를 두었더니 `cosmai eval --url` 이 닿지 않아 이 예측자만 운영 DB 의 사전을 읽었다.
+        # The Predictor protocol does not hand over a connection -- the implementation opens the connection
+        # that reads the dictionary. Its destination is not held per predictor but comes from the one place,
+        # analysis.predictors: a url field of its own here left `cosmai eval --url` out of reach and this
+        # predictor alone read the dictionary of the production DB.
         from analysis.predictors import connect_lexicon
 
         with connect_lexicon() as conn:
@@ -48,7 +50,8 @@ class BrandLinkPredictor:
                 observed_at=date(1970, 1, 1),
                 observed_at_resolution="day",
             )
-            # (d) surface_re 는 ingredient 표면도 문다. 브랜드 회로의 정밀도를 재려면 kind 로 거른다.
+            # (d) surface_re bites ingredient surfaces too. Measuring the precision of the brand circuit
+            # means filtering by kind.
             linked = {h.canonical for h in self.linker.link(unit, lexicon) if h.kind == "brand"}
             out.append("OK" if brand in linked else "FP")
         return out
@@ -56,7 +59,8 @@ class BrandLinkPredictor:
 
 @dataclass(frozen=True, eq=False)
 class ProductMatchPredictor:
-    """쌍마다 채택(Y)·비채택(N)을 답한다. 점수는 채택 집합에 대한 정밀도다 (interfaces.md)."""
+    """Per pair it answers accepted (Y) or not (N). The score is the precision over the accepted set
+    (interfaces.md)."""
 
     linker: RuleLinker = field(default_factory=RuleLinker)
 
@@ -66,7 +70,8 @@ class ProductMatchPredictor:
             left, _, right = row.text.partition(PAIR_SEPARATOR)
             src_a, _, name_a = left.partition(":")
             src_b, _, name_b = right.partition(":")
-            # 평가 행에는 브랜드 컬럼이 없다 — 후보 생성이 이미 브랜드로 묶은 쌍이라 이름만으로 판정한다.
+            # The evaluation rows have no brand column -- candidate generation has already grouped the pair
+            # by brand, so it is judged by the names alone.
             a = normalized(name_a, "", src_a)
             b = normalized(name_b, "", src_b)
             out.append("Y" if accepts(a, b).ok else "N")
@@ -74,6 +79,6 @@ class ProductMatchPredictor:
 
 
 def register_implementations() -> None:
-    """registry.load_implementations() 만이 등록을 일으킨다 (#99)."""
+    """Only registry.load_implementations() causes registration (#99)."""
     register("brand_link", LINKER_VERSION, BrandLinkPredictor())
     register("product_match", LINKER_VERSION, ProductMatchPredictor())

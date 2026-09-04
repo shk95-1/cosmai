@@ -1,4 +1,4 @@
-"""질의 축의 불용어 (포크 #46). 색인 축은 여기서 아무것도 안 바뀐다.
+"""Stopwords on the query axis (fork #46). Nothing changes on the index axis here.
 
 두 축이 다르다는 것이 이 파일의 본론이다. `bm25.tokenize` 는 그대로 두고 `bm25.tokenize_query` 만
 목록을 탄다 -- 색인에서 `소비자` 를 빼면 `소비자` 를 직접 찾는 질의를 못 하게 된다. 목록이 사는 자리는
@@ -24,8 +24,9 @@ from analysis.retrieval import topics as topics_module
 from cosmai.cli import main
 from tests.retrieval.conftest import csv_stopwords, install_stopwords, install_topics, stopword_rows
 
-# ydc `v0.3.0` 의 `seeds/stopwords_ko.txt` 뒤에 붙은 질의 메타 블록 그대로(12개). 그 파일은 읽기 전용
-# 원본이라 레포로 들여오지 않고 여기 시험 벡터로만 둔다 -- `test_particles.py` 의 조사 30개와 같은 자리다.
+# The query-meta block appended after `seeds/stopwords_ko.txt` in ydc `v0.3.0`, as it is (12 of them). That
+# file is a read-only original, so it is not brought into the repo and lives here only as a test vector -- the
+# same place as the 30 particles of `test_particles.py`.
 YDC_QUERY_META = (
     "소비자",
     "사람",
@@ -40,8 +41,9 @@ YDC_QUERY_META = (
     "뭐라",
     "어떻",
 )
-# 같은 파일 앞쪽(일반어 블록 30개) 중 우리 목록에 들어오는 유일한 하나. ydc 는 파일 전체를 질의에
-# 적용하므로 이 말도 질의에서 빠졌고, 이슈가 든 근거 예시가 이것을 뺀 결과다.
+# The only one of the general block (30) at the front of the same file that enters our list. ydc applies the
+# whole file to queries, so this word dropped out of queries there too, and the example the issue gives is the
+# result of dropping it.
 FROM_YDC_GENERAL = ("관련",)
 # 그 일반어 블록의 나머지 29. 우리는 안 가져왔고, 근거는 두 갈래다(등급 B 리뷰 M6 이 고친 자리 --
 # "lift 가 처분했다"는 **틀렸다**: lift 는 `terms` 의 미포착 표현 보고서에서만 돌고 BM25 점수에는 닿지
@@ -55,8 +57,10 @@ YDC_GENERAL_REST = (
     "영상", "댓글", "채널", "오늘", "이번", "지금", "그냥", "더", "또",
     "여러분", "안녕", "구독", "링크", "클릭", "확인", "하", "되", "있",
 )  # fmt: skip
-# 위 (1). 시험 벡터는 아래 `GENERAL_CARRIERS` 이고, 나머지는 `<말>은 좋다`로 담아 잰다.
-# 2글자 규칙에 걸리는 것은 이 넷뿐이다 -- 나머지 아홉은 그 규칙까지 가지도 않는다(태그에서 걸린다).
+# The (1) above. The test vector is `GENERAL_CARRIERS` below, and the rest are carried in `<word> is good`
+# and measured.
+# Only these four are caught by the two-character rule -- the other nine never reach it (they are caught on
+# the tag).
 DROPPED_BY_TOKENIZE = frozenset(
     {"것", "수", "등", "때", "거", "분", "번", "중", "점", "쪽", "듯", "여러분", "하"}
 )
@@ -109,13 +113,14 @@ def conn(needs_schema: str, needs_runtime_url: str):
 
 @pytest.fixture
 def installed():
-    """레포 CSV 를 이 프로세스의 활성 목록으로. DB 를 쓰는 테스트는 자기 스키마에서 다시 세운다."""
+    """The repo CSV as this process's active list. A test that uses a DB sets it up again in its own
+    schema."""
     active = stopwords.use(csv_stopwords())
     yield active
     stopwords.forget()
 
 
-# ---------- 목록이 무엇이고 어디에 사는가 ----------
+# ---------- what the list is and where it lives ----------
 
 
 def test_the_repo_csv_carries_the_ydc_judgement_and_none_of_the_general_block():
@@ -128,20 +133,23 @@ def test_the_repo_csv_carries_the_ydc_judgement_and_none_of_the_general_block():
 
 
 def test_the_general_block_we_left_behind_is_left_behind_for_the_reason_we_wrote():
-    """M6: 근거가 "lift 가 처분했다"가 아니라 두 갈래라는 것. 13은 토크나이저가 실제로 버리고,
-    16은 토큰으로 남되 흔해서 idf 가 깎는 부류다 -- 후자가 이 목록이 필요한 이유의 반대편이다.
-    실측이 갈라지면 그 문장부터 낡은 것이므로 여기서 센다."""
+    """M6: that the ground is two branches rather than "lift disposed of it". 13 are really dropped by the
+    tokenizer, and the other 16 stay as tokens but are common enough that idf discounts them -- the latter is
+    the other side of why this list is needed. If the measurement splits, that sentence is the first thing to
+    go stale, so it is counted here."""
     emitted, dropped = set(), set()
     for word in YDC_GENERAL_REST:
         text = GENERAL_CARRIERS.get(word, f"{word}은 좋다")
         (emitted if word in bm25.tokenize(text) else dropped).add(word)
     assert dropped == DROPPED_BY_TOKENIZE
     assert len(emitted) == 16
-    # 왜 버려지는지까지 센다 -- "2글자 규칙이 처분했다"는 넷에만 맞는 말이고, 아홉은 태그에서 걸린다.
+    # Why they are dropped is counted too -- "the two-character rule disposed of them" is true of four only,
+    # and the other nine are caught on the tag.
     kiwi = bm25.kiwi()
     by_length_rule = set()
     for word in dropped:
-        # kiwipiepy 의 오버로드는 한 문장 입력도 배치 반환과 함께 묶어 놓아 좁혀지지 않는다(bm25 와 같다).
+        # kiwipiepy's overloads tie a single-sentence input together with the batch return, so it cannot be
+        # narrowed.
         parsed: Any = kiwi.tokenize(GENERAL_CARRIERS.get(word, f"{word}은 좋다"))
         tags = [t.tag.split("-")[0] for t in parsed if t.form == word]
         if any(tag in bm25.KIWI_TAGS for tag in tags):
@@ -152,8 +160,9 @@ def test_the_general_block_we_left_behind_is_left_behind_for_the_reason_we_wrote
 
 
 def test_every_row_says_it_is_a_query_stopword():
-    """`canonical` 은 정본 표기가 아니라 이 표기가 걸리는 **축**이다 -- 축이 하나뿐인 지금도 그
-    자리를 비워 두면 다음 축이 `kind` 를 새로 파게 되고, 그러면 버전 축이 또 하나 생긴다."""
+    """`canonical` is not the canonical spelling but the **axis** this spelling hangs on -- even now, with
+    only one axis, leaving that slot empty makes the next axis dig `kind` open again, and then there is one
+    more version axis."""
     for row in _rows():
         assert row["kind"] == stopwords.KIND, row
         assert row["canonical"] == stopwords.AXIS, row
@@ -169,11 +178,12 @@ def test_a_row_that_the_tokenizer_cannot_emit_is_kept_but_says_so(installed):
     assert sum(UNREACHABLE in row["note"] for row in _rows()) == 2  # 사람들·뭐라
 
 
-# ---------- 두 축이 갈린다 ----------
+# ---------- the two axes are split ----------
 
 
 def test_the_query_tokenizer_drops_the_filler_the_index_tokenizer_keeps(installed):
-    """이슈의 근거 예시. ydc 실측과 같은 토큰이 나오고, 질의 쪽에서만 필러가 빠진다."""
+    """The example the issue gives. The same tokens as the ydc measurement come out, and the filler drops on
+    the query side only."""
     assert bm25.tokenize("백탁 관련해서 소비자들이") == ["백탁", "관련", "소비자"]
     assert bm25.tokenize_query("백탁 관련해서 소비자들이") == ["백탁"]
 
@@ -191,13 +201,14 @@ def test_the_index_still_indexes_the_filler(installed):
 
 
 def test_search_uses_the_query_tokenizer(installed):
-    """필러가 든 자연어 질의가 필러만 든 문서를 끌어올리지 않는다."""
+    """A natural-language query with fillers in it does not pull up a document holding only fillers."""
     index = bm25.Index(["topic", "filler"], ["백탁이 심하다", "후니는 우리 소비자편이야"])
     assert index.search("백탁 관련해서 소비자들이")[0][0] == "topic"
 
 
 def test_the_note_names_what_was_dropped_and_says_nothing_otherwise(installed):
-    """`search` 의 유일한 창구다. 뺀 것이 없을 때도 찍으면 그 줄은 곧 읽히지 않는 줄이 된다."""
+    """The one window of `search`. Printed even when nothing was taken out, that line soon stops being
+    read."""
     assert stopwords.query_note("백탁") is None
     assert stopwords.query_note("사람들 반응") is None  # 전부 불용어라 아무것도 안 뺐다
     note = stopwords.query_note("백탁 관련해서 소비자들이")
@@ -206,20 +217,21 @@ def test_the_note_names_what_was_dropped_and_says_nothing_otherwise(installed):
 
 
 def test_a_query_that_is_all_stopwords_keeps_its_tokens(installed):
-    """빈 질의는 결과 0건이고, 필러가 낀 순위보다 나쁘다."""
+    """An empty query is 0 results, and that is worse than a ranking with fillers in it."""
     tokens = bm25.tokenize("사람들 반응")
     assert tokens and set(tokens) <= stopwords.active().words
     assert bm25.tokenize_query("사람들 반응") == tokens
 
 
 def test_without_an_active_list_the_query_tokenizer_is_the_index_tokenizer():
-    """활성 버전이 없는 것은 막힘이 아니라 이 목록 이전의 검색이다 -- 주제 사전과 다른 자리다."""
+    """No active version is not a blocker but the search as it was before this list -- unlike the topic
+    dictionary."""
     stopwords.forget()
     assert stopwords.active().version is None
     assert bm25.tokenize_query("백탁 관련해서 소비자들이") == bm25.tokenize("백탁 관련해서 소비자들이")
 
 
-# ---------- 기준선이 안 움직인다 ----------
+# ---------- the baseline does not move ----------
 
 
 def test_no_alias_and_no_eval_query_meets_the_list(installed):
@@ -249,13 +261,13 @@ def test_the_heldout_gold_is_defined_on_the_index_axis(installed):
     assert retrieval_eval.docs_with_tokens(index, "백탁 소비자 반응") == {"a", "b"}
 
 
-# ---------- DB 왕복 ----------
+# ---------- the DB round trip ----------
 
 
 @pytest.mark.postgres
 def test_the_active_version_is_what_the_lexicon_cli_loaded(conn, needs_runtime_url: str):
-    """적재 경로는 `cosmai lexicon load` 하나다 -- 새 CLI 도 새 kind 도 새 DDL 도 필요 없었다
-    (`kind='stopword'` 는 001 의 CHECK 에 이미 있다)."""
+    """There is one load path, `cosmai lexicon load` -- no new CLI, no new kind and no new DDL was needed
+    (`kind='stopword'` is already in the CHECK of 001)."""
     argv = ["lexicon", "load", "--kind", stopwords.KIND, "--version", "1"]
     assert main([*argv, str(stopwords.DICTIONARY_CSV), "--url", needs_runtime_url]) == 0
     assert (
@@ -287,7 +299,7 @@ def test_a_loaded_version_does_not_move_the_list_until_it_is_activated(conn, nee
 
 @pytest.mark.postgres
 def test_an_empty_schema_gives_an_empty_list_instead_of_refusing(conn):
-    """주제 사전은 여기서 멈춘다(정답 0건이 거짓 초록을 만든다). 질의 불용어는 멈추지 않는다."""
+    """The topic dictionary stops here (0 answers make a false green). The query stopwords do not stop."""
     empty = stopwords.load(conn)
     assert empty.words == frozenset()
     assert empty.version is None
@@ -295,7 +307,7 @@ def test_an_empty_schema_gives_an_empty_list_instead_of_refusing(conn):
 
 @pytest.mark.postgres
 def test_activating_the_aspect_dictionary_does_not_turn_this_list_off(conn, needs_runtime_url: str):
-    """포크 #56 이 aspect v3 를 올리는 동안 이 목록이 꺼지지 않는다는 것. `entity_lexicon` 의
+    """That this list is not switched off while fork #56 raises aspect v3. The number of `entity_lexicon`
     activate 는 `WHERE kind = %s` 라 **활성 버전**이 kind 마다 독립이다. 버전 **번호표**까지 독립인
     것은 아니고(포크 #58), 그 사실은 여기가 아니라 계약이 진다."""
     install_topics(conn)
@@ -312,8 +324,8 @@ def test_activating_the_aspect_dictionary_does_not_turn_this_list_off(conn, need
 
 @pytest.mark.postgres
 def test_the_index_cache_signature_does_not_move_with_the_list(conn):
-    """색인은 `tokenize` 그대로라 목록이 바뀌어도 같은 색인이 맞다 -- 서명이 이것을 물면 목록을
-    고칠 때마다 38만 청크를 다시 형태소 분석한다."""
+    """The index is `tokenize` as it was, so the same index is right even when the list changes -- the
+    signature does not bite this."""
     from analysis.retrieval.pipeline import index_signature
 
     install_topics(conn)

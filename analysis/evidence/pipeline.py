@@ -1,15 +1,17 @@
 """`needs.corpus_*` + `needs.topic_quarter_judgement` → `needs.topic_quarter_evidence` (포크 #6).
 
-근거는 판정과 달리 **코퍼스를 훑는 단계**다. 그래서 #40 이 만나지 않은 함정을 그대로 만난다:
-`needs_runtime` 의 `idle_in_transaction_session_timeout` 이 15초라, 후보를 커서로 들고 접기 시작하면
-연결이 끊긴다. 읽자마자 `conn.commit()` 하고 그 뒤로는 DB 를 보지 않는 것이 이 파일의 모양이고,
-`analysis/trend/pipeline.py` 가 같은 이유로 같은 모양이다. 끌어오는 것은 본문이 아니라 포인터와
-좋아요뿐이다 -- 본문은 뷰가 필요할 때 잇는다. 전량(261,317문서)에서 후보 15,602행 · 질의 178ms ·
+Unlike the judgement, evidence is **a stage that scans the corpus**. So it runs into the trap #40 never met:
+`needs_runtime`'s `idle_in_transaction_session_timeout` is 15 seconds, so holding the candidates on a cursor
+and starting to fold them cuts the connection. Committing with `conn.commit()` as soon as it has read and not
+looking at the DB after that is the shape of this file, and `analysis/trend/pipeline.py` has the same shape
+for the same reason. What is pulled in is pointers and like counts, not bodies -- the body is joined by the
+view when it needs one. Over the whole set (261,317 documents) 15,602 candidate rows · 178ms of query ·
 명령 전체 0.52s · 최대 상주 73MB 로 **재 봤다**(2026-08-26, 계약 §근거 "전량 실측"); 재지 않은 채
 "가볍다"고 적어 두면 그것은 다음 사람이 밟을 단언이다.
 
-**모집단을 다시 적지 않는다.** 지표를 세운 `POPULATION` CTE 를 그대로 import 해서 쓴다. 근거만 다른
-모집단에서 고르면 카드가 인용하는 발화와 카드에 적힌 숫자가 다른 분모 위에 서고, 둘 다 그럴듯해서
+**The population is not written again.** The `POPULATION` CTE that built the metrics is imported and used as
+it is. Choosing the evidence from a different population would stand the speech a card quotes and the numbers
+written on that card on different denominators, and both would look plausible enough to hide it
 보이지 않는다 (계약 §근거).
 """
 
@@ -37,17 +39,17 @@ from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
 
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
-# 근거가 붙을 자리. 판정된 셀만 읽는 것이 025 의 FK 가 거절할 행을 만들지 않는 방법이다.
+# Where the evidence attaches. Reading only judged cells is how no row the FK of 025 would refuse is made.
 CELLS: LiteralString = (
     "SELECT DISTINCT topic_key, quarter, source FROM topic_quarter_judgement "
     "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
 )
-# 두 술어를 나란히 두는 것은 계약이 그 둘의 동치를 보장하지 않기 때문이고, 023 의 부분 인덱스가
-# `content_type` 으로 골라지므로 계획은 그대로다 -- `source` 하나만 걸면 26만 행을 훑는다
-# (`analysis/trend/pipeline.py` 의 같은 자리, #5 실측).
+# The two predicates sit side by side because the contract does not guarantee they are equivalent, and the
+# partial index of 023 is chosen by `content_type` so the plan is unchanged -- with `source` alone it scans
+# 260k rows (the same place in `analysis/trend/pipeline.py`, measured in #5).
 #
-# quality_flags 를 여기서 거르지 않는 것은 게이트가 두 곳에 있으면 갈리기 때문이다. 규칙 넷은
-# `analysis/evidence` 하나가 지고, 이 질의는 후보를 데려오기만 한다.
+# quality_flags is not filtered here because a gate in two places drifts. The four rules are carried by
+# `analysis/evidence` alone, and this query only brings the candidates over.
 CANDIDATES: LiteralString = (
     POPULATION
     + f"""
@@ -83,12 +85,14 @@ VIOLATIONS: LiteralString = (
 
 
 class NoEvidence(LookupError):
-    """근거로 삼을 것이 없다. 아직 안 세운 것이라 실패가 아니라 막힘이다 -- 0행을 조용히 쓰면 빈 표
-    위에서도 불변식이 참이 되고, 카드는 "규칙에 걸린 셀이 없다"와 "근거가 없다"를 구분하지 못한다."""
+    """There is nothing to take as evidence. It has not been counted yet, so this is blocked rather than a
+    failure -- writing 0 rows quietly makes the invariants true over an empty table too, and the card cannot
+    tell "no cell matched the rule" from "there is no evidence"."""
 
 
 def _int(value: Any) -> int:
-    """좋아요는 jsonb 안에서 문자열로 산다. 못 읽는 값은 0 이다 -- ydc 도 그렇게 읽는다."""
+    """A like count lives as a string inside jsonb. A value that cannot be read is 0 -- ydc read it that way
+    too."""
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -97,7 +101,8 @@ def _int(value: Any) -> int:
 
 @dataclass(frozen=True)
 class Built:
-    """적재 전의 근거 한 벌. 골든과 테스트는 DB 에 쓰지 않고 이것만 본다."""
+    """One evidence set before loading. The golden set and the tests write nothing to the DB and look only at
+    this."""
 
     run_id: int
     snapshot_id: int
@@ -139,7 +144,8 @@ def build(
     panel_version: int | None = None,
     top: int = TOP_PER_CELL,
 ) -> Built:
-    """판정 셀과 후보를 읽고, 트랜잭션을 닫고, 고른다. run 을 찾는 길은 `quarter`·`judge` 와 같다."""
+    """Reads the judged cells and the candidates, closes the transaction, and picks. The run is found the
+    same way as `quarter` and `judge`."""
     with conn.cursor() as cur:
         version = panel_version if panel_version is not None else panel_seed.active_version(cur)
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
@@ -223,7 +229,8 @@ def run(
     panel_version: int | None = None,
     top: int = TOP_PER_CELL,
 ) -> EvidenceOutcome:
-    """그 (run, scope, 명부) 의 근거 행을 통째로 다시 쓴다 -- 부분 갱신이면 자리의 사다리가 구멍 난다."""
+    """Rewrites the evidence rows of that (run, scope, roster) wholesale -- a partial update puts a hole in
+    the ladder of ranks."""
     made = build(
         conn,
         scope=scope,
@@ -237,7 +244,8 @@ def run(
         cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(STAMP_VERSION, (payload, made.run_id))
-        # 계약 문장이 아니라 저장된 행이 답한다 -- 자리가 1 부터 이어지는가, 근거가 그 셀의 것인가.
+        # The stored rows answer, not a sentence of the contract -- do the ranks run on from 1, does the
+        # evidence belong to that cell.
         cur.execute(VIOLATIONS, (made.run_id,))
         violations = [f"{name} {quarter or '-'} {detail}" for name, quarter, detail in cur.fetchall()]
     conn.commit()

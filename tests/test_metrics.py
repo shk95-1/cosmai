@@ -1,11 +1,12 @@
-"""점수 계산의 고정 벡터. 손으로 셀 수 있는 크기라 값이 바뀌면 규칙이 바뀐 것이다."""
+"""Fixed vectors for the score computation. Small enough to count by hand, so a changed value means a changed
+rule."""
 
 from __future__ import annotations
 
 from analysis.metrics import Scores, precision_over, score
 
 PAIRS = [("불만", "불만"), ("불만", "만족"), ("만족", "만족"), ("중립", "중립"), ("중립", "불만")]
-# (gold, 예측). 채택 = 예측 'Y' 두 행뿐이고 분모는 그 둘이다.
+# (gold, prediction). Accepted = the two rows predicted 'Y', and the denominator is those two.
 MATCHES = [("Y", "Y"), ("V", "Y"), ("N", "N"), ("Y", "N")]
 
 
@@ -31,6 +32,6 @@ def test_a_label_nobody_predicted_scores_zero_instead_of_dividing_by_zero():
 def test_precision_counts_only_the_rows_the_implementation_accepted():
     assert precision_over(MATCHES, {"Y"}, {"Y"}) == 0.5
     assert precision_over(MATCHES, {"Y"}, {"Y", "V"}) == 1.0
-    # 아무것도 채택하지 않으면 분모가 0 이다 — 0 으로 나누지 않고 0.0 을 낸다.
+    # Accept nothing and the denominator is 0 -- it does not divide by zero but emits 0.0.
     assert precision_over(MATCHES, {"Z"}, {"Y"}) == 0.0
     assert precision_over([], {"Y"}, {"Y"}) == 0.0

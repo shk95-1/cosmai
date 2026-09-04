@@ -1,5 +1,5 @@
-"""원천 어댑터. 커서가 자연키와 어긋나면 페이지 경계에서 행이 조용히 사라지므로,
-BATCH 를 작게 낮춰 실제로 여러 페이지를 돌게 만들고 전수를 센다."""
+"""The source adapters. A cursor out of step with the natural key makes rows vanish quietly at a page
+boundary, so BATCH is lowered to force several real pages and the whole set is counted."""
 
 from __future__ import annotations
 
@@ -92,7 +92,7 @@ def test_since_filters_by_the_source_date(tubedepth_schema, _schema_name):
 
 
 def test_a_commerce_review_doc_id_carries_the_site(trend_radar_schema, _schema_name):
-    # review_key 는 사이트 안에서만 고유하다. 사이트를 빼면 두 사이트의 리뷰가 한 문서가 된다.
+    # review_key is unique only inside a site. Drop the site and reviews from two sites become one document.
     conn = _connect(trend_radar_schema, _schema_name)
     try:
         with conn.cursor() as cur:

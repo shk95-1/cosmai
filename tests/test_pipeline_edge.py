@@ -1,9 +1,10 @@
-"""선언된 엣지가 실제 스키마·단계와 어긋나지 않는다 (#141).
+"""A declared edge does not diverge from the real schemas and stages (#141).
 
-계보를 계약으로 적는 값은 그것이 코드와 같을 때만 있다. 여기서 재는 것은 셋이다: 참조된 단계가
-실재하는가 · 참조된 저장소가 실재하는 표인가 · 그림에서 떨어져 나온 단계가 없는가.
+Writing the lineage into the contract is worth something only while it matches the code. Three things are
+measured here: does the referenced stage exist · is the referenced store a real table · is there a stage cut
+off from the picture.
 
-노드 표를 따로 두지 않은 대가를 여기서 치른다 -- 저장소의 실재를 DB 에 직접 묻는다.
+The price of keeping no node table is paid here -- the existence of a store is asked of the DB directly.
 """
 
 from __future__ import annotations
@@ -31,13 +32,13 @@ def _stores() -> set[str]:
 
 DDL_FILES = (
     ("needs", REPO_ROOT / "contracts" / "ddl" / "needs"),
-    (None, REPO_ROOT / "contracts" / "ddl" / "current"),  # app.<schema>.sql 은 이름이 정규화돼 있다
+    (None, REPO_ROOT / "contracts" / "ddl" / "current"),  # app.<schema>.sql has its names normalized
 )
 CREATE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][\w.]*)", re.IGNORECASE)
 
 
 def _declared_tables() -> set[str]:
-    """이 체크아웃의 DDL 이 선언하는 표 이름 전부, 스키마까지 붙여서."""
+    """Every table name the DDL of this checkout declares, with the schema attached."""
     out: set[str] = set()
     for default_schema, directory in DDL_FILES:
         for path in sorted(directory.glob("*.sql")):
@@ -57,18 +58,19 @@ def test_every_stage_an_edge_names_is_declared():
 
 
 def test_no_stage_is_left_out_of_the_graph():
-    # 그림에서 떨어져 나온 단계는 "무엇을 먹이는지 아무도 모르는 단계" 다. prune 처럼 쓰기만
-    # 없고 읽기만 있는 단계가 있으므로 방향은 묻지 않는다 -- 엣지가 하나라도 있으면 된다.
+    # A stage cut off from the picture is "a stage nobody knows what feeds it". Some stages only read and
+    # never write, such as prune, so the direction is not asked -- one edge is enough.
     assert STAGE_KEYS <= _stage_refs(), sorted(STAGE_KEYS - _stage_refs())
 
 
 def test_a_store_key_is_a_table_this_checkout_declares():
-    """실재는 DB 가 아니라 **계약** 에 묻는다.
+    """Existence is asked of the **contract**, not of the DB.
 
-    라이브 DB 에 묻는 것이 처음 생각이었지만 셋이 어긋났다: 하네스는 tubedepth 를 통째로 세우지
-    않고 jobs 하나만 세우고(tool/checks/test 가 그 이유를 적는다), 운영 DB 에는 포크가 만든 표도
-    산다. 어느 쪽에 묻든 "이 체크아웃이 아는 표인가" 가 아니라 "지금 그 서버에 있나" 를 재게 된다 --
-    그리고 후자로 판정하면 upstream 계약이 남의 객체를 참조해도 초록이다(#107·#150 과 같은 자리).
+    Asking the live DB was the first thought, but three things diverged: the harness does not stand tubedepth
+    up whole and stands up jobs alone (tool/checks/test writes down why), and the production DB also holds
+    tables the fork made. Asked of either, it measures "is it on that server now" rather than "is it a table
+    this checkout knows" -- and judged the latter way, an upstream contract referring to someone else's object
+    stays green (the same place as #107 and #150).
     """
     declared = _declared_tables()
     missing = sorted(k for k in _stores() if k not in declared)
@@ -76,7 +78,7 @@ def test_a_store_key_is_a_table_this_checkout_declares():
 
 
 def test_a_store_key_is_schema_qualified():
-    # search_path 에 따라 뜻이 달라지는 이름은 계약이 될 수 없다.
+    # A name whose meaning depends on search_path cannot be a contract.
     assert not [key for key in _stores() if "." not in key]
 
 
@@ -86,7 +88,8 @@ def test_edges_are_unique():
 
 
 def test_no_edge_joins_two_stages():
-    # 단계 사이에는 언제나 그것이 남긴 표가 있다. 건너뛰면 계보가 "무엇을 통해" 를 잃는다.
+    # Between two stages there is always the table one of them left. Skipped, the lineage loses its "through
+    # what".
     assert not [e for e in EDGES if e.from_kind == "stage" and e.to_kind == "stage"]
 
 
@@ -94,7 +97,7 @@ def test_the_seeded_rows_match_the_declaration():
     url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
     engine = create_engine(url)
     with engine.connect() as conn:
-        conn.exec_driver_sql("SET ROLE needs_owner")  # needs_migrator 는 SET ROLE 로만 needs 를 본다
+        conn.exec_driver_sql("SET ROLE needs_owner")  # needs_migrator sees needs only through SET ROLE
         rows = {(r[0], r[1]) for r in conn.execute(text("select from_key, to_key from needs.pipeline_edge"))}
     engine.dispose()
     if not rows:

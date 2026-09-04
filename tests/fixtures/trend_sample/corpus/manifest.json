@@ -5,22 +5,22 @@
     "run_20260819T054559Z"
   ],
   "table_counts": {
-    "document.csv": 974,
-    "mention.csv": 1171,
-    "channel.csv": 11
+    "document.csv": 3225,
+    "mention.csv": 3065,
+    "channel.csv": 18
   },
   "documents_by_content_type": {
-    "video_long": 62,
-    "video_unknown": 1,
+    "video_long": 126,
     "video_short": 1,
-    "comment": 910
+    "comment": 3097,
+    "video_unknown": 1
   },
   "input_counts": {
-    "video_rows": 64,
-    "comment_rows": 910,
+    "video_rows": 128,
+    "comment_rows": 3097,
     "duplicate_docs": 0,
     "orphan_comments": 0,
-    "duplicate_comment_text": 0
+    "duplicate_comment_text": 3
   },
   "text_rule": "영상 text = 정규화(제목 + 공백 + 설명). 댓글 text = 정규화(본문). 정규화는 HTML 엔티티 해제 → NFKC → 제어문자 제거 → 공백 축약이며 trend.py 의 normalize_text 를 그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외.",
   "rules": [
@@ -37,11 +37,11 @@
     "태그를 판정 텍스트에 포함할지는 미결이다. 포함하면 선크림 장문이 962 → 1,019편이 되고 모든 composition 이 움직인다."
   ],
   "reproduces": {
-    "선크림_장문_product": 21,
-    "그_영상_댓글_전체": 418,
-    "그_영상_댓글_중복제외": 418,
-    "재현_방법": "document 에서 content_type=video_long 이고 channel.panel_role=product 이며 mention 에 topic_id=선크림 이 있는 문서 → 21. 그 영상들을 parent_item_id 로 갖는 댓글 → 418. 그중 quality_flags 가 빈 것 → 418.",
-    "표본": "2026-08-19 코퍼스에서 채널 11개만 남기고 잘라낸 대표 표본이다. product 4개(UCat2CSzaple02nnhbUSJ2zg · UCcM_RMZxkIiSmnjx_hOKkDQ · UCN820P3PLVl7v0nPdnXTtLQ · UCED7YKsAzQ2qi2e-cJ7yTEg) 와 expert 7개(UCehSxRApNbh93SbHSR9PNmg · UC120Dx91wwLlbOjxCMBpZiQ · UCXFd79l1HUumoM6spU4D1Cw · UCK7v-eIsfif6b-Df8jJ343Q · UCJT4XXjfaxSPxTe2Ui95zTQ · UCAXfBEN6G-T1EEhfnOAXOwg · UCeW13kHjeb_sviMo30GGBEw) 다. 각 채널의 선크림 장문 전부와 그 영상들의 댓글 전부를 담았고, 제외 경로를 보이려고 쇼츠 1편 · video_unknown 1편 · 선크림 없는 장문 1편을 함께 남겼다 — 모집단이 채널 단위로 닫혀 있어 ydc trend.py 를 같은 잘린 run 에 돌린 값과 1:1 로 맞댈 수 있다. expert 7개는 포크 #41 이 더했다: 판정·보고 모집단은 product 뿐이라(규칙 5) 이 채널들은 metrics_topic_quarter 의 어느 행에도 들지 않고, 패널 민감도가 product 와 43채널 전부를 갈라 볼 수 있는 자리만 만든다."
+    "선크림_장문_product": 85,
+    "그_영상_댓글_전체": 2605,
+    "그_영상_댓글_중복제외": 2601,
+    "재현_방법": "document 에서 content_type=video_long 이고 channel.panel_role=product 이며 mention 에 topic_id=선크림 이 있는 문서 → 85. 그 영상들을 parent_item_id 로 갖는 댓글 → 2605. 그중 quality_flags 가 빈 것 → 2601.",
+    "표본": "2026-08-19 코퍼스에서 채널 18개만 남기고 잘라낸 대표 표본이다. 각 채널의 선크림 장문 전부와 그 영상들의 댓글 전부를 담았고, 제외 경로를 보이려고 쇼츠 1편 · video_unknown 1편 · 선크림 없는 장문 1편을 함께 남겼다 — 모집단이 채널 단위로 닫혀 있어 ydc trend.py 를 같은 잘린 run 에 돌린 값과 1:1 로 맞댈 수 있다. product 11개와 expert 7개가 들어 있고, 반사실 모집단을 갈라 보는 패널 민감도가 그 둘을 다 요구한다. tool/measure-trend-sample 이 이 표본과 골든 일곱 벌을 한 번에 다시 만든다."
   },
   "source_run_manifests": [
     {

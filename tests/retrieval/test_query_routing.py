@@ -1,6 +1,6 @@
-"""질의 라우터를 붙이지 않는다는 결정을 지키는 자리 (포크 #47).
+"""The place that keeps the decision not to attach a query router (fork #47).
 
-지킬 것이 둘이다.
+There are two things to keep.
 
 **① 성분명 판정의 정본은 토크나이저 사전이 아니다.** `analysis/retrieval/dict/ingredient_dictionary.tsv`
 는 Kiwi 사전이고 담론어를 **일부러** 담는다 -- 없으면 `백탁` 이 `백`+`탁` 으로 쪼개진다(`bm25.kiwi`).
@@ -8,9 +8,10 @@
 밟았다(`rag/router.py` v0.3.0). 우리는 같은 사전을 같은 자리에 두고 있으므로 라우터를 붙이는 날 같은 일이
 일어난다. 그래서 이 파일은 라우터가 없는 지금 **미리** 선다.
 
-**② 그 결정이 인용한 수가 아직 참인가.** 계약에 숫자를 적고 재는 길을 남기지 않으면 사전이 자라는 순간
-그 숫자가 조용히 거짓이 된다 -- #41 의 `tool/compare-ydc-sensitivity`, #6 의 `tool/measure-evidence-fixture`
-와 같은 자리이고, 여기서는 `tool/measure-query-routing` 이 그 길이다.
+**2. Are the numbers that decision quoted still true.** Write a number into the contract without leaving a
+way to measure it and that number goes quietly false the moment the dictionary grows -- the same place as
+`tool/compare-ydc-sensitivity` in #41 and `tool/measure-evidence-fixture` in #6, and here
+`tool/measure-query-routing` is that way.
 """
 
 from __future__ import annotations
@@ -32,14 +33,15 @@ from analysis.retrieval import bm25, topics
 ROOT = Path(__file__).resolve().parents[2]
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 TOOL = ROOT / "tool" / "measure-query-routing"
-# ydc 의 demo 가 자기 성분명 목록에 **없어야 한다**고 못 박은 넷. 우리 사전에는 넷 다 있고, 그것이 이
-# 사전이 성분명 목록이 아니라는 증거다 -- 같은 낱말로 반대편을 지킨다.
+# The four that ydc's demo nailed down as having to be **absent** from its own ingredient-name list. Our
+# dictionary has all four, and that is the evidence this dictionary is not an ingredient-name list -- the same
+# words keep the opposite side.
 DISCOURSE = ("선크림", "백탁", "톤업", "썬크림")
 
 
 @lru_cache(maxsize=1)
 def measured() -> dict:
-    """도구를 **세션에 한 번만** 부른다 -- Kiwi 를 얹는 일이라 부를 때마다 몇 초다."""
+    """Calls the tool **once per session** -- it puts Kiwi on, so every call is several seconds."""
     done = subprocess.run(
         [sys.executable, str(TOOL), "--json"], capture_output=True, text=True, cwd=ROOT, check=False
     )
@@ -55,15 +57,16 @@ def contract() -> str:
 
 
 def surfaces() -> set[str]:
-    """토크나이저 사전 두 벌이 아니라 성분 사전 한 벌 -- 라우터가 성분명 목록으로 오해할 그 파일이다."""
+    """One ingredient dictionary, not the two tokenizer dictionaries -- the file a router would mistake for an
+    ingredient-name list."""
     path = bm25.DICT_DIR / "ingredient_dictionary.tsv"
     lines = path.read_text(encoding="utf-8").splitlines()
     return {line.split("\t")[0] for line in lines if line.strip() and not line.startswith("#")}
 
 
 def loaded() -> ModuleType:
-    """확장자가 없어 평범한 import 로는 안 들어온다. 종료 코드 2 를 확인하려면 상수를 갈아야 해서
-    프로세스 밖이 아니라 안에서 부른다."""
+    """It has no extension, so a plain import does not reach it. Checking exit code 2 needs a constant
+    swapped, so it is called inside the process rather than outside it."""
     spec = spec_from_loader("measure_query_routing", SourceFileLoader("measure_query_routing", str(TOOL)))
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
@@ -78,7 +81,7 @@ def test_the_tool_still_runs_and_answers_in_the_shape_the_test_reads():
 
 
 def test_a_missing_source_is_blocked_and_not_a_quietly_empty_answer(monkeypatch: pytest.MonkeyPatch):
-    """0 으로 나가면 "재 봤더니 함정이 없더라"로 읽힌다 -- 원천이 없는 것은 막힘이다."""
+    """Exiting 0 reads as "I measured it and there is no trap" -- a missing source is a blocker."""
     module = loaded()
     monkeypatch.setattr(module, "INGREDIENTS", ROOT / "analysis" / "retrieval" / "dict" / "없는파일.tsv")
     monkeypatch.setattr(sys, "argv", ["measure-query-routing", "--json"])
@@ -86,11 +89,13 @@ def test_a_missing_source_is_blocked_and_not_a_quietly_empty_answer(monkeypatch:
 
 
 def test_the_case_against_a_partial_router_is_a_measurement_not_a_flourish():
-    """기본값이 vector 면 부분 라우터가 아무것도 악화시키지 않는다 -- 그 반론을 막는 것은 이 수다."""
+    """With vector as the default, a partial router makes nothing worse -- this number is what answers
+    that."""
     only = measured()["brand_only"]
     assert only["correct"] == 0 and only["misrouted"] > 0, only
     assert only["traces"]["밀려"] == ["려"] and only["traces"]["화이트닝"] == ["화이트"]
-    # 짧은 표기가 원인이다. 다 길어지면 오탐이 사라지고 이 줄을 다시 재야 한다.
+    # Short spellings are the cause. Once they all grow long the false hits disappear and this line has to be
+    # measured again.
     assert only["short_surfaces"] > 0 and only["short_surfaces"] < only["surfaces"]
 
 
@@ -106,7 +111,8 @@ def test_the_collagen_seat_is_measured_on_the_axis_that_actually_holds_it():
 
 
 def test_the_sample_admits_that_choosing_the_alias_rule_was_also_a_choice():
-    """질의를 손으로 고르는 자의성은 규칙이 없앴지만 규칙을 고르는 자의성은 남는다."""
+    """The rule removed the arbitrariness of picking queries by hand, but the arbitrariness of picking the
+    rule remains."""
     wobble = measured()["sample"]["alias_rules"]
     assert wobble["rates"]["first_ko"] == measured()["sample"]["misrouted"]
     assert wobble["low"] < wobble["rates"]["first_ko"] < wobble["high"]
@@ -114,8 +120,8 @@ def test_the_sample_admits_that_choosing_the_alias_rule_was_also_a_choice():
 
 
 def test_the_tokenizer_dictionary_carries_discourse_words_so_it_is_not_an_ingredient_list():
-    """이 파일의 핵심. 넷 중 하나라도 사라지면 사전이 성분표 쪽으로 움직인 것이고, 그때는 이 결정을
-    다시 읽어야 한다 -- 조용히 통과시키지 않는다."""
+    """The heart of this file. If even one of the four disappears the dictionary has moved towards an
+    ingredient table, and then this decision has to be read again -- it is not passed over quietly."""
     present = surfaces()
     assert bm25.DICT_DIR / "ingredient_dictionary.tsv" in bm25.DICTIONARIES
     for word in DISCOURSE:
@@ -123,7 +129,8 @@ def test_the_tokenizer_dictionary_carries_discourse_words_so_it_is_not_an_ingred
 
 
 def test_the_tokenizer_dictionary_overlaps_the_words_people_ask_with():
-    """겹침이 0 이 되면 함정이 사라진 것이다(#46 이 질의 불용어에서 잰 0 과 같은 자). 지금은 0 이 아니다."""
+    """An overlap of 0 means the trap is gone (the same 0 that #46 measured on query stopwords). It is not 0
+    now."""
     people = {alias for entry in topics.active().entries for alias in entry["ko"]}
     caught = people & surfaces()
     assert caught, "겹침이 0 이면 §질의 라우팅 의 근거가 바뀐 것이다"
@@ -133,7 +140,8 @@ def test_the_tokenizer_dictionary_overlaps_the_words_people_ask_with():
 
 
 def test_no_list_in_this_repo_can_decide_that_a_word_is_an_ingredient():
-    """후보 셋이 전부 담론어를 담는다. 하나라도 깨끗해지면 라우터의 성분명 축이 열릴 수 있다."""
+    """All three candidates hold discourse words. If even one becomes clean, the router's ingredient-name axis
+    could open."""
     from db.seed.lexicon import _ingredient_rows
 
     rows = _ingredient_rows(ROOT / "eval")
@@ -157,12 +165,14 @@ def test_no_list_in_this_repo_can_decide_that_a_word_is_an_ingredient():
 
 
 def test_the_frames_carry_no_exact_signal_of_their_own():
-    """비율이 문형에서 온 것이 아님을 매번 보인다 -- 문형이 사전을 건드리면 표본이 표본이 아니다."""
+    """It shows every time that the ratio does not come from the sentence pattern -- once the pattern touches
+    the dictionary, the sample is no longer a sample."""
     assert measured()["sample"]["frame_signals"] == 0
 
 
 def test_ydc_published_queries_route_the_same_way_on_our_dictionary():
-    """ydc 가 공표한 셋은 걸린 표기까지 그쪽 문서와 같아야 한다 -- 같은 성분표에서 나온 같은 파일이다."""
+    """The three ydc published have to match that document down to the spellings caught -- it is the same file
+    from the same ingredient table."""
     published = measured()["ydc_published"]
     assert published["misrouted"] == published["queries"] == 3
     assert published["traces"]["선크림 루틴 알려줘"] == ["선크림", "루틴"]
@@ -181,7 +191,8 @@ def test_ydc_published_queries_route_the_same_way_on_our_dictionary():
     ],
 )
 def test_the_contract_still_says_what_the_tool_measures(sentence: str, section: str, key: str):
-    """문장이 통째로 남아 있는지부터 본다 -- 숫자만 고치고 문장을 지우면 이 표가 눈을 감는다."""
+    """It looks first at whether the sentence is still there in full -- fixing only the numbers and deleting
+    the sentence makes this table close its eyes."""
     assert sentence in contract(), sentence
     assert str(measured()[section][key]) in sentence
 
@@ -196,7 +207,8 @@ def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
     assert f"{found['dictionary']['surfaces']:,}표기" in table
     assert f"{found['candidates']['entity_rows']}행 / {found['candidates']['entity_keys']}키" in table
     keys = found["candidates"]["entity_ingredient_keys"]
-    # 분모를 함께 건다 -- 8 만 적히면 바로 옆의 28키 대비로 읽힌다(실측은 원본 CSV 32키 중 8이다).
+    # The denominator goes with it -- with only 8 written down it reads against the 28 keys right next to it
+    # (the measurement is 8 of the 32 keys of the original CSV).
     assert f"`category='ingredient'` 는 **32키 중 {keys}키**" in table
     assert f"32키의 `category` 가 **{found['candidates']['entity_categories']}종**" in table
     only = found["brand_only"]
@@ -207,13 +219,14 @@ def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
 
 
 def test_the_decision_and_its_blockers_are_still_written_down():
-    """수만 남고 결정이 사라지면 다음 사람이 라우터를 그냥 붙인다."""
+    """With only the numbers left and the decision gone, the next person just attaches the router."""
     table = contract()
     assert "성분명 판정의 정본은 토크나이저 사전이 아니다" in table
     assert "slopindustries/cosmai#73" in table
     assert "§검색 실측 과 **같은 자가 아니다**" in table
     assert "라우터는 #11 을 대체하지 못한다" in table
-    # 오독되는 수(`4/10`)는 리터럴로 박혀 있는데 그것을 무력화하는 문장이 안 박히면 비대칭이다.
+    # The misread number (`4/10`) is nailed down as a literal, and without the sentence that defuses it nailed
+    # down too it is asymmetric.
     assert "**그래서 이 절의 답은 첫 줄이 아니라 넷째 줄과 마지막 줄이다**" in table
     assert "어느 것도 #11 의 입력이 아니다" in table
     assert "**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.**" in table

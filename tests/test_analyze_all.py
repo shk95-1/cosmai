@@ -1,6 +1,7 @@
-"""`cosmai analyze all`: 세 단계가 한 run 을 공유하고, 두 번째 실행이 같은 metrics 를 낸다 (#5).
+"""`cosmai analyze all`: the three stages share one run and a second execution emits the same metrics (#5).
 
-원천 두 스키마는 계약 덤프 그대로 따로 세운다 — 운영에서 needs·trend_radar·tubedepth 가 세 스키마다.
+The two source schemas are stood up separately from the contract dumps -- in production needs, trend_radar
+and tubedepth are three schemas.
 """
 
 from __future__ import annotations
@@ -52,7 +53,7 @@ REVIEWS = (
     ("oliveyoung", "R3", "A1", 2.0, "끈적임이 심하고 밀려요", WRITTEN),
 )
 COMMENTS = (
-    # 브랜드·형태가 다 들어간 바람 한 줄 — metrics_wish 는 축 값이 있는 행만 센다.
+    # One wish line holding both brand and format -- metrics_wish counts only rows with a value on the axis.
     ("V1", "C1", "라네즈 쿠션으로도 출시해주세요 제발요", 12),
     ("V1", "C2", "저는 백탁이 너무 심해서 못 쓰겠더라고요", 5),
 )
@@ -76,7 +77,8 @@ def _apply_dump(engine: Any, dump: Path, schema: str, original: str) -> None:
 
 @pytest.fixture
 def source_schemas(database_url_for_tests: str, _schema_name: str) -> Iterator[tuple[str, str]]:
-    """두 덤프가 alembic_version 을 함께 가져서 한 스키마에 부을 수 없다 (test_linker.py 와 같은 이유)."""
+    """The two dumps both carry alembic_version and cannot be poured into one schema (the same reason as
+    test_linker.py)."""
     tail = hashlib.sha1(_schema_name.encode()).hexdigest()[:10]
     names = (f"trall_{tail}", f"tdall_{tail}")
     engine = create_engine(database_url_for_tests)
@@ -202,7 +204,7 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
             "SELECT status, finished_at IS NOT NULL FROM analysis_run WHERE run_id = %s", (found.run_id,)
         )
         assert cur.fetchone() == ("ok", True)
-        # 세 단계가 한 run 을 나눠 쓴다 — polarity 가 연 run 에 aggregate 가 metrics 를 쓴다.
+        # The three stages share one run -- aggregate writes metrics into the run polarity opened.
         cur.execute("SELECT count(*) FROM analysis_run")
         assert cur.fetchone() == (1,)
 
@@ -210,8 +212,8 @@ def test_analyze_all_runs_the_three_stages_into_one_run(analysis_url: str, sourc
 def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
     analysis_url: str, sources: tuple[str, str]
 ):
-    """#41: 화면 3 은 product_ref <> '' 행만 읽는다 — 집계가 그 축을 내지 않으면
-    실제 run 에서 영원히 0행이다."""
+    """#41: screen 3 reads only rows with product_ref <> '' -- if the aggregation does not emit that axis it
+    is 0 rows forever on a real run."""
     found = _all(analysis_url, sources)
     assert found.status == "ok", found.detail
     with connect(analysis_url) as conn, conn.cursor() as cur:
@@ -225,14 +227,17 @@ def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
     per_product = [r for r in rows if r[2]]
     sums = {(r[0], r[1]): r for r in rows if not r[2]}
     assert per_product, "제품 축 행이 하나도 없다 — 화면 3 이 빈다"
-    # 화면 3 이 정렬·막대에 쓰는 값이다. 리뷰가 있는 제품 행은 unresolved 가 차 있어야 한다.
+    # The value screen 3 uses for sorting and bars. A product row with reviews has to have unresolved
+    # filled.
     assert any(r[5] is not None for r in per_product)
-    # 카테고리 합 행은 그대로 남는다 — 제품 축은 그 위에 얹히는 것이지 대체가 아니다 (화면 1·골든).
+    # The category total row stays -- the product axis is laid on top of it, not a replacement (screen 1 and
+    # the golden set).
     assert sums and {(r[0], r[1]) for r in per_product} <= set(sums)
     for scope, need_key, _, neg, pos, _ in per_product:
-        # 한 제품의 몫은 그 (scope, need_key) 합을 넘지 못한다 — 제품을 모르는 언급은 합에만 남는다.
+        # One product's share cannot exceed the (scope, need_key) total -- a mention with no known product
+        # stays only in the total.
         assert neg <= sums[(scope, need_key)][3] and pos <= sums[(scope, need_key)][4]
-    # 롤업은 제품마다 need_key 당 한 행이다 — 화면 3 이 그 scope 로 중복을 지운다 (screens.js).
+    # The rollup is one row per need_key per product -- screen 3 dedupes by that scope (screens.js).
     rolled = [(r[1], r[2]) for r in per_product if r[0] == "all"]
     assert rolled and len(set(rolled)) == len(rolled)
 
@@ -290,12 +295,13 @@ def test_the_run_records_every_version_and_the_active_lexicon_per_ruleset(
     assert versions["extractor"] == EXTRACTOR_VERSION
     assert versions["polarity"] == POLARITY_VERSION
     assert versions["aggregate"]
-    # #17 판정: lexicon 은 활성 버전 + ruleset 이다.
+    # Decision of #17: lexicon is the active version + ruleset.
     assert versions["lexicon"] == {"entity": 1, "aspect": {SUNCARE_RULESET: 1, GENERIC_RULESET: 1}}
 
 
 def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, sources: tuple[str, str]):
-    """시드 슬라이스를 같은 scope 에 섞으면 같은 문장이 두 번 세어진다 — 모집단을 이름으로 못 박는다."""
+    """Mixing a seed slice into the same scope counts the same sentence twice -- the population is pinned down
+    by name."""
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
@@ -311,20 +317,21 @@ def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, source
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT versions->>'extractor' FROM analysis_run WHERE run_id = %s", (found.run_id,))
         assert cur.fetchone() == (EXTRACTOR_VERSION,)
-        # metrics_need 의 scope 축은 원천 카테고리다 (analysis/aggregate).
+        # The scope axis of metrics_need is the source category (analysis/aggregate).
         cur.execute(
             "SELECT neg, pos FROM metrics_need WHERE run_id = %s AND scope = %s AND need_key = '백탁' "
             "AND month = '' AND product_ref = ''",
             (found.run_id, CATEGORY),
         )
         row = cur.fetchone()
-    # 시드 행이 모집단에 들어왔다면 neg 가 2 다 — 이 run 이 쓴 리뷰 불만 한 건만 센다.
+    # Had a seed row entered the population, neg would be 2 -- only the one review complaint this run wrote
+    # is counted.
     assert row == (1, 1)
 
 
 class StubPolarity:
-    """`--impl <spec>` 가 여는 판정자 자리의 스텁 — 규칙과 다른 버전을 내는 것이 요점이다
-    (tests/test_analyze_polarity.py 의 같은 이름과 같은 역할)."""
+    """The stub in the classifier slot `--impl <spec>` opens -- emitting a version other than the rules' is
+    the point (the same name and the same role as in tests/test_analyze_polarity.py)."""
 
     version = "stub-v9"
 
@@ -340,10 +347,11 @@ class StubPolarity:
 def test_an_impl_run_records_that_implementations_version_not_the_rules(
     analysis_url: str, sources: tuple[str, str]
 ):
-    """entrypoints.md: `--impl` 이 있으면 그 구현의 버전이 analysis_run.versions.polarity 와 산출 행에
-    남는다. `all` 은 성공한 run 을 자기가 모은 versions 로 다시 닫으므로(analysis/pipeline.py `_close`),
-    polarity 가 RUN_START 에 쓴 올바른 버전은 그 versions 가 판정자를 물어봤을 때만 살아남는다.
-    `--impl` 에서 여기까지의 배선은 tests/test_cli_analyze.py 가 본다."""
+    """entrypoints.md: with `--impl`, the version of that implementation stays in
+    analysis_run.versions.polarity and on the output rows. `all` closes a successful run again with the
+    versions it gathered (`_close` in analysis/pipeline.py), so the correct version polarity wrote in
+    RUN_START survives only when those versions asked the classifier.
+    The wiring from `--impl` to here is checked by tests/test_cli_analyze.py."""
     found = _all(analysis_url, sources, polarity=StubPolarity())
     assert found.status == "ok", found.detail
     with connect(analysis_url) as conn, conn.cursor() as cur:
@@ -353,7 +361,7 @@ def test_an_impl_run_records_that_implementations_version_not_the_rules(
         stamped = cur.fetchall()
     assert row is not None
     assert row[0]["polarity"] == StubPolarity.version
-    # 나머지 버전은 그대로다 — 갈아 끼운 것은 판정자 하나뿐이다.
+    # The other versions are unchanged -- only the classifier was swapped.
     assert row[0]["extractor"] == EXTRACTOR_VERSION and row[0]["linker"] == LINKER_VERSION
     assert stamped == [(StubPolarity.version,)]
 
@@ -375,14 +383,14 @@ def test_a_failing_stage_closes_the_run_as_failed(analysis_url: str, sources: tu
 def test_a_polarity_failure_closes_the_run_polarity_itself_opened(
     analysis_url: str, sources: tuple[str, str], database_url_for_tests: str
 ):
-    """polarity 는 run 을 열고 바로 커밋한다 — 그 안에서 죽으면 running 행이 고아로 남으면 안 된다.
+    """polarity opens the run and commits at once -- dying inside it must not leave an orphan running row.
 
-    가장 긴 단계라 운영에서 타임아웃이 착지할 자리이기도 하다: 가장 일어나기 쉬운 실패다.
+    It is also the longest stage and where a timeout lands in production: the most likely failure.
     """
     commerce, _ = sources
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        # link 는 product 만 읽는다 — review 만 닫으면 polarity 가 run 을 연 뒤에 죽는다.
+        # link reads product only -- closing review alone makes polarity die after it opened the run.
         conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".review FROM needs_runtime')
     engine.dispose()
     found = _all(analysis_url, sources)
@@ -390,7 +398,7 @@ def test_a_polarity_failure_closes_the_run_polarity_itself_opened(
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT run_id, status, finished_at IS NOT NULL, note FROM analysis_run")
         rows = cur.fetchall()
-    # 고아 running 행 + 새 failed 행이 아니라, polarity 가 연 그 행 하나가 닫힌다.
+    # Not an orphan running row plus a new failed row: the one row polarity opened is closed.
     assert [(r[1], r[2]) for r in rows] == [("failed", True)]
     assert rows[0][0] == found.run_id
     assert "polarity" in rows[0][3]
@@ -433,8 +441,8 @@ def test_analyze_all_with_a_lexicon_scope_aggregates_what_it_labelled(
 def test_a_lexicon_scope_writes_the_rows_the_unscoped_run_writes_for_that_category(
     analysis_url: str, sources: tuple[str, str]
 ):
-    """펼친 scope 의 행은 스코프 없는 05:00 실행이 그 원천 카테고리에 쓰는 행과 같아야 한다 — scope 는
-    어느 카테고리를 쓸지를 고르지, 그 안에서 무엇이 세어지는지를 바꾸지 않는다."""
+    """A row of an expanded scope has to equal the row a scope-less 05:00 run writes to that source category
+    -- scope picks which category to write under and does not change what is counted inside it."""
     whole = _all(analysis_url, sources)
     assert whole.status == "ok", whole.detail
     rows = _dump(analysis_url, "metrics_need", NEED_METRICS, whole.run_id)
@@ -454,8 +462,9 @@ def test_analyze_all_still_stops_being_quiet_when_no_source_category_carries_the
     commerce, _youtube = sources
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        # 카테고리를 주는 것은 rank_snapshot 뿐이다 — 지우면 남는 유도 경로는 제품명 정규식뿐이고,
-        # 그 규칙은 glowpick 것만 있다 (eval/lexicon/category_map_v1.csv).
+        # Only rank_snapshot gives a category -- delete it and the one derivation path left is the
+        # product-name regex, and that rule exists for glowpick alone
+        # (eval/lexicon/category_map_v1.csv).
         conn.exec_driver_sql(f'DELETE FROM "{commerce}".rank_snapshot')
         conn.exec_driver_sql(
             f'INSERT INTO "{commerce}".review '
@@ -507,7 +516,8 @@ def test_analyze_aggregate_alone_takes_the_lexicon_axis_too(analysis_url: str, s
 
 
 def test_a_source_category_scope_keeps_running_exactly_as_it_did(analysis_url: str, sources: tuple[str, str]):
-    """회귀: 원천 카테고리 문자열을 그대로 준 실행은 그 한 scope 만 쓴다 (#38 택2 는 추가일 뿐이다)."""
+    """Regression: a run given the source category string as it is writes that one scope alone (option 2 of
+    #38 is only an addition)."""
     commerce, _youtube = sources
     _insert_need(analysis_url, CATEGORY)
     with connect(analysis_url) as conn:
@@ -542,12 +552,13 @@ def test_analyze_aggregate_alone_stops_being_quiet_when_nothing_carries_the_scop
 
 
 def test_one_silent_scope_leaves_one_partial_row_not_two(analysis_url: str, sources: tuple[str, str]):
-    """#38 의 침묵과 #16 의 stale 보고 행은 `_one` 의 aggregate 분기에서 만나고, 만나는 **순서**가
-    불변식이다: `_amend_silent_scope(..., close_run=True)` 는 자기 run 행을 partial 로 닫고
-    `_reported` 는 status 가 OK 가 아니면 보고 행을 하나 넣는다. 후자가 바깥이어야 한다 — 안팎이
-    뒤집히면 표식 하나 없는 이 침묵 한 건에 partial 행이 둘 남고, "한 사건에 한 행"이 깨진다.
+    """The silence of #38 and the stale reporting row of #16 meet in the aggregate branch of `_one`, and the
+    **order** in which they meet is the invariant: `_amend_silent_scope(..., close_run=True)` closes its own
+    run row as partial and `_reported` inserts one reporting row when the status is not OK. The latter has to
+    be the outer one -- inverted, this one silence with not a single mark leaves two partial rows and "one row
+    per event" breaks.
 
-    이 자리를 지키는 것이 사람의 주의력뿐이면 다음 리베이스에서 조용히 뒤집힌다.
+    If human attention is the only thing keeping this place, the next rebase turns it over quietly.
     """
     commerce, _youtube = sources
     _insert_need(analysis_url, None)
@@ -614,11 +625,12 @@ def test_stale_and_scope_silence_both_land_in_one_note(analysis_url: str, source
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
-    # 이 컨테이너에는 운영 뷰가 바인딩하는 것만 있다 (tool/checks/test): trend_radar 전부는 비어 있고
-    # tubedepth 는 jobs 한 표뿐이다 — link 가 읽는 tubedepth 네 표는 없어서 거기서 실패한다.
+    # This container holds only what the production views bind (tool/checks/test): all of trend_radar is empty
+    # and tubedepth has the single jobs table -- the four tubedepth tables link reads are absent, so it fails
+    # there.
     assert main(["analyze", "all", "--url", analysis_url]) == 1
     assert "failed" in capsys.readouterr().out
-    # 단계에 닿기 전의 거절은 blocked 다 — 실패한 run 이 남는 exit 1 과 갈린다.
+    # A refusal before reaching a stage is blocked -- apart from the exit 1 that leaves a failed run.
     assert main(["analyze", "all", "--url", analysis_url.replace("check-runtime", "wrong")]) == 2
 
 
@@ -626,7 +638,7 @@ def test_the_health_view_reports_the_run_and_its_metric_rows(
     analysis_url: str, sources: tuple[str, str], database_url_for_tests: str, _schema_name: str
 ):
     found = _all(analysis_url, sources)
-    # 운영에서 이 파일을 적용하는 것은 db/migrate.sh 이고 그때의 롤이 needs_owner 다.
+    # In production this file is applied by db/migrate.sh, and the role then is needs_owner.
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
         conn.exec_driver_sql("SET ROLE needs_owner")
@@ -684,7 +696,8 @@ def test_the_contract_and_the_crontab_agree_on_every_analyze_line():
 
 
 def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime():
-    """뷰 파일이 있어도 배포가 적용하지 않으면 운영에는 없는 것이다 — db/migrate.sh 의 (f) 단계."""
+    """A view file that the deployment does not apply is absent in production -- step (f) of
+    db/migrate.sh."""
     url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
     engine = create_engine(url)
     with engine.connect() as conn:
@@ -693,4 +706,4 @@ def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime():
         assert conn.execute(
             text("SELECT has_table_privilege('needs_runtime', 'needs.analysis_health', 'SELECT')")
         ).scalar_one()
-    engine.dispose()  # needs_migrator 는 CONNECTION LIMIT 2 다 — 통과든 실패든 놓아준다.
+    engine.dispose()  # needs_migrator has CONNECTION LIMIT 2 -- released on pass or fail alike
