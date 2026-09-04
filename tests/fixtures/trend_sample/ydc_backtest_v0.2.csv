@@ -1,4 +1,8 @@
 ﻿cutoff,source,topic_id,trend_type,before_pp,before_excl_pp,after_pp,at_cutoff_pp,expected,actual,hit,hit_level
-2025Q2,youtube_comment,무기자차,사라짐,9.05,8.17,9.89,3.52,하락 유지,상승,false,false
-2025Q2,youtube_comment,유기자차,사라짐,5.08,3.85,5.97,4.93,하락 유지,상승,false,false
-2025Q2,youtube_comment,자극_눈시림,급상승,18.58,13.3,30.89,21.13,상승 유지,상승,true,true
+2024Q2,youtube_comment,무기자차,신규 등장,8.99,0.0,6.51,26.98,상승 유지,하락,false,true
+2024Q2,youtube_comment,유기자차,신규 등장,4.23,0.0,3.63,12.7,상승 유지,하락,false,true
+2024Q2,youtube_comment,자극_눈시림,신규 등장,4.23,0.0,17.02,12.7,상승 유지,상승,true,true
+2024Q2,youtube_comment,톤업_메이크업베이스,신규 등장,2.65,0.0,16.44,7.94,상승 유지,상승,true,true
+2025Q2,youtube_comment,무기자차,사라짐,6.02,9.97,5.77,11.19,하락 유지,하락,true,true
+2025Q2,youtube_comment,톤업_메이크업베이스,급상승,17.8,16.7,10.23,12.31,상승 유지,하락,false,false
+2025Q2,youtube_video,촉촉함_건조함,사라짐,18.81,21.38,27.79,14.71,하락 유지,상승,false,false

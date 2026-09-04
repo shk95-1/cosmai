@@ -105,18 +105,24 @@ def test_the_command_leaves_every_stored_table_exactly_as_it_found_it(measured: 
 
 
 def test_a_conclusion_that_moves_is_a_finding_and_not_a_failed_run(measured: str, capsys):
-    """이 표본에서는 광고·협찬 영상을 빼면 유형이 세 셀에서 바뀐다. **그것이 이 명령의 답이다** --
-    실행의 실패가 아니므로 종료 코드가 아니라 `note` 의 `ad_flips=` 가 싣는다 (계약 §종료 코드).
-    전량에서 흔들림은 평상 상태라, 1 로 내면 `set -e` 셸 한 줄이 정상 실행을 실패로 읽는다."""
+    """On this sample both measurements move: dropping the ad and sponsored videos turns one cell's
+    verdict over, and one panel cell's direction flips. **That is this command's answer** -- not a
+    failed run, so it rides in the `note` (`panel_flips=` · `ad_flips=`) and not in the exit code
+    (the exit-code section of `contracts/entrypoints.md`). On the full population moving is the normal
+    state, so exiting 1 would make one `set -e` shell line read a normal run as a failure.
+
+    Both numbers were 3 and 0 before #57 re-cut the sample; the panel one being non-zero is the point
+    of that re-cut -- the flip verdict used to run zero times."""
     assert main(["trend", "sensitivity", "--url", measured]) == 0
     printed = capsys.readouterr().out
     assert "trend sensitivity run=" in printed
-    assert "ad_flips=3" in printed
-    assert "panel_flips=0" in printed
+    assert "ad_flips=1" in printed
+    assert "panel_flips=1" in printed
     with connect(measured) as conn:
         built = build(conn)
     assert built.status == "ok"
-    assert built.flipped_cells == 3
+    assert built.flipped_cells == 1
+    assert len(built.flipped) == 1
     assert built.violations == ()
 
 
