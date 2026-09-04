@@ -15,6 +15,13 @@ tested_tree_stamp() {
     cat "$(tested_tree_dir)/$1" 2>/dev/null || true
 }
 
+# The count an entry carries is pytest's own, read back from the run's output: the summary line is
+# the last "<n> passed" in it. `-q` puts that count at the start of the line, so a pattern that
+# insists on something before it silently records a zero -- which is what the first version did.
+tested_tree_passed() {
+    grep -o '[0-9][0-9]* passed' "$1" 2>/dev/null | tail -1 | cut -d' ' -f1
+}
+
 # Records the checkout's current tree. The caller runs this only after a green suite and after the
 # container is gone, so a failed or killed run leaves no claim behind.
 tested_tree_record() {

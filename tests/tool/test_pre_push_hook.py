@@ -201,3 +201,38 @@ def test_exactly_one_decision_line_is_printed(repo: Path):
     done = run_hook(repo, sha)
     decisions = [line for line in done.stdout.splitlines() if line.startswith("pre-push: ")]
     assert len(decisions) == 1, done.stdout
+
+
+# The count in an entry is pytest's own summary count. It is read back from the run's output rather
+# than counted here, and the first version of that read recorded 0 for every real run: `-q` (this
+# project's addopts) puts the number first on the line, and the pattern insisted on a character
+# before it. A zero is not visibly wrong in a cache file, so it needs its own test.
+def passed_count(tmp_path: Path, log: str) -> str:
+    out = tmp_path / "pytest.log"
+    out.write_text(log, encoding="utf-8")
+    return subprocess.run(
+        ["sh", "-c", f'. tool/checks/tested-tree; tested_tree_passed "{out}"'],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_the_count_is_read_from_a_quiet_summary_line(tmp_path: Path):
+    log = "....\n1999 passed, 1 skipped, 1 deselected, 2 xfailed in 1055.26s (0:17:35)\n"
+    assert passed_count(tmp_path, log) == "1999"
+
+
+def test_the_count_is_read_from_a_decorated_summary_line(tmp_path: Path):
+    log = "tests/a.py ..\n====== 1986 passed, 3 skipped in 903.21s (0:15:03) ======\n"
+    assert passed_count(tmp_path, log) == "1986"
+
+
+def test_the_summary_wins_over_an_earlier_line_that_looks_like_one(tmp_path: Path):
+    log = "a test printed 5 passed\n....\n12 passed in 0.42s\n"
+    assert passed_count(tmp_path, log) == "12"
+
+
+def test_a_run_with_no_summary_yields_no_count(tmp_path: Path):
+    assert passed_count(tmp_path, "collection failed\n") == ""
