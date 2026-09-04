@@ -1,7 +1,7 @@
 [project]
 name = "cosmai"
 version = "0.0.1"
-description = "화장품 소비자 니즈 분석 시스템 — 수집·정규화·분석 모노레포"
+description = "Cosmetics consumer needs analysis system — a collection, normalization and analysis monorepo"
 requires-python = ">=3.12"
 dependencies = [
     "psycopg[binary]>=3.2",
@@ -21,8 +21,9 @@ dependencies = [
 [project.scripts]
 cosmai = "cosmai.cli:main"
 
-# 콘솔 스크립트를 실제로 깔려면 프로젝트가 패키지여야 한다. 평평한 레이아웃 그대로 네 모듈만 담고,
-# uv sync 는 editable 로 넣으므로 작업 트리가 계속 정본이다 (python -m cosmai.cli 도 그대로 돈다).
+# Installing the console script for real needs the project to be a package. It keeps the flat layout and
+# holds just the four modules, and uv sync installs it editable, so the working tree stays canonical
+# (python -m cosmai.cli still runs as it did).
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
 build-backend = "uv_build"
@@ -39,14 +40,14 @@ dev = [
 ]
 # analysis/retrieval (#28): 성분명·담론어를 한 토큰으로 유지하려면 사용자 사전을 얹은 형태소
 # 분석기가 필요하다 -- 공백 토큰화로는 `에칠헥실트리아존` 이 쪼개져 성분 검색이 조용히 빈다.
-# numpy 는 벡터 파일(.npy)을 읽고 코사인을 계산하는 데 직접 쓴다 -- kiwipiepy 가 딸려 오게
-# 두면 그쪽이 의존을 끊는 날 조용히 사라진다.
+# numpy is used directly to read the vector files (.npy) and compute cosines -- left to arrive with
+# kiwipiepy, it disappears quietly the day that side drops the dependency.
 retrieval = [
     "kiwipiepy>=0.20",
     "numpy>=2",
 ]
-# 벡터를 만드는 쪽만. torch 가 딸려 오므로 이미지에도 tool/checks/test 에도 넣지 않는다 --
-# 인코딩은 GPU 가 있는 호스트에서 사람이 돌리는 일이고, 크론이 하는 일이 아니다 (#28).
+# Only the side that makes vectors. torch comes with it, so it goes into neither the image nor
+# tool/checks/test -- encoding is something a person runs on a host with a GPU, not something cron does (#28).
 embed = [
     "sentence-transformers>=3",
 ]
@@ -65,8 +66,8 @@ markers = [
 line-length = 110
 target-version = "py312"
 exclude = ["playbook"]
-# 확장자 없는 실행 파일은 기본 수집에 안 걸린다. `tool/` 의 파이썬 도구는 이름으로 들여보낸다 --
-# 안 그러면 훅의 format·lint 가 그 파일 앞에서 조용히 아무 말도 하지 않는다 (포크 #41).
+# An extension-less executable is not picked up by the default collection. The python tools in `tool/`
+# are let in by name -- otherwise the hook's format·lint say nothing at all in front of those files (fork #41).
 extend-include = [
     "tool/compare-ydc-sensitivity",
     "tool/measure-query-routing",
@@ -83,11 +84,6 @@ extend-include = [
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-
-# One line is over 110 columns because it is a Korean report string held under `# fmt: off` --
-# reflowing it would re-stage a Korean line and trip tool/checks/lang for no behaviour change.
-[tool.ruff.lint.per-file-ignores]
-"tool/measure-source-mix" = ["E501"]
 
 [tool.basedpyright]
 typeCheckingMode = "standard"
