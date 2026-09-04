@@ -328,7 +328,7 @@ class PanelChannelRow:  # -> needs.panel_channel (fork #3). The 43-channel roste
 
 
 @dataclass(frozen=True)
-class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (canonical for the quarterly grain, §Time)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (canonical for the quarter, formats.md §Time)
     run_id: int
     scope: str  # a category name | 'all' (the same vocabulary as metrics_need.scope)
     # The registry of the topic axis is aspect_lexicon(ruleset='retrieval-topic').aspect, not needs.need_key
@@ -341,7 +341,7 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (canonical for 
     mentions: int  # numerator: documents this topic matched
     documents: int  # documents of that population in that quarter
     quarter_mentions: int  # denominator of the share: the mentions of that quarter's trend_use topics
-    denom_channels: int  # panel channels in the computation that quarter. Both sources use it (§Formulas)
+    denom_channels: int  # panel channels in that quarter's output. Both sources use one value (§Formulas)
     composition: float | None = None
     velocity_yoy: float | None = None
     persistence: float | None = None
@@ -376,7 +376,7 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (a derivati
 
 
 @dataclass(frozen=True)
-class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (speech holding up a cell — §Evidence)
+class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (the speech under a verdict cell — §Evidence)
     # The first eight columns are the primary key of topic_quarter_judgement as it is. That the evidence
     # points at the judged cell rather than the metric row is the point -- whoever asks for evidence is
     # whoever read the type.
