@@ -119,6 +119,10 @@ def test_a_second_panel_version_turns_the_first_one_off_in_one_statement(needs_r
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         assert panel.active_version(cur) == panel.PANEL_VERSION
         panel.insert(cur, panel.rows(EVAL_DIR)[:5], version=2, note="seed:test-v2")
+        # Mid-transaction, both versions are active -- 027's constraint trigger is deferred to
+        # commit, so this in-flight state is legal and the swap below is what makes it so.
+        cur.execute("SELECT count(DISTINCT version) FROM panel_channel WHERE active")
+        assert cur.fetchone() == (2,)
         panel.activate(cur, 2)
         conn.commit()
         assert panel.active_version(cur) == 2
@@ -150,4 +154,20 @@ def test_two_active_versions_are_refused_rather_than_counted_twice(needs_runtime
         cur.execute("UPDATE panel_channel SET active = true")
         with pytest.raises(ValueError):
             panel.active_version(cur)
+        # This transaction never commits, so 027's deferred constraint trigger never fires here --
+        # the Python guard above is what catches the double-active state in this test.
         conn.rollback()
+
+
+@pytest.mark.postgres
+def test_a_hand_update_leaving_two_versions_active_is_rejected_at_commit(needs_runtime_url: str):
+    """027: a hand `UPDATE` that bypasses the loader is refused when the transaction commits, not
+    only by the Python guard -- the DB itself now enforces this (#34's Facts)."""
+    seed.run_all(needs_runtime_url, only=("panel",))
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        panel.insert(cur, panel.rows(EVAL_DIR)[:5], version=2, note="seed:test-v2")
+        cur.execute("UPDATE panel_channel SET active = true WHERE version = %s", (2,))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.commit()
+        conn.rollback()
+        assert panel.active_version(cur) == panel.PANEL_VERSION

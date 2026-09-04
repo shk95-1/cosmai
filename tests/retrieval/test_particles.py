@@ -60,4 +60,5 @@ def test_the_contract_says_the_tags_do_the_cutting():
     Only the particle side is picked up -- the stopword sentence of the same section may be reopened by the
     query axis (fork #46), and there is no reason for the particle-disposal test to hold that sentence
     hostage."""
-    assert "조사는 Kiwi 의 태그가 가른다" in ENTRYPOINTS.read_text(encoding="utf-8")
+    # English since fork #59 rewrote that bullet (upstream #206 moved the contracts to English).
+    assert "Particles are told apart by Kiwi's tags" in ENTRYPOINTS.read_text(encoding="utf-8")

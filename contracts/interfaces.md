@@ -1498,6 +1498,12 @@ chunked_at_max=키없음`, 활성 주제 사전 v2):
 `속건조`·`파데프리`). 다시 재기 전까지 아래 두 줄은 v2 판본의 값이고, 판정(분포가 갈리지 않는다)이 그 둘로
 어떻게 되는지는 재 봐야 안다.
 
+**Version record of this table vs. what the tool carries from now on (#68).** The two rows below were
+measured on active lexicon **v2 · 61 queries**, and the tool of that day recorded the lexicon axis as a bare
+number; that record stays as written. Since #68 `tool/measure-vector-floor` records the lexicon axis as the
+full stamp (`ruleset · version · topics · aliases · fingerprint`), the same weight as the store axis, so the
+next remeasurement replaces this line with the stamp it was measured on.
+
 
 | 분포 | n | 최소 | 25% | 중앙 | 75% | 최대 |
 |---|---|---|---|---|---|---|
@@ -1720,6 +1726,64 @@ ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector
 바뀌지 않는다. 그러니 #11 은 기본값을 골라야 한다.
 **위 표의 일곱 줄은 어느 것도 #11 의 입력이 아니다** — 기본 엔진 판단의 입력은 전 소스에서 같은 자로 잰
 §검색 실측 여섯 줄이고, §근거 가 자기 두 줄에 대해 못 박은 것과 같은 자리다.
+
+## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
+The LLM is the last layer and makes no conclusion: `search` finds the evidence (gate included), the code folds
+it to one item per document, and the model only says what that evidence says. The decision that this layer
+exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 20 queries
+re-measured on our corpus — is fork #74 and is **not** in this section. The origin is ydc `rag/generate.py`
+(v0.4.0 `76db718`), with two corrections the promotion required: text blocks only out of a response that mixes
+thinking blocks (the shape `analysis/polarity/llm.py` already uses), and "no key" as an option (`--dry-run`),
+not a fallback path.
+
+**Prompt rules** — principle sentences, no numbers; the numbers ydc carried (a heldout hit rate, a backtest
+hit rate and base rate) were records of older lexicon and corpus versions and do not belong in a prompt that
+outlives them. (1) Answer only from the evidence given; invent nothing. (2) Put `[Source: doc_id]` after
+every factual claim. (3) When the evidence is not enough, say the fixed sentence and stop. (4) Keep sources
+apart; BM25 scores and vector cosines are different scales, never cite a score as a ranking reason. (5) No
+causation between an ingredient and a reaction — only "there was a mention that …". (6) Vector search misses
+often and a chunk can sit close in cosine while unrelated (an e5 limit): read the query-token chunk
+frequency first — frequency 0 means the corpus never says that word — then read the text and say so in the
+answer. (7) Do not predict; backtesting did not show that a rise continues; say only "this asymmetry is here
+now". (8) Do not use papers or research trends — that axis is held shut (`analysis.crosscheck.PAPER_HOLD`;
+the sentence is emitted only while the constant holds). ydc's rules 5 (MFDS data) and 7 (temporal filter)
+are deleted: they name sources this corpus does not have (MFDS is fork #55, still open).
+
+**Format** — exactly three sections, fixed English markers, sentences in the language of the query:
+`## Core` (2–4 sentences, each cited), `## Evidence summary` (at most three bullets; "N items say the same"
+rather than quoting), `## Limits` (one or two lines: what this answer must not be used for, the one-source
+warning, and that it stands on retrieved chunks — a different denominator from the quarterly verdict table).
+Past four sentences the core is cut.
+
+**Citation unit** — `search` emits `chunk_id` (`doc_id#ordinal`); the prompt cites the document. Chunks of
+one document are folded into one piece of evidence with their texts concatenated in rank order, so a long
+document is one citation, not several.
+
+**Version note** — one stderr line per run: `note: index=<pipeline.index_signature> · chunks=<count> ·
+dictionary=<topics stamp>[ · store=<vectors stamp>][ · <coverage note>]`. The lexicon and the signature are
+read **once, right after the index is opened and before the search**, so the row and the note stand on the
+lexicon the evidence stood on (the same rule `eval.run` keeps; fork #62, #68). The index and the vector store
+are each opened once per run and handed down to `search`.
+
+**Cost** — `analysis/polarity/pricing.UsageLedger` as it is: `reserve` before the call (estimate = prompt
+characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the $10
+total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
+same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
+the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
+not set until #74 has measured the cost per query.
+
+**Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
+`called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
+`bm25.tokenize_query`, which drops query stopwords; the gate reads the index axis, so `gate_ok` can be true
+on a token absent from this map) · `doc_ids` (text[], folded, rank order) · `index_fingerprint` ·
+`dictionary_stamp` · `store_stamp` (null on `bm25`) · `model` · `usd` · `answer_chars`. One row per real
+call — not on `--dry-run`, not on the 0-evidence path (no call was made) — inserted after `settle` in its own
+short transaction, outside the LLM round trip (the 15-second idle-in-transaction rule). These columns are what
+lets the next judgment be measured: the partial answers BM25 gives on the query axis (`pipeline.search`'s
+"unmeasured loss") and the actual query distribution behind fork #11.
+
+**Exit codes and streams** are in the retrieval section of `entrypoints.md` (the `ask` continuation of its
+exit-code bullet); `tests/retrieval/test_ask.py` holds every sentence above that names a behaviour.
 
 ## 패스 기준 (2026-08-23 결정: 6단계까지 무정지 → 2차 패스에서 기준선)
 | 패스 | 유닛 완료 기준 | 검사 |

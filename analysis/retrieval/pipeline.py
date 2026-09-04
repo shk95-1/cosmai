@@ -495,6 +495,9 @@ def search(
     sources: tuple[str, ...] | None = None,
     store: Path | None = None,
     cache_dir: Path | None = CACHE_DIR,
+    index: Index | None = None,
+    vector_store=None,
+    encoder=None,
 ) -> list[tuple[str, float, str]]:
     """(chunk_id, score, body). `vector` and `hybrid` block a query with no grounding before ranking it.
 
@@ -510,7 +513,10 @@ def search(
     `sources`). A host with no vector file sees `StoreMissing` (2) only **after** paying that cost -- because
     the gate comes before the store.
     """
-    index, _ = load_index(conn, sources, cache_dir=cache_dir)
+    # The three handles are pass-throughs to ranked_chunks, which already takes them: a caller that
+    # has to read the index or the store for something else (ask.py reads both for its version note)
+    # would otherwise open them a second time here. Behaviour is unchanged when they are None.
+    index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
     if engine in ("vector", "hybrid") and not (grounded := grounding.check(query, index)).ok:
         # 0 results is an answer the contract already knows (exit code 1) -- no new code is added, only the
         # reason is said.
@@ -525,6 +531,8 @@ def search(
         store=store,
         cache_dir=cache_dir,
         index=index,  # hand over what the gate opened -- bm25 and hybrid do not open the same index twice
+        vector_store=vector_store,
+        encoder=encoder,
     )
     # A vector encodes the raw query instead of tokenizing it, so it does not ride this list -- printing this
     # line there would state something that did not happen.

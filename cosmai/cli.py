@@ -32,6 +32,9 @@ STAGES = ("link", "polarity", "aggregate", "all")
 RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review")
 # bm25 is letters, vector is meaning, hybrid is the two rankings fused with RRF.
 RETRIEVAL_ENGINES = ("bm25", "vector", "hybrid")
+# analysis.retrieval.ask.DEFAULT_MODEL restated for the same reason RETRIEVAL_SOURCES is: the
+# default belongs in `--help`, and importing that module would pull psycopg into every --help.
+RETRIEVAL_ASK_MODEL = "claude-sonnet-5"
 SPLITS = ("tune", "holdout")
 KINDS = ("brand", "format", "attribute", "ingredient", "stopword", "alias", "aspect")
 
@@ -87,6 +90,18 @@ def _add_retrieval(subparsers: argparse._SubParsersAction) -> None:
     search.add_argument("--top", type=int, default=10, help="How many chunks to print.")
     search.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
     search.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+
+    ask = actions.add_parser("ask", help="Let an LLM summarise the ranked chunks in three sections.")
+    ask.add_argument("--query", required=True, help="What to ask.")
+    ask.add_argument("--engine", default="bm25", choices=RETRIEVAL_ENGINES)
+    ask.add_argument("--source", action="append", default=None, choices=RETRIEVAL_SOURCES, help="Repeatable.")
+    ask.add_argument("--top", type=int, default=10, help="How many chunks to fold into evidence.")
+    ask.add_argument("--model", default=RETRIEVAL_ASK_MODEL, help="A model priced in analysis/polarity.")
+    ask.add_argument(
+        "--dry-run", action="store_true", help="Print the prompt and the evidence; call nothing."
+    )
+    ask.add_argument("--vectors", default=None, help="Vector store path; default var/retrieval/...")
+    ask.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
     ev = actions.add_parser("eval", help="Score the retriever against the topic dictionary.")
     ev.add_argument("--mode", required=True, choices=["literal", "heldout"])
@@ -318,6 +333,8 @@ def _run_retrieval(args: argparse.Namespace) -> int:
                 return _run_retrieval_embed(conn, args, store)
             if args.action == "terms":
                 return _run_retrieval_terms(conn, args, sources)
+            if args.action == "ask":
+                return _run_retrieval_ask(conn, args, sources, store)
             hits = pipeline.search(
                 conn, args.query, engine=args.engine, top=args.top, sources=sources, store=store
             )
@@ -332,6 +349,35 @@ def _run_retrieval(args: argparse.Namespace) -> int:
     for chunk_id, score, text in hits:
         print(f"{score:8.4f}  {chunk_id}  {text[:120]}")
     return 0
+
+
+def _run_retrieval_ask(
+    conn: Any, args: argparse.Namespace, sources: tuple[str, ...], store: Path | None
+) -> int:
+    from analysis.retrieval import ask
+
+    try:
+        answer = ask.run(
+            conn,
+            args.query,
+            engine=args.engine,
+            top=args.top,
+            sources=sources,
+            store=store,
+            model=args.model,
+            dry_run=args.dry_run,
+        )
+    # A refusal goes to stderr here, unlike the other retrieval subcommands: this one's stdout is
+    # the markdown artefact itself (the `trend cards` convention), so one refused line redirected
+    # into a `.md` would sit inside the answer.
+    except ask.BLOCKING as blocked:
+        print(blocked, file=sys.stderr)
+        return 2
+    ask.report(answer)
+    print(answer.text)
+    # Evidence 0 is not a failure; it is the absence of an answer -- the same place `search` puts
+    # its "no results" (exit 1), and the fixed refusal is already on stdout.
+    return 0 if answer.status == "ok" else 1
 
 
 def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:

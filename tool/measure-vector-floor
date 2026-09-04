@@ -203,7 +203,9 @@ def measure_cosine(conn, store, device: str | None) -> dict:
     band = band_of(real, low=True)
     measured = {
         "store": store.stamp,
-        "dictionary": dictionary.version,
+        # The same weight on both axes: a stamp, not a bare number -- rows can be added to the
+        # active version and the number stays (#62, #68).
+        "dictionary": dictionary.stamp,
         "csv_queries": same_as_csv(real_queries),
         "present": {name: count for name, count in found.items() if count},
         "real": band,
@@ -276,7 +278,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
             rules[name][sample] = sum(1 for query in queries if zero_df(query, index, minimum))
         rules["in_use"][sample] = sum(1 for query in queries if not grounding.check(query, index).ok)
     return {
-        "dictionary": dictionary.version,
+        "dictionary": dictionary.stamp,  # a stamp, not a bare number (#68)
         "csv_queries": same_as_csv(real),
         "minimum_length": grounding.ZERO_DF_MINLEN,
         "frames": len(shapes),
@@ -289,7 +291,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
 
 
 def report_cosine(found: dict) -> None:
-    print(f"store {found['store']} · active topic dictionary v{found['dictionary']}")
+    print(f"store {found['store']} · active topic dictionary {found['dictionary']}")
     same = found["csv_queries"]
     verdict_csv = "same" if same["same"] else "different"
     print(f"  {same['active']} queries · {verdict_csv} from the load-source CSV ({same['csv']})")
@@ -339,7 +341,7 @@ def report_df(found: dict) -> None:
     }
     same = found["csv_queries"]
     print(
-        f"\nblocked queries · active topic dictionary v{found['dictionary']} · {found['frames']} frames "
+        f"\nblocked queries · active topic dictionary {found['dictionary']} · {found['frames']} frames "
         f"· the queries are {'the same as' if same['same'] else 'different from'} the load-source CSV"
     )
     for name, label in labels.items():

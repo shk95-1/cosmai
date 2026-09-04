@@ -16,7 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from cosmai.cli import RETRIEVAL_ENGINES, RETRIEVAL_SOURCES, build_parser, main
+from cosmai.cli import (
+    RETRIEVAL_ASK_MODEL,
+    RETRIEVAL_ENGINES,
+    RETRIEVAL_SOURCES,
+    build_parser,
+    main,
+)
 
 
 class FakeConn:
@@ -47,7 +53,7 @@ def refuse_connection(monkeypatch):
 def worked(monkeypatch):
     """Lets the connection through and swaps the working function for a fake. It records what was called with
     which arguments."""
-    from analysis.retrieval import embed, pipeline, terms
+    from analysis.retrieval import ask, embed, pipeline, terms
     from analysis.retrieval import eval as retrieval_eval
     from cosmai import cli
 
@@ -74,12 +80,19 @@ def worked(monkeypatch):
         calls["terms"] = kw
         return SimpleNamespace(documents={"topical": 1})
 
+    def summarise(_conn, query, **kw):
+        # The answer layer is the one subcommand whose worker would spend money -- the fake stands
+        # in for the client, the ledger and the log all at once.
+        calls["ask"] = {"query": query, **kw}
+        return ask.Answer(status="ok", text="## Core", prompt="p", evidence=(), note="note: fake")
+
     monkeypatch.setattr(pipeline, "run", chunk)
     monkeypatch.setattr(pipeline, "search", search)
     monkeypatch.setattr(retrieval_eval, "run", score)
     monkeypatch.setattr(embed, "run", encode)
     monkeypatch.setattr(terms, "scan", look)
     monkeypatch.setattr(terms, "render", lambda _scanned, **_kw: "표")
+    monkeypatch.setattr(ask, "run", summarise)
     return calls
 
 
@@ -88,6 +101,7 @@ def worked(monkeypatch):
     [
         ["retrieval", "chunk"],
         ["retrieval", "search", "--query", "백탁"],
+        ["retrieval", "ask", "--query", "panthenol"],
         ["retrieval", "eval", "--mode", "literal"],
         ["retrieval", "embed"],
         ["retrieval", "terms"],
@@ -106,6 +120,7 @@ def test_a_refused_connection_is_blocked_not_failed(argv, refuse_connection, cap
     [
         (["retrieval", "chunk"], "chunk"),
         (["retrieval", "search", "--query", "백탁"], "search"),
+        (["retrieval", "ask", "--query", "panthenol"], "ask"),
         (["retrieval", "eval", "--mode", "literal"], "eval"),
         (["retrieval", "embed"], "embed"),
         (["retrieval", "terms"], "terms"),
@@ -169,3 +184,43 @@ def test_a_scan_that_saw_no_document_is_partial(worked, monkeypatch):
 
     monkeypatch.setattr(terms, "scan", lambda *_a, **_kw: SimpleNamespace(documents={}))
     assert main(["retrieval", "terms"]) == 1
+
+
+def test_the_answer_layer_gets_the_engine_the_model_and_the_dry_run_flag(worked):
+    """`ask` is the only subcommand with a switch that decides whether money moves, so the flag
+    reaching the worker is the thing worth pinning."""
+    assert main(["retrieval", "ask", "--query", "panthenol", "--engine", "hybrid", "--dry-run"]) == 0
+    assert worked["ask"]["engine"] == "hybrid"
+    assert worked["ask"]["dry_run"] is True
+    assert worked["ask"]["model"] == RETRIEVAL_ASK_MODEL
+
+
+def test_an_answer_with_no_evidence_is_partial(worked, monkeypatch, capsys):
+    """Evidence 0 puts the fixed refusal on stdout and exits 1 -- the same place `search` puts its
+    "no results", because a quiet 0 reads as an answer that stands on something."""
+    from analysis.retrieval import ask
+
+    monkeypatch.setattr(
+        ask,
+        "run",
+        lambda *_a, **_kw: ask.Answer(
+            status="no_evidence", text=ask.CANNOT_ANSWER, prompt="p", evidence=(), note="note: fake"
+        ),
+    )
+    assert main(["retrieval", "ask", "--query", "panthenol"]) == 1
+    assert capsys.readouterr().out.strip() == ask.CANNOT_ANSWER
+
+
+def test_a_blocked_answer_keeps_stdout_free_of_everything_but_markdown(worked, monkeypatch, capsys):
+    """stdout is redirected into a `.md`, so a refusal belongs on stderr (the `trend cards` rule)."""
+    from analysis.polarity.pricing import BudgetExceeded
+    from analysis.retrieval import ask
+
+    def refuse(*_a, **_kw):
+        raise BudgetExceeded("no budget left (test)")
+
+    monkeypatch.setattr(ask, "run", refuse)
+    assert main(["retrieval", "ask", "--query", "panthenol"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "no budget left (test)" in captured.err

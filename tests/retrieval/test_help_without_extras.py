@@ -27,8 +27,16 @@ MODULES = (
     "analysis.retrieval.eval",
     "analysis.retrieval.embed",
     "analysis.retrieval.vectors",
+    "analysis.retrieval.ask",
 )
-COMMANDS = ("retrieval", "retrieval chunk", "retrieval search", "retrieval eval", "retrieval embed")
+COMMANDS = (
+    "retrieval",
+    "retrieval chunk",
+    "retrieval search",
+    "retrieval ask",
+    "retrieval eval",
+    "retrieval embed",
+)
 
 # The block is put on with a finder that raises ModuleNotFoundError at import time -- planting an empty fake
 # module would make it "present but empty", which tests a different situation from the image's "absent".

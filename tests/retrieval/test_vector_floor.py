@@ -202,6 +202,40 @@ def test_the_search_section_says_the_floor_is_absent_on_purpose():
     assert "§벡터 하한선" in search
 
 
+def test_the_lexicon_axis_carries_a_stamp_like_the_store_axis(monkeypatch: pytest.MonkeyPatch):
+    """A bare number is not a version (#62): rows can be added to the active version and the number
+    stays. The store axis already carried `store.stamp`; the lexicon axis carried `.version` (#68).
+    Both measurements of this tool feed the same contract section, so both get the same weight."""
+    floor = loaded()
+    from analysis.retrieval import embed, topics
+
+    fixed = topics.Topics((), 2, "abc123")
+    monkeypatch.setattr(topics, "use_active", lambda _conn: fixed)
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_k: object())
+    monkeypatch.setattr(floor, "literal_queries", lambda _dictionary: ["query"])
+    monkeypatch.setattr(floor, "same_as_csv", lambda _queries: {"same": True, "csv": 1, "active": 1})
+    monkeypatch.setattr(floor, "presence", lambda _conn, names: dict.fromkeys(names, 0))
+    monkeypatch.setattr(floor, "top_cosine", lambda _s, _e, queries: [(q, 0.9) for q in queries])
+
+    measured = floor.measure_cosine(None, SimpleNamespace(stamp="model=m", model="m"), "cpu")
+    assert measured["dictionary"] == fixed.stamp
+    assert "version=2" in measured["dictionary"] and "fingerprint=abc123" in measured["dictionary"]
+    # The df measurement writes the same key from the same lexicon; a number there would be the same
+    # half-version the cosine table just stopped carrying.
+    source = TOOL.read_text(encoding="utf-8")
+    assert "dictionary.version" not in source
+    assert source.count('"dictionary": dictionary.stamp') == 2
+
+
+def test_the_contract_records_the_table_version_apart_from_what_the_tool_carries():
+    """The table in the contract is a record on active lexicon v2 · 61 queries, written when the tool
+    carried a number. Fixing the tool does not remeasure the table (#68), so the contract has to say
+    which version the recorded rows stand on and that the next remeasurement carries the stamp."""
+    body = section()
+    assert "v2 · 61 queries" in body
+    assert "next remeasurement" in body and "fingerprint" in body
+
+
 def test_a_sample_with_no_fake_left_says_so_instead_of_crashing(capsys):
     """If all twelve are in the corpus, the sample is not wholly fake. Blowing up at that point leaves this
     tool no chance to say "do not trust this output" with the exit code 1 it promised."""
@@ -209,7 +243,7 @@ def test_a_sample_with_no_fake_left_says_so_instead_of_crashing(capsys):
     assert floor.band_of([], low=False) is None
     measured = {
         "store": "model=m · vectors=1 · chunked_at_max=키없음",
-        "dictionary": 2,
+        "dictionary": "ruleset=r · version=2 · topics=1 · aliases=2 · fingerprint=f",
         "csv_queries": {"same": True, "csv": 2, "active": 2},
         "present": dict.fromkeys(floor.FAKE, 3),
         "real": floor.band_of([("백탁", 0.90), ("톤 업", 0.80)], low=True),

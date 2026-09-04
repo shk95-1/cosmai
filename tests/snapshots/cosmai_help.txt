@@ -51,12 +51,13 @@ options:
   --url URL             SQLAlchemy URL; default is needs_runtime from the secret file.
 
 $ cosmai retrieval --help
-usage: cosmai retrieval [-h] {chunk,search,eval,terms,embed} ...
+usage: cosmai retrieval [-h] {chunk,search,ask,eval,terms,embed} ...
 
 positional arguments:
-  {chunk,search,eval,terms,embed}
+  {chunk,search,ask,eval,terms,embed}
     chunk               Load needs.retrieval_chunk from the source schemas.
     search              Rank chunks against a query.
+    ask                 Let an LLM summarise the ranked chunks in three sections.
     eval                Score the retriever against the topic dictionary.
     terms               Show the frequent words the topic dictionary misses.
     embed               Encode chunks into a vector store on disk.
@@ -88,6 +89,24 @@ options:
   --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
                         Repeatable.
   --top TOP             How many chunks to print.
+  --vectors VECTORS     Vector store path; default var/retrieval/...
+  --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai retrieval ask --help
+usage: cosmai retrieval ask [-h] --query QUERY [--engine {bm25,vector,hybrid}]
+                            [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                            [--top TOP] [--model MODEL] [--dry-run] [--vectors VECTORS]
+                            [--url URL]
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         What to ask.
+  --engine {bm25,vector,hybrid}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+                        Repeatable.
+  --top TOP             How many chunks to fold into evidence.
+  --model MODEL         A model priced in analysis/polarity.
+  --dry-run             Print the prompt and the evidence; call nothing.
   --vectors VECTORS     Vector store path; default var/retrieval/...
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
