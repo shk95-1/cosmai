@@ -27,7 +27,7 @@ def _load(*parts: str) -> dict:
 
 class _FixtureFetcher:
     """No network: hands back a saved dump per job kind, keyed the way the real sources would ask.
-    Counts calls per kind -- #8 수정 라운드 2's freshness cache is only provable by counting fetches,
+    Counts calls per kind -- #8 fix round 2's freshness cache is only provable by counting fetches,
     not just reading rows back."""
 
     def __init__(self) -> None:
@@ -87,7 +87,7 @@ def test_watch_work_flatten_lands_every_table(tubedepth_schema: str, tmp_path: P
     exit_flatten = run("flatten", database_url=tubedepth_schema, payload_root=payload_root, captured_at=AT)
     assert exit_flatten == 0
 
-    # #8 수정 라운드 2: 3 listing jobs (one per follow-up kind on the one channel+comments line) share
+    # #8 fix round 2: 3 listing jobs (one per follow-up kind on the one channel+comments line) share
     # one channel -- the freshness cache (models.FRESHNESS) means only the first actually fetches;
     # jobs 2 and 3 reuse that artifact. Before the cache: 3 fetches, 6 listing_entries rows.
     assert fetcher.calls["channel.videos"] == 1

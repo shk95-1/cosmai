@@ -1,5 +1,5 @@
 """Sample-design constants `cli.py` actually runs on. `scope.json` is this module's declarative
-copy (contracts/entrypoints.md: 'scope.lock의 변형'), and
+copy (contracts/entrypoints.md: 'a variant of scope.lock'), and
 `tests/collectors/naver/test_scope_matches_constants.py` is the drift check -- the same split
 `collectors/commerce/models.py` constants vs. `collectors/commerce/scope.json` uses (#7's form)."""
 
