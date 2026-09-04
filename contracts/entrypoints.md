@@ -696,8 +696,8 @@ than lanes has a second floor as well, "total work ÷ lane count". There are two
 count, so there are two durations: the **seed basis**, which walks only the length of `seeds()`, and the
 **budget basis**, which fills up to `max_requests_per_run`. On the budget basis the hourly ranking alone,
 with its slowest source (daisomall), runs past and occupies the start times of 02:10 product and 04:15
-review — and moving the cron does not close it. It is not a full overlap but the overlap a per-source
-advisory lock closes (#10 §A-8-1, `collectors/commerce/storage/locks.py`), and that lock is already wired
+review — and moving the cron does not close it. This is not an overlap to untangle by moving the cron; it
+is the overlap a per-source advisory lock closes (#10 §A-8-1, `collectors/commerce/storage/locks.py`), and that lock is already wired
 unconditionally into the production entry point (`collectors/commerce/cli.py`, with
 `tests/collectors/commerce/test_source_lock.py` holding that place). Interval arithmetic cannot see the
 lock, so `tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py` always checks the

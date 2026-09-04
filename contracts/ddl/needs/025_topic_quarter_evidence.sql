@@ -42,7 +42,7 @@ CREATE TABLE needs.topic_quarter_evidence (
   matched_term  text,
   picked_at     timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role, rank),
-  -- If one comment takes two slots in a cell, three pieces of evidence are really one. Uniqueness
+  -- If one comment takes two slots in a cell, the evidence set is really one. Uniqueness
   -- on the slot (rank) alone cannot stop that.
   UNIQUE (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role, doc_id),
   FOREIGN KEY (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role)

@@ -115,7 +115,7 @@ CREATE TABLE needs.wish_mention (
   observed_at     date NOT NULL,
   observed_at_resolution text NOT NULL,
   month           text NOT NULL,
-  wish_class      text NOT NULL CHECK (wish_class IN ('a','b','c')),  -- a product request, b creator request, c general wish
+  wish_class      text NOT NULL CHECK (wish_class IN ('a','b','c')),  -- a product or launch request, b creator request, c general wish
   brand           text,
   format          text,
   attribute       text,
