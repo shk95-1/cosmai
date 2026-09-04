@@ -193,7 +193,9 @@ def measure_cosine(conn, store, device: str | None) -> dict:
     band = band_of(real, low=True)
     measured = {
         "store": store.stamp,
-        "dictionary": dictionary.version,
+        # The same weight on both axes: a stamp, not a bare number -- rows can be added to the
+        # active version and the number stays (#62, #68).
+        "dictionary": dictionary.stamp,
         "csv_queries": same_as_csv(real_queries),
         "present": {name: count for name, count in found.items() if count},
         "real": band,
@@ -264,7 +266,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
             rules[name][sample] = sum(1 for query in queries if zero_df(query, index, minimum))
         rules["in_use"][sample] = sum(1 for query in queries if not grounding.check(query, index).ok)
     return {
-        "dictionary": dictionary.version,
+        "dictionary": dictionary.stamp,  # a stamp, not a bare number (#68)
         "csv_queries": same_as_csv(real),
         "minimum_length": grounding.ZERO_DF_MINLEN,
         "frames": len(shapes),
@@ -276,7 +278,7 @@ def measure_df(conn, sources: tuple[str, ...] | None = None) -> dict:
 
 
 def report_cosine(found: dict) -> None:
-    print(f"저장소 {found['store']} · 활성 주제 사전 v{found['dictionary']}")
+    print(f"store {found['store']} · active topic lexicon {found['dictionary']}")
     same = found["csv_queries"]
     verdict_csv = "같다" if same["same"] else "다르다"
     print(f"  질의 {same['active']}개 · 적재 원본 CSV({same['csv']}개)와 {verdict_csv}")
@@ -323,8 +325,8 @@ def report_df(found: dict) -> None:
     }
     same = found["csv_queries"]
     print(
-        f"\n막힌 질의 수 · 활성 주제 사전 v{found['dictionary']} · 문형 {found['frames']}개 "
-        f"· 질의는 적재 원본 CSV 와 {'같다' if same['same'] else '다르다'}"
+        f"\nblocked queries · active topic lexicon {found['dictionary']} · {found['frames']} frames "
+        f"· queries {'match' if same['same'] else 'differ from'} the loaded source CSV"
     )
     for name, label in labels.items():
         counts = " · ".join(

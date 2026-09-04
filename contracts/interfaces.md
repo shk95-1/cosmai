@@ -1482,6 +1482,12 @@ chunked_at_max=키없음`, 활성 주제 사전 v2):
 `속건조`·`파데프리`). 다시 재기 전까지 아래 두 줄은 v2 판본의 값이고, 판정(분포가 갈리지 않는다)이 그 둘로
 어떻게 되는지는 재 봐야 안다.
 
+**Version record of this table vs. what the tool carries from now on (#68).** The two rows below were
+measured on active lexicon **v2 · 61 queries**, and the tool of that day recorded the lexicon axis as a bare
+number; that record stays as written. Since #68 `tool/measure-vector-floor` records the lexicon axis as the
+full stamp (`ruleset · version · topics · aliases · fingerprint`), the same weight as the store axis, so the
+next remeasurement replaces this line with the stamp it was measured on.
+
 
 | 분포 | n | 최소 | 25% | 중앙 | 75% | 최대 |
 |---|---|---|---|---|---|---|
