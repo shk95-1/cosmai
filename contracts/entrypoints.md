@@ -350,14 +350,19 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   source ∈ {youtube_comment, youtube_video, youtube_transcript, commerce_review}
   engine ∈ {bm25, vector, hybrid}      mode ∈ {literal, heldout}
 ```
-- **주제 사전은 `needs.aspect_lexicon` 의 활성 버전이다**(`ruleset='retrieval-topic'`, 포크 #8). 그 별칭이
-  BM25 토큰 확장(Kiwi 사용자 단어 + 부분문자열 확장)과 평가 정답(`match_topics`)을 함께 정하므로, 사전을
-  바꾸는 길은 `cosmai lexicon load/diff/activate` 하나다 — 적재 원본은 `analysis/retrieval/dict/topics_v1.csv`.
-  aspect 버전 하나 = **모든 룰셋을 합친 aspect 사전 전체**라(`activate` 는 kind 단위로 켠다) 주제를 새
-  버전으로 올릴 때는 극성 쪽 CSV(`eval/lexicon/aspect_lexicon_v1.csv`)도 같은 버전으로 함께 적재한다.
-  **v3 적재는 아직 안 했다**(2026-08-27, 운영은 v2 가 활성) — 그전까지 검색이 보는 사전은 v2 이고, 레포의
-  적재 원본은 이미 v3 내용이라 그 둘이 갈려 있다. 켜는 순간 `선크림` 주제가 12,197 → 12,418 문서를 보게
-  되고 색인 캐시가 사전 지문으로 무효화된다(`pipeline.index_signature`).
+- **The topic lexicon is the active version of `needs.aspect_lexicon`** (`ruleset='retrieval-topic'`, fork
+  #8). Its aliases set both the BM25 token expansion (Kiwi user words + substring expansion) and the
+  evaluation gold (`match_topics`), so the one way to change the lexicon is `cosmai lexicon
+  load/diff/activate` — the load source is `analysis/retrieval/dict/topics_v1.csv`. One aspect version is
+  **the whole aspect lexicon across every ruleset** (`activate` switches per kind), so when the topics go up a
+  version the polarity CSV (`eval/lexicon/aspect_lexicon_v1.csv`) is loaded at the same version alongside.
+  **Which version is active is not a sentence in this file** (fork #63 — this line once said v2 was active in
+  production after v3 already was): retrieval reads it from the DB at run time and every run says which one
+  it stood on — `eval` rows and the `ask` note carry the lexicon stamp (`ruleset · version · topics · aliases
+  · fingerprint`, fork #62) and `tool/show-lexicon-stamp` prints the active one, so a stale claim here has no
+  reader. Last measured 2026-08-27: v3, fingerprint `ae48f7cfb70a60f7`, 63 literal · 62 heldout queries.
+  Activating a version invalidates the index cache through that fingerprint (`pipeline.index_signature`);
+  v2 → v3 moved the sunscreen topic from 12,197 to 12,418 documents.
 - **The index and extraction axis carries no stopword list and no particle list** (fork #37, ydc
   `lexicon.json` disposed of). That axis is the index tokenizer (`bm25.tokenize`) and `terms`. **General terms
   are not removed by anything on it** (fork #59 — this line once credited lift): of ydc's general-word block,

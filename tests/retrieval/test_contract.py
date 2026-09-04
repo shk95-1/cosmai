@@ -75,6 +75,17 @@ def test_the_index_axis_sentence_credits_the_tokenizer_and_idf_not_lift():
     assert "lift removes" not in section and "removed by the lift" not in section
 
 
+def test_the_contract_does_not_claim_which_lexicon_version_is_active():
+    """fork #63: a version name in prose goes stale (it said v2 while v3 was active). The active version is
+    read from the DB at run time and printed by every run; the contract may record a dated measurement but
+    must not assert the current state."""
+    section = "\n".join(_search_section())
+    assert "is not a sentence in this file" in section
+    assert "tool/show-lexicon-stamp" in section
+    for stale in ("is active in production", "v2 is active", "not loaded v3"):
+        assert stale not in section, stale
+
+
 def test_the_search_baseline_table_carries_every_mode_and_engine():
     """heldout 의 vector P@10 이 #28 단계 4 벡터 채택의 근거인데, 그 여섯 줄이 사는 곳이
     지워질 리뷰 문서뿐이었다 -- 계약이 그 거처다(#17 S10)."""
