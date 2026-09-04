@@ -1,5 +1,5 @@
-# 이 레포의 compose — 배선 전부는 여기 하나(README.md "stack/" 절). portal 하나였던 파일에 #10 §C
-# 절차 1 이 수집·분석 스케줄러를 더한다.
+# This repo's compose -- every bit of wiring lives in this one file (README.md's "stack/" section). #10
+# §C procedure 1 adds the collection/analysis schedulers to what used to be a portal-only file.
 #
 # **db-net and the database belong to this file now (#177).** Both were the `shared-db` project's:
 # it created the network, fixed its unprefixed name, and ran shared-postgres. That project died
@@ -21,51 +21,59 @@
 # containers are still sitting on. Until #181 retires them, stop and start this stack with
 # `stop`/`up` -- never `down`.
 #
-# **스케줄러는 컨테이너당 크론탭 하나.** supercronic 에는 줄 단위 스위치가 없어서 운영자가 켜고 끌 수
-# 있는 최소 단위가 컨테이너다. 그래서 따로 멈춰야 하는 것끼리 나눈다: 외부 요청 예산을 쓰는 팔
-# (commerce · naver · youtube work)이 각각, 그 예산을 안 쓰는 팔(youtube flatten+prune · analyze)이
-# 각각, 그리고 #10 절차 3 이 큐 깊이를 확인한 뒤에야 켜라고 한 youtube watch 가 혼자. 어느 파일이 어느
-# 컨테이너 것인지는 이름이 말한다(stack/crontab.d/<서비스명>) — tests/stack/test_stack_wiring.py 가
-# 그 대응과 아래 값들을 검사한다.
+# **One scheduler is one crontab per container.** supercronic has no per-line switch, so a container is
+# the smallest unit an operator can turn on and off. So this splits apart whatever must be stopped
+# separately: each arm that spends an outside request budget (commerce, naver, youtube work) on its
+# own, each arm that does not spend that budget (youtube flatten+prune, analyze) on its own, and youtube
+# watch alone, since #10 procedure 3 says to turn it on only after the queue depth is checked. The name
+# says which file belongs to which container (stack/crontab.d/<service name>) --
+# tests/stack/test_stack_wiring.py checks that mapping along with the values below.
 #
-# **조건 2 의 "이미지 안 동작 확인" 은 빌드가 한다.** stack/Dockerfile 의 마지막 RUN 이 이미지 안에서
-# `cosmai --help` · `db/migrate.sh --help` · `ls contracts/ddl/needs/*.sql` · site-packages 를 통한
-# `scope_threshold()` 임포트를 전부 실행한다. 그 빌드가 성공했다는 것이 그 조건의 근거다.
+# **The build is what satisfies condition 2's "confirm it works inside the image".** The last RUN in
+# stack/Dockerfile runs `cosmai --help`, `db/migrate.sh --help`, `ls contracts/ddl/needs/*.sql`, and a
+# `scope_threshold()` import through site-packages, all inside the image. That build succeeding is that
+# condition's evidence.
 name: cosmai
 
-# **오늘 `up -d` 하면 수집기 둘은 매 실행 실패한다.** collectors/{naver,youtube}/cli.py 의 기본
-# fetcher 는 아직 `_RaisingFetcher` 라 collector-youtube-work 는 하루 288회, collector-naver 는 월
-# 2회 NotImplementedError 로 끝나고 그 둘에서 나가는 외부 요청은 한 건도 없다. 그래도 프로필 뒤로
-# 숨기지 않는 이유: 절차 1 이 검사하는 것이 배선이고, 게이트를 걸면 `up -d` 가 그 배선을 띄우지 않아
-# 대조할 것이 없어진다. 비용도 로그뿐이다 — supercronic 은 작업이 실패해도 계속 돌므로 컨테이너는
-# 재시작 루프에 들지 않는다.
+# **Running `up -d` today makes two collectors fail on every run.** collectors/{naver,youtube}/cli.py's
+# default fetcher is still `_RaisingFetcher`, so collector-youtube-work ends with NotImplementedError
+# 288 times a day and collector-naver twice a month, and not a single outside request ever leaves either
+# of them. Still not hidden behind a profile, because: what procedure 1 checks is the wiring, and gating
+# it would keep `up -d` from ever raising that wiring, leaving nothing to check against. The cost is only
+# log noise too -- supercronic keeps running after a job fails, so the container never enters a restart
+# loop.
 #
-# **collector-commerce 는 더 이상 그 셋에 없다.** #10 이 라이브 트랜스포트를 붙였고
-# (collectors/commerce/cli.py 의 `fetcher or live_fetchers()`), 그래서 이 컨테이너는 뜨는 순간부터
-# 다음 크론 시각에 커머스 4사로 진짜 요청을 낸다. STATE.md §3 이 컷오버 전 새 수집을 금지하고 조건
-# 3(그림자 실행)은 사람이 시각을 골라 여는 단계이므로, 그 금지를 관례가 아니라 파일이 지키도록
-# **프로필 `commerce` 뒤에 둔다** — 배포가 곧 그림자 실행이 되면 안 된다. 여는 명령은 그 서비스
-# 블록에 적혀 있고, tests/stack/test_live_collection_is_behind_a_profile.py 가 프로필 없이는 뜨지
-# 않는다는 것을 검사한다.
-# (collector-youtube-watch 도 프로필 뒤이지만 이유는 다르다 — 큐 깊이다. 아래 참조.)
+# **collector-commerce is no longer part of that set.** #10 attached a live transport
+# (`fetcher or live_fetchers()` in collectors/commerce/cli.py), so this container sends real requests to
+# the four commerce sites at the very next cron time, the moment it starts. Since STATE.md §3 forbids
+# new collection before cutover and condition 3 (shadow run) is a stage a person opens by choosing a
+# time, this **sits behind the `commerce` profile** so a file enforces that ban rather than convention --
+# a deploy must never turn itself into the shadow run. The command that opens it is written in that
+# service's own block, and tests/stack/test_live_collection_is_behind_a_profile.py checks that it never
+# starts without the profile.
+# (collector-youtube-watch also sits behind a profile, but for a different reason -- queue depth. See
+# below.)
 #
-# 스케줄러 여섯이 공유하는 정의. 하나의 객체인 이유는 fleet 쪽 앵커와 같다: 이 값들이 서로 달라지면
-# 컨테이너 하나만 조용히 다른 DB(호스트 기본값 127.0.0.1:5434 — 컨테이너 안에서는 아무것도 없는 주소)를
-# 보게 되고, 그것은 크래시가 아니라 "수집은 도는데 행이 안 늘어난다"로 나타난다.
+# The definition six schedulers share. It is one object for the same reason as the fleet's own anchor:
+# if these values ever diverged, one container alone would quietly point at a different DB (the host
+# default 127.0.0.1:5434 -- an address that is nothing at all from inside a container), and that would
+# not show up as a crash but as "collection runs, but the row count never grows".
 x-cron: &cron
-  # 이미지는 stack/Dockerfile 하나에서 나온다. supercronic 만 stack/Dockerfile.cron 이 그 위에 얹는다
-  # (그 파일의 주석이 왜 두 장인지 설명한다). **`docker compose build` 만 따로 돌리지 마라** —
-  # 그 앞 단계가 없으면 FROM 이 이 호스트에 이미 있는 남의 `cosmai` 를 집는다. 두 단계는
-  # tool/stack-build 가 한 번에 돈다.
+  # The image comes from exactly one place, stack/Dockerfile. Only supercronic is layered on top of it
+  # by stack/Dockerfile.cron (that file's own comment explains why it is two stages). **Never run
+  # `docker compose build` on its own** -- without that earlier stage, FROM picks up someone else's
+  # `cosmai` already sitting on this host. tool/stack-build runs both stages in one go.
   build:
     context: ..
     dockerfile: stack/Dockerfile.cron
   image: cosmai-needs-cron:local
-  # 여섯 다 같은 build 를 들고 있다: 태그가 같아 두 번째부터는 캐시 히트이고, 대신 프로필 뒤에 숨은
-  # watch 컨테이너도 다른 서비스 없이 혼자 빌드하고 띄울 수 있다.
+  # All six share this same build: the tag is the same, so every one after the first is a cache hit, and
+  # in exchange the watch container hiding behind its profile can still be built and started alone, with
+  # no other service.
   restart: unless-stopped
-  # 데이터베이스가 같은 파일에 있게 되면서(#177) 스케줄러가 클러스터보다 먼저 뜰 수 있다. 그때의
-  # 첫 크론 줄은 크래시가 아니라 연결 거절로 끝난 run 이라 아무것도 재시도하지 않는다.
+  # Now that the database lives in this same file (#177), a scheduler can start before the cluster does.
+  # That first cron line then ends as a run closed by connection refused, not a crash, so nothing retries
+  # it.
   depends_on:
     postgres:
       condition: service_healthy
@@ -74,24 +82,24 @@ x-cron: &cron
     # 같은 DB 다 — db/runtime.py 의 host_and_port() 가 세 자리에서 이 둘만 읽는다.
     COSMAI_DB_HOST: postgres
     COSMAI_DB_PORT: "5432"
-    # db/secrets.py 의 COSMAI_SECRET_FILE. 값이 아니라 위치다.
+    # db/secrets.py's COSMAI_SECRET_FILE. A location, not a value.
     COSMAI_SECRET_FILE: /run/cosmai/env
-    # supercronic 이 각 작업의 stdout 을 그대로 흘리므로, 버퍼링되면 `docker logs` 가 실행 중에는
-    # 비어 있다가 종료할 때 한꺼번에 찬다.
+    # supercronic streams each job's stdout straight through, so if it were ever buffered, `docker logs`
+    # would sit empty while the job runs and fill all at once when it exits.
     PYTHONUNBUFFERED: "1"
     # stack/crontab.d/* 여섯 파일이 전부 첫 줄에서 UTC 라고 선언하고 contracts/entrypoints.md §스케줄
     # 의 시각도 UTC 다. 이 줄이 없으면 그것이 베이스 이미지가 마침 UTC 라는 우연이고, 이미지를 바꾸는
     # 날 여섯 스케줄이 한꺼번에 움직인다.
     TZ: UTC
   volumes:
-    # 읽기 전용: 어느 스케줄러도 이 파일에 쓰지 않는다. 호스트 경로는 리터럴이 아니라 변수이고 기본값이
-    # 없다 — 빠지면 compose 가 이름을 말하며 거부한다(stack/env.example).
+    # Read-only: no scheduler ever writes to this file. The host path is a variable, not a literal, and
+    # has no default -- leaving it out makes compose refuse to start, naming it (stack/env.example).
     - ${COSMAI_SECRET_FILE_HOST:?stack-env-example 참고 - ~/.config/cosmai/env 의 호스트 절대경로}:/run/cosmai/env:ro
   networks:
     - db-net
 
 services:
-  # --- 데이터베이스 -------------------------------------------------------------------------------
+  # --- Database -----------------------------------------------------------------------------------
   # #177: the cluster every other service here reads and writes. No POSTGRES_USER/PASSWORD/DB is
   # set, and none may be: the data directory below already holds an initialised cluster, so the
   # entrypoint sets DATABASE_ALREADY_EXISTS and never reaches docker_verify_minimum_env -- the one
@@ -100,30 +108,33 @@ services:
   # and no secret value enters this file or stack/.env (contracts/secrets.md).
   postgres:
     image: postgres:18
-    # 디스크의 클러스터를 쓴 그 이미지다. 다른 메이저는 이 데이터 디렉터리 위에서 기동을 거부한다.
+    # The exact image that wrote the cluster on disk. A different major version refuses to start on top
+    # of this data directory.
     container_name: cosmai-postgres
     restart: unless-stopped
     volumes:
-      # PGDATA 의 부모를 붙인다 -- 죽은 컨테이너가 그렇게 붙였고, 이미지의 PGDATA 기본값
-      # /var/lib/postgresql/18/docker 가 그 아래에 그대로 있다. 자식을 직접 붙이면 같은 클러스터를
-      # 못 찾고 빈 것을 새로 만든다.
+      # This mounts PGDATA's parent -- the dead container mounted it the same way, and the image's
+      # PGDATA default, /var/lib/postgresql/18/docker, sits right under it unchanged. Mounting the
+      # child directly would fail to find the same cluster and create an empty one instead.
       #
-      # 기본값이 없다 -- COSMAI_SECRET_FILE_HOST 와 같은 부류의 호스트 절대경로다. 이 파일의
-      # `name: cosmai` 와 container_name 은 고정이므로 어느 체크아웃에서 `up` 하든 겨냥하는 것은
-      # 같은 운영 컨테이너인데, 체크아웃마다 다른 자리로 풀리는 상대 기본값은 그 컨테이너를 엉뚱한
-      # 디렉터리 위에 다시 만든다. 그 경로는 entrypoint 의 docker_create_db_directories 가 이미
-      # root 소유로 만들어 놓은 뒤에야 기동이 실패한다.
+      # No default -- an absolute host path, the same kind as COSMAI_SECRET_FILE_HOST. Since this
+      # file's `name: cosmai` and container_name are fixed, `up` from any checkout targets the same
+      # production container, while a relative default that resolves to a different spot per checkout
+      # would recreate that container on top of the wrong directory. That path only fails to start
+      # after the entrypoint's docker_create_db_directories has already created it, owned by root.
       - ${COSMAI_PG_DATA_DIR:?stack/env.example - absolute host path of the existing postgres data directory}:/var/lib/postgresql
     ports:
-      # 호스트에서 도는 `uv run cosmai ...` 와 db/migrate.sh 가 보는 주소(db/runtime.py 의 기본값).
-      # 루프백에만 연다 -- 구 컨테이너가 열던 범위 그대로다.
+      # The address `uv run cosmai ...` running on the host and db/migrate.sh see (db/runtime.py's
+      # default). Opened only on loopback -- exactly the range the old container opened.
       - "127.0.0.1:5434:5432"
     healthcheck:
-      # 아래 depends_on 이 기다리는 조건. 포트가 열리는 시각과 클러스터가 질의를 받는 시각은 다르다
-      # (기동 시 WAL 재생) -- 그 사이에 뜬 크론 컨테이너는 조용히 실패한 run 하나로 끝난다.
-      # **살아 있음만 잰다. 어느 클러스터인지는 못 잰다** -- 갓 만들어진 빈 클러스터에서도 이 명령은
-      # platform 롤도 app DB 도 없이 0 으로 끝난다. 초록을 "데이터가 거기 있다"로 읽으면 안 된다.
-      # 그것을 되묻는 자리는 tool/status 의 db 절(원장 버전 · app 크기 · 행 수)이다.
+      # The condition depends_on below waits on. The moment the port opens and the moment the cluster
+      # accepts queries are different (WAL replay at startup) -- a cron container that starts in
+      # between just ends quietly as one failed run.
+      # **This only measures being alive. It cannot measure which cluster this is** -- even on a
+      # freshly created empty cluster, this command exits 0 with neither a platform role nor an app DB.
+      # Green here must never be read as "the data is there". The place that asks that question is
+      # tool/status's db section (ledger version, app size, row counts).
       test: ["CMD-SHELL", "pg_isready -U platform -d app"]
       interval: 10s
       timeout: 5s
@@ -137,21 +148,24 @@ services:
         aliases:
           - shared-postgres
 
-  # --- 수집 ---------------------------------------------------------------------------------------
+  # --- Collection ---------------------------------------------------------------------------------
   # 커머스 4사. 여섯 줄이 한 컨테이너인 이유는 하나의 요청 예산을 나눠 쓰기 때문이다: crontab.d 의
   # 간격 규칙(contracts/entrypoints.md §스케줄)은 이 줄들이 서로 겹치지 않는다는 전제 위에 있고,
   # 컨테이너를 쪼개면 그 전제를 지킬 자리가 없어진다.
   #
-  # **프로필 뒤에 있으므로 `docker compose up -d` 로는 뜨지 않는다** — 라이브 트랜스포트가 붙어 있어
-  # 뜨는 순간부터 실제 요청이 나가고, 언제 처음 나갈지는 #10 조건 3(그림자 실행)에서 사람이 고르는
-  # 시각이다. 조건 5(컷오버)에서 상시로 켜는 것도 같은 명령이다.
-  # 이 게이트가 막는 것은 인자 없는 `up -d` 뿐이다 — 서비스명을 직접 지정한 `up -d collector-commerce`나
-  # `run --rm collector-commerce`는 Compose 의 표준 동작(이름을 직접 부르면 그 서비스의 프로필이 자동
-  # 활성)으로 프로필 없이도 뜬다(collector-youtube-watch 도 같은 한계를 가진 기존 패턴이라 회귀는 아님).
-  # "실수로 수집이 시작되는 일은 없다"로 읽으면 안 된다.
-  # 켜기: docker compose --profile commerce up -d collector-commerce
-  # 끄기: docker compose stop collector-commerce
-  # (stack/rollback.sh 는 이 프로필을 이미 켜고 부른다 — 안 그러면 롤백이 이 컨테이너를 못 세운다.)
+  # **Sits behind a profile, so `docker compose up -d` never starts it** -- the live transport is
+  # attached, so real requests go out the moment it starts, and when the first one goes out is a time a
+  # person chooses at #10 condition 3 (shadow run). The same command also turns it on permanently at
+  # condition 5 (cutover).
+  # This gate only blocks a bare `up -d` with no argument -- naming the service directly, either
+  # `up -d collector-commerce` or `run --rm collector-commerce`, still starts it with no profile, which
+  # is Compose's standard behavior (naming a service directly auto-activates its profile);
+  # collector-youtube-watch has the same limit as an existing pattern, so this is not a regression.
+  # This must never be read as "collection can never start by accident".
+  # Turn on: docker compose --profile commerce up -d collector-commerce
+  # Turn off: docker compose stop collector-commerce
+  # (stack/rollback.sh already calls this with the profile on -- otherwise a rollback could not stop
+  # this container.)
   collector-commerce:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-commerce"]
@@ -193,26 +207,29 @@ services:
       # make every run after the first one collect against a stale session.
       - ${COMMERCE_BROWSER_PROFILE_DIR:-../var/browser-profiles}:/srv/cosmai/var/browser-profiles
 
-  # 네이버 API Hub. 커머스와 다른 호스트·다른 키(contracts/secrets.md 의 COSMA_SRC_NAVER_BLOG_*)라
-  # 예산도 따로다 — 네이버 쿼터가 막혔다고 커머스를 멈출 이유가 없다.
+  # The naver API Hub. A different host and different keys from commerce
+  # (contracts/secrets.md's COSMA_SRC_NAVER_BLOG_*), so its budget is separate too -- naver's quota
+  # being blocked is no reason to stop commerce.
   collector-naver:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-naver"]
 
-  # youtube 큐 소비자. youtube 넷 중 외부 요청을 쓰는 유일한 줄이라 혼자 선다: 쿼터가 소진되면 이것만
-  # 멈추고 watch 와 flatten 은 그대로 둔다.
+  # The youtube queue consumer. This stands alone because it is the only one of the three youtube lines
+  # that spends an outside request: if the quota runs out, only this one stops, and watch and flatten
+  # keep running.
   collector-youtube-work:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-youtube-work"]
     volumes:
       - ${COSMAI_SECRET_FILE_HOST:?stack-env-example 참고 - ~/.config/cosmai/env 의 호스트 절대경로}:/run/cosmai/env:ro
-      # work 가 쓰고 flatten 이 읽는 바로 그 디렉터리. 둘이 다른 볼륨을 보면 artifacts 행은 있는데
-      # payload 파일이 없어서 flatten 이 통째로 error 를 센다 (collectors/youtube/payload_store.py).
-      # 경로는 PayloadStore 의 기본값 `var/youtube-payloads` 를 이미지 WORKDIR 기준으로 편 것이다.
+      # The exact directory work writes and flatten reads. If the two ever saw different volumes, an
+      # artifacts row would exist with no payload file behind it, and flatten would count nothing but
+      # errors across the board (collectors/youtube/payload_store.py). The path is PayloadStore's
+      # default `var/youtube-payloads` resolved against the image's WORKDIR.
       - youtube-payloads:/srv/cosmai/var/youtube-payloads
 
-  # flatten + prune. 외부 요청이 없어서(저장된 payload 를 펴고, 낡은 행을 지운다) 예산으로 갈릴 이유가
-  # 없는 둘이다.
+  # flatten + prune. Neither makes an outside request (one unpacks a stored payload, the other deletes
+  # aged rows), so there is no reason to split them apart by budget.
   collector-youtube-flatten:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-youtube-flatten"]
@@ -220,66 +237,74 @@ services:
       - ${COSMAI_SECRET_FILE_HOST:?stack-env-example 참고 - ~/.config/cosmai/env 의 호스트 절대경로}:/run/cosmai/env:ro
       - youtube-payloads:/srv/cosmai/var/youtube-payloads
 
-  # 팬아웃의 원천. **프로필 뒤에 있으므로 `docker compose up -d` 로는 뜨지 않는다** — #10 절차 3 이
-  # 큐 깊이 < MAX_QUEUE_DEPTH 를 확인한 뒤에 켜라고 한 줄이고, 그 확인 전까지 꺼져 있어야 한다.
-  # 켜기: docker compose --profile youtube-watch up -d collector-youtube-watch
-  # 끄기: docker compose stop collector-youtube-watch
-  # (오늘 collectors/youtube/watchlist.txt 는 디렉티브가 없는 자리표시자라, 켜면 매시 종료 코드 2 로
-  #  거절한다. 목록을 채우는 것이 켜기의 전제다 — 목록은 이미지 안에 있어 재빌드가 필요하다.)
+  # The fan-out's source. **Sits behind a profile, so `docker compose up -d` never starts it** -- this
+  # is the line #10 procedure 3 says to turn on only after confirming queue depth < MAX_QUEUE_DEPTH, and
+  # it must stay off until that check happens.
+  # Turn on: docker compose --profile youtube-watch up -d collector-youtube-watch
+  # Turn off: docker compose stop collector-youtube-watch
+  # (Today collectors/youtube/watchlist.txt is a placeholder with no directives, so turning this on
+  #  rejects with exit code 2 every hour. Filling in that list is a precondition for turning it on --
+  #  the list lives inside the image, so this needs a rebuild.)
   collector-youtube-watch:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/collector-youtube-watch"]
     profiles: ["youtube-watch"]
 
-  # --- 분석 ---------------------------------------------------------------------------------------
-  # DB 전용이라 어느 수집 예산에도 속하지 않는다. 수집기를 롤백으로 멈춰도 이미 쌓인 행에 대한 분석은
-  # 계속 돌 수 있어야 해서 자기 컨테이너다.
+  # --- Analysis -------------------------------------------------------------------------------------
+  # DB-only, so it belongs to no collection budget. This gets its own container so analysis can keep
+  # running over rows already collected even while a collector is stopped for a rollback.
   analyze:
     <<: *cron
     command: ["supercronic", "/srv/cosmai/stack/crontab.d/analyze"]
     environment:
-      # `<<:` 가 environment: 를 통째로 갈아 끼우므로 앵커의 다섯 키를 여기서 다시 적는다 --
-      # collector-commerce 가 이미 밟은 함정이고, 하나를 빠뜨리면 08:00 에야 드러난다.
+      # `<<:` replaces environment: wholesale, so the anchor's five keys are repeated here too --
+      # collector-commerce has already hit this trap, and dropping one only surfaces at 08:00.
       COSMAI_DB_HOST: postgres
       COSMAI_DB_PORT: "5432"
       COSMAI_SECRET_FILE: /run/cosmai/env
       PYTHONUNBUFFERED: "1"
       TZ: UTC
-      # 08:00 줄의 gemma4 가 부르는 호스트 ollama (#32). secret 이 아니라 주소 노브라 값이 여기 있다
-      # (stack/env.example, contracts/secrets.md 의 "secret 이 아닌 것"). 기본값은 컨테이너 안에서
-      # 왕복을 실측한 유일한 경로다: WSL2 미러링이 물려받은 Windows 의 Tailscale 인터페이스 --
-      # 브리지 게이트웨이(172.18.0.1)도 LAN(192.168.10.35)도 host.docker.internal 도 닿지 않았다.
-      # **Tailscale 이 꺼지면 이 주소는 사라진다** -- 그때는 stack/.env 에서 갈아 끼운다. 못 닿는
-      # 밤은 조용히 0건이 아니라 failed run 이다 (analysis/polarity/ollama.py 의 preflight).
+      # The host ollama the 08:00 line's gemma4 calls (#32). This is an address knob, not a secret, so
+      # the value can live here (stack/env.example, "what is not a secret" in contracts/secrets.md).
+      # The default is the only path measured to round-trip inside a container: the Windows Tailscale
+      # interface WSL2's mirroring inherits -- neither the bridge gateway (172.18.0.1), the LAN
+      # (192.168.10.35), nor host.docker.internal were reachable.
+      # **This address disappears when Tailscale is off** -- swap it out from stack/.env when that
+      # happens. An unreachable night is not a quiet zero but a failed run
+      # (the preflight in analysis/polarity/ollama.py).
       OLLAMA_URL: ${OLLAMA_URL:-http://100.102.193.98:11434}
 
-  # --- 노출 ---------------------------------------------------------------------------------------
-  # 백엔드도 DB 자격증명도 없다: 브라우저가 PostgREST(3000)를 직접 부르므로
-  # 이 컨테이너는 정적 파일만 내보낸다(portal/Dockerfile 자신의 주석).
+  # --- Exposure -------------------------------------------------------------------------------------
+  # No backend, no DB credential: the browser calls PostgREST (3000) directly, so this container only
+  # serves static files (portal/Dockerfile's own comment).
   portal:
     build: ../portal
     image: cosmai-portal
     restart: unless-stopped
-    # 정적 파일만 내보내지만 그것이 부르는 API 뒤에 이 DB 가 있다 -- 스케줄러와 같은 순서로 뜬다.
+    # Only serves static files, but the DB behind the API it calls is this one -- it starts in the same
+    # order as the schedulers.
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      # PostgREST 와 같은 노출 범위(로컬 네트워크) — 보여주는 것은 그 API 가
-      # 이미 anon 에 연 데이터뿐이라 새로운 노출을 만들지 않는다.
+      # The same exposure range as PostgREST (the local network) -- what it shows is only data that
+      # API already opened to anon, so this creates no new exposure.
       - "${NEEDS_PORTAL_PORT:-3003}:80"
     networks:
       - db-net
 
 volumes:
-  # 이름 있는 볼륨: 호스트 배치를 이 파일이 정하지 않는다. 안에 있는 것은 재취득 가능한 payload 뿐이라
-  # 백업 대상이 아니고, artifacts 행과의 짝은 DB 쪽 digest 가 쥔다.
+  # A named volume: this file does not fix where it lives on the host. What is inside is only
+  # reacquirable payload, so it is not something to back up, and its pairing with an artifacts row is
+  # held by the digest on the DB side.
   youtube-payloads:
 
 networks:
   db-net:
-    # 접두사 없는 이름. 아직 이 망에 붙어 있는 구 스택 컨테이너들이 이 이름으로 찾고, compose 가
-    # 기존 망을 새로 만들지 않고 받아들이는 근거(com.docker.compose.network)도 이 이름이다.
-    # external 이 아니다 -- 만들던 프로젝트가 사라졌으므로(#176), external 이면 망이 없는 호스트에서
-    # `up` 이 실패하기만 한다. 그 대가로 생기는 `down` 의 위험은 이 파일 머리말에 적혀 있다.
+    # An unprefixed name. The old-stack containers still attached to this network look it up by this
+    # name, and this same name is also the basis (com.docker.compose.network) compose uses to adopt an
+    # existing network instead of creating a new one.
+    # Not external -- since the project that used to create it is gone (#176), external would only make
+    # `up` fail on a host with no such network. The hazard that trades for in `down` is written in this
+    # file's header.
     name: db-net

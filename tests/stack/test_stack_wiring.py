@@ -1,6 +1,6 @@
 """What stack/docker-compose.yml claims and what the rest of the repo can actually answer.
 
-playbook 02-test-discipline.md T10, 재사용 형태: the two repos that had this test still shipped the
+playbook 02-test-discipline.md T10, reused form: the two repos that had this test still shipped the
 2026-08 outage, because their copy read the compose file inside the repo while the real wiring lived
 in another repo's stack/. Here there is only one stack/, so one file can ask all of it: every cron
 line names a subcommand the CLI has, every service names a crontab file that exists, every service

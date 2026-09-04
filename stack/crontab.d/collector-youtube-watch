@@ -1,5 +1,5 @@
 # UTC. watch 1h, from contracts/entrypoints.md §스케줄. Alone in its own container because it is the
-# only line an operator has to be able to hold back: it is the fan-out source, issue #10 절차 3 turns
+# only line an operator has to be able to hold back: it is the fan-out source, issue #10 procedure 3 turns
 # it on only after the queue depth is confirmed under MAX_QUEUE_DEPTH (collectors/youtube/scope.json),
 # and supercronic can only be stopped a container at a time.
 #
