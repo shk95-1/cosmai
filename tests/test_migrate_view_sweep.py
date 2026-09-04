@@ -1,12 +1,14 @@
-"""배포가 남의 뷰를 지우지 않는다 (#150).
+"""A deploy never drops someone else's view (#150).
 
-#138 이 뷰 사이 의존 때문에 재적용이 죽는 것을 고치면서 스키마의 뷰를 **전부** 떨어뜨렸다.
-운영 `needs` 에는 포크가 만든 뷰 둘(`metrics_topic_quarter_violation`·`topic_quarter_judgement_violation`,
-포크 DDL 022·024)이 살고 upstream 의 `db/views/` 는 그것을 모른다 -- 스윕이 지운 뒤 다시 만드는
-루프가 도는 것은 `db/views/*.sql` 뿐이라 그 둘은 그대로 사라진다.
+Fixing #138, where re-applying died because of a dependency between views, meant dropping **every**
+view in the schema. Two views the fork made (`metrics_topic_quarter_violation`,
+`topic_quarter_judgement_violation`, fork DDL 022/024) live on production `needs`, and upstream's
+`db/views/` knows nothing about them -- the drop-then-recreate loop only runs over `db/views/*.sql`, so
+those two would simply vanish.
 
-여기서는 그 결과를 잰다: `db/views/` 에 파일이 없는 뷰를 하나 심어 두고 배포를 두 번 돌린 뒤
-살아 있는지 묻는다. 소스를 grep 하지 않는 이유는 스윕의 *모양*이 아니라 *범위*가 문제여서다.
+This measures that outcome: it plants a view with no file in `db/views/`, runs the deploy twice, and
+asks whether it survived. The reason this does not grep the source is that the problem is the sweep's
+*scope*, not its *shape*.
 """
 
 from __future__ import annotations
@@ -27,7 +29,8 @@ PROBE = "zz_foreign_view_probe"
 
 
 def _harness_container() -> str:
-    """하네스가 띄운 컨테이너 이름. tool/checks/test 가 포트에서 이름을 짓는 규칙 그대로다."""
+    """The container name the harness started. Exactly the rule tool/checks/test uses to name it from
+    the port."""
     url = os.environ.get("TEST_POSTGRES_URL") or pytest.skip("set TEST_POSTGRES_URL, or run tool/checks/test")
     port = urlparse(url.replace("postgresql+psycopg://", "postgresql://")).port
     name = f"cosmai-test-postgres-{port}"
@@ -46,15 +49,16 @@ def test_a_view_this_checkout_does_not_own_survives_the_deploy():
         conn.exec_driver_sql(f"CREATE OR REPLACE VIEW needs.{PROBE} AS SELECT 1 AS one")
     engine.dispose()
 
-    # 정리 블록이 이름을 항상 갖도록 try 밖에서 만든다.
+    # Created outside the try so the cleanup block always has a name.
     with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as fh:
-        # 하네스가 쓰는 것과 같은 더미다(tool/checks/test) -- secret 이 아니다.
+        # The same dummy the harness uses (tool/checks/test) -- not a secret.
         fh.write("NEEDS_DB_MIGRATOR=check\nNEEDS_DB_RUNTIME=check-runtime\n")
         secret = fh.name
 
     try:
         env = {**os.environ, "COSMAI_SECRET_FILE": secret}
-        # 두 번 돈다: 한 번은 스윕이 도는 것을 보고, 두 번째는 재적용이 여전히 멱등한지 본다.
+        # Runs twice: once to watch the sweep run, and a second time to check that re-applying is still
+        # idempotent.
         for _ in range(2):
             done = subprocess.run(
                 ["db/migrate.sh", "--container", container, "--db", "fleet", "--superuser", "fleet"],
@@ -84,7 +88,8 @@ def test_a_view_this_checkout_does_not_own_survives_the_deploy():
 
 
 def test_the_views_this_checkout_owns_are_all_present_after_the_deploy():
-    # 범위를 좁히는 수정이 제 뷰까지 빠뜨리지 않았는지 -- 반대편을 함께 붙든다.
+    # Whether a fix that narrows the scope did not also drop the views this checkout owns -- this holds
+    # the opposite side at the same time.
     _harness_container()
     owned = {p.stem for p in (REPO_ROOT / "db" / "views").glob("*.sql")}
     engine = create_engine(os.environ["TEST_POSTGRES_URL"])

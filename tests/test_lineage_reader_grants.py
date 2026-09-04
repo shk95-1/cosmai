@@ -1,11 +1,12 @@
-"""계보 두 뷰가 읽는 원천 표의 SELECT 를 배포가 실제로 열어 두는가 (#144).
+"""Whether a deploy actually leaves SELECT open on the source tables the two lineage views read (#144).
 
-`db/migrate.sh` 는 뷰를 `SET ROLE needs_owner` 로 만들고 뷰는 **소유자 권한으로** 돈다 — 그래서
-원천을 읽어야 하는 롤은 `needs_runtime` 이 아니라 `needs_owner` 다. 그 GRANT 가 없으면 배포 단계
-(f) 가 뷰 생성에서 죽고, 스위트가 초록이어도 운영에는 뷰가 없다(#158 이 데인 자리의 한 칸 위).
+`db/migrate.sh` creates a view with `SET ROLE needs_owner` and the view runs **with owner
+privilege** -- so the role that has to read the source is `needs_owner`, not `needs_runtime`. Without
+that GRANT, deploy stage (f) dies creating the view, and even with a green suite production has no view
+at all (one spot above where #158 got bitten).
 
-`db/grants/needs_runtime_reader.sql` 의 needs_owner 블록이 그 줄을 갖고, migrate.sh 는 (e) 로 그것을
-(f) 보다 먼저 돌린다.
+The needs_owner block of `db/grants/needs_runtime_reader.sql` carries that line, and migrate.sh runs it
+as stage (e), before (f).
 """
 
 from __future__ import annotations
@@ -18,15 +19,15 @@ from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.postgres
 
-# 이름이 아니라 oid 로 묻는다 — 스키마 USAGE 가 없는 롤이 이름을 풀려고 하면 has_table_privilege
-# 가 단언이 아니라 예외로 끝난다(test_collector_health_view.py 와 같은 이유).
+# Asked by oid, not name -- if a role with no schema USAGE tried to resolve the name, has_table_privilege
+# would end in an exception instead of an assertion (the same reason as test_collector_health_view.py).
 _OID = (
     "SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE n.nspname = :s AND c.relname = :t"
 )
 _MAY_SELECT = "SELECT has_table_privilege(:role, cast(:oid AS oid), 'SELECT')"
 
-# (스키마, 표, 어느 뷰의 어느 구간이 읽는가)
+# (schema, table, which section of which view reads it)
 OWNER_NEEDS = (
     ("trend_radar", "review", "mention_lineage 5a · collection_lineage 6a"),
     ("trend_radar", "run", "collection_lineage 6a"),
@@ -43,7 +44,7 @@ def deployed() -> Any:
     engine = create_engine(url)
     with engine.connect() as conn:
         yield conn
-    engine.dispose()  # needs_migrator 는 CONNECTION LIMIT 2 다 — 통과든 실패든 놓아준다.
+    engine.dispose()  # needs_migrator has CONNECTION LIMIT 2 -- always release, pass or fail.
 
 
 @pytest.mark.parametrize(("schema", "table", "why"), OWNER_NEEDS)

@@ -1,15 +1,18 @@
-"""`needs.mention_lineage`: 지표 한 칸에서 그 값을 만든 언급들과 원문 발췌까지 (#144 경로 4·5a·5b).
+"""`needs.mention_lineage`: from one metrics cell to the mentions that made its value and their original
+excerpt (#144 paths 4, 5a, 5b).
 
-A19 는 뒤집지 않는다. `need_mention`·`wish_mention` 은 `run_id` 를 갖지 않고, 집계가 고르는 모집단은
-`extractor_version` 하나다(`analysis/aggregate/pipeline.py` 의 `load_needs`) — 이 뷰는 그 모집단과
-칸의 축(`category`·`need_key`·`month`·`product_ref`)을 필터 가능한 컬럼으로 내놓을 뿐, 스스로
-run 을 고르지 않는다.
+This does not reverse A19. `need_mention`/`wish_mention` carry no `run_id`, and the one population
+aggregation picks is `extractor_version` (`load_needs` in `analysis/aggregate/pipeline.py`) -- this view
+only puts that population and the cell's axes (`category`, `need_key`, `month`, `product_ref`) out as
+filterable columns, and never picks a run on its own.
 
-원문은 발췌만 나간다(사용자 결정 2026-08-27). 이유는 anon 이 리뷰 본문을 못 봐서가 **아니다** —
-운영에서 `postgrest_anon` 은 `trend_radar_reader` 의 멤버라 `trend_radar.review.body` 를 그대로 읽고,
-`db/grants/postgrest_anon_needs.sql` 은 `needs` 스키마만 다스린다(코디네이터 실측 2026-08-27).
-자르는 이유는 **이 뷰가 원문 전달 경로가 되지 않게** 하려는 것이다: 칸 하나에 언급 수천 건이 딸려
-나오는 자리라, 발췌가 아니면 여기가 사실상의 원문 덤프 출구가 된다.
+Only an excerpt of the original text goes out (user decision 2026-08-27). The reason is **not** that
+anon cannot see the review body -- in production `postgrest_anon` is a member of `trend_radar_reader`
+and reads `trend_radar.review.body` straight through, and `db/grants/postgrest_anon_needs.sql` only
+governs the `needs` schema (coordinator measured this 2026-08-27). The reason this truncates is
+**to keep this view from becoming a channel for the original text**: this is a spot where thousands of
+mentions ride out of one cell, and without an excerpt this would effectively become an exit for dumping
+the original text.
 """
 
 from __future__ import annotations
@@ -27,7 +30,8 @@ pytestmark = pytest.mark.postgres
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEW = REPO_ROOT / "db" / "views" / "mention_lineage.sql"
 
-EXCERPT = 120  # 사용자 결정: 근거로 쓰기엔 충분하고 전문 재구성은 안 되는 길이.
+# User decision: a length that's enough to use as evidence but not enough to reconstruct the full text.
+EXCERPT = 120
 LONG_SENTENCE = "백" * 200
 LONG_BODY = "본" * 300
 
@@ -35,11 +39,12 @@ CAPTURED = datetime(2026, 8, 20, 3, 0, tzinfo=UTC)
 
 # (src, site, ref, product_ref, source_product_key, category, need_key, polarity, month, sentence)
 NEED_ROWS = (
-    # 리뷰 언급 — 원문이 trend_radar.review 에 있다(경로 5a).
+    # A review mention -- its original text lives in trend_radar.review (path 5a).
     ("review", "glowpick", "g:1/r:1", "p:라운드랩", None, "선케어", "백탁", "불만", "2026-07", LONG_SENTENCE),
-    # 같은 칸의 둘째 언급. 칸 → 언급들은 1:N 이다.
+    # A second mention of the same cell. A cell -> mentions is 1:N.
     ("review", "glowpick", "g:1/r:2", None, "g:1", "선케어", "백탁", "만족", "2026-07", "덜 하얗다"),
-    # 동의어. scope='all' 롤업만 canonical 로 접는다(A17) — 카테고리 칸은 raw need_key 다.
+    # A synonym. Only a scope='all' rollup folds this to canonical (A17) -- the category cell is the raw
+    # need_key.
     (
         "review",
         "glowpick",
@@ -52,11 +57,11 @@ NEED_ROWS = (
         "2026-08",
         "하얗다",
     ),
-    # 댓글 언급 — 원문이 tubedepth.comments 에 있다(경로 5b).
+    # A comment mention -- its original text lives in tubedepth.comments (path 5b).
     ("yt_comment", "youtube", "v-1/c-1", None, None, "선케어", "백탁", "불만", "2026-07", "백탁 심함"),
-    # 원문에 못 닿는 갈래. 행은 남고 doc_found 가 거짓이라야 한다.
+    # A branch that never reaches the original text. The row stands and doc_found must be false.
     ("yt_transcript", "youtube", "v-1/t-1", None, None, "선케어", "백탁", "중립", "2026-07", "자막 문장"),
-    # 지워진 리뷰를 가리키는 언급 — 언급은 있고 원문이 없다.
+    # A mention pointing at a deleted review -- the mention exists, the original text does not.
     ("review", "glowpick", "g:1/r:404", None, None, "선케어", "백탁", "불만", "2026-07", "사라진 리뷰"),
 )
 
@@ -77,7 +82,8 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
                 ("glowpick", "r:1", CAPTURED, "g:1", 2.0, LONG_BODY, datetime(2026, 7, 3, tzinfo=UTC)),
                 ("glowpick", "r:2", CAPTURED, "g:1", 5.0, "잘 발린다", datetime(2026, 7, 4, tzinfo=UTC)),
                 ("glowpick", "r:3", CAPTURED, "g:1", 1.0, "하얗다", datetime(2026, 8, 1, tzinfo=UTC)),
-                # 같은 review_key 를 가진 다른 사이트. site 를 안 걸면 두 행이 된다.
+                # A different site carrying the same review_key. Without filtering by site, this becomes
+                # two rows.
                 ("oliveyoung", "r:1", CAPTURED, "o:9", 4.0, "다른 사이트", None),
             ],
         )
@@ -95,7 +101,7 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
             ],
         )
         conn.exec_driver_sql("SET ROLE needs_owner")
-        # need_mention.product_ref 는 FK 다 — 카탈로그 행이 언급보다 먼저 있어야 한다.
+        # need_mention.product_ref is an FK -- the catalog row must exist before the mention.
         conn.exec_driver_sql(
             f'INSERT INTO "{schema}".product_ref (product_ref, brand, name_norm, name, linker_version)'
             " VALUES ('p:라운드랩', '라운드랩', '자작나무', '자작나무 선크림', 'rule-v1.0')"
@@ -141,10 +147,11 @@ def view(
     needs_runtime_url: str,
     _schema_name: str,
 ) -> dict[str, Any]:
-    """뷰를 읽는 롤은 needs_runtime 이다 — 원천 표에는 직접 닿지 않고 뷰만 읽는 것이 설계다.
+    """The role reading the view is needs_runtime -- the design is that it never touches the source
+    tables directly and only reads the view.
 
-    컬럼 이름도 같은 연결에서 가져온다: needs_migrator 는 CONNECTION LIMIT 2 라, 테스트마다 엔진을
-    하나 더 여는 것만으로 스위트가 연결을 다 쓴다.
+    The column names are also pulled from this same connection: needs_migrator has CONNECTION LIMIT 2,
+    so opening one more engine per test alone would use up the suite's connections.
     """
     _seed_and_create_view(needs_schema, _schema_name, tubedepth_side_schema)
     engine = create_engine(needs_runtime_url)
@@ -175,19 +182,22 @@ def test_every_mention_gets_one_row_need_and_wish_in_the_same_shape(rows: dict[t
 
 
 def test_the_cell_axes_are_filterable_columns(rows: dict[tuple[str, str], Any]):
-    # 칸 = (scope, need_key, month, product_ref). 그 넷이 그대로 컬럼이라야 화면이 eq 로 좁힌다.
+    # A cell = (scope, need_key, month, product_ref). Those four must be columns as they stand for the
+    # screen to narrow by eq.
     row = rows[("need", "g:1/r:1")]
     assert row["extractor_version"] == "rule-v2.3"
     assert (row["category"], row["need_key"], row["month"]) == ("선케어", "백탁", "2026-07")
-    # 제품 축의 값은 product_ref 이고, 없으면 source_product_key 다 (aggregate/__init__.py 의 _product).
+    # The product axis's value is product_ref, or source_product_key if that is absent (_product in
+    # aggregate/__init__.py).
     assert row["product_axis"] == "p:라운드랩"
     assert rows[("need", "g:1/r:2")]["product_axis"] == "g:1"
     assert rows[("need", "v-1/c-1")]["product_axis"] == ""
 
 
 def test_only_the_rollup_key_is_folded_to_canonical(rows: dict[tuple[str, str], Any]):
-    # A17: scope='all' 롤업만 needs.need_key.canonical 로 접는다. 두 값이 한 행에 나란히 있어야
-    # 카테고리 칸(raw)과 롤업 칸(canonical)이 같은 뷰에서 갈린다.
+    # A17: only a scope='all' rollup folds this through needs.need_key.canonical. Both values must sit
+    # side by side in one row for the raw category cell and the rollup cell to split apart in the same
+    # view.
     synonym = rows[("need", "g:1/r:3")]
     assert synonym["need_key"] == "화이트캐스트"
     assert synonym["need_key_rollup"] == "백탁"
@@ -198,16 +208,18 @@ def test_only_the_rollup_key_is_folded_to_canonical(rows: dict[tuple[str, str], 
 def test_the_sentence_leaves_as_a_120_character_excerpt_only(rows: dict[tuple[str, str], Any]):
     row = rows[("need", "g:1/r:1")]
     assert row["sentence_excerpt"] == LONG_SENTENCE[:EXCERPT]
-    # 잘렸다는 사실 자체는 숨기지 않는다 — 전문 길이가 나란히 있어야 발췌인 줄 안다.
+    # The fact that it was cut is never hidden -- the full length has to sit next to it for a reader to
+    # know it's an excerpt.
     assert row["sentence_chars"] == len(LONG_SENTENCE)
 
 
 def test_no_column_carries_the_full_source_text(view: dict[str, Any]):
-    """이 뷰는 원문 전달 경로가 되지 않는다 — 나가는 것은 발췌뿐이다.
+    """This view never becomes a channel for the original text -- only an excerpt ever goes out.
 
-    이름 셋을 막는 것만으로는 `sentence_full` 같은 컬럼이 그대로 통과한다. 재는 것은 이름이 아니라
-    **값**이다: 어떤 text 컬럼도 120자를 넘지 않는다. 픽스처가 200자 문장과 300자 본문을 일부러
-    싣고 있어(LONG_SENTENCE·LONG_BODY) 자르지 않는 컬럼이 하나라도 생기면 여기서 걸린다.
+    Blocking just three names would still let a column like `sentence_full` through untouched. What
+    this measures is not a name but a **value**: no text column ever exceeds 120 characters. The
+    fixture deliberately carries a 200-character sentence and a 300-character body
+    (LONG_SENTENCE, LONG_BODY), so any column that fails to truncate is caught right here.
     """
     assert {"sentence", "body", "text"} & view["columns"] == set()
     over = {
@@ -220,7 +232,8 @@ def test_no_column_carries_the_full_source_text(view: dict[str, Any]):
 
 
 def test_a_review_mention_reaches_its_source_row_by_site_and_review_key(rows: dict[tuple[str, str], Any]):
-    # ref 는 product_key/review_key 다. site 를 같이 걸지 않으면 다른 사이트의 같은 review_key 가 붙는다.
+    # ref is product_key/review_key. Without also filtering by site, the same review_key from a
+    # different site attaches too.
     row = rows[("need", "g:1/r:1")]
     assert row["doc_found"] is True
     assert (row["doc_kind"], row["doc_parent"], row["doc_key"]) == ("review", "g:1", "r:1")
@@ -239,11 +252,13 @@ def test_a_comment_mention_reaches_its_source_row_by_video_and_comment_id(rows: 
 
 
 def test_a_mention_whose_source_row_is_gone_keeps_its_row(rows: dict[tuple[str, str], Any]):
-    # 조용히 사라지면 "칸이 이만큼을 셌다" 와 화면의 목록 길이가 어긋나고, 어느 쪽이 맞는지 알 수 없다.
+    # If it quietly vanished, "the cell counted this many" and the screen's list length would disagree,
+    # with no way to tell which one is right.
     missing = rows[("need", "g:1/r:404")]
     assert missing["doc_found"] is False
     assert missing["doc_excerpt"] is None
-    # 자막·블로그는 원문 표 자체가 없다. 못 닿는 것과 지워진 것을 doc_kind 가 가른다.
+    # A transcript or a blog has no original-text table at all. doc_kind tells "unreachable" apart from
+    # "deleted".
     transcript = rows[("need", "v-1/t-1")]
     assert transcript["doc_found"] is False
     assert transcript["doc_kind"] is None
@@ -252,12 +267,14 @@ def test_a_mention_whose_source_row_is_gone_keeps_its_row(rows: dict[tuple[str, 
 def test_a_wish_row_carries_the_metrics_wish_axes(rows: dict[tuple[str, str], Any]):
     row = rows[("wish", "v-1/c-2")]
     assert row["wish_class"] == "a"
-    # format 은 ';' 로 최대 3개가 들어오고 첫 번째가 주 값이다 (A12, aggregate/__init__.py 의 _first).
+    # format arrives as up to 3 values joined by ';' and the first is the primary value (A12,
+    # _first in aggregate/__init__.py).
     assert row["format_first"] == "스틱"
     assert row["attribute_first"] == "무기자차"
     assert row["brand"] == "라운드랩"
     assert row["like_count"] == 12
-    # 축이 빈 언급은 그 축의 marginal 행에만 들고, 값 있는 칸에는 끼지 않는다.
+    # A mention with an empty axis only lands in that axis's marginal row, never in a cell that has a
+    # value.
     assert rows[("wish", "v-1/c-3")]["format_first"] == ""
     # wish 는 polarity 축이 없다 — 없는 값을 '중립' 같은 것으로 채우지 않는다.
     assert row["polarity"] is None
@@ -269,7 +286,7 @@ def test_a_wish_comment_reaches_its_source_row_too(rows: dict[tuple[str, str], A
     assert row["doc_found"] is True
 
 
-# --- 배포 경로: db/migrate.sh 가 실제로 남기는 것 (tool/checks/test 의 throwaway 컨테이너) ---
+# --- Deploy path: what db/migrate.sh actually leaves behind (tool/checks/test's throwaway container) ---
 
 
 @pytest.fixture
@@ -279,12 +296,12 @@ def deployed() -> Any:
     with engine.connect() as conn:
         conn.execute(text("SET ROLE needs_owner"))
         yield conn
-    engine.dispose()  # needs_migrator 는 CONNECTION LIMIT 2 다 — 통과든 실패든 놓아준다.
+    engine.dispose()  # needs_migrator has CONNECTION LIMIT 2 -- always release, pass or fail.
 
 
 def test_the_deploy_leaves_the_view_readable_by_the_screen(deployed: Any):
-    """뷰의 권한은 뷰 파일이 진다(#158): 배포가 뷰를 DROP+CREATE 하므로 화이트리스트의 GRANT 는
-    새 객체에 따라오지 않는다. 화면은 PostgREST 에 anon 으로 묻는다."""
+    """A view's own file carries its grants (#158): since the deploy does DROP+CREATE on the view, a
+    whitelist's GRANT never carries over to the new object. The screen asks PostgREST as anon."""
     assert deployed.execute(text("SELECT to_regclass('needs.mention_lineage')")).scalar_one() is not None
     for role in ("needs_runtime", "postgrest_anon"):
         granted = deployed.execute(
