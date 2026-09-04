@@ -1,8 +1,10 @@
-"""규칙 극성 rule-v2.2 — 순수 함수(DB 없음). #6 의 LLM 구현이 같은 시그니처로 갈아 끼운다.
+"""Rule polarity rule-v2.2 — pure functions (no DB). The LLM implementation of #6 swaps in under the same
+signature.
 
-어휘와 규칙은 slice-suncare/polarity.py(v2.2)를 그대로 옮긴 것이다: 부정어 분리, 타제품·취향·피부타입
-맥락 제외, 부정된 만족어, 중립 명사는 불만어를 동반할 때만 불만. aspect 사전은 인자로 받는다 —
-slice-p1/aspects_generic.py 가 런타임에 사전만 바꿔 끼워 카테고리 횡단을 돌린 것과 같은 자리다.
+The lexicon and the rules are carried over from slice-suncare/polarity.py (v2.2) unchanged: negation split
+off, other-product / preference / skin-type context excluded, negated satisfaction words, and neutral nouns
+that are a complaint only when a complaint word comes with them. The aspect lexicon is taken as an argument —
+the same seam where slice-p1/aspects_generic.py swapped only the lexicon at runtime to run across categories.
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ NEG_AFTER = re.compile(
     re.I,
 )
 NEG_BEFORE = re.compile(r"(없|않|안 |덜|전혀|하나도|1도|심하지)\s?.{0,6}$")
-# aspect 가 '이 제품'이 아닌 것에 붙는 맥락.
+# Context where the aspect attaches to something other than 'this product'.
 CONTEXT_BEFORE = re.compile(
     r"(다른 ?(선크림|제품|거)|유기자차[는은]?|무기자차[는은]?|사용하던|기존|전에 ?쓰던|예전|평소|특유의"
     r"|선크림 ?특유|선크림[은는]? ?(끈적|답답|백탁)|날씨|가을|겨울|피부 ?타입|피부[가는]? ?(좀 )?(건조"
@@ -59,7 +61,7 @@ CONTRAST_THIS = re.compile(
 )
 NEGATED_TAIL = re.compile(r"없어서|없고|않아서|않고")
 
-_CONTEXT = None  # 맥락 히트: 부정 여부를 판정하지 않는다 (aspect 가 이 제품 것이 아니다).
+_CONTEXT = None  # Context hit: negation is not decided (the aspect is not this product's).
 
 
 class _Hit:
@@ -73,7 +75,8 @@ class _Hit:
 
 
 def ruleset_for(category: str | None) -> str:
-    """suncare 사전은 '선블록' 행만 갖는다 — 다른 카테고리에 물으면 빈 사전이 온다 (formats.md §ruleset)."""
+    """The suncare lexicon has only SUNCARE_CATEGORY rows — asking for another category returns an
+    empty lexicon (formats.md §ruleset)."""
     return SUNCARE_RULESET if category == SUNCARE_CATEGORY else GENERIC_RULESET
 
 
@@ -98,12 +101,12 @@ def _first(*groups: list[_Hit]) -> str | None:
     return None
 
 
-class RulePolarity(SingleCallPolarity):  # classify_many 는 단건 반복 — 배치 API 가 없다
+class RulePolarity(SingleCallPolarity):  # classify_many loops over single calls — there is no batch API
     version = VERSION
 
     def __init__(self) -> None:
-        # for_category 는 부를 때마다 사전을 다시 훑는다 (types.py 주석) — 카테고리별로 캐시한다.
-        # 캐시가 사전을 붙들고 있으므로 id 는 살아 있는 동안 재사용되지 않는다.
+        # for_category rescans the lexicon on every call (types.py comment) — so cache it per category.
+        # The cache holds the lexicon, so its id is not reused while it is alive.
         self._patterns: dict[tuple[int, str | None], tuple[AspectLexicon, tuple[AspectPattern, ...]]] = {}
 
     def patterns_for(self, aspects: AspectLexicon, category: str | None) -> tuple[AspectPattern, ...]:
@@ -117,7 +120,7 @@ class RulePolarity(SingleCallPolarity):  # classify_many 는 단건 반복 — �
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
     ) -> PolarityResult:
-        # rating 은 규칙 v2 가 폴백을 걷어낸 뒤로 쓰지 않는다 — 기준선 .77 이 그 규칙에서 나온 숫자다.
+        # rating is unused since rule v2 dropped the fallback — the .77 baseline is the number that rule gave.
         aspect, polarity, reason = self._judge(sentence, self.patterns_for(aspects, category))
         return PolarityResult(aspect=aspect, polarity=polarity, reason=reason, version=self.version)
 
