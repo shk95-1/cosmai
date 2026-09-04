@@ -152,7 +152,7 @@ def test_the_two_roles_add_up_to_the_seeded_panel():
     """43채널이 분모다. 계약이 그 수를 말하지 않으면 #31 이 무엇을 다 채웠는지 알 자가 없다."""
     counted = [int(cells[2]) for cells in _markdown_rows(FORMATS, ROLE_HEADER)]
     assert sum(counted) == PANEL_CHANNELS
-    assert f"{PANEL_CHANNELS}채널" in FORMATS.read_text(encoding="utf-8")
+    assert f"{PANEL_CHANNELS} channels" in FORMATS.read_text(encoding="utf-8")
 
 
 def test_the_ddl_lives_in_this_forks_number_block():

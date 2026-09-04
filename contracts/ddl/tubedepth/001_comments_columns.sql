@@ -1,6 +1,6 @@
--- Additive only (epic #16 사전 승인 2: DROP·타입 변경·다른 스키마 변경은 제외).
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
 -- Applied to the throwaway test schema only by tests/conftest.py's tubedepth_schema fixture --
--- production tubedepth is untouched by #8 (contracts/entrypoints.md 승인 경계, issue #8).
+-- production tubedepth is untouched by #8 (contracts/entrypoints.md approval boundary, issue #8).
 --
 -- published_at_resolution: what precision comments.published_at actually carries (day|month|year) --
 -- YouTube's own comment timestamps are already coarse for older comments.

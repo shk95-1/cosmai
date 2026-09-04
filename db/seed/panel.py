@@ -84,7 +84,11 @@ def activate(cur: psycopg.Cursor[Any], version: int) -> int:
 
 
 def active_version(cur: psycopg.Cursor[Any]) -> int | None:
-    """활성 판본. 둘이면 답을 고르지 않고 멈춘다 -- 고르면 그 자리는 분모를 두 번 센 43+43 을 낸다."""
+    """활성 판본. 둘이면 답을 고르지 않고 멈춘다 -- 고르면 그 자리는 분모를 두 번 센 43+43 을 낸다.
+
+    027's deferred constraint trigger now refuses this state at commit; this Python check is the
+    read-side guard for a transaction still in flight, where the trigger has not fired yet.
+    """
     cur.execute(ACTIVE_SQL)
     versions = sorted(int(v) for (v,) in cur.fetchall())
     if len(versions) > 1:

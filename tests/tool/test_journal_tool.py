@@ -4,9 +4,8 @@ The refusals are the point of the file. A journal is a public comment on a publi
 written by an agent mid-run, and the two things an agent has at hand are a machine path and whatever
 it just read out of the environment. Both are refused before `gh` is reached at all.
 
-The Korean anchors the tool still accepts (#192's migration window) are read from
-tests/tool/fixtures rather than written here: tool/checks/lang stops a Hangul literal from reaching
-a .py file, and the follow-up that drops the anchors drops the fixture with them.
+#192's migration window closed (#204): `## Journal` and `planned` are the only head and state the
+tool accepts now.
 """
 
 from __future__ import annotations
@@ -20,9 +19,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 JOURNAL = REPO_ROOT / "tool" / "journal"
-KO = json.loads(
-    (Path(__file__).resolve().parent / "fixtures" / "korean_anchors.json").read_text(encoding="utf-8")
-)
 HEAD = "## Journal"
 
 FAKE_GH = """#!/bin/sh
@@ -69,8 +65,7 @@ def run(tmp_path: Path):
         if relist is not None:
             (tmp_path / "list2.json").write_text(json.dumps(relist), encoding="utf-8")
         # Without `reads` the comment is not moving: every read answers with what the listing said.
-        heads = (HEAD, KO["journal_head"])
-        listed = [c for c in (comments or []) if c["body"].startswith(heads)]
+        listed = [c for c in (comments or []) if c["body"].startswith(HEAD)]
         for index, row in enumerate(reads or listed, start=1):
             (tmp_path / f"read{index}.json").write_text(json.dumps(row), encoding="utf-8")
         (tmp_path / "read-last.json").write_text(
@@ -183,30 +178,25 @@ def test_the_journal_comment_is_created_when_there_is_none(run):
     assert done.written["body"].startswith(f"{HEAD}\n- 1 planned "), done.written
 
 
-def test_a_journal_written_in_korean_is_still_the_one_appended_to(run):
-    # #192's migration window: the journals already on the issues carry the Korean head, and a tool
-    # that stopped seeing them would open a second journal on every one of those issues.
+def test_a_legacy_korean_headed_comment_is_no_longer_read_as_the_journal(run):
+    # #204 closes the window: `## Journal` is the only head read now, so a comment under the old
+    # Korean head is invisible to the tool and a fresh `## Journal` comment is opened instead.
+    korean_head = (
+        (Path(__file__).resolve().parent / "fixtures" / "korean_journal_head.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
     legacy = {
         "id": 900,
-        "body": f"{KO['journal_head']}\n- 1 ok 2026-09-01T00:00Z abc1234\n",
+        "body": f"## {korean_head}\n- 1 ok 2026-09-01T00:00Z abc1234\n",
         "created_at": "2026-09-01T00:00:00Z",
         "updated_at": "2026-09-01T00:00:00Z",
     }
     done = run("185", "2", "ok", comments=[OTHER_COMMENT, legacy])
     assert done.returncode == 0, done.stderr
-    assert "-X PATCH" in done.calls and "issues/comments/900" in done.calls, done.calls
-    body = done.written["body"]
-    assert body.startswith(KO["journal_head"]), body
-    assert body.strip().splitlines()[-1].startswith("- 2 ok "), body
-
-
-def test_the_korean_planned_state_is_accepted_and_written_in_english(run):
-    # The window accepts the old word; what it writes is the new one, so the journal stops growing
-    # in two languages while both are legal.
-    done = run("185", "1", KO["state_planned"], comments=[OTHER_COMMENT])
-    assert done.returncode == 0, done.stderr
-    assert done.written["body"].startswith(f"{HEAD}\n- 1 planned "), done.written
-    assert KO["state_planned"] not in done.written["body"], done.written
+    assert "-X PATCH" not in done.calls, done.calls
+    assert "issues/185/comments" in done.calls, done.calls
+    assert done.written["body"].startswith(f"{HEAD}\n- 2 ok "), done.written
 
 
 def _repo_with_origin(tmp_path: Path, origin: str) -> Path:
