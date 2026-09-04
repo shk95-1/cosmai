@@ -1620,14 +1620,30 @@ literal` 이 쓰는 그 주제 별칭 63개 중 후보가 있는 **59개**(`재�
 - **거꾸로 서 있다는 것이 이 절의 답이다.** 색인의 6.06% 인 `commerce_review` 가 상위 10 의 **21.03%** —
   3.5배로 과대표된다. 짧은 리뷰가 질의어를 밀도 높게 담아 BM25 의 길이 보정(`bm25.B` 0.75)이 그쪽을 올리기
   때문이고, 그래서 "긴 문서가 많은 소수 소스가 밀린다"는 ydc 의 그림은 우리 코퍼스에서 성립하지 않는다.
-- **`youtube_transcript` 는 "가끔 이기고 대개 밀린다".** 59질의 중 **58개**에 후보가 있는데, 그중 **47개**는
-  첫 등장이 상위 10 밖이고(첫 등장 중앙값 32위) **11개**에서만 상위 10 에 든다 — 그것도 종종 1위다. 이
-  이중분포는 위 판정을 뒤집지 않는다(첫 관문에서 이미 갈린다). 다만 **분배를 안 넣는 근거로도 쓰지
-  않는다**: 이 소스는 이 절이 정의한 소수 소스(그 질의에서 후보가 있는 비지배 소스)에 들고 위 중앙값 19위에
-  이미 기여하므로, 소스별 몫을 넣으면 이 소스의 대표성은 실제로 완화된다. `youtube_video` 도 같은 모양이다
-  (후보 있는 47질의 중 **38개**가 상위 10 밖 · 중앙값 35위 · 최대 777위). 두 소스의 이중분포는 별건으로
-  추적할 값이 있는 현상이라 **포크 #65** 가 진다 — 재는 길은 위와 같은 `tool/measure-source-mix` 의
-  소스별 분해 줄이다.
+- **`youtube_transcript` "sometimes wins, usually loses" — and the cause is chunk length (fork #65).**
+  58 of the 59 queries have a transcript candidate; in **47** its first appearance is outside the top 10
+  (median first rank 32) and in **11** it is inside — at rank 1 in 3 of the 58. The numbers behind it
+  (`tool/measure-transcript-bimodal`, 2026-09-04, lexicon v3, 381,950 chunks, `avg_len` 24.76 tokens):
+  a transcript chunk is median **87 tokens / 480 characters** (3.51× `avg_len`, 12.06 chunks per
+  document — the only source packed to the 500-character target) against a comment's 7 tokens, so at
+  equal tf BM25's length normalisation (`bm25.B` 0.75) hands the comment a **2.87×** score and a
+  transcript needs tf ≥ 7 to tie one comment that says the word once. The rival causes are refuted by
+  measurement: transcripts own **47.14%** of the df the query set reaches (2.8× their index share) yet
+  5.47% of the top 10, so they lose at scoring, not at matching spoken language; and the 11 winning
+  queries are the ones where transcripts hold the term almost alone (median own-df share 82.30% against
+  42.20% for the buried 47) — a competition split, not a chunking or style split. Sweeping `B` from
+  0.0 to 1.0 moves the transcript share of the top 10 from 62.56% to 3.42% and the median first rank
+  from 1 to 190: the whole phenomenon is `B`. **`B` stays 0.75.** The adoption gate the contract names is
+  the heldout bm25 row, and it is .000 at every `B`; the only row that moves is literal — a wash, P@10
+  .868 → .871 and MRR@10 .897 → .894 at B=0.5 — and that row is a breakage detector biased on the same
+  axis (a transcript chunk carries a topic label 46.03% of the time against a comment's 13.30%, yet per
+  1,000 characters it is the lowest of the four sources), so tuning `B` on it would be circular. Nor
+  does any `B` justify allocation: at B ≥ 0.9 the first gate flips to skew, but the minority median stays
+  38–49, below the 100 the verdict asks. The
+  structural repair, if the creator-side voice must be visible, is a shorter transcript window (about
+  140 characters would sit at `avg_len`), which needs a re-chunk and a re-embed of production and a new
+  retrieval-measurements table — its own issue. `youtube_video` has the same shape (38 of its 47 candidate queries
+  outside the top 10 · median 35 · max 777) and the same reading applies.
 - **그래서 분배(각 소스 k/n 씩 뽑아 합치기 · RRF)를 `ranked_chunks` 에 더하지 않는다.** 분배는 공짜가
   아니다 — 상위 k 의 자리를 관련도가 아니라 소속으로 나눠 주므로, 고칠 쏠림이 없으면 남는 것은 손해뿐이다.
   §검색 실측 의 정답은 소스와 무관한 (문서, 주제) 라벨이라 그 손해가 곧 P@10 하락으로 나온다.
