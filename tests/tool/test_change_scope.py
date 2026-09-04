@@ -195,11 +195,14 @@ def test_a_prose_change_next_to_a_code_change_costs_the_code_change(repo: Path):
     assert scope.klass == "B", scope.raw
 
 
-def test_a_branch_with_nothing_on_it_is_class_c(repo: Path):
+def test_a_branch_with_nothing_on_it_verifies_nothing(repo: Path):
+    # #215 review C2: a tree identical to the base is the base's own tree. Calling that class C ran
+    # three snapshot tests and then recorded the tree as green, which is how any tree became green.
     write(repo, "a.py", PY_BEFORE)
     base = commit(repo, "one")
     scope = classify(repo, base)
-    assert scope.klass == "C", scope.raw
+    assert scope.klass == "N", scope.raw
+    assert scope.tests == [], scope.tests
 
 
 def test_a_base_that_does_not_exist_is_class_a(repo: Path):
@@ -252,3 +255,61 @@ def test_a_classifier_that_cannot_answer_falls_back_to_the_whole_suite(tmp_path:
     # And it stops there: with no uv and no docker on this PATH, the run is unverified (69), never
     # a pass. A green here would mean the fallback ran nothing at all.
     assert done.returncode == 69, done.stdout + done.stderr
+
+
+def test_a_comment_only_ddl_change_is_still_class_a(repo: Path):
+    # #215 review C1: the full-suite list is about blast radius, and no question about a diff's
+    # contents can narrow it. Measured on the old order, this classified C.
+    before = "-- the old wording\nCREATE TABLE a (id int);\n"
+    scope = change(repo, "contracts/ddl/needs/030_a.sql", before, before.replace("old wording", "why"))
+    assert scope.klass == "A", scope.raw
+    assert "contracts/ddl/" in scope.reason, scope.reason
+
+
+def test_a_string_only_change_in_a_package_is_class_b(repo: Path):
+    # A SQL predicate inside a string is behaviour: it earns the package's tests and the DB-free
+    # suite, never the three snapshot tests.
+    scope = change(
+        repo,
+        "analysis/polarity/q.py",
+        'QUERY = "SELECT id FROM app.need WHERE tenant = %s"\n',
+        'QUERY = "SELECT id FROM app.need WHERE 1=1"\n',
+    )
+    assert scope.klass == "B", scope.raw
+    assert "tests/test_polarity.py" in scope.tests, scope.tests
+
+
+def test_a_string_only_change_in_conftest_is_class_a(repo: Path):
+    scope = change(
+        repo,
+        "tests/conftest.py",
+        'TEST_DB_URL_ENV = "TEST_POSTGRES_URL"\n',
+        'TEST_DB_URL_ENV = "TEST_PG_URL"\n',
+    )
+    assert scope.klass == "A", scope.raw
+
+
+def test_a_default_model_and_a_regex_are_code_too(repo: Path):
+    assert change(repo, "analysis/judge/m.py", 'M = "gpt-4o-mini"\n', 'M = "gpt-3.5-turbo"\n').klass == "B"
+    scope = change(repo, "analysis/extractor/r.py", 'P = r"^\\d{4}$"\n', 'P = r"^\\d{2}$"\n')
+    assert scope.klass == "B", scope.raw
+
+
+def test_markdown_a_test_parses_runs_that_test(repo: Path):
+    # #215 review I4: contracts/ownership.md is data to tests/test_ownership.py, so editing it is
+    # prose that a test reads. Class C, plus the tests the map puts behind that file.
+    scope = change(repo, "contracts/ownership.md", "# Owners\n\n- a: b\n", "# Owners\n\n- a: c\n")
+    assert scope.klass == "C", scope.raw
+    assert "tests/test_ownership.py" in scope.tests, scope.tests
+    assert "tests/test_cli_help.py" in scope.tests, "the prose tests still run"
+
+
+def test_a_deleted_test_file_is_class_a(repo: Path):
+    # #215 review, minor 9: removing coverage is not a small change, and an empty test list used to
+    # buy it the DB-free suite alone.
+    write(repo, "tests/test_linker.py", "def test_a():\n    assert 1\n")
+    base = commit(repo, "before")
+    (repo / "tests" / "test_linker.py").unlink()
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
