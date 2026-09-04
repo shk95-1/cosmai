@@ -1,4 +1,5 @@
-"""`cosmai eval <task>`: needs.labeled_set 의 골드와 등록된 구현체의 예측을 맞춰 점수를 낸다."""
+"""`cosmai eval <task>`: matches the gold of needs.labeled_set with the predictions of a registered
+implementation and scores them."""
 
 from __future__ import annotations
 
@@ -30,8 +31,9 @@ REJECTED = frozenset({"N"})
 STRICT_GOLD = frozenset({"Y"})
 LENIENT_GOLD = frozenset({"Y", "V"})
 PRODUCT_MATCH_GOLD = frozenset({"Y", "V", "N"})
-# 'OK(retailer)' 처럼 이유를 달고 오는 brand_link 라벨. 앞머리만 화이트리스트로 인정하고 나머지는 거절한다 —
-# 알 수 없는 라벨을 조용히 OK 로 접으면 정밀도가 부풀어도 아무도 모른다.
+# A brand_link label that arrives with a reason attached, such as 'OK(retailer)'. Only the head is accepted
+# by whitelist and the rest is refused -- folding an unknown label quietly to OK inflates the precision with
+# nobody the wiser.
 BRAND_LINK_GOLD = re.compile(r"^(OK|FP)\b")
 
 
@@ -53,7 +55,8 @@ def _normalize(task: str, label: str, where: str) -> str:
 
 
 def _refuse_unknown_match_labels(pairs: Sequence[tuple[str, str]], where: str) -> None:
-    """gold 는 Y|V|N, 예측은 채택 Y | 비채택 N. 그 밖의 라벨은 분모를 조용히 바꾸므로 거절한다."""
+    """gold is Y|V|N and a prediction is accepted Y | not accepted N. Any other label changes the denominator
+    quietly, so it is refused."""
     bad_gold = {gold for gold, _ in pairs} - PRODUCT_MATCH_GOLD
     if bad_gold:
         raise LookupError(f"{where}: gold {', '.join(sorted(bad_gold))} is not one of Y, V, N")
@@ -93,12 +96,12 @@ def _metrics(task: str, pairs: Sequence[tuple[str, str]], scores: Scores) -> dic
 def evaluate(
     conn: psycopg.Connection[Any], task: str, impl: Implementation, split: str | None = None
 ) -> tuple[SetResult, ...]:
-    # split 을 거르는 것은 점수를 숨기려는 것이 아니다: 홀드아웃을 아예 돌리지 않아야 튜닝 중에
-    # 블라인드가 유지되고, 유료 구현(#6)에서는 그만큼 돈이 나가지 않는다.
+    # Filtering by split is not about hiding a score: not running the holdout at all is what keeps the blind
+    # blind during tuning, and on a paid implementation (#6) that much money is not spent.
     sets = [s for s in for_task(task) if split is None or s.split == split]
     loaded = [(eval_set, _rows(conn, task, eval_set)) for eval_set in sets]
-    # 예측 전에 읽기 트랜잭션을 닫는다: idle_in_transaction_session_timeout 15s (db/bootstrap.sql) 가
-    # 열어둔 채로 도는 구현체(#6 의 LLM 배치)의 세션을 끊는다.
+    # The read transaction is closed before predicting: idle_in_transaction_session_timeout 15s
+    # (db/bootstrap.sql) cuts the session of an implementation that runs with it open (the LLM batch of #6).
     conn.rollback()
     results = []
     for eval_set, rows in loaded:
@@ -146,7 +149,7 @@ def render(task: str, version: str, results: Sequence[SetResult]) -> str:
 
 
 def record(conn: psycopg.Connection[Any], task: str, version: str, results: Sequence[SetResult]) -> int:
-    # note 는 계약이 정한 문자열 그대로라 점수는 같은 행의 jsonb 에 남긴다.
+    # note is exactly the string the contract fixed, so the scores go into the jsonb of the same row.
     versions = {task: version, "scores": {r.name: dict(r.metrics) for r in results}}
     with conn.cursor() as cur:
         cur.execute(RUN, (json.dumps(versions, ensure_ascii=False), f"eval:{task}:{version}"))

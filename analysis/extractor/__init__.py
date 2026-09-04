@@ -1,8 +1,10 @@
-"""규칙 추출기 rule-v2.3 — 후보 문장(slice-suncare·slice-p1)과 바람 분류 a/b/c/n(slice-p9).
+"""Rule extractor rule-v2.3 -- candidate sentences (slice-suncare · slice-p1) and the wish classes a/b/c/n
+(slice-p9).
 
-문장 분할·표지 규칙은 세 슬라이스가 같은 정규식을 쓴다. 바람 표지는 사전 테이블이 아니라 규칙 버전에
-붙어 있어(analysis/lexicon.py 의 담화 표지와 같은 자리) 여기 상수로 산다. 브랜드·제형·속성만
-entity_lexicon 에서 온다.
+The sentence splitting and the marker rules use the same regexes across the three slices. The wish markers
+are attached to the rule version rather than to the dictionary table (the same place as the discourse markers
+in analysis/lexicon.py), so they live here as constants. Only brands, formats and attributes come from
+entity_lexicon.
 """
 
 from __future__ import annotations
@@ -14,12 +16,12 @@ from analysis.types import AspectLexicon, Candidate, Lexicon, TextUnit, WishResu
 VERSION = "rule-v2.3"
 # 슬라이스 셋이 같은 분할점을 쓴다: 종결 문장부호, '요/다' 뒤의 새 한글, ㅎㅎ/ㅋㅋ 뒤.
 SPLIT = re.compile(r"(?<=[.!?~ㅠㅜ])\s+|(?<=요)\s+(?=[가-힣])|(?<=다)\s+(?=[가-힣])|(?<=[ㅎㅋ]{2})\s+")
-SENTENCE_MIN = 4  # 후보 판정용 (slice-suncare·slice-p1)
-WISH_SENTENCE_MIN = 3  # 바람 판정용 (slice-p9)
+SENTENCE_MIN = 4  # for the candidate decision (slice-suncare · slice-p1)
+WISH_SENTENCE_MIN = 3  # for the wish decision (slice-p9)
 LOW_RATING = 3.0
-LIST_MAX = 3  # A12: format·attribute 는 ';' 로 최대 3개
+LIST_MAX = 3  # A12: format and attribute take at most 3 separated by ';'
 
-# ---------- 바람 표지 (slice-p9/wish_extractor.py) ----------
+# ---------- wish markers (slice-p9/wish_extractor.py) ----------
 WISH_ANY = re.compile(
     r"면 좋겠|면 좋을|았으면|었으면|으면 해|나왔으면|있었으면|싶어요|싶네요|싶다|싶습니다|싶어\b|싶은데"
     r"|싶음"
@@ -160,7 +162,7 @@ B2 = re.compile(
     r"|(마켓|공구|공동구매|판매|재입고|입고|재판매|오픈|라방|라이브)[^.!?]{0,12}"
     r"(없나요|없을까요|없을까|안 ?하|언제|있나요|있을까요)"
 )
-B_WINDOW = 30  # 요청 어미 앞 30자 안에 콘텐츠 목적어가 있어야 크리에이터 요청이다
+B_WINDOW = 30  # a content object must be within 30 characters before the request ending for a creator ask
 CLASS_ORDER = {"a": 0, "b": 1, "c": 2, "n": 3}
 
 
@@ -183,7 +185,8 @@ def _is_creator_request(sentence: str) -> str | None:
 
 
 def classify_wish(sentence: str) -> tuple[str, str]:
-    """한 문장의 바람 분류 (a 제품/출시 요청 · b 크리에이터 요청 · c 일반 희망 · n 아님)."""
+    """The wish class of one sentence (a product/launch request · b creator request · c general wish · n
+    none)."""
     stated = PAST_LAUNCH.search(sentence) and not LAUNCH_AGAIN.search(sentence)
     launch = None if stated else LAUNCH.search(sentence)
     if LAUNCH_NOT.search(sentence):
@@ -211,8 +214,8 @@ class RuleExtractor:
     version = VERSION
 
     def __init__(self) -> None:
-        # complaint_marker_re 는 부를 때마다 정규식을 컴파일한다 (types.py) — 카테고리별로 한 번만 만든다.
-        # 캐시가 사전을 붙들고 있으므로 id 는 살아 있는 동안 재사용되지 않는다.
+        # complaint_marker_re compiles the regex on every call (types.py) -- it is built once per category.
+        # The cache holds the dictionary, so its id is not reused while it is alive.
         self._markers: dict[tuple[int, str | None], tuple[AspectLexicon, re.Pattern[str]]] = {}
         self._brands: dict[int, tuple[Lexicon, dict[str, str]]] = {}
 
@@ -256,7 +259,8 @@ class RuleExtractor:
     def candidates(
         self, unit: TextUnit, aspects: AspectLexicon, lexicon_category: str | None = None
     ) -> list[Candidate]:
-        """lexicon_category 가 사전을 고른다 — unit.category 는 사이트 원문이라 사전 키가 아니다."""
+        """lexicon_category chooses the dictionary -- unit.category is the site original and not a dictionary
+        key."""
         category = lexicon_category if lexicon_category is not None else unit.category
         marker_re = self._marker_re(aspects, category)
         low = unit.rating is not None and unit.rating <= LOW_RATING
@@ -284,7 +288,7 @@ class RuleExtractor:
         return found
 
     def wishes(self, unit: TextUnit, lexicon: Lexicon) -> WishResult | None:
-        """분류 n(바람 아님)은 행이 아니다 — wish_mention.wish_class 는 a|b|c 만 받는다 (001)."""
+        """Class n (not a wish) is not a row -- wish_mention.wish_class takes only a|b|c (001)."""
         best: tuple[str, str, str] = ("n", "", "")
         for sentence in sentences(unit.text, WISH_SENTENCE_MIN):
             found, marker = classify_wish(sentence)

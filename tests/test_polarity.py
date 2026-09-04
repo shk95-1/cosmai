@@ -1,4 +1,5 @@
-"""RulePolarity: aspect 매칭·부정어·중립 명사. 문장은 평가셋 tune 셋에서 옮겼다."""
+"""RulePolarity: aspect matching, negation words, neutral nouns. The sentences are carried over from the tune
+set of the evaluation set."""
 
 from __future__ import annotations
 
@@ -102,7 +103,7 @@ def test_an_empty_dictionary_never_invents_an_aspect(category: str | None):
 
 @pytest.mark.postgres
 def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_url: str, monkeypatch, capsys):
-    """유닛은 IMPLEMENTATIONS 에 자기 모듈 한 줄만 더한다 — 그 import 가 두 task 를 등록한다."""
+    """A unit adds only its own module line to IMPLEMENTATIONS — that import registers both tasks."""
     from analysis import predictors, registry
     from cosmai.cli import main
     from db import seed
@@ -111,14 +112,15 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     assert "analysis.predictors" in registry.IMPLEMENTATIONS
     registry.load_implementations()
     found = {task: registry.get(task) for task in ("polarity", "wish_class")}
-    # 두 task 는 각자의 규칙 버전을 낸다 — 추출기만 rule-v2.3 으로 올라갔다.
+    # The two tasks report their own rule versions — only the extractor went up to rule-v2.3.
     assert {task: impl.version if impl else None for task, impl in found.items()} == {
         "polarity": "rule-v2.2",
         "wish_class": "rule-v2.3",
     }
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
-    # Predictor 계약이 연결을 주지 않아 구현체가 사전 접속을 스스로 연다 (#12 이월).
+    # The Predictor contract hands over no connection, so the implementation opens the lexicon connection
+    # itself (carried over from #12).
     monkeypatch.setattr(predictors, "LEXICON_URL", needs_runtime_url)
     assert main(["eval", "polarity", "--url", needs_runtime_url]) == 0
     assert main(["eval", "wish_class", "--url", needs_runtime_url]) == 0

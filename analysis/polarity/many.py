@@ -1,7 +1,9 @@
-"""classify_many 의 기본 구현. 배치 API 를 가진 구현(#6 의 Claude)만 단건 반복보다 낫다.
+"""Default implementation of classify_many. Only an implementation with a batch API (#6's Claude) beats
+looping over single calls.
 
-규칙 구현이 이 클래스를 상속해 계약을 채운다 — 판정 로직은 analysis/polarity/__init__.py 에 그대로 두고
-(비교 대상 고정), 늘어난 시그니처만 여기서 메운다.
+The rule implementation inherits this class to fill the contract — the judgement logic stays in
+analysis/polarity/__init__.py as it was (the comparison target is fixed) and only the widened signature is
+filled in here.
 """
 
 from __future__ import annotations

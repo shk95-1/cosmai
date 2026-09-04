@@ -1,6 +1,8 @@
-"""`analyze link`: 원천 스키마를 읽어 제품 식별 표와 brand_mention 을 다시 만든다.
+"""`analyze link`: reads the source schemas and rebuilds the product identification tables and
+brand_mention.
 
-쓰는 곳은 needs 뿐이고 원천 두 스키마는 SELECT 로만 연다 (db/grants/needs_runtime_reader.sql).
+Only needs is written to, and the two source schemas are opened with SELECT alone
+(db/grants/needs_runtime_reader.sql).
 """
 
 from __future__ import annotations
@@ -19,12 +21,13 @@ from analysis.linker import RuleLinker
 from analysis.types import Lexicon, ProductRow, TextUnit
 
 TABLES = ("product_ref", "product_member", "product_ref_candidate", "brand_mention")
-# formats.md: 유튜브 댓글 시각만 상대시간 복원본이다 — 2025-09 이후만 달 단위로 믿는다.
+# formats.md: only the YouTube comment timestamps are restored from relative time -- only 2025-09 onwards is
+# trusted at month resolution.
 COMMENT_MONTH_FROM = date(2025, 9, 1)
-# needs_runtime 의 timeout 은 "sized per statement not per job" 이다 (db/bootstrap.sql) — 한 실행을
-# 이 크기의 읽기·쓰기 조각으로 쪼개 statement 30s·transaction 60s 안에 각 조각이 끝나게 한다.
+# The timeouts of needs_runtime are "sized per statement not per job" (db/bootstrap.sql) -- one run is cut
+# into read and write pieces of this size so each piece finishes inside statement 30s and transaction 60s.
 BATCH = 2000
-# 첫 페이지의 시작 키. 빈 문자열은 어떤 키보다 작다.
+# The starting key of the first page. An empty string is smaller than any key.
 FIRST = ""
 
 REF_SQL: LiteralString = """
@@ -58,7 +61,7 @@ SET video_id = EXCLUDED.video_id, count = EXCLUDED.count, cooc_count = EXCLUDED.
     observed_at = EXCLUDED.observed_at, observed_at_resolution = EXCLUDED.observed_at_resolution
 """
 
-# 페이징은 전부 키셋이다 — OFFSET 은 페이지마다 앞을 다시 읽어 전체가 O(n²) 가 된다.
+# All the paging is keyset -- OFFSET rereads the front on every page and makes the whole thing O(n^2).
 PRODUCTS = pgsql.SQL("""
 SELECT source, product_key, name, brand, volume, first_seen_at::date
 FROM {schema}.product WHERE (source, product_key) > (%s, %s)
@@ -90,22 +93,23 @@ ORDER BY video_id, comment_id LIMIT %s
 
 @dataclass(frozen=True)
 class _Documents:
-    """brand_mention 한 src 의 원천. 행은 (ref_id, video_id, text, observed_at)."""
+    """The source of one src of brand_mention. A row is (ref_id, video_id, text, observed_at)."""
 
     src: str
     sql: pgsql.SQL
-    key_columns: tuple[int, ...]  # 페이지 마지막 행에서 다음 시작 키를 뽑는 자리
+    key_columns: tuple[int, ...]  # where the next start key is taken from in the last row of a page
 
 
 DOCUMENTS = (
-    _Documents("title", TITLES, (1,)),  # B12: 제목도 링크 대상이다
+    _Documents("title", TITLES, (1,)),  # B12: a title is a link target too
     _Documents("transcript", TRANSCRIPTS, (1,)),
-    _Documents("comment", COMMENTS, (1, 0)),  # comments 의 PK 가 (video_id, comment_id) 다
+    _Documents("comment", COMMENTS, (1, 0)),  # the PK of comments is (video_id, comment_id)
 )
 
 
 def _resolution(src: str, observed_at: date | None) -> str:
-    """링크에 쓴 단위와 저장한 단위가 갈리면 안 된다 — 시각을 모른다는 것은 observed_at NULL 이 말한다."""
+    """The unit used for linking and the unit stored must not diverge -- that the time is unknown is said by
+    observed_at NULL."""
     if src != "comment" or observed_at is None:
         return "day"
     return "month" if observed_at >= COMMENT_MONTH_FROM else "year"
@@ -123,7 +127,8 @@ def _pages(
         with conn.cursor() as cur:
             cur.execute(query, (*key, *params, batch))
             page = cur.fetchall()
-        # 읽자마자 닫는다: 링크하는 동안 트랜잭션이 열려 있으면 idle_in_transaction 15s 가 세션을 끊는다.
+        # Closed as soon as it is read: with the transaction open during linking, idle_in_transaction 15s
+        # cuts the session.
         conn.rollback()
         if not page:
             return
@@ -156,7 +161,7 @@ def _counts(conn: psycopg.Connection[Any]) -> dict[str, int]:
 def link_products(
     conn: psycopg.Connection[Any], linker: RuleLinker, commerce_schema: str, batch: int
 ) -> None:
-    """--since 를 받지 않는다: 창을 자른 카탈로그는 다른 군집을 만들어 같은 ref 가 흔들린다."""
+    """It takes no --since: a catalogue cut to a window makes different clusters and the same ref wobbles."""
     query = PRODUCTS.format(schema=pgsql.Identifier(commerce_schema))
     products = [
         ProductRow(
@@ -171,7 +176,7 @@ def link_products(
         for source, product_key, name, brand, volume, first_seen in page
     ]
     match = linker.match_products(products)
-    # ref → member 순서를 지킨다: product_member 가 product_ref 를 참조한다 (001).
+    # The order ref -> member is kept: product_member references product_ref (001).
     _write(
         conn,
         REF_SQL,
@@ -234,7 +239,8 @@ def link_brands(
                 )
                 hits = collections.Counter[str]()
                 cooc = collections.Counter[str]()
-                # brand_mention 은 브랜드만 센다 — surface_re 는 ingredient 표면까지 문다 (lexicon.py).
+                # brand_mention counts brands only -- surface_re bites ingredient surfaces too
+                # (lexicon.py).
                 for hit in linker.link(unit, lexicon):
                     if hit.kind != "brand":
                         continue
@@ -265,7 +271,8 @@ def run(
     linker: RuleLinker | None = None,
     batch: int = BATCH,
 ) -> dict[str, int]:
-    """배치마다 커밋한다 — 중간에 죽어도 자연키 upsert 라 다음 실행이 이어서 같은 결과로 수렴한다."""
+    """Committed per batch -- dying halfway is fine because every write is a natural-key upsert and the next
+    run converges on the same result."""
     resolved = linker or RuleLinker()
     lexicon = load_lexicon(conn)
     link_products(conn, resolved, commerce_schema, batch)

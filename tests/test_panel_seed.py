@@ -1,9 +1,10 @@
-"""패널 명부 43채널이 needs 로 들어가고, 재실행이 아무것도 바꾸지 않으며, 활성 판본은 하나다 (포크 #31).
+"""The 43 channels of the panel roster go into needs, a rerun changes nothing, and there is one active
+version (fork #31).
 
-`active` 는 행 단위라 두 판본이 동시에 켜질 수 있고, 그러면 `panel_channel (version, panel_role)
-WHERE active` 부분 인덱스를 타는 분모가 이중으로 세어진다. 부분 유니크 인덱스로는 "활성 행 중
-distinct version 이 하나"를 적을 수 없으므로(#3 리뷰 L6 이 이 불변식을 적재기에 지웠다) 여기서
-적재기가 그것을 지는지 묻는다.
+`active` is per row, so two versions can be switched on at once, and then the denominator riding the
+`panel_channel (version, panel_role) WHERE active` partial index is counted twice. A partial unique index
+cannot express "there is one distinct version among the active rows" (#3 review L6 deleted this invariant
+from the loader), so this asks whether the loader carries it.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ SEED_CSV = EVAL_DIR / "panel" / "channels_v1.csv"
 SLICE_CSV = REPO_ROOT / "analysis" / "slices" / "ydc" / "seeds" / "channels_v1.csv"
 EXPECTED = {"panel_roster": 1, "panel_channel": 43}
 ROLES = {"product": 34, "expert": 9}  # contracts/formats.md §패널 명부 CSV 의 v1 패널 열
-CSV_COLUMNS = 11  # 파일은 11열, 표로 가는 것은 6열 (같은 계약)
+CSV_COLUMNS = 11  # the file has 11 columns and 6 go into the table (the same contract)
 
 SNAPSHOT = (
     "SELECT version, note, seeded_at FROM panel_roster ORDER BY version",
@@ -31,7 +32,8 @@ SNAPSHOT = (
 
 
 def _snapshot(cur: psycopg.Cursor[Any]) -> list[list[tuple[Any, ...]]]:
-    """행이 다시 쓰였는지 세는 자리 -- 개수만 보면 UPDATE 가 값을 바꾼 재실행이 초록으로 지나간다."""
+    """Where a rewritten row is counted -- looking only at counts, a rerun whose UPDATE changed a value
+    passes green."""
     out = []
     for query in SNAPSHOT:
         cur.execute(query)  # type: ignore[arg-type]
@@ -44,16 +46,17 @@ def _roles(cur: psycopg.Cursor[Any]) -> dict[str, int]:
     return {role: int(n) for role, n in cur.fetchall()}
 
 
-# ---------- 원본이 슬라이스 밖에 있다 ----------
+# ---------- the original lives outside the slice ----------
 def test_the_panel_seed_csv_sits_outside_the_slice_that_9_deletes():
-    """#9 가 `analysis/slices/ydc/` 를 지웠다 -- 그 안에 원본을 남겼다면 같이 사라졌을 자리다."""
+    """#9 deleted `analysis/slices/ydc/` -- had the original been left inside it, it would have gone with
+    it."""
     assert SEED_CSV.is_file()
     assert not SLICE_CSV.exists()
 
 
 def test_the_seed_csv_reads_without_a_bom_special_case():
-    """`db/seed/_common.read_csv` 는 utf-8 로 연다 -- BOM 이 남으면 첫 열 이름이 `﻿channel_id` 가
-    되고, 적재기는 KeyError 하나로 죽는다."""
+    """`db/seed/_common.read_csv` opens as utf-8 -- with a BOM left, the first column name becomes
+    `\ufeffchannel_id` and the loader dies on one KeyError."""
     assert not SEED_CSV.read_bytes().startswith(b"\xef\xbb\xbf")
     csv_rows = read_csv(SEED_CSV)
     assert len(csv_rows) == 43
@@ -61,7 +64,7 @@ def test_the_seed_csv_reads_without_a_bom_special_case():
     assert csv_rows[0]["channel_id"].startswith("UC")
 
 
-# ---------- 값이 들어간다 · 재실행이 아무것도 바꾸지 않는다 ----------
+# ---------- the values go in · a rerun changes nothing ----------
 @pytest.mark.postgres
 def test_the_seed_loads_43_panel_channels_and_a_rerun_changes_nothing(needs_runtime_url: str):
     assert seed.run_all(needs_runtime_url, only=("panel",)) == EXPECTED
@@ -70,7 +73,8 @@ def test_the_seed_loads_43_panel_channels_and_a_rerun_changes_nothing(needs_runt
         assert _roles(cur) == ROLES
     assert seed.run_all(needs_runtime_url, only=("panel",)) == EXPECTED
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
-        # seeded_at 까지 같아야 한다: 값이 같은 UPDATE 도 행을 다시 쓰고, 그것은 변경 0 이 아니다.
+        # seeded_at has to match too: an UPDATE with equal values still rewrites the row, and that is not
+        # zero changes.
         assert _snapshot(cur) == before
         assert _roles(cur) == ROLES
 
@@ -79,8 +83,9 @@ def test_the_seed_loads_43_panel_channels_and_a_rerun_changes_nothing(needs_runt
 def test_the_seed_keeps_the_six_columns_the_contract_maps_and_drops_the_other_five(
     needs_runtime_url: str,
 ):
-    """계약이 버린다고 적은 다섯 열(team_rank·team_role·channel_published_at·video_count_at_seed·
-    subscriber_count_at_seed)은 표에 자리가 없다 -- 여섯 열이 실제로 채워졌는지만 여기서 센다."""
+    """The five columns the contract says are dropped (team_rank · team_role · channel_published_at ·
+    video_count_at_seed · subscriber_count_at_seed) have no place in the table -- only whether the six columns
+    were really filled is counted here."""
     seed.run_all(needs_runtime_url, only=("panel",))
     source = {r["channel_id"]: r for r in read_csv(SEED_CSV)}
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
@@ -107,7 +112,7 @@ def test_the_seed_keeps_the_six_columns_the_contract_maps_and_drops_the_other_fi
     )
 
 
-# ---------- 활성 판본은 언제나 하나 ----------
+# ---------- there is always one active version ----------
 @pytest.mark.postgres
 def test_a_second_panel_version_turns_the_first_one_off_in_one_statement(needs_runtime_url: str):
     seed.run_all(needs_runtime_url, only=("panel",))
@@ -119,13 +124,14 @@ def test_a_second_panel_version_turns_the_first_one_off_in_one_statement(needs_r
         assert panel.active_version(cur) == 2
         cur.execute("SELECT count(*) FROM panel_channel WHERE active")
         assert cur.fetchone() == (5,)
-        # 두 번째 activate 는 아무 행도 다시 쓰지 않는다.
+        # The second activate rewrites no row.
         assert panel.activate(cur, 2) == 0
 
 
 @pytest.mark.postgres
 def test_activating_a_version_that_has_no_rows_is_refused(needs_runtime_url: str):
-    """빈 판본을 켜면 `SET active = (version = n)` 이 명부를 통째로 끄고 분모를 0 으로 만든다."""
+    """Switch an empty version on and `SET active = (version = n)` turns the whole roster off and makes the
+    denominator 0."""
     seed.run_all(needs_runtime_url, only=("panel",))
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         with pytest.raises(LookupError):
@@ -136,7 +142,8 @@ def test_activating_a_version_that_has_no_rows_is_refused(needs_runtime_url: str
 
 @pytest.mark.postgres
 def test_two_active_versions_are_refused_rather_than_counted_twice(needs_runtime_url: str):
-    """부분 인덱스는 이 상태를 막지 못한다. 분모를 묻는 자리가 조용히 86 을 세는 대신 멈춘다."""
+    """A partial index cannot stop this state. The place that asks for the denominator stops instead of
+    quietly counting 86."""
     seed.run_all(needs_runtime_url, only=("panel",))
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         panel.insert(cur, panel.rows(EVAL_DIR), version=2, note="seed:test-v2")

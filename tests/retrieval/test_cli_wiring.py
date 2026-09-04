@@ -1,12 +1,14 @@
-"""`cosmai retrieval <하위명령>` 이 실제로 일하는 함수까지 닿는지.
+"""Whether `cosmai retrieval <subcommand>` really reaches the function that does the work.
 
-두 번 다 여기서 죽었다(2026-08-25, 둘 다 인코딩 시작 0.3초 만에).
-  1. 공통 디스패치가 `args.source` 를 읽는데 `embed` 에는 그 옵션이 없었다.
-  2. 호출부만 고치고 `_run_retrieval_embed` 의 시그니처는 그대로여서 인자 수가 안 맞았고,
-     그 함수 본문은 아직 pgvector 시절이라 이제 없는 이름을 참조하고 있었다.
+It died here twice (2026-08-25, both 0.3 seconds into the encoding).
+  1. The shared dispatch read `args.source`, which `embed` did not have as an option.
+  2. Only the call site was fixed and the signature of `_run_retrieval_embed` stayed, so the argument count
+     did not match, and that function's body was still from the pgvector era and referred to names that no
+     longer exist.
 
-연결에서 멈추는 테스트로는 2번을 못 잡는다. 그래서 연결을 가짜로 통과시키고 **일하는 함수가
-불렸는지**까지 본다 -- DB 도 모델도 부르지 않는다."""
+A test that stops at the connection cannot catch the second. So the connection is passed through a fake and
+it checks **whether the function that does the work was called** -- neither the DB nor the model is
+called."""
 
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ from cosmai.cli import RETRIEVAL_ENGINES, RETRIEVAL_SOURCES, build_parser, main
 
 
 class FakeConn:
-    """`with conn:` 만 되면 된다. 아무 쿼리도 받지 않는다."""
+    """`with conn:` is all that is needed. It takes no query at all."""
 
     def __enter__(self):
         return self
@@ -29,8 +31,8 @@ class FakeConn:
 
 @pytest.fixture
 def refuse_connection(monkeypatch):
-    """소켓을 열지 않고 연결만 거절한다. tests/conftest.py 의 오프라인 가드는 RuntimeError 를
-    던지는데, 그것은 CLI 가 잡는 예외가 아니라 테스트 하네스의 신호다."""
+    """Refuses the connection without opening a socket. The offline guard of tests/conftest.py raises
+    RuntimeError, which is a signal of the test harness rather than an exception the CLI catches."""
     import psycopg
 
     from cosmai import cli
@@ -43,7 +45,8 @@ def refuse_connection(monkeypatch):
 
 @pytest.fixture
 def worked(monkeypatch):
-    """연결을 통과시키고 일하는 함수를 가짜로 바꾼다. 무엇이 어떤 인자로 불렸는지 남긴다."""
+    """Lets the connection through and swaps the working function for a fake. It records what was called with
+    which arguments."""
     from analysis.retrieval import embed, pipeline, terms
     from analysis.retrieval import eval as retrieval_eval
     from cosmai import cli
@@ -92,7 +95,8 @@ def worked(monkeypatch):
     ids=lambda a: a[1],
 )
 def test_a_refused_connection_is_blocked_not_failed(argv, refuse_connection, capsys):
-    # exit 2 는 "아직 아무것도 시작하지 못한 거절"이다. 인자 해석이 연결보다 앞이라 여기까지 온다.
+    # exit 2 is "a refusal before anything could start". Argument parsing comes before the connection, so
+    # it gets this far.
     assert main(argv) == 2
     assert "연결 거절" in capsys.readouterr().out
 
@@ -137,7 +141,7 @@ def test_the_engine_reaches_search_and_eval(worked):
 
 
 def test_the_vector_store_flag_is_spelled_the_same_everywhere():
-    # `--out` 이 eval 에서는 CSV, embed 에서는 벡터 경로였다. 같은 이름이 다른 뜻이면 헷갈린다.
+    # `--out` was the CSV for eval and the vector path for embed. The same name meaning two things confuses.
     parser = build_parser()
     for action in ("search", "eval", "embed"):
         argv = ["retrieval", action, "--vectors", "x"]
@@ -159,7 +163,8 @@ def test_the_engine_and_source_vocabularies_are_shared():
 
 
 def test_a_scan_that_saw_no_document_is_partial(worked, monkeypatch):
-    """빈 표는 "사전이 다 잡았다" 로 읽힌다 -- 청크가 비었다는 뜻인데도 초록이면 그게 더 나쁘다."""
+    """An empty table reads as "the dictionary caught everything" -- green while it means the chunks are
+    empty is worse."""
     from analysis.retrieval import terms
 
     monkeypatch.setattr(terms, "scan", lambda *_a, **_kw: SimpleNamespace(documents={}))

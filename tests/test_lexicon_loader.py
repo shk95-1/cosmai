@@ -1,4 +1,5 @@
-"""사전 로더: 한 버전을 읽어 컴파일된 Lexicon/AspectLexicon 을 돌려준다 (contracts/formats.md §ruleset)."""
+"""The dictionary loader: it reads one version and returns a compiled Lexicon/AspectLexicon
+(contracts/formats.md §ruleset)."""
 
 from __future__ import annotations
 
@@ -32,7 +33,7 @@ def test_the_surface_regex_allows_a_particle_and_skips_stopped_brands(seeded):
     lex = load_lexicon(seeded)
     hits = [m.group(1) for m in lex.surface_re.finditer("어제 산 3CE 틴트랑 라네즈는 좋다")]
     assert hits == ["3CE", "라네즈"]
-    # 스톱 티어는 표면 자체를 정규식에서 뺀다 (slice-p3 link_brands.py --stop).
+    # The stop tier takes the surface out of the regex altogether (slice-p3 link_brands.py --stop).
     assert "포인트" in lex.stop
     assert not lex.surface_re.search("포인트 컬러가 예쁘다")
     assert "카이" in lex.cooc_required
@@ -64,7 +65,7 @@ def test_a_category_pattern_hides_the_generic_of_the_same_name(seeded):
     cream = p1.for_category("크림")
     assert [p.scope for p in cream if p.aspect == "눈시림"] == ["category"]
     assert len(cream) == 20
-    # 카테고리를 모르면 generic 만 본다.
+    # With no category known, only generic is looked at.
     assert {p.scope for p in p1.for_category(None)} == {"generic"}
 
 

@@ -31,7 +31,8 @@ HEADER = "## 벡터 하한선"
 
 
 def loaded() -> ModuleType:
-    """확장자가 없어 평범한 import 로는 안 들어온다 (`test_query_routing.loaded` 와 같은 길)."""
+    """It has no extension, so a plain import does not reach it (the same way as
+    `test_query_routing.loaded`)."""
     spec = spec_from_loader("measure_vector_floor", SourceFileLoader("measure_vector_floor", str(TOOL)))
     assert spec is not None and spec.loader is not None
     module = module_from_spec(spec)
@@ -45,28 +46,31 @@ def section() -> str:
     return body[start : body.index("\n## ", start)]
 
 
-# 진짜 61개가 좁은 띠에 있고 가짜가 그 안에 들어앉은 우리 실측의 모양. 열 개로 줄인 것뿐이다.
+# The shape of our measurement: the 61 real ones sit in a narrow band with the fakes settled inside it. It
+# is only that, cut down to ten.
 NESTED_REAL = [0.80, *[0.84] * 4, *[0.88] * 5]
 NESTED_FAKE = [0.85] * 10
 
 
 def test_the_three_verdicts_were_fixed_before_any_number_was_seen():
     floor = loaded()
-    # 갈리면 분리다 -- 문턱은 두 분포 사이 어디든 되므로 가운데를 준다.
+    # Apart is separation -- the threshold can be anywhere between the two distributions, so it gives the
+    # middle.
     kind, threshold = floor.verdict([0.90, 0.91], [0.80, 0.81])
     assert kind == floor.SEPARATED and 0.81 < threshold < 0.90
-    # 겹쳐도 정탐 90% 를 남기는 문턱이 오탐 절반을 자르면 쓸 수 있다.
+    # Even overlapping, a threshold that leaves 90% of the true hits is usable if it cuts half the false ones.
     kind, threshold = floor.verdict([0.70, *[0.90] * 9], [*[0.60] * 6, *[0.95] * 4])
     assert kind == floor.USABLE and threshold == 0.90
-    # 그 문턱이 오탐을 절반도 못 자르면 못 쓴다 -- 우리 실측이 이 모양이다.
+    # If that threshold cannot cut even half the false ones it is unusable -- our measurement has this shape.
     kind, threshold = floor.verdict(NESTED_REAL, NESTED_FAKE)
     assert kind == floor.UNUSABLE and threshold == 0.84
     assert floor.verdict([], [0.5])[0] == "측정 불가"
 
 
 def test_a_tie_at_the_edge_is_not_separation():
-    """경계 부등호를 아무도 안 지키면 `<=` 로 바뀌어도 스위트가 초록이다 -- 가짜 최고가 진짜 최저와
-    **같은** 값이면 그 값의 질의는 진짜와 구별되지 않으므로 분리가 아니다."""
+    """With nobody keeping the boundary inequality, the suite stays green when it becomes `<=` -- if the
+    highest fake equals the lowest real, a query at that value is indistinguishable from a real one, so it is
+    not separation."""
     floor = loaded()
     kind, threshold = floor.verdict([0.90, 0.91], [0.90, 0.80])
     assert kind != floor.SEPARATED
@@ -74,31 +78,34 @@ def test_a_tie_at_the_edge_is_not_separation():
 
 
 def test_blocking_every_fake_is_not_by_itself_a_reason_to_put_a_floor_in():
-    """`가짜를 다 막는다`만 보면 어떤 값이든 좋아 보인다 -- ydc 가 표본 6개로 .865 를 넣은 자리다.
-    그래서 문턱 하나를 볼 때는 자르는 쪽과 남기는 쪽을 **함께** 본다."""
+    """Look only at "it blocks every fake" and any value looks good -- that is where ydc put .865 from a
+    sample of 6. So when a single threshold is looked at, what it cuts and what it leaves are looked at
+    **together**."""
     floor = loaded()
     high = floor.at(0.86, NESTED_REAL, NESTED_FAKE)
-    assert high["fake_blocked"] == high["fake"] == 10  # 가짜를 다 막는데
-    assert high["real_lost"] == 5 and high["real"] == 10  # 정탐 절반을 함께 버린다
-    # 그 값은 정탐 90% 를 남기지 못하므로 판정에 쓰이는 문턱이 아니다.
+    assert high["fake_blocked"] == high["fake"] == 10  # it blocks every fake
+    assert high["real_lost"] == 5 and high["real"] == 10  # and throws away half the true hits with them
+    # That value does not leave 90% of the true hits, so it is not a threshold used in the judgement.
     assert floor.verdict(NESTED_REAL, NESTED_FAKE)[1] < 0.86
 
 
 def test_the_threshold_is_always_an_observed_score_that_keeps_the_promised_share():
-    """값 사이의 수를 고르면 그 고르는 규칙이 또 하나의 손잡이가 된다."""
+    """Pick a number between the values and the rule for picking it becomes one more knob."""
     floor = loaded()
     threshold = floor.highest_keeping(NESTED_REAL)
     assert threshold in NESTED_REAL
     kept = sum(1 for score in NESTED_REAL if score >= threshold) / len(NESTED_REAL)
     assert kept >= floor.KEEP
-    # 더 높은 실측값을 잡으면 약속한 몫을 못 남긴다 -- 그래서 이것이 **가장 높은** 문턱이다.
+    # Take a higher measured value and it cannot leave the promised share -- which is why this is the
+    # **highest** threshold.
     higher = min(score for score in NESTED_REAL if score > threshold)
     assert sum(1 for score in NESTED_REAL if score >= higher) / len(NESTED_REAL) < floor.KEEP
 
 
 def test_the_fake_names_are_evidence_only_while_the_corpus_lacks_them():
-    """있으면 가짜가 아니다. 한 번의 훑기로 세는 것도 계약이다 -- 이름마다 물으면 없는 이름은 매번
-    전량 훑기이고 열두 번이 statement_timeout 안에 든다는 보장이 없다."""
+    """If it is there it is not a fake. Counting it in one scan is part of the contract too -- asked per name,
+    a missing name is a full scan every time and there is no guarantee twelve of them fit inside
+    statement_timeout."""
     floor = loaded()
     asked: list[tuple[str, tuple]] = []
 
@@ -140,14 +147,15 @@ def test_search_fills_top_k_however_far_the_query_is():
     matrix = numpy.eye(4, vectors.DIM, dtype="float32")
     store = vectors.VectorStore(matrix, [f"d:{i}#0" for i in range(4)], ["s"] * 4, {"query_prefix": "q: "})
     far = numpy.zeros(vectors.DIM, dtype="float32")
-    far[vectors.DIM - 1] = 1.0  # 네 문서 중 어느 것과도 코사인 0 인 질의
+    far[vectors.DIM - 1] = 1.0  # a query at cosine 0 to all four documents
     hits = vectors.search(store, far, top=3)
     assert len(hits) == 3
     assert [round(distance, 6) for _chunk, distance in hits] == [1.0, 1.0, 1.0]
 
 
 def test_the_criteria_were_written_into_the_contract_before_the_numbers():
-    """세 갈래가 계약에 없으면 판정이 도구 안에서만 살고, 도구를 고치는 사람이 기준도 함께 고친다."""
+    """With the three branches absent from the contract, the judgement lives only inside the tool, and whoever
+    fixes the tool fixes the criteria with it."""
     floor = loaded()
     body = section()
     for kind in (floor.SEPARATED, floor.USABLE, floor.UNUSABLE):
@@ -155,34 +163,38 @@ def test_the_criteria_were_written_into_the_contract_before_the_numbers():
     assert f"{int(floor.KEEP * 100)}% 이상을 남기는 문턱" in body
     assert "절반 이상 자른다" in body and floor.CUT == 0.50
     assert "결과를 보고 기준을 만들지 않는다" in body
-    # 표본의 성질도 기준의 일부다 -- 가짜가 코퍼스에 있으면 그 수는 이 표의 수가 아니다.
+    # The properties of the sample are part of the criteria too -- if a fake is in the corpus, that number is
+    # not the number of this table.
     assert "종료 코드 1" in body
 
 
 def test_the_contract_carries_the_verdict_and_the_constants_it_was_measured_with():
-    """수만 옮겨 적고 상수가 갈리면 다음 사람이 다른 기준으로 잰 값을 이 표에 넣는다."""
+    """Copy only the numbers and let the constant drift, and the next person puts a value measured by another
+    criterion into this table."""
     floor = loaded()
     body = section()
     assert f"**{floor.UNUSABLE}**" in body
     assert f"| 가짜 질의 (코퍼스에 없는 성분명) | {len(floor.FAKE)} |" in body
     assert f"ydc 임시값 .{str(floor.YDC_TRIAL).split('.')[1]}" in body
-    # 판정이 어느 저장소 위에 섰는지 (#49). 없으면 다음 재측정이 무엇과의 델타인지 말할 수 없다.
+    # Which store the judgement stood on (#49). Without it the next remeasurement cannot say what the delta
+    # is against.
     assert "vectors=381950" in body
 
 
 def test_the_decision_and_the_size_of_the_overlap_are_still_written_down():
-    """수만 남고 결정이 사라지면 다음 사람이 하한선을 그냥 넣는다."""
+    """With only the numbers left and the decision gone, the next person just puts a floor in."""
     body = section()
     assert "하한선을 두지 않는다" in body
     assert "결과를 보고 기준을 만들지 않는다" in body
-    # 겹침의 크기를 안 적으면 "스치듯 겹친다"로 읽히고, 그러면 문턱을 조금 올려 보자는 말이 선다.
+    # Without the size of the overlap written down it reads as "they barely graze", and then "let us raise the
+    # threshold a little" gets said.
     assert "사분위 구간" in body
     assert "**73.8%**" in body, "ydc 임시값이 우리 코퍼스에서 무엇을 버리는지가 이 절의 절반이다"
     assert "§검색 실측" in body, "같은 질의 목록으로 잰 것이라 그쪽과 이어져 있어야 한다"
 
 
 def test_the_search_section_says_the_floor_is_absent_on_purpose():
-    """계약의 입구 쪽에 없으면 `--engine vector` 를 쓰는 사람은 이 결정을 영영 안 만난다."""
+    """Absent from the front of the contract, a person using `--engine vector` never meets this decision."""
     body = ENTRYPOINTS.read_text(encoding="utf-8")
     start = body.index("## 검색 (")
     search = body[start : body.index("\n## ", start)]
@@ -191,8 +203,8 @@ def test_the_search_section_says_the_floor_is_absent_on_purpose():
 
 
 def test_a_sample_with_no_fake_left_says_so_instead_of_crashing(capsys):
-    """12개가 전부 코퍼스에 있으면 표본이 통째로 가짜가 아니다. 그 자리에서 터지면 이 도구는 약속한
-    종료 코드 1 로 "이 산출을 믿지 마라" 를 말할 기회가 없다."""
+    """If all twelve are in the corpus, the sample is not wholly fake. Blowing up at that point leaves this
+    tool no chance to say "do not trust this output" with the exit code 1 it promised."""
     floor = loaded()
     assert floor.band_of([], low=False) is None
     measured = {
@@ -211,8 +223,8 @@ def test_a_sample_with_no_fake_left_says_so_instead_of_crashing(capsys):
 
 
 def test_the_measurement_itself_survives_a_sample_that_is_not_fake(monkeypatch: pytest.MonkeyPatch):
-    """위 테스트는 보고만 본다. 수를 만드는 쪽도 같은 자리에서 살아남아야 한다 -- 분위수를 낼 표본이
-    없는데 내는 것이 이 함수가 하면 안 되는 일이다."""
+    """The test above looks only at the report. The side that makes the numbers has to survive in the same
+    place -- emitting a quantile with no sample to make it from is what this function must not do."""
     floor = loaded()
     from analysis.retrieval import embed, topics
 

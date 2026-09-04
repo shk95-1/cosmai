@@ -1,21 +1,23 @@
-"""검색 평가 (slices/ydc/retrieval_eval.py). 검색기가 좋은지 나쁜지를 재는 채점기다.
+"""Search evaluation (slices/ydc/retrieval_eval.py). The scorer that measures whether a searcher is good.
 
-정답은 공짜로 있다 -- `topics.match_topics` 가 청크 본문에 붙인 주제가 (문서, 주제) 라벨이다.
-사람이 라벨을 달 필요가 없다. ydc 는 그것을 `common/mention.csv` 로 미리 내려 두었지만, 여기서는
-청크가 DB 에 있으므로 읽으면서 만든다 -- 라벨 파일을 따로 두면 청크와 어긋난 채로 굳는다.
+The answers come for free -- the topics `topics.match_topics` attaches to a chunk body are the (document,
+topic) labels. Nobody has to label anything by hand. ydc dropped them into `common/mention.csv` in advance,
+but here the chunks are in the DB, so they are built while reading -- a separate label file would set solid
+while out of step with the chunks.
 
-두 모드가 서로 다른 질문이다.
+The two modes are different questions.
 
-  literal   질의 = 주제 별칭 하나, 정답 = 그 주제가 붙은 문서 전부.
-            **고장 감지용이다.** 정답 자체가 문자열 매칭으로 만들어졌으니 BM25 가 당연히
-            잘한다. 여기서 못하면 토큰화가 깨진 것이다(사전 미적용, 정규화 불일치).
+  literal   query = one topic alias, answer = every document that topic is attached to.
+            **This is for fault detection.** The answers themselves were made by string matching, so BM25
+            does well by construction. Doing badly here means the tokenization is broken (dictionary not
+            applied, normalization mismatch).
 
-  heldout   질의 = 별칭 A, 정답 = A 의 **토큰이 하나도 없는** 같은 주제 문서.
-            **진짜 측정이다.** BM25 는 구조적으로 0 에 가깝게 나오는 것이 정상이고,
-            그 0 이 벡터가 넘어야 하는 선이다(#28 단계 4의 채택 기준).
+  heldout   query = alias A, answer = documents of the same topic with **not one token of A** in them.
+            **This is the real measurement.** BM25 coming out near 0 is structurally normal, and that 0 is
+            the line the vectors have to beat (the adoption criterion of #28 step 4).
 
-주의 -- 이 결과로 파라미터를 만지면 그때부터 이 숫자는 성능이 아니다. 자동 라벨은 손잡이를
-고르는 데 쓰고, 사람이 만든 골든셋은 최종 보고에 한 번만 쓴다.
+Caution -- touch a parameter because of these results and from then on this number is not performance. The
+automatic labels are for choosing what to touch; the human golden set is used once, in the final report.
 """
 
 from __future__ import annotations
@@ -46,12 +48,12 @@ FIELDS = (
 MODES = ("literal", "heldout")
 ENGINES = ("bm25", "vector", "hybrid")
 
-# `cache_dir=None` 은 "캐시를 쓰지 마라"여야 한다. None 을 "기본값"으로 읽으면 끌 방법이 없고,
-# 테스트가 레포의 var/retrieval/bm25 에 색인을 남긴다(2026-08-25 에 실제로 남겼다).
-# 그래서 "안 넘겼음"을 나타내는 표식을 따로 둔다.
+# `cache_dir=None` has to mean "do not use a cache". Reading None as "the default" leaves no way to turn it
+# off, and the tests then leave an index in the repo's var/retrieval/bm25 (which really happened on
+# 2026-08-25). So a separate marker stands for "not passed".
 _DEFAULT_CACHE = Path("<default>")
 
-GOLD_PAGE = 2000  # 정답을 만들 때 한 번에 물어 오는 청크 수 (corpus.BATCH 와 같은 규모)
+GOLD_PAGE = 2000  # chunks fetched at once while building the answers (the same scale as corpus.BATCH)
 GOLD_SQL = """
 SELECT chunk_id, doc_id, text FROM retrieval_chunk
 WHERE chunk_id > %s{source}
@@ -77,19 +79,20 @@ class Row:
     p_at_k: float
     mrr: float
     hit: bool
-    note: str = ""  # 이 점수가 어느 코퍼스 위에서 나왔는지. 질의마다 같은 값이라 CSV 어느 줄을 봐도 읽힌다
-    store: str = ""  # 어느 벡터 저장소로 쟀는지. 어긋나지 않아도 실린다 -- note 와 축이 다르다 (#49)
-    # 어느 주제 사전 위의 값인지. **엔진과 무관하게 언제나 찬다** -- 정답도 질의도 사전이 만들므로
-    # 저장소를 안 여는 bm25 행도 사전 위에 서 있다 (#62).
+    note: str = ""  # which corpus this score came out on. The same value per query, so any CSV line reads it
+    store: str = ""  # which vector store it was measured with. Carried even when in step -- a different axis
+    # from note (#49). Which topic dictionary the value stands on. **Always filled, whatever the engine** --
+    # the dictionary makes both the answers and the queries, so even a bm25 row that opens no store stands on
+    # the dictionary (#62).
     dictionary: str = ""
 
 
 def queries(mode: str, dictionary: topics.Topics | None = None) -> list[tuple[str, str]]:
-    """(topic_id, 질의). 질의는 주제 별칭이다 -- 사람이 라벨을 만들지 않는다."""
+    """(topic_id, query). A query is a topic alias -- nobody makes the labels by hand."""
     out = []
     for entry in (dictionary or topics.active()).entries:
         if not entry["trend_use"]:
-            continue  # 판정에 안 쓰는 주제는 평가에서도 뺀다
+            continue  # a topic not used for the decision is left out of the evaluation as well
         aliases = entry["ko"] + entry["latin"]
         if mode == "heldout" and len(aliases) < 2:
             continue  # 별칭이 하나면 뺄 게 없다 (혼합자차)
@@ -104,28 +107,31 @@ def gold_from_chunks(
     *,
     dictionary: topics.Topics | None = None,
 ) -> dict[str, set[str]]:
-    """topic_id -> doc_id 집합. 청크 본문에 match_topics 를 돌려 만든다.
+    """topic_id -> set of doc_id. Built by running match_topics over the chunk bodies.
 
-    문서 단위로 접는다 -- 정답이 chunk_id 면 한 문서의 조각 수가 점수를 좌우한다.
+    Folded per document -- with chunk_id answers, the number of pieces of one document decides the score.
 
-    `sources` 는 색인·검색과 같은 판으로 좁힌다 -- 좁힌 소스 밖의 문서는 어떤 엔진으로도
-    나올 수 없으므로, 정답에 남으면 P@k·Hit@k 를 깎고 `gold_size` 가 틀린다.
+    `sources` is narrowed to the same board as the indexing and the search -- a document outside the narrowed
+    sources cannot come out of any engine, so left in the answers it cuts P@k · Hit@k and makes `gold_size`
+    wrong.
 
-    한 페이지씩 키셋으로 훑고 페이지마다 커밋한다(`corpus._keyset` 과 같은 방식). 서버 커서로 38만
-    행을 한 흐름에 훑으면 그 트랜잭션이 매칭이 끝날 때까지 열려 있는데, needs_runtime 의
-    `transaction_timeout`(60초, db/bootstrap.sql:48)은 트랜잭션 **총 수명**의 상한이라 도중에 끊는다.
-    주제 매칭은 커밋한 뒤에 도는 것도 그래서다 -- 느린 쪽이 트랜잭션 밖에 있어야 한다.
+    It walks one keyset page at a time and commits per page (the same way as `corpus._keyset`). Walking the
+    rows in one stream with a server cursor holds that transaction open until the matching ends, and
+    needs_runtime's `transaction_timeout` (60s, db/bootstrap.sql:48) is a cap on the **total lifetime** of a
+    transaction and cuts it mid-way. That is also why the topic matching runs after the commit -- the slow
+    side has to be outside the transaction.
     """
-    # 정답을 만드는 사전은 **이 DB 의 활성 버전**이다 -- 프로세스에 남아 있던 사전으로 채점하면
-    # 그 점수가 어느 사전 위에서 나왔는지 아무도 답할 수 없다. 넘겨받았으면 그것을 쓴다: 정답과
-    # 질의와 행이 적는 판본이 **같은 한 벌**이어야 판본이 그 점수의 판본이다 (#62).
+    # The dictionary that builds the answers is **the active version of this DB** -- built from a dictionary
+    # left over in the process, nobody can say which dictionary that score came out on. If one was handed
+    # over, that one is used. The queries and the rows have to write down **one and the same** revision for
+    # the revision to be the revision of that score (#62).
     dictionary = dictionary or topics.use_active(conn)
 
     narrow, params = "", ()
     if sources:
         narrow, params = " AND source = ANY(%s)", (list(sources),)
     gold: dict[str, set[str]] = defaultdict(set)
-    cursor = ""  # 마지막 행의 chunk_id 가 다음 페이지의 커서다
+    cursor = ""  # the chunk_id of the last row is the cursor of the next page
     while True:
         with conn.cursor() as cur:
             cur.execute(GOLD_SQL.format(source=narrow), (cursor, *params, GOLD_PAGE))  # noqa: S608
@@ -140,14 +146,14 @@ def gold_from_chunks(
 
 
 def docs_with_tokens(index: bm25.Index, query: str) -> set[str]:
-    """질의 토큰이 하나라도 든 문서. heldout 의 정답에서 뺀다.
+    """Documents holding any query token. Taken out of the heldout answers.
 
     부분문자열로 빼면 안 된다 -- `하얘서` 를 Kiwi 는 `하얗` 으로 주므로 글자로는 안 겹치는데
     토큰으로는 겹친다. 색인이 실제로 쓰는 단위로 빼야 두 검색기가 같은 판에서 겨룬다.
 
-    그래서 여기는 `tokenize_query` 가 아니라 `tokenize` 다 (#46). 정답 정의는 색인 축이고, 질의
-    불용어를 여기까지 태우면 뺄 문서가 줄어 heldout 의 정답이 넓어진다 -- 그 순간 벡터 채택의
-    근거였던 .062 가 다른 판 위의 숫자가 된다.
+    So this is `tokenize` rather than `tokenize_query` (#46). The answer definition is on the index axis, and
+    riding the query stopwords this far leaves fewer documents to take out and widens the heldout answers --
+    at which moment the .062 that grounded the vectors becomes a number on a different board.
     """
     found: set[str] = set()
     for term in set(bm25.tokenize(query)):
@@ -157,7 +163,8 @@ def docs_with_tokens(index: bm25.Index, query: str) -> set[str]:
 
 
 def to_docs(chunk_ids: list[str], k: int = K) -> list[str]:
-    """검색 결과를 문서 단위로. 이걸 안 하면 정답(doc_id)과 형식이 달라 점수가 항상 0 이다."""
+    """Search results per document. Without this the shape differs from the answers (doc_id) and the score is
+    always 0."""
     out: list[str] = []
     seen: set[str] = set()
     for chunk_id in chunk_ids:
@@ -172,7 +179,8 @@ def to_docs(chunk_ids: list[str], k: int = K) -> list[str]:
 
 
 def score(ranked: list[str], gold: set[str]) -> tuple[float, float, bool]:
-    """(P@k, MRR@k, Hit@k). 정답이 비면 그 질의는 건너뛰어야 하므로 호출 전에 막는다."""
+    """(P@k, MRR@k, Hit@k). An empty answer set means that query has to be skipped, so it is blocked before
+    the call."""
     hits = [i for i, doc in enumerate(ranked, 1) if doc in gold]
     p = len(hits) / len(ranked) if ranked else 0.0
     mrr = 1 / hits[0] if hits else 0.0
@@ -189,33 +197,39 @@ def run(
     cache_dir: Path | None = _DEFAULT_CACHE,
     k: int = K,
 ) -> list[Row]:
-    """질의마다 한 행. 색인은 heldout 의 정답 계산에도 쓰이므로 엔진과 무관하게 항상 만든다."""
+    """One row per query. The index is used for the heldout answers too, so it is always built whatever the
+    engine."""
     if mode not in MODES:
         raise ValueError(f"mode 는 {MODES} 중 하나다: {mode!r}")
     if engine not in ENGINES:
         raise ValueError(f"engine 은 {ENGINES} 중 하나다: {engine!r}")
 
-    # 색인은 heldout 의 정답 계산(질의 토큰이 든 문서 빼기)에도 쓰이므로 엔진과 무관하게 만든다.
-    # 정답 정의가 어휘 기준이어야 세 검색기가 같은 판에서 겨룬다.
+    # The index is used for the heldout answers too (taking out the documents holding a query token), so
+    # whatever the engine, the answer definition has to be lexical for the three searchers to compete on the
+    # same board.
     from analysis.retrieval.pipeline import coverage_note, load_index, ranked_chunks
 
     index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
-    # 사전 한 벌을 여기서 세우고 정답·질의·행의 판본이 모두 그것을 본다. 각자 활성 사전을 다시
-    # 읽으면 실행 도중에 activate 가 들어온 날 세 답이 서로 다른 사전 위에 선다 (#62).
+    # One dictionary is set up here and the answers, the queries and the rows' revision all look at it.
+    # Reading the active dictionary separately would leave the three answers standing on different
+    # dictionaries the day an activate lands mid-run (#62).
     dictionary = topics.use_active(conn)
     gold_all = gold_from_chunks(conn, sources, dictionary=dictionary)
 
-    # 벡터 저장소와 모델은 여기서 한 번만 연다. 질의마다 열면 1.2GB 행렬과 모델을 61번 읽는다.
+    # The vector store and the model are opened once here. Opening them per query means opening a 1.2GB
+    # matrix and the model 61 times.
     vector_store = encoder = None
     coverage = stamp = ""
     if engine != "bm25":
         from analysis.retrieval import embed, vectors
 
         vector_store = vectors.load(store or vectors.DEFAULT_STORE)
-        # 저장소를 연 쪽이 판본과 커버리지를 함께 묻는다. 채점표에 실어야 "어느 코퍼스 위의 점수인가"가
-        # 읽힌다 -- 어긋나도 점수는 멀쩡한 숫자로 나오므로 수치만 봐서는 알 수 없다.
+        # Whoever opened the store asks for the revision and the coverage together. It has to be on the score
+        # sheet for "which corpus is this score on" to be readable -- a mismatch still gives a perfectly
+        # normal-looking score, so the numbers alone cannot tell.
         coverage = coverage_note(conn, vector_store) or ""
-        # 판본은 어긋남과 축이 다르다: 경고에 얹으면 **정상일 때** 어느 저장소로 쟀는지가 안 남는다 (#49).
+        # The revision is on a different axis from the mismatch: put on the warning, nothing would be left
+        # saying which store it was measured with **when everything is normal** (#49).
         stamp = vector_store.stamp
         encoder = embed.load_encoder(vector_store.model)
 
@@ -227,8 +241,9 @@ def run(
             skip = docs_with_tokens(index, query)
             gold -= skip
         if not gold:
-            continue  # 정답이 없는 질의는 점수를 정의할 수 없다
-        # 후보는 줄이지 않는다. 두 검색기가 같은 후보·같은 정답으로 겨뤄야 점수를 비교할 수 있다.
+            continue  # a query with no answers has no defined score
+        # The candidates are not reduced. Two searchers have to compete on the same candidates and the same
+        # answers for the scores to be comparable.
         hits = ranked_chunks(
             conn,
             query,
@@ -237,7 +252,7 @@ def run(
             sources=sources,
             store=store,
             cache_dir=_cache(cache_dir),
-            index=index,  # 위에서 세운 것을 넘긴다 -- 질의마다 다시 읽으면 61번 푼다
+            index=index,  # hand over what was built above -- rereading per query unpickles it 61 times
             vector_store=vector_store,
             encoder=encoder,
         )
@@ -263,7 +278,8 @@ def run(
 
 
 def summary(rows: list[Row]) -> str:
-    """literal 이 0.9 밑이면 토큰화를 의심한다 -- 성능 보고가 아니라 고장 감지다."""
+    """A literal below 0.9 casts doubt on the tokenization -- this is fault detection, not a performance
+    report."""
     if not rows:
         return "질의 0개 (청크가 비었는지 확인)"
     n = len(rows)
@@ -271,10 +287,12 @@ def summary(rows: list[Row]) -> str:
     mrr = sum(r.mrr for r in rows) / n
     hit = sum(1 for r in rows if r.hit) / n
     lines = [f"질의 {n}개 · P@{K} {p:.3f} · MRR@{K} {mrr:.3f} · Hit@{K} {hit:.0%}"]
-    # 판본과 커버리지 경고는 CSV 를 안 열어도 보여야 한다 -- 요약만 읽고 표에 옮겨 적는 것이 실제 용법이다.
+    # The revision and the coverage warning have to show without opening the CSV -- someone who reads only
+    # the summary copies it into the table.
     if stamp := next((r.store for r in rows if r.store), ""):
         lines.append(f"저장소 {stamp}")
-    # 사전은 엔진을 안 가린다 -- bm25 요약에도 이 줄이 있어야 그 점수가 어느 사전 위의 값인지 읽힌다.
+    # The dictionary does not pick engines -- a bm25 summary needs this line too for that score to say which
+    # dictionary it stands on.
     if known := next((r.dictionary for r in rows if r.dictionary), ""):
         lines.append(f"사전 {known}")
     if note := next((r.note for r in rows if r.note), ""):

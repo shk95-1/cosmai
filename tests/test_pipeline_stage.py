@@ -1,7 +1,7 @@
-"""선언된 단계가 크론탭과 어긋나지 않는다 (#138).
+"""A declared stage does not diverge from the crontab (#138).
 
-`db/seed/pipeline.STAGES` 가 기대 주기의 정본이지만, 실제로 도는 것은 `stack/crontab.d/` 다.
-둘이 갈리면 관제 화면이 조용히 틀린 답을 한다 — 그것을 여기서 막는다.
+`db/seed/pipeline.STAGES` is canonical for the expected period, but what really runs is `stack/crontab.d/`.
+When the two part, the control screen answers wrong quietly -- that is what is stopped here.
 """
 
 from __future__ import annotations
@@ -13,13 +13,13 @@ from db.seed.pipeline import STAGES
 
 CRONTAB_DIR = Path(__file__).resolve().parents[1] / "stack" / "crontab.d"
 
-# `cosmai collect <arm> --dataset <ds>` 와 `cosmai analyze <ds>` 두 모양뿐이다.
+# There are only the two shapes `cosmai collect <arm> --dataset <ds>` and `cosmai analyze <ds>`.
 COLLECT = re.compile(r"cosmai\s+collect\s+(\S+)\s+--dataset\s+(\S+)")
 ANALYZE = re.compile(r"cosmai\s+analyze\s+(\S+)")
 
 
 def cron_lines() -> list[tuple[str, str]]:
-    """(크론 표현식, 명령) 목록. 주석과 빈 줄은 뺀다."""
+    """The list of (cron expression, command). Comments and blank lines are dropped."""
     out: list[tuple[str, str]] = []
     for path in sorted(CRONTAB_DIR.iterdir()):
         for raw in path.read_text(encoding="utf-8").splitlines():
@@ -32,10 +32,11 @@ def cron_lines() -> list[tuple[str, str]]:
 
 
 def stage_key_of(command: str) -> str:
-    """크론 줄의 명령에서 stage_key 를 뽑는다.
+    """Takes the stage_key out of the command of a cron line.
 
-    analyze 는 두 줄이 같은 하위명령을 쓰지 않는다는 보장이 없다 -- `polarity` 증분 패스는
-    `--missing` 으로 갈리고 analysis_run.note 도 그 어휘로 갈린다(contracts/entrypoints.md).
+    There is no guarantee two analyze lines do not use the same subcommand -- the `polarity` incremental pass
+    is told apart by `--missing`, and analysis_run.note parts on the same vocabulary
+    (contracts/entrypoints.md).
     """
     if m := COLLECT.search(command):
         return f"{m.group(1)}:{m.group(2)}"
@@ -46,7 +47,8 @@ def stage_key_of(command: str) -> str:
 
 
 def interval_of(expr: str) -> str:
-    """크론 표현식이 뜻하는 기대 주기. 지금 쓰는 네 모양만 안다 -- 새 모양이 오면 여기서 죽는다."""
+    """The expected period a cron expression means. It knows only the four shapes in use -- a new shape dies
+    here."""
     minute, hour, dom, _month, _dow = expr.split()
     if "/" in minute:
         return f"{minute.split('/')[1]} min"
@@ -75,6 +77,6 @@ def test_declared_interval_matches_the_cron_expression():
 
 
 def test_only_youtube_watch_is_disabled():
-    # 지금 profile 뒤에 있는 것은 하나뿐이다(STATE.md §2). 더 늘면 그 사실을 여기서 마주친다.
+    # Only one thing sits behind a profile today (STATE.md §2). If more appear, that fact is met here.
     off = {s.stage_key for s in STAGES if not s.enabled}
     assert off == {"youtube:watch"}, off

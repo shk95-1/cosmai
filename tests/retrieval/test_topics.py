@@ -1,9 +1,10 @@
-"""주제 사전이 `needs.aspect_lexicon` 의 활성 버전에서 온다는 것과, 그렇게 온 사전이 상수판과
-**같은 사전**이라는 것 (#8).
+"""That the topic dictionary comes from the active version of `needs.aspect_lexicon`, and that the
+dictionary that came that way is **the same dictionary** as the constant version (#8).
 
-동등성이 이 파일의 본론이다. `contracts/interfaces.md` 의 검색 실측 표(mode x engine 여섯 줄)는
-2026-08-26 에 코디네이터가 재측정해 확정한 값이고, 그 숫자는 `gold_from_chunks` -> `match_topics` 가
-만든 정답 위에 서 있다. 주제 집합이 한 별칭이라도 달라지면 그 표는 조용히 낡은 표가 된다.
+Equivalence is the subject of this file. The measured search table of `contracts/interfaces.md` (six mode x
+engine lines) is the value the coordinator remeasured and settled on 2026-08-26, and those numbers stand on
+the answers `gold_from_chunks` -> `match_topics` made. Let the topic set differ by one alias and that table
+quietly becomes an old table.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ from tests.retrieval import frozen_topics
 from tests.retrieval.conftest import csv_topics, install_topics
 from tests.retrieval.test_lexicon_v3 import LISTED, expected_entries
 
-# 상수판과 맞대는 텍스트. 별칭 전부 + 슬라이스 demo() 가 붙들던 경계(coupang 오탐·조사·활용형)다.
+# The text matched against the constant version. Every alias plus the boundaries the slice demo() held
+# (coupang false hits, particles, inflected forms).
 CORPUS = [
     "",
     "백탁없이 촉촉하게 발려요",
@@ -60,9 +62,9 @@ def conn(needs_schema: str, needs_runtime_url: str):
 
 
 def _same_dictionary(loaded: topics.Topics) -> None:
-    """맞대는 상대는 얼어붙은 v1 **+ 포크 #56 의 판정 원장**이다. v1 그대로가 아닌 이유는 #56 이 별칭
-    일곱을 더했기 때문이고, 더한 것이 정확히 그 원장뿐이라는 것은 `test_lexicon_v3.py` 가 진다 --
-    여기서 상수판을 통째로 갈면 "무엇이 언제 늘었나"를 아무도 못 읽는다."""
+    """What it is matched against is the frozen v1 **plus the decision ledger of fork #56**. It is not v1 as
+    it stands because #56 added seven aliases, and that what was added is exactly that ledger is carried by
+    `test_lexicon_v3.py` -- swap the constant version wholesale here and nobody can read "what grew when"."""
     assert [e["topic"] for e in loaded.entries] == [e["topic"] for e in frozen_topics.TOPICS]
     for got, frozen in zip(loaded.entries, expected_entries(), strict=True):
         assert got["ko"] == frozen["ko"], got["topic"]
@@ -77,8 +79,9 @@ def _same_dictionary(loaded: topics.Topics) -> None:
 
 
 def test_the_repo_csv_is_the_frozen_dictionary_plus_the_ledger():
-    """`dict/topics_v1.csv` 는 적재 원본이다 -- 여기가 상수판 + 원장과 갈리면 DB 에 들어가는 사전이
-    실측 표를 만든 사전도, 그 표가 어떤 델타 위에 있는지 말할 수 있는 사전도 아니게 된다."""
+    """`dict/topics_v1.csv` is the load source -- drift here from the constant version plus the ledger, and
+    the dictionary that goes into the DB is neither the dictionary that made the measured table nor one that
+    can say which delta that table sits on."""
     _same_dictionary(csv_topics())
 
 
@@ -91,8 +94,8 @@ def test_matching_agrees_with_the_frozen_constant():
 
 
 def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():
-    """평가 질의와 토큰 확장 목록이 사전에서 파생된다 -- 셋 중 하나만 어긋나도 실측 표의 질의 수
-    (literal 61 · heldout 60)가 달라진다."""
+    """The evaluation queries and the token expansion list are derived from the dictionary -- one of the three
+    out of step and the query counts of the measured table (literal 61 · heldout 60) change."""
     frozen_queries = {
         mode: [
             (entry["topic"], alias)
@@ -105,24 +108,27 @@ def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():
     }
     assert retrieval_eval.queries("literal") == frozen_queries["literal"]
     assert retrieval_eval.queries("heldout") == frozen_queries["heldout"]
-    assert len(frozen_queries["literal"]) == 63  # v1 의 61 + #56 이 판정 주제에 더한 둘
+    assert len(frozen_queries["literal"]) == 63  # v1's 61 + the two #56 added to judged topics
     assert bm25.expand_words() == sorted(
         {a for e in expected_entries() for a in e["ko"] if " " not in a and len(a) >= 2}
     )
 
 
 def test_the_fingerprint_follows_the_aliases():
-    """색인 캐시 서명이 무는 값이다 -- 별칭이 바뀌어도 안 움직이면 옛 색인이 그대로 재사용된다."""
+    """It is the value the index cache signature bites -- if it does not move when an alias changes, the old
+    index is reused as it is."""
     before = csv_topics().fingerprint
     changed = topics.from_rows(
         [("백탁", "허옇", {"term_kind": "ko", "topic_type": "attribute", "trend_use": "true"})], 1
     )
     assert changed.fingerprint != before
-    assert csv_topics().fingerprint == before  # 같은 내용은 같은 서명 (캐시 키가 결정적이어야 한다)
+    assert csv_topics().fingerprint == before  # same content, same signature (the cache key must be
+    # deterministic)
 
 
 def test_a_row_without_a_kind_is_refused():
-    # 조용히 ko 로 치면 식약처 성분명이 부분문자열 매칭에 끼어들어 매칭이 넓어진다.
+    # Treated as ko quietly, an MFDS ingredient name slips into the substring matching and the matching
+    # widens.
     with pytest.raises(ValueError, match="term_kind"):
         topics.from_rows([("백탁", "백탁", {"topic_type": "attribute", "trend_use": "true"})], 1)
 
@@ -137,15 +143,16 @@ def test_a_topic_that_says_two_types_is_refused():
 
 
 def test_a_topic_with_no_trend_use_is_refused():
-    # 기본값을 정해 두면 평가 질의에서 빠져야 할 주제가 조용히 들어온다(선크림 481/518).
+    # With a default in place, a topic that ought to drop out of the evaluation queries comes in quietly
+    # (sunscreen 481/518).
     with pytest.raises(ValueError, match="trend_use"):
         topics.from_rows([("백탁", "백탁", {"term_kind": "ko", "topic_type": "attribute"})], 1)
 
 
 @pytest.mark.postgres
 def test_the_active_version_is_what_the_lexicon_cli_loaded(conn, needs_runtime_url: str):
-    """적재 경로는 `cosmai lexicon load` 하나다 -- 검색이 자기 적재기를 따로 가지면 사전 변경이
-    다시 버전을 못 받는다."""
+    """There is one load path, `cosmai lexicon load` -- with the search holding a loader of its own, a
+    dictionary change goes without a version again."""
     argv = ["lexicon", "load", "--kind", "aspect", "--version", "1"]
     assert main([*argv, str(topics.DICTIONARY_CSV), "--url", needs_runtime_url]) == 0
     activate = ["lexicon", "activate", "--kind", "aspect", "--version", "1", "--url", needs_runtime_url]
@@ -178,16 +185,16 @@ def test_a_loaded_version_does_not_move_the_dictionary_until_it_is_activated(con
 
 @pytest.mark.postgres
 def test_a_schema_with_no_active_topic_rows_refuses_instead_of_matching_nothing(conn):
-    """빈 사전은 오류 없이 정답 0건·질의 0개를 만든다 -- 그 초록이 "검색이 아무것도 못 찾는다"와
-    구분되지 않는다. 어디를 고쳐야 하는지까지 말하고 멈춘다."""
+    """An empty dictionary makes 0 answers and 0 queries with no error -- that green is indistinguishable from
+    "the search finds nothing". It stops and says what to fix as well."""
     with pytest.raises(LookupError, match="cosmai lexicon"):
         topics.load(conn)
 
 
 @pytest.mark.postgres
 def test_the_polarity_ruleset_is_not_read_as_a_topic(conn):
-    """aspect 사전 한 버전에는 룰셋이 여럿 산다 -- 극성 사전의 정규식이 주제 별칭으로 읽히면
-    `match_topics` 가 아무 문장에나 걸린다."""
+    """Several rulesets live in one aspect dictionary version -- read the regexes of the polarity dictionary
+    as topic aliases and `match_topics` hits any sentence at all."""
     from db.lexicon import insert_aspects
 
     install_topics(conn)
@@ -197,25 +204,28 @@ def test_the_polarity_ruleset_is_not_read_as_a_topic(conn):
     assert [e["topic"] for e in topics.load(conn).entries] == [e["topic"] for e in frozen_topics.TOPICS]
 
 
-# ---------- 판본 문자열 (포크 #62) ----------
+# ---------- the revision string (fork #62) ----------
 
 
 def test_the_stamp_names_the_ruleset_the_version_and_the_content():
-    """번호표만으로는 판본이 아니다 -- 켜져 있는 버전에 행을 더할 수 있어 번호가 그대로 남는다
-    (`index_signature` 가 지문을 함께 무는 것과 같은 이유)."""
+    """The number alone is not a revision -- rows can be added to a version that is switched on and the number
+    stays (the same reason `index_signature` bites the fingerprint as well)."""
     stamped = csv_topics(3).stamp
     assert stamped == (
         "ruleset=retrieval-topic · version=3 · topics=15 · aliases=80"
         f" · fingerprint={csv_topics(3).fingerprint}"
     )
-    # 별칭 수는 매칭·질의가 보는 두 계열만 센다. mfds_inci 를 함께 세면 한 낱말이 두 축을 말한다.
+    # The alias count counts only the two families the matching and the queries see. Counting mfds_inci with
+    # them makes one word speak on two axes.
     assert csv_topics(3).aliases == 80
-    # 적재 원본 한 벌에는 번호표가 없다 -- 번호는 적재가 준다. 0 이나 1 로 메우면 그 자리가 거짓이 된다.
+    # A bare load source has no number -- the number is given by the load. Filling it with 0 or 1 makes that
+    # place a lie.
     assert "version=미적재" in csv_topics(None).stamp
 
 
 def _pre_v3_loading_source() -> topics.Topics:
-    """현행 적재 원본에서 #56 원장의 일곱 행만 거둬 그 직전 적재 원본을 재구성한다."""
+    """It takes only the seven rows of the #56 ledger out of the current load source and rebuilds the load
+    source just before it."""
     entries = []
     for current in csv_topics().entries:
         entry = {key: list(value) if isinstance(value, list) else value for key, value in current.items()}
@@ -227,8 +237,9 @@ def _pre_v3_loading_source() -> topics.Topics:
 
 
 def test_the_pre_v3_loading_source_retraces_the_baseline_content_fingerprint():
-    """옛 DB v1 행은 없어도 그 적재 원본의 내용 지문은 남은 DB v2 와 같은 값으로 되짚힌다.
-    얼어붙은 사본은 mfds_inci 순서 하나가 다른 프록시라 그 사본의 지문을 기준선에 쓰면 안 된다."""
+    """Even with no old DB v1 rows, the content fingerprint of that load source is retraced to the same value
+    as the remaining DB v2. The frozen copy is a proxy differing by one mfds_inci order, so its fingerprint
+    must not be used as the baseline."""
     retraced = _pre_v3_loading_source()
     assert retraced.stamp == (
         "ruleset=retrieval-topic · version=1 · topics=15 · aliases=73 · fingerprint=5a0cae76311e1408"
@@ -245,8 +256,9 @@ def test_the_pre_v3_loading_source_retraces_the_baseline_content_fingerprint():
 
 
 def test_the_difference_between_two_dictionaries_names_the_axis_it_is_on():
-    """지문은 갈렸다는 것만 말한다. 무엇이 갈렸는지를 못 말하면 "지문이 다르다"가 "점수가 다르다"로
-    읽힌다 -- 실제로 얼어붙은 사본과 적재 원본은 매칭이 안 보는 칸의 **순서**로 갈린다 (포크 #62)."""
+    """The fingerprint says only that they differ. Unable to say what differs, "the fingerprints differ" reads
+    as "the scores differ" -- and in fact the frozen copy and the load source differ by the **order** of a
+    column the matching does not see (fork #62)."""
     frozen = topics.Topics(
         entries=tuple(frozen_topics.TOPICS),
         version=1,
@@ -254,7 +266,7 @@ def test_the_difference_between_two_dictionaries_names_the_axis_it_is_on():
     )
     lines = topics.differences(csv_topics(3), frozen)
     assert "≈ 유기자차.mfds_inci: 순서만 다르다" in lines
-    # #56 이 더한 일곱이 넷(주제 셋 × 계열)으로 나온다. 그 밖의 축은 갈리지 않는다.
+    # The seven #56 added come out as four (three topics x families). No other axis differs.
     assert sorted(line.split(":")[0] for line in lines) == [
         "~ 선크림.ko",
         "~ 선크림.latin",
@@ -262,4 +274,4 @@ def test_the_difference_between_two_dictionaries_names_the_axis_it_is_on():
         "~ 톤업_메이크업베이스.ko",
         "≈ 유기자차.mfds_inci",
     ]
-    assert topics.differences(csv_topics(3), csv_topics(9)) == []  # 번호표는 사전 내용이 아니다
+    assert topics.differences(csv_topics(3), csv_topics(9)) == []  # the number is not dictionary content

@@ -1,7 +1,7 @@
-"""이 레포가 만드는 `*_version` 문자열은 contracts/versioning.md 의 두 형식 중 하나여야 한다.
+"""Every `*_version` string this repo builds has to be one of the two formats of contracts/versioning.md.
 
-산문으로만 적힌 규칙은 깨진다 — #2 의 `rule-v1` 이 마이너 없이 조용히 통과했다. 유닛은 자기 상수를
-VERSIONS 에 한 줄로 더한다.
+A rule written only in prose breaks -- the `rule-v1` of #2 passed quietly with no minor. A unit adds its own
+constant to VERSIONS as one line.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
 from analysis.polarity.ownership import OWNERS
 
-# versioning.md: `rule-vX.Y` 또는 `llm-<model>-<yyyymmdd>`.
+# versioning.md: `rule-vX.Y` or `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
 
 VERSIONS = (
@@ -26,8 +26,8 @@ VERSIONS = (
     ("analysis.polarity.VERSION", POLARITY_VERSION),
     ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
     ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
-    # OllamaPolarity(...).version 은 인스턴스 속성이라 상수 import 가 안 된다 (analysis/polarity/ollama.py) —
-    # 운영이 실제로 찍는 값은 OWNERS 에 등록된 그대로다.
+    # OllamaPolarity(...).version is an instance attribute, so the constant cannot be imported
+    # (analysis/polarity/ollama.py) -- the value production really stamps is the one registered in OWNERS.
     ("analysis.polarity.ownership.OWNERS['선블록'].version", OWNERS["선블록"].version),
 )
 

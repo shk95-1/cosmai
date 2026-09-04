@@ -1,8 +1,10 @@
-"""#123: 카테고리 표기의 정본 — 분모와 언급이 같은 문자열을 적지 않으면 카테고리 scope 는 분모를 못 받는다.
+"""#123: the canonical spelling of a category -- unless the denominator and the mentions write the same
+string, a category scope gets no denominator.
 
-`metrics_need.scope` 는 `need_mention.category` 에서 나오고(analysis/aggregate/pipeline.py:scopes_for),
-그 값은 사이트가 발행한 경로 원문이다. 분모가 그 경로를 leaf 로 자르면 두 문자열은 절대 만나지 못하고
-`population_share_pct`·`low_share`·`denom_*` 가 카테고리 scope 전체에서 결측이 된다 (운영 실측 run 24).
+`metrics_need.scope` comes from `need_mention.category` (analysis/aggregate/pipeline.py:scopes_for), and
+that value is the path the site published. If the denominator cuts that path to its leaf, the two strings
+never meet and `population_share_pct` · `low_share` · `denom_*` go missing across the whole category scope
+(measured in production, run 24).
 """
 
 from __future__ import annotations
@@ -21,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FORMATS = ROOT / "contracts" / "formats.md"
 CODE_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
 
-# 운영이 실제로 들고 있는 두 모양 — oliveyoung 은 경로를, glowpick 은 leaf 하나를 발행한다
-# (trend_radar.rank_snapshot 실측 2026-08-27: oliveyoung 200 경로 전부 'N > 중분류 > leaf').
+# The two shapes production really holds -- oliveyoung publishes a path and glowpick a single leaf
+# (measured on trend_radar.rank_snapshot 2026-08-27: all 200 oliveyoung paths are 'N > mid > leaf').
 PATH = "01 > 선케어 > 선블록"
 LEAF_ONLY = "크림"
 
@@ -56,7 +58,7 @@ def test_a_site_that_publishes_one_level_is_already_canonical():
 
 
 def test_the_denominator_writes_the_same_string_the_mention_carries():
-    """두 자리가 같은 원천(rank_snapshot.category_name)을 받으므로 같은 문자열이어야 한다."""
+    """Both places take the same source (rank_snapshot.category_name), so they have to be the same string."""
     unit = review_unit(
         source="oliveyoung", product_key="p", review_key="r0", body="", rating=1.0,
         written_at=date(2026, 1, 1), captured_at=date(2026, 1, 1), category=PATH,
@@ -65,7 +67,7 @@ def test_the_denominator_writes_the_same_string_the_mention_carries():
 
 
 def test_a_category_scope_gets_its_denominator_and_population_share():
-    """#123 의 완료 기준 — 카테고리 scope 에서 population_share_pct 가 결측이 아니다."""
+    """The completion criterion of #123 -- population_share_pct is not missing on a category scope."""
     mentions = [_mention(PATH, f"p/{i}", 1.0) for i in range(3)]
     (row,) = [
         r
@@ -78,8 +80,9 @@ def test_a_category_scope_gets_its_denominator_and_population_share():
 
 
 def test_the_latest_snapshot_names_the_category():
-    """polarity 쪽은 captured_at DESC 로 하나를 고른다 (analysis/polarity/pipeline.py:288). 분모 쪽이
-    fetch 순서에 맡기면 보드를 옮긴 제품에서 두 자리가 서로 다른 카테고리를 적는다."""
+    """The polarity side picks one by captured_at DESC (analysis/polarity/pipeline.py:288). If the denominator
+    side leaves it to the fetch order, the two places write different categories for a product that moved
+    boards."""
     old = RankSnapshot("oliveyoung", "b", "c", "p", datetime(2026, 8, 1, tzinfo=UTC), 3, None, LEAF_ONLY)
     new = RankSnapshot("oliveyoung", "b", "c", "p", datetime(2026, 8, 20, tzinfo=UTC), 3, None, PATH)
     from analysis.aggregate.ranking import latest_categories
