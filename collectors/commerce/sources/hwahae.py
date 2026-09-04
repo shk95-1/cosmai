@@ -42,7 +42,7 @@ class Hwahae:
     policy: ClassVar[SourcePolicy] = SourcePolicy(
         min_interval_s=1.0,
         concurrency=2,
-        # Added for #10 (사용자 승인 2026-08-24): with a live transport, a source with no ceiling is
+        # Added for #10 (user approval 2026-08-24): with a live transport, a source with no ceiling is
         # a run with no worst case. This one walks RANKING from a single seed and production has
         # measured exactly one request per run, so 20 is twenty times the observed shape rather
         # than a guess -- and 19 x 1.0s of wall clock if it ever ran into it, which is nothing next

@@ -68,7 +68,7 @@ def _source(source_policy: SourcePolicy, seeds_count: int = 3) -> Source:
     class _FakeSource:
         key: ClassVar[str] = "fake"
         datasets: ClassVar[frozenset[Dataset]] = frozenset({Dataset.RANKING})
-        # 이 가짜 소스는 리뷰를 걷지 않는다 -- 빈 값이 답이다(#144 의 review_body_datasets).
+        # This fake source doesn't walk reviews -- an empty value is the answer (#144's review_body_datasets).
         review_body_datasets: ClassVar[frozenset[Dataset]] = frozenset()
         scope: ClassVar[Scope] = {Dataset.RANKING: {"seeds": seeds_count}}
         policy: ClassVar[SourcePolicy] = source_policy
@@ -517,7 +517,7 @@ def test_every_shipped_source_declares_a_request_budget():
 
     Harmless while nothing paced and nothing fetched (#7); not harmless now that a lane really waits
     out `min_interval_s` between real requests, because `max_depth` alone bounds how deep a walk
-    goes and not how wide. hwahae was the last one without a budget and got 20 for #10 (사용자 승인
+    goes and not how wide. hwahae was the last one without a budget and got 20 for #10 (user approval
     2026-08-24) -- twenty times the one request production measures per run.
     """
     from collectors.commerce import sources as _registered  # noqa: F401 -- import registers them

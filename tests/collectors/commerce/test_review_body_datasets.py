@@ -7,11 +7,12 @@
 glowpick 리뷰 3,597건 중 2,284건(63.5퍼센트)이 미상이 됐다 -- glowpick 의 `parse()` 는 dataset 으로
 게이트하지 않아 매시 ranking 런이 리뷰 본문을 쓰기 때문이다.
 
-그래서 선언을 SQL 이 아니라 소스 옆에 두고, 이 파일이 **선언과 코드가 갈리면 운다**. 여기서 재는
-것은 문서가 아니라 동작이다: 녹화된 픽스처를 그대로 `parse()` 에 흘려 `ReviewRecord` 가 나오는
-dataset 을 모으고 선언과 맞춰 본다. 게이트가 바뀌면(또는 사라지면) 그 자리가 여기서 빨개진다.
+So the declaration lives next to the source rather than in SQL, and this file **cries when the
+declaration and the code drift apart**. What it measures here is behavior, not documentation: it feeds
+recorded fixtures straight into `parse()`, collects which datasets actually produce a `ReviewRecord`,
+and checks that against the declaration. If a gate changes (or disappears), that spot goes red here.
 
-뷰가 이 선언을 비추는지는 `tests/test_collection_lineage_view.py` 가 따로 지킨다.
+Whether the view reflects this declaration is guarded separately by `tests/test_collection_lineage_view.py`.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-import collectors.commerce.sources  # noqa: F401  -- 등록이 import 부작용이다
+import collectors.commerce.sources  # noqa: F401  -- registration is an import side effect
 from collectors.commerce.contract import Fetch, Payload, Source
 from collectors.commerce.models import Dataset, ReviewRecord
 from collectors.commerce.registry import SOURCES
@@ -37,26 +38,28 @@ def _payload(fetch: Fetch, body: bytes) -> Payload:
 
 
 def _review_count(source: Source, fetch: Fetch, body: bytes) -> tuple[int, bool]:
-    """(그 파싱이 낸 ReviewRecord 수, 파싱이 성립했는가).
+    """(the ReviewRecord count that parse produced, whether the parse succeeded).
 
-    엉뚱한 dataset 의 픽스처를 먹이면 파서가 던질 수 있다 -- 그것은 이 테스트의 대상이 아니라
-    조합이 무의미하다는 뜻이다. 다만 전부 던져서 조용히 초록이 되는 것은 막아야 하므로, 성립한
-    파싱의 수를 아래에서 따로 센다.
+    Feeding the parser a fixture from the wrong dataset can make it throw -- that isn't what this
+    test is about, it just means the combination is meaningless. But everything throwing and
+    quietly turning green must be prevented, so the count of successful parses is counted separately
+    below.
     """
     try:
         out = source.parse(_payload(fetch, body))
-    except Exception:  # noqa: BLE001 -- 위 docstring 의 이유. 성립 여부는 반환값이 나른다.
+    except Exception:  # noqa: BLE001 -- the reason is in the docstring above; success rides in the return.
         return 0, False
     return len([r for r in out.records if isinstance(r, ReviewRecord)]), True
 
 
 def _datasets_that_write_bodies(source: Source, bodies: list[bytes]) -> tuple[set[Dataset], int]:
-    """그 소스가 리뷰 본문을 내는 dataset 들과, 성립한 파싱의 수.
+    """The datasets on which that source produces review bodies, and the count of successful parses.
 
-    씨드 한 단계와 그 씨드가 낸 follow 한 단계를 다 본다 -- oliveyoung·daisomall 의 리뷰 본문은
-    씨드(랭킹 페이지)가 아니라 그 뒤의 리뷰 엔드포인트에서 나오기 때문이다. 어느 dataset 에
-    적어 두는가는 **run 의 dataset**, 즉 `seeds(...)` 를 부른 그 값이다 -- `trend_radar.run.datasets`
-    가 기록하는 것이 그것이다(collectors/commerce/cli.py 의 `log.start`).
+    Looks at both the seed step and the one follow step the seed produced -- oliveyoung's and
+    daisomall's review bodies come not from the seed (the ranking page) but from the review endpoint
+    after it. Which dataset it gets recorded under is **the run's dataset**, i.e. the value that
+    called `seeds(...)` -- that is what `trend_radar.run.datasets` records (`log.start` in
+    collectors/commerce/cli.py).
     """
     found: set[Dataset] = set()
     parsed = 0
@@ -88,7 +91,8 @@ def replayed() -> dict[str, tuple[set[Dataset], int]]:
 
 
 def test_every_registered_source_was_actually_replayed(replayed: dict[str, tuple[set[Dataset], int]]):
-    # 픽스처가 전부 예외로 끝나면 위 집합이 비고 선언이 빈 소스는 조용히 통과한다.
+    # If every fixture ends in an exception the set above is empty, and an empty declaration
+    # passes silently.
     assert set(replayed) == set(SOURCES)
     for key, (_, parsed) in replayed.items():
         assert parsed > 0, f"{key}: 성립한 파싱이 하나도 없다"
@@ -108,20 +112,23 @@ def test_the_declaration_matches_what_parse_actually_emits(
 
 
 def test_glowpick_writes_review_bodies_on_its_ranking_run(replayed: dict[str, tuple[set[Dataset], int]]):
-    """이 한 줄이 slopindustries/cosmai#144 가 데인 자리다 -- 잃어버리면 안 되는 사실이라 따로 못박는다.
+    """This one line is where slopindustries/cosmai#144 got burned -- pinned separately because it is
+    a fact that must not be lost.
 
-    glowpick 의 `parse()` 는 NEW_PRODUCT 만 갈라내고 `payload.fetch.dataset` 을 더는 보지 않는다
-    (glowpick.py). 클래스 주석이 이유를 적는다: ranking 과 review 가 **같은 카테고리 페이지**다.
+    glowpick's `parse()` only splits off NEW_PRODUCT and no longer looks at `payload.fetch.dataset`
+    (glowpick.py). The class comment writes the reason: ranking and review are **the same category
+    page**.
     """
     observed, _ = replayed["glowpick"]
     assert Dataset.RANKING in observed
-    # 반대편: 게이트가 있는 사이트에서는 ranking 런이 리뷰 본문을 내지 않는다.
+    # The other side: on a site that has a gate, a ranking run does not produce review bodies.
     assert Dataset.RANKING not in replayed["oliveyoung"][0]
     assert Dataset.RANKING not in replayed["daisomall"][0]
 
 
 def test_a_source_cannot_be_registered_without_deciding():
-    """새 사이트가 늘 때 우는 자리 -- 등록이 import 시점이라 스위트 전체가 그때 죽는다."""
+    """Where it cries when a new site is added -- registration happens at import time, so the whole
+    suite dies right there."""
     from collectors.commerce.registry import register
 
     with pytest.raises(TypeError, match="review_body_datasets"):

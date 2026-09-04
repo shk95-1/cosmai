@@ -11,7 +11,7 @@ is the assertion that holds that -- it is what would otherwise fail only in prod
 sometimes.
 
 What none of this answers is whether Chromium actually gets past oliveyoung's challenge. That is the
-shadow run (#10 조건 3), not a test.
+shadow run (#10 condition 3), not a test.
 """
 
 from __future__ import annotations

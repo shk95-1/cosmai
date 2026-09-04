@@ -5,7 +5,7 @@ browser tests assert is *our* policy (what counts as a refusal, whether a page i
 navigation dies, when a Chromium is started at all); a real browser would make those assertions slow
 and occasionally wrong for reasons that have nothing to do with the policy. Whether Chromium
 actually gets past oliveyoung's challenge is not a question a test can answer -- that is the shadow
-run (#10 조건 3).
+run (#10 condition 3).
 
 The fixture owns closing: `BrowserFetcher` holds a thread, and a test that forgot to close one would
 leak it into every test that runs after.
