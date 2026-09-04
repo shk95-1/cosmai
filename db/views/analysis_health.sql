@@ -1,8 +1,10 @@
 -- run 한 줄에 시작·끝·상태·행 수. contracts/entrypoints.md §공통 운영 뷰(collector_health)의 분석판이다.
--- 행 수를 셀 수 있는 것은 run_id 를 가진 두 표뿐이다 — need_mention·wish_mention 은 run 에 매달리지
--- 않으므로(versioning.md A19) 각 단계가 만든 수는 note 가 이름=값으로 나른다 (analysis/pipeline.py).
--- db/migrate.sh 가 배포마다 다시 적용한다. CREATE OR REPLACE 는 컬럼 이름·순서·타입이 그대로일 때만
--- 성공하므로 DROP 을 앞세운다 — 뷰를 넓히는 배포가 exit 1 로 멈추지 않게.
+-- Only two tables carry a run_id, so those are the only ones whose row count can be counted here --
+-- need_mention/wish_mention do not hang off a run (versioning.md A19), so each stage's own count of
+-- what it made rides in `note` as name=value (analysis/pipeline.py).
+-- db/migrate.sh re-applies this on every deploy. CREATE OR REPLACE only succeeds when the column
+-- names, order and types stay the same, so DROP goes first -- a deploy that widens the view must not
+-- stop with exit 1.
 
 DROP VIEW IF EXISTS needs.analysis_health;
 CREATE VIEW needs.analysis_health AS

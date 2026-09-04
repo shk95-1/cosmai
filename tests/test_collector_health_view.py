@@ -24,16 +24,17 @@ ENTRYPOINTS_MD = REPO_ROOT / "contracts" / "entrypoints.md"
 
 STARTED = datetime(2026, 8, 23, 1, 0, tzinfo=UTC)
 FINISHED = datetime(2026, 8, 23, 1, 30, tzinfo=UTC)
-STARTED_B = datetime(2026, 8, 23, 4, 0, tzinfo=UTC)  # RUN_B 는 제 시각을 갖는다 -- 옆 run 것이 새면 보인다
+# RUN_B has its own time -- a leak from the run next to it would show
+STARTED_B = datetime(2026, 8, 23, 4, 0, tzinfo=UTC)
 FINISHED_B = datetime(2026, 8, 23, 4, 5, tzinfo=UTC)
-RUN_A = UUID("11111111-1111-4111-8111-111111111111")  # commerce, fetch_log 두 dataset
-RUN_B = UUID("22222222-2222-4222-8222-222222222222")  # commerce, fetch_log 가 한 줄도 없는 run
+RUN_A = UUID("11111111-1111-4111-8111-111111111111")  # commerce, two fetch_log datasets
+RUN_B = UUID("22222222-2222-4222-8222-222222222222")  # commerce, a run with not one fetch_log line
 RUN_C = UUID("33333333-3333-4333-8333-333333333333")  # naver
 RUN_D = UUID("44444444-4444-4444-8444-444444444444")  # commerce, every source skipped (lock contention)
 RUN_E = UUID("55555555-5555-4555-8555-555555555555")  # commerce, one source errored (a real partial)
 
-# (dataset, http status, elapsed_ms, error). 404 는 계약이 세는 세 통(2xx / 403·429 / error·5xx)
-# 어디에도 들어가지 않는다 — requests 와의 차이로만 드러나는 것이 의도다.
+# (dataset, http status, elapsed_ms, error). 404 lands in none of the three buckets the contract
+# counts (2xx / 403,429 / error,5xx) -- it is meant to show up only as the gap against requests.
 COMMERCE_FETCHES = (
     ("rank", 200, 10, None),
     ("rank", 200, 20, None),
@@ -45,7 +46,8 @@ COMMERCE_FETCHES = (
     ("rank", 404, 80, None),
     ("review", 200, 5, None),
 )
-# elapsed_ms 가 NULL 인 줄이 섞여도 p90 은 남은 두 값의 백분위여야 한다.
+# Even with a line where elapsed_ms is NULL mixed in, p90 must be the percentile of the two remaining
+# values.
 NAVER_FETCHES = (
     ("blog", 200, 100, None),
     ("blog", 429, 200, None),
@@ -53,15 +55,17 @@ NAVER_FETCHES = (
 )
 COLUMNS = "collector, dataset, run_id, started_at, finished_at, status, requests, ok, blocked, failed, queued, p90_ms"  # noqa: E501
 
-# youtube 팔의 한 행은 (dataset, 시간 버킷) 하나다 -- run 이 없는 수집기에서 commerce 의 run 에 해당하는
-# "유한한 일감 묶음" 을 뷰가 시간으로 만든다. 아래 넷이 그 네 행이다.
-YT_WATCH = datetime(2026, 8, 23, 1, 0, tzinfo=UTC)  # 다 끝난 버킷: 성공·차단·실패·취소가 섞였다
-YT_BLOCKED = datetime(2026, 8, 23, 2, 0, tzinfo=UTC)  # 실패가 전부 쿼터 소진인 버킷
-YT_LEGACY = datetime(2026, 8, 23, 3, 0, tzinfo=UTC)  # #101·#102 이전 행: dataset 도 elapsed_ms 도 없다
-YT_QUEUE = datetime(2026, 8, 23, 4, 0, tzinfo=UTC)  # 아직 하나도 claim 되지 않은 버킷 = 찬 큐
+# One row of the youtube arm is one (dataset, hour bucket) -- for a collector with no run, this is the
+# view building the "finite bundle of work" that corresponds to commerce's run, out of time instead. The
+# four below are those four rows.
+# a fully finished bucket: success, blocked, failed and cancelled all mixed in
+YT_WATCH = datetime(2026, 8, 23, 1, 0, tzinfo=UTC)
+YT_BLOCKED = datetime(2026, 8, 23, 2, 0, tzinfo=UTC)  # a bucket where every failure is quota exhaustion
+YT_LEGACY = datetime(2026, 8, 23, 3, 0, tzinfo=UTC)  # a row from before #101/#102: no dataset, no elapsed_ms
+YT_QUEUE = datetime(2026, 8, 23, 4, 0, tzinfo=UTC)  # nothing has been claimed yet = a full queue
 
-# (state, error_code, elapsed_ms). cancelled 하나는 일부러 있다 -- ok·blocked·failed 세 통 어디에도
-# 들어가지 않는 몫이고, commerce 팔에서 404 가 앉는 자리와 같다.
+# (state, error_code, elapsed_ms). One cancelled is deliberate -- it is the share that lands in none of
+# the ok/blocked/failed buckets, the same spot 404 sits in on the commerce arm.
 YT_WATCH_JOBS = (
     ("succeeded", None, 10),
     ("succeeded", None, 20),
@@ -72,7 +76,8 @@ YT_WATCH_JOBS = (
     ("failed", "http_500", 70),
     ("cancelled", None, 80),
 )
-# 셋째 줄은 elapsed_ms 를 갖기 전의 행이다 -- p90 이 그것을 0 으로 채우면 1900 아닌 1800 이 나온다.
+# The third line is a row from before elapsed_ms existed -- if p90 filled that in with 0, the result
+# would be 1800, not 1900.
 YT_BLOCKED_JOBS = (("failed", "quota", 1000), ("failed", "quota", 2000), ("failed", "quota", None))
 YT_LEGACY_JOBS = (("succeeded", None, None), ("succeeded", None, None))
 YT_QUEUE_JOBS = (("queued", None, None), ("queued", None, None))
@@ -85,8 +90,9 @@ YT_BUCKETS = (
 
 
 def _youtube_job_rows() -> list[tuple[Any, ...]]:
-    """`state='queued'` 인 job 은 claim 된 적이 없어 started_at 이 없고, 옛 행도 마찬가지다 --
-    그래서 버킷은 `coalesce(started_at, created_at)` 이라야 두 경우가 다 제 시각에 앉는다."""
+    """A `state='queued'` job has never been claimed so it has no started_at, and an old row is the
+    same -- so the bucket has to be `coalesce(started_at, created_at)` for both cases to land at their
+    own time."""
     rows: list[tuple[Any, ...]] = []
     for bucket, dataset, jobs in YT_BUCKETS:
         for index, (state, error_code, elapsed_ms) in enumerate(jobs):
@@ -112,7 +118,8 @@ def _youtube_job_rows() -> list[tuple[Any, ...]]:
 
 
 def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
-    """운영에서 이 파일을 적용하는 것은 db/migrate.sh (f) 이고 그때의 롤이 needs_owner 다."""
+    """In production, db/migrate.sh (f) is what applies this file, and needs_owner is the role at that
+    point."""
     engine = create_engine(url)
     with engine.begin() as conn:
         conn.exec_driver_sql(
@@ -126,9 +133,10 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
             " elapsed_ms, error) VALUES (%s, %s, 'oliveyoung', %s, 'https://x', %s, 1, %s, %s)",
             [(RUN_A, STARTED, d, s, ms, e) for d, s, ms, e in COMMERCE_FETCHES],
         )
-        # RUN_D 는 소스 전부가 잠금에 밀려 물러난 run 이고 RUN_E 는 소스 하나가 실제로 에러 난 run 이다 --
-        # 둘 다 run.status 는 엔진이 똑같이 'partial' 로 쓴다 (collectors/commerce/cli.py), 그래서
-        # collector_health 가 run_source.outcome 을 보지 않으면 뷰에서 구분이 안 된다.
+        # RUN_D is a run every source stepped back from because of a lock, and RUN_E is a run where one
+        # source genuinely errored -- the engine writes run.status as 'partial' identically for both
+        # (collectors/commerce/cli.py), so the view cannot tell them apart unless collector_health looks
+        # at run_source.outcome.
         conn.exec_driver_sql(
             f'INSERT INTO "{schema}".run (id, captured_at, started_at, finished_at, status, sources,'
             " datasets) VALUES (%s, %s, %s, %s, 'partial', 'oliveyoung,hwahae', 'rank'),"
@@ -144,13 +152,13 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
             " (%s, 'hwahae', 3, 3, 0, 0, 0, false, 0, NULL, 'ok')",
             (RUN_D, RUN_D, RUN_E, RUN_E),
         )
-        # 원천 표는 collectors/commerce 소유다 — 운영에서 이 SELECT 를 여는 것이
-        # db/grants/needs_runtime_reader.sql 의 needs_owner 블록이다.
+        # The source table belongs to collectors/commerce -- in production what opens this SELECT is
+        # the needs_owner block of db/grants/needs_runtime_reader.sql.
         conn.exec_driver_sql(
             f'GRANT SELECT ON "{schema}".run, "{schema}".fetch_log, "{schema}".run_source TO needs_owner'
         )
-        # tubedepth 는 collectors/youtube 소유의 별도 스키마다 -- 운영에서 이 두 줄을 여는 것도 같은
-        # db/grants/needs_runtime_reader.sql 의 needs_owner 블록이다.
+        # tubedepth is a separate schema belonging to collectors/youtube -- the same needs_owner block
+        # of db/grants/needs_runtime_reader.sql is also what opens these two lines in production.
         conn.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{td_schema}" TO needs_owner')
         conn.exec_driver_sql(f'GRANT SELECT ON "{td_schema}".jobs TO needs_owner')
         conn.exec_driver_sql(
@@ -188,7 +196,8 @@ def health_rows(
     needs_runtime_url: str,
     _schema_name: str,
 ) -> list[tuple[Any, ...]]:
-    """뷰를 읽는 롤은 needs_runtime 이다 — 원천 표에는 직접 닿지 않고 뷰만 읽는다는 것이 설계다."""
+    """The role reading the view is needs_runtime -- the design is that it never touches the source
+    tables directly and only reads the view."""
     _seed_and_create_view(needs_schema, _schema_name, tubedepth_side_schema)
     engine = create_engine(needs_runtime_url)
     with engine.connect() as conn:
@@ -208,31 +217,32 @@ def test_all_three_arms_land_in_one_table_with_the_contracts_twelve_columns(
     assert [(r[0], r[1], r[2], r[3]) for r in health_rows] == [
         ("commerce", "rank", str(RUN_A), STARTED),
         ("commerce", "review", str(RUN_A), STARTED),
-        ("commerce", None, str(RUN_B), STARTED_B),  # fetch_log 가 없는 run 은 dataset 을 이름댈 수 없다
-        ("commerce", None, str(RUN_D), STARTED_B),  # 소스 전부가 skipped 여도 마찬가지다
+        ("commerce", None, str(RUN_B), STARTED_B),  # a run with no fetch_log has no dataset to name
+        ("commerce", None, str(RUN_D), STARTED_B),  # the same even with every source skipped
         ("commerce", None, str(RUN_E), STARTED_B),
         ("naver", "blog", str(RUN_C), STARTED),
-        # youtube 는 run 이 없다 -- run_id 자리가 NULL 이고 행을 가르는 것이 dataset + 시간 버킷이다.
+        # youtube has no run -- the run_id column is NULL and dataset + time bucket is what splits rows.
         ("youtube", "watch", None, YT_WATCH),
         ("youtube", "work", None, YT_BLOCKED),
         ("youtube", "work", None, YT_QUEUE),
-        ("youtube", None, None, YT_LEGACY),  # dataset 을 적기 전(#102)에 만들어진 job 들
+        ("youtube", None, None, YT_LEGACY),  # jobs made before dataset was written down (#102)
     ]
     assert all(len(r) == 12 for r in health_rows)
 
 
 def test_a_run_with_no_fetch_log_keeps_its_row_and_counts_zero(health_rows: list[tuple[Any, ...]]):
-    # 행이 사라지면 "돌았는데 아무것도 못 받은 run" 이 표에서 통째로 안 보인다.
+    # If the row vanished, "a run that ran but got nothing" would be invisible in the table entirely.
     matching = [r for r in health_rows if r[2] == str(RUN_B)]
     assert len(matching) == 1, f"fetch_log 없는 run 의 행이 {len(matching)} 개다"
     row = matching[0]
     assert (row[5], row[6], row[7], row[8], row[9]) == ("failed", 0, 0, 0, 0)
-    assert row[11] is None  # 잰 요청이 없으니 백분위도 없다
+    assert row[11] is None  # no measured request, so no percentile either
 
 
 def test_a_run_where_every_source_yielded_reads_yielded_not_partial(health_rows: list[tuple[Any, ...]]):
-    # RUN_D 는 소스 전부가 스스로 물러났을 뿐 아무것도 실패하지 않았다 -- 소스 하나가 실제로 에러 난
-    # RUN_E 와 같은 값이면 대시보드에서 둘이 같은 색으로 보여 거짓 경보가 된다.
+    # RUN_D is every source stepping back on its own, with nothing actually failing -- if it carried
+    # the same value as RUN_E, where a source genuinely errored, the dashboard would show both the same
+    # color as a false alarm.
     yielded = [r for r in health_rows if r[2] == str(RUN_D)]
     partial = [r for r in health_rows if r[2] == str(RUN_E)]
     assert len(yielded) == 1, yielded
@@ -246,7 +256,7 @@ def test_403_and_429_count_as_blocked_and_2xx_as_ok(health_rows: list[tuple[Any,
     assert len(ranked) == 1, ranked
     requests, ok, blocked, failed = ranked[0][6], ranked[0][7], ranked[0][8], ranked[0][9]
     assert (requests, ok, blocked, failed) == (8, 3, 2, 2)
-    # 404 는 어느 통에도 없다 — 계약의 세 통은 2xx / 403·429 / error·5xx 뿐이다.
+    # 404 lands in none of the buckets -- the contract's three buckets are only 2xx / 403,429 / error,5xx.
     assert requests - ok - blocked - failed == 1
     naver = [r for r in health_rows if r[0] == "naver"]
     assert len(naver) == 1, naver
@@ -255,43 +265,47 @@ def test_403_and_429_count_as_blocked_and_2xx_as_ok(health_rows: list[tuple[Any,
 
 def test_p90_ms_is_the_real_percentile_not_the_max_or_the_mean(health_rows: list[tuple[Any, ...]]):
     by_key = {(r[0], r[1]): r[11] for r in health_rows}
-    # elapsed 10..80 (n=8): 0.9*(8-1)=6.3 → 70 + 0.3*(80-70) = 73. max 는 80, 평균은 45 다.
+    # elapsed 10..80 (n=8): 0.9*(8-1)=6.3 -> 70 + 0.3*(80-70) = 73. max is 80, the mean is 45.
     assert by_key[("commerce", "rank")] == 73
     assert by_key[("commerce", "review")] == 5
-    # naver 는 [100, 200] 과 NULL 하나: 0.9*(2-1)=0.9 → 100 + 0.9*100 = 190.
+    # naver has [100, 200] and one NULL: 0.9*(2-1)=0.9 -> 100 + 0.9*100 = 190.
     assert by_key[("naver", "blog")] == 190
 
 
 def test_queued_is_null_on_the_batch_arms_and_a_count_on_the_one_arm_with_a_queue(
     health_rows: list[tuple[Any, ...]],
 ):
-    # commerce·naver 는 크론이 부르는 배치 워커라 큐가 아예 없다 -- 0 이 아니라 NULL 이어야 "큐가 비었다"
-    # 와 "큐라는 것이 없다" 가 표에서 갈린다.
+    # commerce and naver are batch workers a cron calls, so there is no such thing as a queue for them
+    # at all -- it must be NULL, not 0, for "the queue is empty" to read differently from "there is no
+    # queue" in the table.
     assert {r[10] for r in health_rows if r[0] != "youtube"} == {None}
     assert None not in {r[10] for r in health_rows if r[0] == "youtube"}
 
 
 def test_youtube_tells_an_empty_queue_from_a_full_one(health_rows: list[tuple[Any, ...]]):
-    # 완료 기준: 큐가 빈 버킷도 행으로 남고 queued=0 이라야, 큐가 찬 버킷의 2 가 무엇에 대비되는지 읽힌다.
+    # Completion bar: an empty-queue bucket must still leave a row with queued=0, or the full bucket's 2
+    # has nothing to read as a contrast against.
     by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube"}
     assert [by_bucket[b][10] for b in (YT_WATCH, YT_BLOCKED, YT_LEGACY)] == [0, 0, 0]
     full = by_bucket[YT_QUEUE]
     assert full[10] == 2
-    # 아직 아무도 claim 하지 않았으니 잰 요청이 하나도 없고, 끝난 시각도 없다.
+    # No one has claimed anything yet, so there is no measured request and no finish time either.
     assert (full[5], full[6], full[7], full[8], full[9], full[11]) == ("running", 0, 0, 0, 0, None)
 
 
 def test_a_youtube_row_counts_quota_and_rate_limit_as_blocked_not_as_failed(
     health_rows: list[tuple[Any, ...]],
 ):
-    # 쿼터 소진은 이 수집기의 실제 고장 모드다 -- failed 에 섞이면 차단인지 진짜 고장인지 표에서 안 갈린다.
+    # Quota exhaustion is this collector's real failure mode -- mixed into failed, the table can no
+    # longer tell a block from a genuine failure.
     watch = next(r for r in health_rows if (r[0], r[3]) == ("youtube", YT_WATCH))
-    # requests 는 끝난 job 여덟. quota·rate_limited·http_403 셋이 blocked, http_500 하나가 failed,
-    # cancelled 하나는 어느 통에도 없다 (commerce 의 404 자리).
+    # requests is the eight finished jobs. quota, rate_limited and http_403 are blocked (three), one
+    # http_500 is failed, and one cancelled lands in neither bucket (the same spot commerce's 404 sits
+    # in).
     assert (watch[6], watch[7], watch[8], watch[9]) == (8, 3, 3, 1)
     assert watch[6] - watch[7] - watch[8] - watch[9] == 1
-    assert watch[5] == "partial"  # 성공도 실패도 있는 버킷
-    # 실패가 전부 차단인 버킷은 status 까지 blocked 여야 한다.
+    assert watch[5] == "partial"  # a bucket with both success and failure
+    # A bucket where every failure is a block must have status read blocked too.
     blocked = next(r for r in health_rows if (r[0], r[3]) == ("youtube", YT_BLOCKED))
     assert (blocked[5], blocked[6], blocked[7], blocked[8], blocked[9]) == ("blocked", 3, 0, 3, 0)
 
@@ -300,19 +314,21 @@ def test_youtube_p90_skips_the_rows_that_predate_the_elapsed_ms_column(
     health_rows: list[tuple[Any, ...]],
 ):
     by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube"}
-    # elapsed 10..80 (n=8): commerce 의 rank 행과 같은 산수 -- 0.9*(8-1)=6.3 → 73.
+    # elapsed 10..80 (n=8): the same arithmetic as commerce's rank row -- 0.9*(8-1)=6.3 -> 73.
     assert by_bucket[YT_WATCH][11] == 73
-    # [1000, 2000] 과 NULL 하나: 0.9*(2-1)=0.9 → 1900. NULL 을 0 으로 채웠다면 1800 이 나온다.
+    # [1000, 2000] and one NULL: 0.9*(2-1)=0.9 -> 1900. Filling the NULL with 0 would give 1800.
     assert by_bucket[YT_BLOCKED][11] == 1900
-    # 잰 값이 하나도 없는 버킷은 백분위도 없다 -- fetch_log 가 없는 commerce run 과 같다.
+    # A bucket with not a single measured value has no percentile either -- the same as a commerce run
+    # with no fetch_log.
     assert by_bucket[YT_LEGACY][11] is None
 
 
 def test_a_youtube_bucket_spans_one_hour_and_ends_when_its_last_job_did(
     health_rows: list[tuple[Any, ...]],
 ):
-    # started_at 은 버킷의 시작 시각이다 (commerce 의 run 시작에 해당). 아직 claim 되지 않은 job 만 든
-    # 버킷도 이 값이 있어야 표에서 시각을 잃지 않는다 -- 그 행에는 실제 started_at 이 하나도 없다.
+    # started_at is the bucket's own start time (corresponding to commerce's run start). A bucket
+    # holding only unclaimed jobs must still have this value, or the table loses its time entirely --
+    # that row has no real started_at at all.
     by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube"}
     assert set(by_bucket) == {YT_WATCH, YT_BLOCKED, YT_LEGACY, YT_QUEUE}
     assert by_bucket[YT_WATCH][4] == YT_WATCH + timedelta(minutes=len(YT_WATCH_JOBS))
@@ -323,7 +339,8 @@ def test_a_youtube_bucket_spans_one_hour_and_ends_when_its_last_job_did(
 def test_started_and_finished_come_from_the_run_row_not_from_a_neighbour(
     health_rows: list[tuple[Any, ...]],
 ):
-    # run 을 가진 두 팔에 대한 단언이다 -- youtube 행은 run_id 가 없고 시각이 버킷에서 온다.
+    # This asserts on the two arms that have a run -- a youtube row has no run_id, its time comes from
+    # the bucket.
     assert {(r[2], r[3], r[4]) for r in health_rows if r[2] is not None} == {
         (str(RUN_A), STARTED, FINISHED),
         (str(RUN_B), STARTED_B, FINISHED_B),
@@ -333,7 +350,7 @@ def test_started_and_finished_come_from_the_run_row_not_from_a_neighbour(
     }
 
 
-# --- 배포 경로: db/migrate.sh 가 실제로 남기는 것 (tool/checks/test 의 throwaway 컨테이너) ---
+# --- Deploy path: what db/migrate.sh actually leaves behind (tool/checks/test's throwaway container) ---
 
 
 @pytest.fixture
@@ -343,11 +360,12 @@ def deployed() -> Any:
     with engine.connect() as conn:
         conn.execute(text("SET ROLE needs_owner"))
         yield conn
-    engine.dispose()  # needs_migrator 는 CONNECTION LIMIT 2 다 — 통과든 실패든 놓아준다.
+    engine.dispose()  # needs_migrator has CONNECTION LIMIT 2 -- always release, pass or fail.
 
 
 def test_migrate_sh_leaves_the_view_in_the_needs_schema_for_needs_runtime(deployed: Any):
-    """뷰 파일이 있어도 배포가 적용하지 않으면 운영에는 없는 것이다 — db/migrate.sh 의 (f) 단계."""
+    """Even with a view file in place, if the deploy never applies it, production has none -- that is
+    db/migrate.sh's stage (f)."""
     assert deployed.execute(text("SELECT to_regclass('needs.collector_health')")).scalar_one() is not None
     assert deployed.execute(
         text("SELECT has_table_privilege('needs_runtime', 'needs.collector_health', 'SELECT')")
@@ -366,8 +384,8 @@ def test_the_deployed_view_carries_the_contracts_columns_in_order(deployed: Any)
     assert [(n, t) for n, t in found] == contract
 
 
-# 이름이 아니라 oid 로 묻는다 — 스키마 USAGE 가 없는 롤이 'trend_radar.run' 을 풀려고 하면
-# has_table_privilege 가 단언이 아니라 예외로 끝난다.
+# Asked by oid, not name -- if a role with no schema USAGE tried to resolve 'trend_radar.run',
+# has_table_privilege would end in an exception, not an assertion.
 _OID = (
     "SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE n.nspname = :s AND c.relname = :t"
@@ -376,7 +394,8 @@ _MAY_SELECT = "SELECT has_table_privilege(:role, cast(:oid AS oid), 'SELECT')"
 
 
 def test_needs_runtime_reads_the_view_without_any_direct_grant_on_trend_radar(deployed: Any):
-    # 뷰가 소유자 권한으로 도는 것이 여기서는 의도다 — 이 두 단언이 같이 참이어야 그 설계가 성립한다.
+    # The view running with owner privilege is deliberate here -- the design only holds if these two
+    # assertions are both true together.
     for table in ("run", "fetch_log"):
         oid = deployed.execute(text(_OID), {"s": "trend_radar", "t": table}).scalar_one()
         for role, expected in (("needs_owner", True), ("needs_runtime", False)):
@@ -390,16 +409,17 @@ def test_needs_runtime_reads_the_view_without_any_direct_grant_on_trend_radar(de
 
 
 def test_the_youtube_arm_gets_its_grant_on_tubedepth_jobs_from_the_deploy_path(deployed: Any):
-    """뷰 파일이 tubedepth.jobs 를 읽어도 그 SELECT 를 여는 줄이 배포에 없으면 운영에서 뷰가 서지
-    않는다 — db/grants/needs_runtime_reader.sql 의 needs_owner 블록이 그 줄이고 migrate.sh 는
-    (e) 로 그것을 (f) 의 뷰 생성보다 먼저 돌린다."""
+    """Even with the view file reading tubedepth.jobs, the view never stands in production without the
+    line that opens that SELECT in the deploy -- that line is the needs_owner block of
+    db/grants/needs_runtime_reader.sql, and migrate.sh runs it as stage (e), before (f)'s view
+    creation."""
     oid = deployed.execute(text(_OID), {"s": "tubedepth", "t": "jobs"}).scalar_one()
     for role, expected in (("needs_owner", True), ("needs_runtime", False)):
         granted = deployed.execute(text(_MAY_SELECT), {"role": role, "oid": oid}).scalar_one()
         assert granted is expected, role
 
 
-# 계약 절의 sql 펜스가 컬럼의 이름·순서·타입에 대한 유일한 출처다.
+# The contract section's sql fence is the one source of truth for a column's name, order and type.
 _PG_TYPE = {"text": "text", "timestamptz": "timestamp with time zone", "int": "integer"}
 
 

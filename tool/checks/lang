@@ -40,7 +40,12 @@ hits=$(git diff $lang_range -U0 --no-color -- . \
     ':!tool/checks/lang' \
     ':!README.ko.md' \
     ':!eval/' \
-    ':!db/seed/' \
+    ':!db/seed/data/**' \
+    ':!db/seed/mentions.py' \
+    ':!db/seed/metrics.py' \
+    ':!db/seed/mfds.py' \
+    ':!db/seed/panel.py' \
+    ':!db/seed/pipeline.py' \
     ':!analysis/**/*.csv' \
     ':!portal/public/app.js' \
     ':!portal/public/index.html' \

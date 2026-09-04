@@ -1,4 +1,4 @@
-# UTC. naver datalab: monthly (키워드 사전 기준, contracts/entrypoints.md), day 1. 06:10 clears every
+# UTC. naver datalab: monthly (basis: the keyword dictionary, contracts/entrypoints.md), day 1. 06:10 clears every
 # commerce time (02:10/03:30/04:15/04:45/05:30); naver walks a different host, so the commerce gap rule
 # does not bind it.
 10 6 1 * *  cosmai collect naver --dataset datalab

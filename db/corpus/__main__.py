@@ -1,8 +1,8 @@
-"""`python -m db.corpus load <dir>` · `python -m db.corpus verify` (포크 #4).
+"""`python -m db.corpus load <dir>` -- `python -m db.corpus verify` (fork #4).
 
-`db/seed` 와 같은 모양의 CLI 지만 그룹이 아니라 하위 명령이 둘이다: 적재는 레포 밖 경로를 인자로
-받고(원본은 `archive/` 에 있고 그 자리는 수정 금지다), 검증은 적재된 행 위에서 매니페스트의
-`reproduces` 를 다시 센다.
+A CLI shaped the same way as `db/seed`, but with two subcommands rather than groups: load takes a path
+outside the repo as an argument (the source lives in `archive/`, and that spot may not be modified),
+while verify recounts the manifest's `reproduces` on top of the rows already loaded.
 """
 
 from __future__ import annotations
@@ -26,8 +26,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m db.corpus", description="Import and verify the ydc youtube corpus snapshot"
     )
-    # --url 은 하위 명령 **뒤**에도 오도록 부모 파서로 둔다: `load <dir> --url ...` 가 손이 가는
-    # 순서인데, 최상위에만 있으면 그 줄이 unrecognized arguments 로 죽는다.
+    # --url is put on the parent parser so it can also come **after** the subcommand: `load <dir>
+    # --url ...` is the order a hand naturally reaches for, and if it only lived at the top level that
+    # line would die with unrecognized arguments.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--url", help=f"SQLAlchemy URL; default is needs_runtime with {RUNTIME_KEY} from the secret file"

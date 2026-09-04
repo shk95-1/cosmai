@@ -6,8 +6,9 @@
 
 DROP VIEW IF EXISTS needs.metrics_topic_quarter_violation;
 CREATE VIEW needs.metrics_topic_quarter_violation AS
--- ① 격자가 조밀하다: (trend_use 주제 × 그 산출에 존재하는 분기) 전부에 행이 있다. 언급 0 셀을 지우면
--- persistence 의 기준선(그 주제의 전 기간 중앙값)이 올라가 모든 주제의 값이 움직인다.
+-- (1) The grid is dense: every (trend_use topic x quarter present in that output) has a row. Dropping a
+-- zero-mention cell raises persistence's baseline (that topic's all-time median), which moves every
+-- topic's value.
 SELECT 'sparse_grid'::text                                              AS violation,
        run_id, scope, source, content_type, panel_version, panel_role,
        NULL::text                                                       AS quarter,
@@ -18,7 +19,8 @@ SELECT 'sparse_grid'::text                                              AS viola
  GROUP BY run_id, scope, source, content_type, panel_version, panel_role
 HAVING count(*) <> count(DISTINCT topic_key) * count(DISTINCT quarter)
 UNION ALL
--- ② 분모가 닫힌다: 한 분기의 mentions 합이 그 분기 행들이 다 같이 들고 있는 quarter_mentions 다.
+-- (2) The denominator closes: a quarter's sum of mentions equals the quarter_mentions that every row of
+-- that quarter holds in common.
 -- trend_use=false 주제(추천_재구매·선크림)의 행이 하나라도 섞이면 이 등식이 깨진다.
 SELECT 'quarter_mentions_not_closed'::text,
        run_id, scope, source, content_type, panel_version, panel_role,

@@ -1,4 +1,5 @@
-"""시드 규모의 rank_snapshot 에서 run_ranking 이 런타임 롤의 시간 제한 안에 드는가 (db/bootstrap.sql)."""
+"""Whether run_ranking, over a seed-sized rank_snapshot, fits inside the runtime role's time limit
+(db/bootstrap.sql)."""
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
 
-# slice-p2-ranking-dynamics/README.md 실측: rank_snapshot 137,429 → rank_daily 17,948 · price_point 116,292.
+# slice-p2-ranking-dynamics/README.md: rank_snapshot 137,429 -> rank_daily 17,948, price_point 116,292.
 BOARDS = 13
 PRODUCTS = 100
 DAYS = 14
@@ -23,7 +24,8 @@ PRICE_POINTS = 116
 EXPECTED_DAILY = BOARDS * PRODUCTS * DAYS
 BASE = datetime(2026, 6, 1, tzinfo=UTC)
 VERSION = AGGREGATE_VERSION
-# 런타임 롤의 transaction_timeout. 넘기면 배치가 통째로 롤백되므로 이것이 실제 예산이다.
+# The runtime role's transaction_timeout. Exceeding it rolls the whole batch back, so this is the real
+# budget.
 BUDGET_SECONDS = 60
 
 

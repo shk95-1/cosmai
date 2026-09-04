@@ -1,20 +1,23 @@
-"""ydc 가 넘긴 유튜브 코퍼스 스냅샷을 `needs.corpus_*` 로 반입한다 (포크 #4).
+"""Imports the youtube corpus snapshot ydc handed over into `needs.corpus_*` (fork #4).
 
-원본은 `~/github_prj/Main/archive/yt-handoff/` 의 CSV 세 장(261,317 · 105,358 · 43행)이다.
-`archive/` 는 수정 금지(STATE.md §3)이고 174M 를 레포에 복사하지도 않으므로, 이 적재기는 **경로를
-인자로 받는다** -- `db/seed` 처럼 레포 안의 고정 자리를 읽지 않는 유일한 이유다.
+The source is the three CSVs in `~/github_prj/Main/archive/yt-handoff/` (261,317, 105,358, 43 rows).
+`archive/` may not be modified (STATE.md §3) and its 174M is not copied into the repo either, so this
+loader **takes the path as an argument** -- the one reason it does not read a fixed spot inside the repo
+the way `db/seed` does.
 
-세 가지가 이 파일의 모양을 정했다.
+Three things shaped this file.
 
-1. **덮이지 않는다.** 재수집(#38)은 같은 유일키(`source + source_item_id`)로 같은 영상을 다시
-   가져오지만 2026-08-19 의 조회수·좋아요·댓글은 재현되지 않는다. 그래서 관측 판본이 키의 맨 앞에
-   있고(`corpus_document` PK), 재수집분은 다른 `snapshot_id` 로 들어와 옛 행 옆에 선다.
-2. **배치·페이징.** `needs_runtime` 은 statement_timeout 30s · transaction_timeout 60s 아래에 있다
-   (`db/bootstrap.sql`). 26만 행을 한 트랜잭션에 넣으면 그 벽에 부딪히므로 페이지마다 커밋한다 --
-   `analysis/retrieval/corpus.py` 가 읽기에서 같은 이유로 같은 모양을 쓴다. 그래서 이 `load()` 는
-   `db/seed/*` 와 달리 커서가 아니라 **연결**을 받는다: 커밋하는 쪽이 트랜잭션을 소유해야 한다.
-3. **재실행 멱등.** 모든 INSERT 가 `ON CONFLICT DO NOTHING` 이라 두 번 돌려도 값이 다시 쓰이지
-   않는다(`imported_at` 도 첫 적재 값으로 남는다).
+1. **Never overwritten.** A re-collection (#38) fetches the same video again under the same unique key
+   (`source + source_item_id`), but the view count, likes and comments from 2026-08-19 do not
+   reproduce. So the observed version sits at the front of the key (`corpus_document`'s PK), and a
+   re-collection arrives under a different `snapshot_id` and stands beside the old row.
+2. **Batching and paging.** `needs_runtime` sits under a statement_timeout of 30s and a
+   transaction_timeout of 60s (`db/bootstrap.sql`). Putting 260k rows into one transaction hits that
+   wall, so this commits page by page -- `analysis/retrieval/corpus.py` uses the same shape for reading,
+   for the same reason. So this `load()`, unlike `db/seed/*`, takes a **connection** rather than a
+   cursor: whoever commits has to own the transaction.
+3. **Idempotent on re-run.** Every INSERT is `ON CONFLICT DO NOTHING`, so running it twice never
+   rewrites a value (`imported_at` also stays at its first-load value).
 """
 
 from __future__ import annotations
@@ -38,11 +41,12 @@ SNAPSHOT_ID = 1
 SNAPSHOT_LABEL = "yt-handoff-20260819"
 SNAPSHOT_NOTE = "ydc 인계 코퍼스. 원본 archive/yt-handoff/ (읽기 전용)"
 
-# 한 페이지의 행 수. 30초 안에 끝나는 executemany 를 목표로 잡은 값이고, 크게 잡으면
-# statement_timeout 에, 작게 잡으면 왕복 횟수에 진다.
+# The row count of one page. Chosen to target an executemany that finishes inside 30 seconds -- go too
+# high and statement_timeout loses, go too low and the round-trip count loses.
 BATCH = 1000
 
-# 174M CSV 한 줄에 영상 설명 전체가 들어온다 -- csv 기본 상한(128KiB)으로는 _csv.Error 로 죽는다.
+# One line of the 174M CSV carries a whole video description -- csv's default limit (128KiB) dies with
+# _csv.Error on that.
 csv.field_size_limit(10**7)
 
 Progress = Callable[[str, int], None]
@@ -52,7 +56,7 @@ INSERT INTO corpus_snapshot (snapshot_id, label, produced_by, source_runs, colle
 VALUES (%s, %s, %s, %s, %s, %s)
 ON CONFLICT (snapshot_id) DO NOTHING
 """
-# 재적재가 값이 같은 행을 다시 쓰지 않는다 -- "변경 0" 이 rowcount 로 읽힌다.
+# A re-load never rewrites a row that already has the same value -- rowcount reads as "0 changed".
 ACTIVATE_SQL: LiteralString = """
 UPDATE corpus_snapshot SET active = (snapshot_id = %s)
 WHERE active IS DISTINCT FROM (snapshot_id = %s)
@@ -60,7 +64,7 @@ WHERE active IS DISTINCT FROM (snapshot_id = %s)
 SNAPSHOT_COUNT_SQL: LiteralString = "SELECT count(*) FROM corpus_document WHERE snapshot_id = %s"
 ACTIVE_SQL: LiteralString = "SELECT snapshot_id FROM corpus_snapshot WHERE active"
 
-# doc_id 는 생성 열이라 여기 없다 (023).
+# doc_id is a generated column, so it is not here (023).
 DOCUMENT_SQL: LiteralString = """
 INSERT INTO corpus_document
   (snapshot_id, source, source_item_id, content_type, parent_item_id, channel_id,
@@ -78,27 +82,31 @@ PANEL_SQL: LiteralString = "SELECT channel_id, panel_role FROM panel_channel WHE
 
 
 class CorpusMismatch(ValueError):
-    """반입할 행이 이미 계약에 선 사실과 어긋난다. 숫자를 맞추려 비트는 대신 멈춘다."""
+    """A row to import disagrees with a fact the contract already carries. This stops rather than bend
+    to make the numbers fit."""
 
 
 def read_manifest(source_dir: Path) -> dict[str, Any]:
-    """매니페스트를 읽고 그 규칙이 계약이 진 문장과 같은지 되묻는다 (`db/corpus/contract.py`)."""
+    """Reads the manifest and asks whether its rules match the sentences the contract carries
+    (`db/corpus/contract.py`)."""
     manifest: dict[str, Any] = json.loads((source_dir / "manifest.json").read_text(encoding="utf-8"))
     contract.check(manifest)
     return manifest
 
 
 def read_csv(path: Path) -> Iterator[dict[str, str]]:
-    """스트리밍. 26만 행을 통째로 dict 리스트로 올리면 원문(174M)이 두 벌 메모리에 선다.
-    `utf-8-sig`: 이 CSV 들은 BOM 을 달고 있어서 utf-8 로 열면 첫 열 이름이 `\\ufeffdoc_id` 가 된다."""
+    """Streaming. Loading 260k rows as one list of dicts would put the raw 174M text into memory twice.
+    `utf-8-sig`: these CSVs carry a BOM, so opening them as utf-8 would make the first column name
+    `\\ufeffdoc_id`."""
     with path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             yield {k: (v or "") for k, v in row.items()}
 
 
 def runs_by_collected_at(manifest: dict[str, Any]) -> dict[str, str]:
-    """수집 시각 -> run_id. 문서 행에는 런 id 가 없고 `source_metadata.collected_at` 만 있는데,
-    두 런의 시각이 다르므로 이 표 하나로 행마다 어느 런에서 왔는지가 복원된다."""
+    """Collection time -> run_id. A document row carries no run id, only
+    `source_metadata.collected_at`, but the two runs' times differ, so this one table alone recovers
+    which run each row came from."""
     return {run["collected_at"]: run["run_id"] for run in manifest["source_run_manifests"]}
 
 
@@ -110,7 +118,8 @@ def document_row(row: dict[str, str], snapshot_id: int, runs: dict[str, str]) ->
         raise CorpusMismatch(
             f"{row['doc_id']}: collected_at {collected_at!r} belongs to no run in the manifest"
         )
-    # 규칙 1 의 뒷문장을 여기서도 되묻는다: CSV 의 doc_id 와 생성 열이 갈리면 mention 조인이 조용히 빈다.
+    # This asks rule 1's second sentence again, right here: if the CSV's doc_id disagrees with the
+    # generated column, the mention join quietly comes up empty.
     expected = f"{row['source']}:{row['source_item_id']}"
     if row["doc_id"] != expected:
         raise CorpusMismatch(f"doc_id {row['doc_id']!r} is not {expected!r} (manifest rule 1)")
@@ -175,7 +184,8 @@ def _tally(
     name: str,
     by_type: Counter[str] | None = None,
 ) -> Iterator[dict[str, str]]:
-    """흐르는 CSV 를 세면서 넘긴다 -- 174M 를 세자고 한 번 더 읽으면 반입이 두 배로 든다."""
+    """Counts a streaming CSV while passing it through -- reading the 174M again just to count it would
+    double the import's cost."""
     for row in rows:
         counts[name] = counts.get(name, 0) + 1
         if by_type is not None:
@@ -203,7 +213,8 @@ def copy_pages(
     label: str,
     progress: Progress | None,
 ) -> int:
-    """페이지마다 한 트랜잭션. 반환값은 실제로 들어간 행 수라, 재실행이면 0 이 나온다."""
+    """One transaction per page. The return value is the row count actually inserted, so a re-run
+    yields 0."""
     inserted = 0
     seen = 0
     for page in _pages(rows, batch):
@@ -235,8 +246,9 @@ def insert_snapshot(
 
 
 def activate(cur: psycopg.Cursor[Any], snapshot_id: int) -> int:
-    """이 판본만 켠다. 문서가 없는 판본을 켜면 분석이 빈 코퍼스를 오류 없이 읽으므로 거절한다
-    (`db/seed/panel.activate` 와 같은 자리)."""
+    """Turns on only this version. Activating a version with no documents is rejected, because
+    otherwise analysis would read an empty corpus with no error raised (the same spot as
+    `db/seed/panel.activate`)."""
     cur.execute(SNAPSHOT_COUNT_SQL, (snapshot_id,))
     row = cur.fetchone()
     if not (row and row[0]):
@@ -246,7 +258,8 @@ def activate(cur: psycopg.Cursor[Any], snapshot_id: int) -> int:
 
 
 def active_snapshot(cur: psycopg.Cursor[Any]) -> int | None:
-    """활성 스냅샷. 둘일 수는 없다 -- 023 의 부분 유니크 인덱스가 그것을 DB 에서 막는다."""
+    """The active snapshot. There cannot be two -- 023's partial unique index blocks that in the DB
+    itself."""
     cur.execute(ACTIVE_SQL)
     rows: Sequence[tuple[Any, ...]] = cur.fetchall()
     return int(rows[0][0]) if rows else None
@@ -264,7 +277,7 @@ def load(
     batch: int = BATCH,
     progress: Progress | None = None,
 ) -> dict[str, int]:
-    """세 CSV 를 한 스냅샷으로 반입하고 표마다 `count(*)` 를 돌려준다."""
+    """Imports the three CSVs as one snapshot and returns `count(*)` per table."""
     manifest = read_manifest(source_dir)
     runs = runs_by_collected_at(manifest)
     with conn.cursor() as cur:
@@ -272,7 +285,8 @@ def load(
         if version is None:
             raise CorpusMismatch("no active panel roster; load db/seed --only panel first (fork #31)")
         table_counts = {"channel.csv": check_channels(cur, source_dir, version)}
-        # 이어 붙이는 재실행에서는 들어가는 행이 0 이라 삽입 행수가 중복을 말해 주지 못한다.
+        # On a re-run that only appends, 0 rows go in, so the insert count cannot say anything about
+        # duplicates.
         cur.execute(SNAPSHOT_COUNT_SQL, (snapshot_id,))
         fresh = not (row := cur.fetchone()) or not row[0]
         insert_snapshot(cur, manifest, snapshot_id, label, note)
@@ -302,14 +316,16 @@ def load(
         label="corpus_mention",
         progress=progress,
     )
-    # 켜기 **전에** 대조한다: 뒤라면 분석은 이미 그 판본을 읽고 있다. 행은 남지만 스냅샷마다 다른
-    # 키를 쓰므로 (023) 옆에 설 뿐 아무것도 덮지 않는다.
+    # The comparison happens **before** activating: after it, analysis would already be reading that
+    # version. The row still stands, but since each snapshot uses a different key (023) it only stands
+    # beside the others and overwrites nothing.
     contract.check_counts(manifest, {"table_counts": table_counts, "documents_by_content_type": by_type})
     if fresh:
         contract.check_unique({k: v for k, v in table_counts.items() if k in inserted}, inserted)
     with conn.cursor() as cur:
-        # 판본을 켜는 것은 "분석이 이제 이것을 읽는다"는 뜻이라, 옛 스냅샷 옆에 한 벌 더 쌓기만 하는
-        # 반입(#38)은 끄고 부를 수 있어야 한다. 행은 어느 쪽이든 덮이지 않는다.
+        # Activating a version means "analysis reads this now", so an import (#38) that only stacks
+        # another copy beside an old snapshot has to be callable with activation turned off. The rows
+        # are never overwritten either way.
         if activate_snapshot:
             activate(cur, snapshot_id)
         result = counts(cur, TABLES)
