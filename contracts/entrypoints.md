@@ -366,7 +366,9 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   The first load in production was one `cosmai retrieval chunk --source mfds` run by the coordinator
   (2026-09-05, 4,735 chunks); a refresh of the ledger needs the same run again. Adding the source moved the index
   fingerprint (`index_signature` hashes the source set), so the first `search`/`ask`/`eval`/`terms` after #77
-  rebuilds the cache (`chunk` never reads it). Source: rows 8 and 13 of the #74 acceptance table on fork #69 — the seed alone lifted neither.
+  rebuilds the cache (`chunk` never reads it) — except under `--engine vector`, whose index is narrowed to the
+  four encoded sources by `index_sources` in `search`, `ask` and, since fork #82, `eval`, so its signature did
+  not move and no 380k-chunk rebuild happens there. Source: rows 8 and 13 of the #74 acceptance table on fork #69 — the seed alone lifted neither.
 - **The topic lexicon is the active version of `needs.aspect_lexicon`** (`ruleset='retrieval-topic'`, fork
   #8). Its aliases set both the BM25 token expansion (Kiwi user words + substring expansion) and the
   evaluation gold (`match_topics`), so the one way to change the lexicon is `cosmai lexicon
