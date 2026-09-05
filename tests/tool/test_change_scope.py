@@ -72,6 +72,9 @@ class Scope:
         self.klass = lines[0] if lines else ""
         self.reason = lines[1] if len(lines) > 1 else ""
         self.tests = lines[2].split() if len(lines) > 2 else []
+        # #232 Work 2: the fourth line names what a local push owes when it stays class A -- the
+        # computed set the hook can run instead, empty when the classifier truly cannot answer.
+        self.owed = lines[3].split() if len(lines) > 3 else []
 
 
 def classify(repo: Path, base: str) -> Scope:
@@ -500,6 +503,52 @@ def test_a_comment_only_trigger_file_next_to_a_real_trigger_change_is_class_a(re
     scope = classify(repo, base)
     assert scope.klass == "A", scope.raw
     assert "002.sql" in scope.reason, scope.reason
+
+
+# ---------------------------------------------------------------------------------------------
+# #232 Work 2: the fourth line -- what a still-class-A change owes locally once CI covers the
+# whole tree. A trigger change, a gate change and a dynamic-import-root change all have a
+# computed set; a truly unanswerable change (no base, an unmapped path) has none.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_trigger_change_next_to_a_mapped_change_owes_the_computed_set(repo: Path):
+    write(repo, "contracts/ddl/needs/001.sql", "CREATE TABLE a (id int);\n")
+    write(repo, "analysis/linker/rules.py", PY_BEFORE)
+    base = commit(repo, "before")
+    write(repo, "contracts/ddl/needs/001.sql", "CREATE TABLE a (id bigint);\n")
+    write(repo, "analysis/linker/rules.py", PY_CHANGED)
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
+    assert "tests/test_linker.py" in scope.owed, scope.raw
+    assert "tests/test_cli_help.py" in scope.owed, "the smoke set rides along in the owed set too"
+
+
+def test_the_gate_deciding_its_own_change_owes_the_computed_set(repo: Path):
+    scope = change(repo, "tool/change_scope.py", "x = 1\n", "x = 2\n")
+    assert scope.klass == "A", scope.raw
+    assert scope.owed, "the gate's own change still has a computed set to owe locally"
+
+
+def test_a_dynamic_import_root_owes_the_computed_set(repo: Path):
+    scope = change(repo, "analysis/registry.py", "x = 1\n", "x = 2\n")
+    assert scope.klass == "A", scope.raw
+    assert scope.owed, "a dynamic-import root still has a computed set to owe locally"
+
+
+def test_an_unmapped_path_owes_nothing_it_is_unanswerable(repo: Path):
+    scope = change(repo, "newthing/main.py", PY_BEFORE, PY_CHANGED)
+    assert scope.klass == "A", scope.raw
+    assert scope.owed == [], "an unmapped path has no computed set -- it stays A locally too"
+
+
+def test_a_missing_base_owes_nothing_it_is_unanswerable(repo: Path):
+    write(repo, "a.py", PY_BEFORE)
+    commit(repo, "one")
+    scope = classify(repo, "origin/nowhere")
+    assert scope.klass == "A", scope.raw
+    assert scope.owed == [], "no base means nothing about the change is known"
 
 
 # ---------------------------------------------------------------------------------------------

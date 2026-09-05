@@ -1,14 +1,21 @@
 """What verifying this change costs: `tool/change_scope.py <base>` (#215, #231).
 
-Three lines on stdout, for `tool/checks/test --changed <base>` to read:
+Four lines on stdout, for `tool/checks/test --changed <base>` to read:
 
     <A|B|C|N>
     <the reason, in one line>
     <the test paths to run, space separated>
+    <what a class-A verdict owes locally, space separated (#232 Work 2)>
 
 A is the whole suite, B is the computed set (the mapped tests, the readers map, the import closure
 and the smoke set, unioned), C is the format/lint/lang checks plus those test paths, and N is a tree
 identical to the base -- format and lint, and nothing recorded.
+
+The fourth line matters only when the verdict is A: CI now runs class A on every push (#232), so a
+local push only owes the computed set the change would have earned as class B -- the gate list, a
+dynamic-import root, a joining merge and the trigger list are all "A-owed" this way. It is empty
+when the change is truly unanswerable (no base, an unmapped path, a vanished test file): there is
+no smaller question to compute an answer to, so it stays class A locally too.
 
 The questions are asked in that order of authority: the gate list first (unconditional -- no proof
 talks it down), a dynamic-import root next (also unconditional -- nothing traces those imports),
@@ -358,7 +365,63 @@ def unreachable_tests(root: Path) -> list[str]:
     return sorted(t for t in test_files if t not in reachable)
 
 
-def classify(base: str) -> tuple[str, str, list[str]]:
+def try_computed_set(
+    root: Path,
+    files: list[str],
+    entries: dict[str, list[str]],
+    glob_readers: dict[str, list[str]],
+    none_list: list[str],
+    smoke: list[str],
+) -> list[str]:
+    """What a still-class-A change owes locally once CI, not this push, covers the whole tree
+    (#232 Work 2): the same map/readers/closure pass `classify()` runs for class B, but over the
+    full change -- trigger and gate files included -- rather than only what is left after they are
+    stripped out. Empty when some file in the change is genuinely unclaimed (an unmapped path, or a
+    test file that no longer exists): that change has no computed set, and stays class A locally too.
+    """
+    test_files_list = all_test_files(root)
+    test_files = set(test_files_list)
+    dependents = build_dependents(root) if any(p.endswith(".py") for p in files) else {}
+    mapped: set[str] = set()
+    readers: set[str] = set()
+    closure: set[str] = set()
+    for path in files:
+        if is_test_file(path):
+            if not exists_at_head(path):
+                return []
+            mapped.add(path)
+            continue
+        found = False
+        covered = scope_of(path, entries)
+        if covered is not None:
+            _, covers = covered
+            if covers:
+                mapped.update(covers)
+                found = True
+        found_readers = readers_of(root, path, test_files_list, glob_readers)
+        if found_readers:
+            readers.update(found_readers)
+            found = True
+        if path.endswith(".py"):
+            found_closure = import_closure(dependents, path, test_files)
+            if found_closure:
+                closure.update(found_closure)
+                found = True
+        if found:
+            continue
+        if is_none_path(path, none_list):
+            continue
+        if path.endswith(".md"):
+            continue
+        subdir_target = tests_subdir_target(path)
+        if subdir_target is not None:
+            mapped.update(subdir_target)
+            continue
+        return []
+    return sorted(mapped | readers | closure | set(smoke))
+
+
+def classify(base: str) -> tuple[str, str, list[str], list[str]]:
     root = toplevel()
     config = load(root)
     gate: list[str] = config["gate"]  # type: ignore[assignment]
@@ -370,27 +433,39 @@ def classify(base: str) -> tuple[str, str, list[str]]:
     none_list: list[str] = config.get("none", [])  # type: ignore[assignment]
 
     if not git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", check=False):
-        return FULL, f"the base {base} is not in this checkout, so nothing about the change is known", []
+        # No files are known either, so there is nothing to feed try_computed_set: unanswerable,
+        # locally as much as centrally (#232 Work 2).
+        return FULL, f"the base {base} is not in this checkout, so nothing about the change is known", [], []
 
     # --no-renames so a rename arrives as a delete and an add, each judged on its own.
     files = [f for f in git("diff", "--name-only", "--no-renames", f"{base}...HEAD").split("\n") if f]
     if not files:
-        return NOTHING, f"this tree is {base}'s own: there is no change to verify", []
+        return NOTHING, f"this tree is {base}'s own: there is no change to verify", [], []
 
     # The gate's own machinery decides before anything else is asked, and no proof talks it down: a
     # broken classifier that calls itself class C is the one failure nothing downstream can catch.
+    # It still may have a computed set to owe locally (#232 Work 2) -- being unconditional is not
+    # the same as being unanswerable.
     for path in files:
         for prefix in gate:
             if path.startswith(prefix):
-                return FULL, f"{path} is on the gate list in tests/scope.toml", []
+                owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
+                return FULL, f"{path} is on the gate list in tests/scope.toml", [], owed
 
     for path in files:
         if path in DYNAMIC_IMPORT_ROOTS:
-            return FULL, f"{path} is a dynamic-import module: nothing traces that import statically", []
+            owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
+            return (
+                FULL,
+                f"{path} is a dynamic-import module: nothing traces that import statically",
+                [],
+                owed,
+            )
 
     joined = merge_trigger(root, base)
     if joined:
-        return FULL, joined, []
+        owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
+        return FULL, joined, [], owed
 
     # The trigger list is next, but #230 lets tool/checks/invariants prove a changed trigger-list
     # file moved no code before it forces A -- a comment-only edit to contracts/ddl/ is not still an
@@ -398,7 +473,8 @@ def classify(base: str) -> tuple[str, str, list[str]]:
     trigger_files = [p for p in files if any(p.startswith(prefix) for prefix in trigger)]
     failing = invariant_failures(root, base, trigger_files)
     if failing:
-        return FULL, f"{failing[0]} is on the trigger list in tests/scope.toml", []
+        owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
+        return FULL, f"{failing[0]} is on the trigger list in tests/scope.toml", [], owed
     rest = [p for p in files if p not in trigger_files]
 
     test_files_list = all_test_files(root)
@@ -417,6 +493,7 @@ def classify(base: str) -> tuple[str, str, list[str]]:
                 return (
                     FULL,
                     f"{path} was a test file and is gone: nothing left in the tree measures that",
+                    [],
                     [],
                 )
             mapped.add(path)
@@ -464,12 +541,12 @@ def classify(base: str) -> tuple[str, str, list[str]]:
             mapped.update(subdir_target)
             code.append(path)
             continue
-        return FULL, f"{path} maps to no entry in tests/scope.toml", []
+        return FULL, f"{path} maps to no entry in tests/scope.toml", [], []
 
     # Nothing else in the change contributed a single test: whatever it touched, none of it is read
     # by anything (#231 item 3's "none" class carries no tests at all, not even the docs bundle).
     if none_only and not mapped and not readers and not closure and not code:
-        return DOCS, f"{len(files)} file(s): none of them are read by any test", []
+        return DOCS, f"{len(files)} file(s): none of them are read by any test", [], []
 
     # Only now the cheap class, and only for what is left: Markdown, plus code that tool/checks/
     # invariants proves moved nothing -- comments and docstrings, with every string constant compared.
@@ -478,6 +555,7 @@ def classify(base: str) -> tuple[str, str, list[str]]:
             DOCS,
             f"{len(files)} file(s): prose, or code tool/checks/invariants proves is unmoved",
             sorted(set(docs) | prose_tests | readers | closure),
+            [],
         )
     where = ", ".join(sorted(set(keys))) or "(no mapped package)"
     tests = sorted(mapped | readers | closure | set(smoke))
@@ -486,7 +564,7 @@ def classify(base: str) -> tuple[str, str, list[str]]:
         f"{len(mapped)} mapped · {len(readers)} readers · {len(closure)} closure · "
         f"{len(smoke)} smoke"
     )
-    return PACKAGE, reason, tests
+    return PACKAGE, reason, tests, []
 
 
 def main(argv: list[str]) -> int:
@@ -497,10 +575,11 @@ def main(argv: list[str]) -> int:
     if len(argv) != 1:
         print("usage: change_scope.py <base> | change_scope.py --unreachable", file=sys.stderr)
         return 2
-    verdict, reason, tests = classify(argv[0])
+    verdict, reason, tests, owed = classify(argv[0])
     print(verdict)
     print(reason)
     print(" ".join(tests))
+    print(" ".join(owed))
     return 0
 
 
