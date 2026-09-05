@@ -467,6 +467,10 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   `interfaces.md` §Per-source allocation, and the way to measure it is `tool/measure-source-mix`.
 - `terms` emits, as two stdout tables, the high-frequency nouns that dictionary **misses** and the
   document counts of the dictionary's own surfaces — material for a person to read and fix the CSV above.
+  With no `--source` it scans the four text sources (`corpus.ENCODED_SOURCES`, the set `embed` encodes), not
+  the ledger: the report grows the dictionary from consumer speech, and a filing's item and company names are
+  not speech — `--source mfds` opts the ledger in (fork #84; #77 had widened the default to five without
+  saying so).
   It is not dropped to a file: it is a snapshot of a corpus that grows daily, so keeping it in the repo
   makes it stale and, worse, makes it look like a second dictionary. Redirect it if you want to keep it.
 - `chunk` alone writes (`needs.retrieval_chunk`). The other four read that table and the files. The sources are in other schemas and are reached only by the SELECT in
