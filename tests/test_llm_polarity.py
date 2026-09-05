@@ -15,7 +15,7 @@ import pytest
 from analysis.lexicon import DISCOURSE_MARKERS, WISH_MARKERS
 from analysis.polarity import RulePolarity
 from analysis.polarity.llm import DEFAULT_MODEL, PROMPT_DATE, TRUNCATED, LLMPolarity, version_for
-from analysis.polarity.pricing import BudgetExceeded, Usage, UsageLedger
+from analysis.polarity.pricing import BudgetExceeded, PurposeCap, Usage, UsageLedger
 from analysis.polarity.prompt import LABEL_CRITERIA, system_prompt, user_prompt
 from analysis.types import AspectLexicon, AspectPattern, Polarity, PolarityRequest
 from db.seed._common import connect
@@ -143,6 +143,17 @@ def test_the_rule_implementation_answers_classify_many_by_repeating_classify():
     assert [r.polarity for r in many] == [r.polarity for r in one_by_one]
 
 
+def _rows_for(conn, purpose: str) -> int:
+    """How many ledger rows that purpose has in either state -- held (`reserve:p`) or settled (`p`)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT count(*) FROM llm_usage WHERE purpose IN (%s, %s)", (purpose, f"reserve:{purpose}")
+        )
+        row = cur.fetchone()
+    conn.rollback()
+    return int(row[0]) if row else 0
+
+
 @pytest.mark.postgres
 class TestAgainstAFakeClient:
     def _polarity(self, conn: Any, client: FakeClient, **kwargs: Any) -> LLMPolarity:
@@ -218,6 +229,43 @@ class TestAgainstAFakeClient:
             with pytest.raises(BudgetExceeded):
                 LLMPolarity("claude-sonnet-5", ledger, client=client).classify(SENTENCE, None, None, SUN)
         assert client.messages.calls == []  # there was no call at all
+
+    def test_a_purpose_cap_refuses_an_estimate_over_its_per_call_ceiling(self, needs_runtime_url: str):
+        """A cap belongs to one purpose and is read where the global stop is read -- under the same
+        lock, before the reservation row, so a refusal leaves the ledger as it found it."""
+        with connect(needs_runtime_url) as conn:
+            ledger = UsageLedger(conn, caps={"p": PurposeCap(per_call=Decimal("0.01"))})
+            with pytest.raises(BudgetExceeded, match="per-call cap"):
+                ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=1000))  # 1000 x $15/1M = $0.015
+            assert _rows_for(conn, "p") == 0
+
+    def test_a_per_day_cap_counts_todays_held_and_settled_rows_of_that_purpose(self, needs_runtime_url: str):
+        """settle overwrites the reservation row, so a call is one row under `reserve:p` or under
+        `p` -- summing both is the day's spend, not the same money twice."""
+        with connect(needs_runtime_url) as conn:
+            ledger = UsageLedger(conn, caps={"p": PurposeCap(per_day=Decimal("0.05"))})
+            ledger.record("claude-sonnet-5", "p", Usage(output_tokens=2_000))  # $0.030 settled
+            ledger.record("claude-sonnet-5", "reserve:p", Usage(output_tokens=1_000))  # $0.015 held
+            with pytest.raises(BudgetExceeded, match="per-day cap"):
+                ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=500))  # $0.0075, over $0.05
+            assert _rows_for(conn, "p") == 2  # nothing was reserved on the way to the refusal
+
+    def test_yesterdays_spend_does_not_count_against_todays_per_day_cap(self, needs_runtime_url: str):
+        with connect(needs_runtime_url) as conn:
+            ledger = UsageLedger(conn, caps={"p": PurposeCap(per_day=Decimal("0.05"))})
+            ledger.record("claude-sonnet-5", "p", Usage(output_tokens=2_000))
+            ledger.record("claude-sonnet-5", "reserve:p", Usage(output_tokens=1_000))
+            with conn.cursor() as cur:
+                cur.execute("UPDATE llm_usage SET called_at = now() - interval '1 day'")
+            conn.commit()
+            # The same call the test above refuses: with the $0.045 moved off today it is allowed.
+            assert ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=500)).usd == Decimal("0.0075")
+
+    def test_a_purpose_with_no_cap_is_not_charged_another_purposes_cap(self, needs_runtime_url: str):
+        with connect(needs_runtime_url) as conn:
+            caps = {"p": PurposeCap(per_call=Decimal("0.001"), per_day=Decimal("0.001"))}
+            ledger = UsageLedger(conn, caps=caps)
+            assert ledger.reserve("claude-sonnet-5", "q", Usage(output_tokens=1_000)).usd == Decimal("0.015")
 
     def test_the_ledger_is_a_required_argument_so_no_call_can_skip_the_hard_stop(self):
         with pytest.raises(TypeError):
