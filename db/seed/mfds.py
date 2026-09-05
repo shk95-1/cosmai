@@ -77,8 +77,11 @@ VALUES (%s, %s, %s, %s, %s, %s)
 ON CONFLICT (report_seq) DO NOTHING
 """
 # Read back after the DO NOTHING so a stored snapshot row can be compared with the file in hand.
+# Every fact the loader writes except `note`, in one order shared with `_written` (#83).
+SNAPSHOT_FACTS = ("label", "source_tag", "source_file", "source_rows", "max_report_date", "update_policy")
 STORED_SNAPSHOT_SQL: LiteralString = """
-SELECT source_rows, max_report_date, source_file FROM mfds_snapshot WHERE snapshot_id = %s
+SELECT label, source_tag, source_file, source_rows, max_report_date, update_policy
+FROM mfds_snapshot WHERE snapshot_id = %s
 """
 # Recomputing a stored key is an UPDATE, and the WHERE is what makes a no-op rerun rewrite no row.
 REKEY_SQL: LiteralString = """
@@ -149,26 +152,48 @@ def snapshot_facts(ledger: Sequence[Sequence[Any]]) -> SnapshotFacts:
     return SnapshotFacts(source_rows=len(dates), min_report_date=min(dates), max_report_date=max(dates))
 
 
+def _written(facts: SnapshotFacts) -> dict[str, Any]:
+    """The snapshot row this code would write, by column (`SNAPSHOT_FACTS` order). `note` is left out on
+    purpose: nothing downstream carries it, so a reworded note is not a refresh."""
+    return {
+        "label": SNAPSHOT_LABEL,
+        "source_tag": SOURCE_TAG,
+        "source_file": SOURCE_FILE,
+        "source_rows": facts.source_rows,
+        "max_report_date": facts.max_report_date,
+        "update_policy": UPDATE_POLICY,
+    }
+
+
 def check_snapshot(cur: psycopg.Cursor[Any], facts: SnapshotFacts) -> None:
-    """Refuse to load into a snapshot row that describes a different file.
+    """Refuse to load into a snapshot row that describes a different file -- or a different load.
 
     `INSERT ... ON CONFLICT DO NOTHING` on the snapshot plus a constant `SNAPSHOT_ID` on every
     registration is a silent merge waiting to happen: point the loader at a **grown** CSV and the new
     filings land under snapshot 1 while the freshly measured `source_rows` and `max_report_date` are
     thrown away, so the row that is supposed to say how stale the ledger is would describe the old
-    file. Refusing here makes a refresh what it should be -- a reviewed change that bumps
-    `SNAPSHOT_ID` and `SNAPSHOT_LABEL` in code and lands the new filings under their own snapshot.
+    file. The same `DO NOTHING` swallows a bump of the code's own constants over an unchanged file: a
+    new `SNAPSHOT_LABEL` alone keeps the old row, and since fork #77 the chunk text quotes the label
+    that loaded the row, so the chunks would name a label the ledger no longer has (#83). So every fact
+    this code writes is compared, not only the three measured off the file. Refusing here makes a
+    refresh what it should be -- a reviewed change that bumps `SNAPSHOT_ID` and `SNAPSHOT_LABEL` in
+    code and lands the new filings under their own snapshot.
     """
     cur.execute(STORED_SNAPSHOT_SQL, (SNAPSHOT_ID,))
     stored = cur.fetchone()
     if not stored:
         return
-    if tuple(stored) != (facts.source_rows, facts.max_report_date, SOURCE_FILE):
+    held: dict[str, Any] = dict(zip(SNAPSHOT_FACTS, stored, strict=True))
+    wanted = _written(facts)
+    moved = [column for column in SNAPSHOT_FACTS if held[column] != wanted[column]]
+    if moved:
+        detail = "; ".join(
+            f"{column} stored {held[column]!r}, in hand {wanted[column]!r}" for column in moved
+        )
         raise ValueError(
-            f"mfds_snapshot {SNAPSHOT_ID} holds (source_rows, max_report_date, source_file) "
-            f"{tuple(stored)!r} but the file in hand measures "
-            f"{(facts.source_rows, facts.max_report_date, SOURCE_FILE)!r}. "
-            "A grown or replaced ledger is a new snapshot: bump SNAPSHOT_ID and SNAPSHOT_LABEL."
+            f"mfds_snapshot {SNAPSHOT_ID} ({SOURCE_FILE}) does not describe this load: {detail}. "
+            "A grown or replaced ledger, or a relabelled load, is a new snapshot: bump SNAPSHOT_ID and "
+            "SNAPSHOT_LABEL."
         )
 
 
