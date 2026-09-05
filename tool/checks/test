@@ -92,7 +92,8 @@ cleanup() {
     cleanup_ran=1
     [ -z "$secret_file" ] || rm -f "$secret_file" || true
     [ -z "$container_name" ] || docker rm -f -v "$container_name" >/dev/null 2>&1 || true
-    [ -z "$suite_lock_dir" ] || rmdir "$suite_lock_dir" 2>/dev/null || true
+    # rm -rf, not rmdir: the slot holds a pid file (tool/checks/suite-lock) so it is never empty.
+    [ -z "$suite_lock_dir" ] || rm -rf "$suite_lock_dir" 2>/dev/null || true
     # The entry names the class it was verified at: a tree green for class C is green for a class-C
     # change, and the next push has to be able to see which question was answered (#215).
     [ -z "$suite_green" ] || tested_tree_record "$change_class" || true
@@ -131,11 +132,14 @@ if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_
         printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
         exit 1
     fi
-    # Our own leaked container from a killed run goes first, so it is not counted as somebody
-    # else's suite, and only then does this run queue for one of the host's three slots.
+    # The slot is taken before the container is touched: two overlapping pushes from this same
+    # worktree once removed each other's containers because the container went first (2026-09-05,
+    # #240) -- a run that does not hold this port's slot never gets to call it a leak.
+    suite_lock_acquire "$port"
+    # Only a run that now holds the slot reaches here, so a container still on this port is a leak
+    # from a killed run of this same worktree, never a live one -- this is what removes it.
     # rm -v: removes the postgres image's anonymous volume too (without it every run leaks a ~1GB volume)
     docker rm -f -v "$name" >/dev/null 2>&1 || true
-    suite_lock_acquire "$port"
     secret_file=$(mktemp)
     container_name=$name
     docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
