@@ -276,6 +276,40 @@ def test_loading_a_file_that_disagrees_with_the_stored_snapshot_is_refused(needs
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize(
+    ("constant", "bumped"),
+    [
+        ("SNAPSHOT_LABEL", "mfds-ydc-v0.5.0"),
+        ("SOURCE_TAG", "ydc v0.5.0 (0000000)"),
+        ("UPDATE_POLICY", "refreshed_by_hand"),
+    ],
+)
+def test_a_bump_of_a_written_fact_over_an_unchanged_file_is_refused(
+    needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch, constant: str, bumped: str
+):
+    """The check used to compare three of the seven facts the loader writes, so a label-only bump in code
+    over an unchanged file passed, `DO NOTHING` kept the old row, and since fork #77 the chunk text quoted a
+    label the ledger no longer had (fork #83). Every fact the code would write is compared now, and the
+    refusal names the column that moved."""
+    seed.run_all(needs_runtime_url, only=("mfds",))
+    stored_value = getattr(mfds, constant)
+    monkeypatch.setattr(mfds, constant, bumped)
+    facts = mfds.snapshot_facts(mfds.rows(EVAL_DIR))
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        before = _snapshot(cur)
+        with pytest.raises(ValueError) as raised:
+            mfds.check_snapshot(cur, facts)
+        conn.rollback()
+    message = str(raised.value)
+    assert (
+        constant.lower().removeprefix("snapshot_") in message
+    )  # the column: label, source_tag, update_policy
+    assert stored_value in message and bumped in message
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        assert _snapshot(cur) == before
+
+
+@pytest.mark.postgres
 def test_the_snapshot_check_passes_on_the_file_it_was_loaded_from(needs_runtime_url: str):
     """The guard has to be silent on the ordinary rerun, or `--only mfds` stops being idempotent."""
     seed.run_all(needs_runtime_url, only=("mfds",))

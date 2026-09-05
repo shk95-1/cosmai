@@ -224,3 +224,19 @@ def test_a_blocked_answer_keeps_stdout_free_of_everything_but_markdown(worked, m
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "no budget left (test)" in captured.err
+
+
+def test_terms_gets_no_source_set_unless_one_was_asked_for(worked):
+    """Every retrieval worker receives a concrete tuple from the CLI -- an absent `--source` becomes
+    `corpus.SOURCES` before the call -- so a default inside a worker is dead on the production path by
+    construction (the wave-5 review of fork #84 caught `terms.scan`'s). `terms` is the one exception:
+    the CLI passes None through and the worker's own default, the text sources, applies; an explicit
+    `--source` reaches it as given, and the other workers keep the five."""
+    from analysis.retrieval import corpus
+
+    assert main(["retrieval", "terms"]) == 0
+    assert worked["terms"]["sources"] is None
+    assert main(["retrieval", "terms", "--source", "mfds"]) == 0
+    assert worked["terms"]["sources"] == ("mfds",)
+    assert main(["retrieval", "search", "--query", "x"]) == 0
+    assert worked["search"]["sources"] == corpus.SOURCES

@@ -6,9 +6,10 @@ Neither raises an exception and only the ranking goes wrong, so it is pinned dow
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
-from analysis.retrieval import bm25
+from analysis.retrieval import bm25, topics
 from analysis.retrieval.bm25 import (
     DICTIONARIES,
     Index,
@@ -18,6 +19,7 @@ from analysis.retrieval.bm25 import (
     tokenize,
     topic_words,
 )
+from tests.retrieval.conftest import csv_topics
 
 
 def test_the_kiwi_dictionaries_ship_with_the_package():
@@ -119,3 +121,122 @@ def test_mismatched_lengths_are_refused():
     except ValueError:
         return
     raise AssertionError("doc_ids 와 texts 길이가 달라도 통과했다")
+
+
+# ---------- the tokenizer is built once per dictionary, not once per `topics.use()` (#81) ----------
+
+
+def _korean() -> str:
+    """Some Korean to tokenize, taken from the dictionary rather than written here (the repository is in
+    English; Korean a test needs is data)."""
+    return next(a for e in topics.active().entries for a in e["ko"] if " " not in a)
+
+
+def test_reinstalling_the_same_dictionary_keeps_the_tokenizer():
+    """The autouse fixture installs the repo dictionary before every test and forgets it after. Each of the
+    325 retrieval tests paid a Kiwi build for that (measured: 24 of the suite's 25 slowest tests)."""
+    before = bm25.kiwi()
+    topics.forget()
+    topics.use(csv_topics())
+    assert bm25.kiwi() is before
+
+
+def test_reinstalling_the_same_dictionary_builds_no_kiwi_at_all(monkeypatch):
+    """`topic_words` used to build a second, bare Kiwi for its decision on every rebuild. With the tokenizer
+    kept, no Kiwi at all is built for a dictionary this process has seen."""
+    import kiwipiepy
+
+    built: list[object] = []
+    real = kiwipiepy.Kiwi
+
+    class Counting(real):
+        def __init__(self, *args, **kwargs):
+            built.append(self)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(kiwipiepy, "Kiwi", Counting)
+    text = _korean()
+    bm25.tokenize(text)  # warm: whatever this process still has to build, it builds here
+    built.clear()
+    topics.forget()
+    topics.use(csv_topics())
+    bm25.tokenize(text)
+    assert built == []
+
+
+def test_a_borrowed_fingerprint_over_other_content_does_not_share_the_cache():
+    """The cache key is the fingerprint, and `from_rows` makes it from the whole content -- only a `Topics`
+    built by hand (tests do) can carry one over other content. That one gets its own cache, the tokenizer
+    included, rather than the other dictionary's tokens (#81 work item 2). Proved on the expansion list: the
+    same cache object holds it and the tokenizer, and it costs no Kiwi build."""
+    installed = topics.active()
+    aliases = [a for e in installed.entries for a in e["ko"] if " " not in a]
+    compound = aliases[0] + aliases[1]  # a word no dictionary carries
+    assert compound not in expand_words()
+    extra = {
+        "topic": "borrowed",
+        "topic_type": "attribute",
+        "trend_use": True,
+        "ko": [compound],
+        "latin": [],
+        "mfds_inci": [],
+        "note": "",
+    }
+    forged = replace(installed, entries=(*installed.entries, extra))
+    assert forged.fingerprint == installed.fingerprint
+    topics.use(forged)
+    assert compound in expand_words()
+
+
+def test_switching_back_to_the_previous_dictionary_reuses_its_cache():
+    """One test in the suite installs a wider dictionary; every test after it comes back to the repo
+    dictionary. A cache that held one dictionary rebuilt Kiwi on that return, so the previous dictionary's
+    cache stays alongside the active one. Proved on the expansion list: the same object comes back."""
+    installed = topics.active()
+    words = expand_words()
+    wider = _with_extra_alias(installed, "wider")
+    assert wider.fingerprint != installed.fingerprint
+    topics.use(wider)
+    assert expand_words() is not words
+    topics.use(csv_topics())
+    assert expand_words() is words
+
+
+def _with_extra_alias(installed: topics.Topics, topic: str) -> topics.Topics:
+    """A dictionary of another fingerprint: the installed one plus one alias no dictionary carries."""
+    aliases = [a for e in installed.entries for a in e["ko"] if " " not in a]
+    extra = {
+        "topic": topic,
+        "topic_type": "attribute",
+        "trend_use": "true",
+        "ko": [aliases[0] + aliases[1] + topic],
+    }
+    return topics.from_rows(
+        [
+            (
+                e["topic"],
+                a,
+                {"term_kind": "ko", "topic_type": e["topic_type"], "trend_use": str(e["trend_use"])},
+            )
+            for e in (*installed.entries, extra)
+            for a in e["ko"]
+        ],
+        1,
+    )
+
+
+def test_the_dictionary_used_most_recently_survives_a_third_one():
+    """Two caches are kept, and the one to go when a third dictionary arrives is the one used least
+    recently -- not the one installed first. The repo dictionary is installed before every test, so it
+    is always the most recent one when a test installs something else."""
+    installed = topics.active()
+    words = expand_words()
+    first, second = _with_extra_alias(installed, "first"), _with_extra_alias(installed, "second")
+    topics.use(first)
+    expand_words()
+    topics.use(csv_topics())
+    assert expand_words() is words
+    topics.use(second)
+    expand_words()
+    topics.use(csv_topics())
+    assert expand_words() is words

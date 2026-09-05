@@ -1,4 +1,4 @@
-"""Blocks a query with no grounding (fork #48, `df_gate` in ydc `vector_threshold.py`).
+"""Blocks a query with no grounding (fork #48, `df_gate` in ydc `vector_threshold.py`, `v0.3.0` `e5a1b00`).
 
 **The gate applies to `vector` and `hybrid` only** (`pipeline.search`). `bm25` ignores a word with df 0 by
 giving it idf 0 and answers with the words that are left, so the gate would turn a partial answer into 0
