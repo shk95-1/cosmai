@@ -613,3 +613,45 @@ def test_an_ordinary_merge_into_an_unmoved_main_is_still_a_joining_merge(repo: P
     scope = classify(repo, base)
     assert scope.klass == "A", scope.raw
     assert "merge" in scope.reason.lower(), scope.reason
+
+
+# ---------------------------------------------------------------------------------------------
+# #239: a short or extensionless basename ("test", "status", ...) is matched by its path, never
+# by the bare basename -- the #232 push selected 174 test files this way.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_tool_checks_test_selects_its_own_reader_and_not_a_daisomall_test():
+    module = _load_real_module()
+    test_files = module.all_test_files(REPO_ROOT)
+    found = module.readers_of(REPO_ROOT, "tool/checks/test", test_files, {})
+    assert "tests/tool/test_pre_push_hook.py" in found, found
+    assert "tests/collectors/commerce/sources/test_daisomall.py" not in found, found
+
+
+def test_tool_status_selects_its_own_reader_and_not_an_unrelated_test():
+    module = _load_real_module()
+    test_files = module.all_test_files(REPO_ROOT)
+    found = module.readers_of(REPO_ROOT, "tool/status", test_files, {})
+    assert "tests/tool/test_status_tool.py" in found, found
+    assert "tests/retrieval/test_bm25.py" not in found, found
+
+
+def test_an_ordinary_basename_still_matches_by_name_not_only_path():
+    # contracts/formats.md is an ordinary name (not short, not extensionless, not on the generic
+    # list) -- it keeps the basename rule that #231 built.
+    module = _load_real_module()
+    test_files = module.all_test_files(REPO_ROOT)
+    found = module.readers_of(REPO_ROOT, "contracts/formats.md", test_files, {})
+    assert "tests/test_corpus_import.py" in found, found
+
+
+def test_unreachable_names_no_more_than_the_three_files_it_named_before():
+    module = _load_real_module()
+    unreachable = set(module.unreachable_tests(REPO_ROOT))
+    before = {
+        "tests/test_conftest_guard.py",
+        "tests/test_lineage_reader_grants.py",
+        "tests/test_no_orphaned_test_files.py",
+    }
+    assert unreachable <= before, unreachable

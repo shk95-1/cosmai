@@ -142,21 +142,59 @@ def all_test_files(root: Path) -> list[str]:
     return sorted(p for p in out if p.rsplit("/", 1)[-1].startswith("test_") and p.endswith(".py"))
 
 
+# A basename this generic is a substring of nearly every test file in the tree -- "test", "status"
+# and "issue" alone selected 174 files for the #232 push (#239). Kept as a named constant, one
+# comment: extend it when a new bare-word basename shows the same over-selection, never inline.
+GENERIC_BASENAMES = frozenset(
+    {
+        "test",
+        "status",
+        "issue",
+        "format",
+        "lint",
+        "paths",
+        "todo",
+        "js",
+        "journal",
+        "ownership",
+        "prerequisite",
+        "invariants",
+    }
+)
+
+
+def _is_generic_basename(basename: str) -> bool:
+    """A basename that would over-match by itself: no extension at all, five characters or fewer,
+    or a plain dictionary word from the hand-picked list above (#239).
+    """
+    return "." not in basename or len(basename) <= 5 or basename in GENERIC_BASENAMES
+
+
 def readers_of(
     root: Path, resource: str, test_files: list[str], glob_readers: dict[str, list[str]]
 ) -> set[str]:
     """Every test that names `resource` by basename or by repo-relative path, plus the hand-listed
     glob readers (#231 Work 1b, 5) -- a test that discovers the file by glob/rglob/iterdir instead
     of naming it cannot be found by a text search, so those are pinned in tests/scope.toml.
+
+    A generic basename (#239) is never matched bare: "test" or "status" alone is a substring of
+    nearly every test file, so those are matched only by the full repo-relative path
+    ("tool/checks/test") and by the path's last two segments ("checks/test") -- never the basename.
     """
     found: set[str] = set()
     basename = resource.rsplit("/", 1)[-1]
+    segments = resource.split("/")
+    last_two = "/".join(segments[-2:]) if len(segments) >= 2 else None
+    generic = _is_generic_basename(basename)
     for tf in test_files:
         try:
             text = (root / tf).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if resource in text or basename in text:
+        if generic:
+            if resource in text or (last_two is not None and last_two in text):
+                found.add(tf)
+        elif resource in text or basename in text:
             found.add(tf)
     for pattern, tests in glob_readers.items():
         if fnmatch.fnmatch(resource, pattern):
@@ -301,12 +339,13 @@ def merge_trigger(root: Path, base: str) -> str | None:
 
 
 # Directories readers_of's basename/path scan is meant for -- data a test reads by name rather
-# than code it imports (#231 Work 1b, review 2026-09-05 blocker 4). Not playbook/: it is entirely
-# on the `none` list already (nothing imports it, tests/scope.toml says so), and its snippets/
-# subdirectory carries copies of tool/checks/{test,format,lint,prerequisite} named with exactly
-# those four generic basenames -- a naive basename scan over them matches nearly every test file in
-# the tree (the word "test" alone) and would make the audit blind to real gaps, not accurate.
-READER_SCAN_DIRS = ("contracts/", "db/", "stack/", "eval/")
+# than code it imports (#231 Work 1b, review 2026-09-05 blocker 4). playbook/ returned here in
+# #239: its snippets/ subdirectory carries copies of tool/checks/{test,format,lint,prerequisite}
+# named with exactly those four generic basenames, which used to make a naive basename scan match
+# nearly every test file in the tree (the word "test" alone); readers_of's generic-basename rule
+# now matches those only by path ("tool-checks/test"), which none of those copies' actual readers
+# use, so the scan is harmless and the audit sees the directory again.
+READER_SCAN_DIRS = ("contracts/", "db/", "stack/", "eval/", "playbook/")
 
 
 def non_code_reader_candidates(root: Path, trigger: list[str]) -> list[str]:
