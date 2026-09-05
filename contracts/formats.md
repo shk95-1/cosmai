@@ -218,9 +218,11 @@ not an orphan **comment**.
   that first carried it (`snapshot_id` says which) — a filing that changed under the same sequence is
   neither re-entered nor updated; it stays as first loaded. That rests on a written assumption: MFDS does
   not re-file under a used report number. The loader refuses a silent merge: after the snapshot row's
-  `DO NOTHING` it reads the row back and raises when the file's `source_rows`, `max_report_date` or
-  `source_file` differ from what is stored, so a refresh is a reviewed bump of the snapshot id in code,
-  never a rerun over a grown file. `entp_key` is loader-filled (`CHECK (entp_key <> '')`, a company that
+  `DO NOTHING` it reads the row back and raises, naming the column, when any fact it writes — `label`,
+  `source_tag`, `source_file`, `source_rows`, `max_report_date`, `update_policy` (`note` excepted: nothing
+  downstream carries it) — differs from what is stored, so a refresh is a reviewed bump of the snapshot id
+  in code, never a rerun over a grown file and never a relabelled rerun over the same one (fork #83: a
+  label-only bump used to pass, and since #77 the chunk text quotes the label that loaded the row). `entp_key` is loader-filled (`CHECK (entp_key <> '')`, a company that
   folds to nothing is refused before any DB contact); changing `normalize_company` therefore needs
   `db/seed/mfds.py` `rekey()` over the stored rows — a rerun of the load cannot repair a key, which is why
   028 grants `needs_runtime` UPDATE as well. `update_policy` has no CHECK — this vocabulary is this

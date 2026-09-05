@@ -9,8 +9,9 @@ Widen `KIWI_TAGS` or delete the one-character-noun rule and particles leak into 
 exception and only changes the ranking quietly -- the ydc list lives here only as the test vector that
 catches that regression.
 
-One test running all 30 is not a matter of taste: the autouse fixture that sets the active dictionary up
-throws Kiwi away (`bm25._forget_topics`), so one parameter is one whole morphological analyzer.
+One test running all 30 rather than one parameter per particle: the list is one test vector, and until #81 the
+autouse fixture that sets the active dictionary up threw Kiwi away after every test, so one parameter would
+have been one whole morphological analyzer.
 """
 
 from __future__ import annotations

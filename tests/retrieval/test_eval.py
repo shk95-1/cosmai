@@ -466,3 +466,82 @@ def test_the_gold_the_queries_and_the_row_stamp_stand_on_the_lexicon_the_run_fix
     for row in rows:
         assert (row.topic_id, row.query) in expected, f"query from another lexicon: {row}"
         assert row.gold_size == len(gold[row.topic_id]), f"gold from another lexicon: {row}"
+
+
+# ---------- the vector path stands on the sources the store carries (#82) ----------
+
+
+@pytest.fixture
+def with_a_filing(loaded):
+    """The text chunks plus one ledger chunk -- the source the vector store never carries (#77). Its text
+    names the same topic as d1..d3, so on the lexical board it is an answer and on the vector board it can
+    only be a wrong one."""
+    from analysis.retrieval import corpus, topics
+
+    gold = retrieval_eval.gold_from_chunks(loaded)
+    topic = next(t for t, docs in gold.items() if "d1" in docs)
+    alias = next(e["ko"][0] for e in topics.active().entries if e["topic"] == topic)
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES ('f1#0', 'f1', %s, 0, %s, 'z')",
+            (corpus.MFDS, f"{alias} report no. 1 registered 2020-01-01"),
+        )
+    loaded.commit()
+    return loaded, topic
+
+
+def _store_over_the_text_sources(conn, tmp_path):
+    """A vector store the way `retrieval embed` burns it: the encoded sources only, a filing never in it."""
+    import numpy as np
+
+    from analysis.retrieval import corpus, vectors
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT chunk_id, source FROM retrieval_chunk WHERE source = ANY(%s) ORDER BY chunk_id",
+            (list(corpus.ENCODED_SOURCES),),
+        )
+        rows = cur.fetchall()
+    conn.commit()
+    matrix = np.zeros((len(rows), vectors.DIM), dtype="float32")
+    matrix[:, 0] = 1.0
+    out = tmp_path / "e5base"
+    manifest = {
+        "model": "m",
+        "l2_normalized": True,
+        "query_prefix": "query: ",
+        "dim": vectors.DIM,
+        "sources": list(corpus.ENCODED_SOURCES),
+    }
+    vectors.save(out, matrix, rows, manifest)
+    return out
+
+
+def test_the_vector_path_stands_on_the_sources_the_store_carries(with_a_filing, monkeypatch, tmp_path):
+    """#77 narrowed `ask` and `search` to the encoded sources on the vector path through `index_sources`;
+    `eval.run` kept building the index, the gold and the ranking on the raw source set, so with the
+    five-source default a filing entered a gold the vector store can never return -- exactly the failure
+    `gold_from_chunks` warns about (shk95-1/cosmai#235 finding 1). The rows with the default sources are the
+    rows with the four text sources passed explicitly; the lexical engine keeps the filing as an answer."""
+    from analysis.retrieval import corpus, embed, vectors
+
+    conn, topic = with_a_filing
+
+    class FakeEncoder:
+        def encode(self, texts, **_kw):
+            return [[1.0] + [0.0] * (vectors.DIM - 1) for _ in texts]
+
+    monkeypatch.setattr(embed, "load_encoder", lambda *_a, **_kw: FakeEncoder())
+    out = _store_over_the_text_sources(conn, tmp_path)
+
+    by_default = retrieval_eval.run(conn, "literal", engine="vector", store=out, cache_dir=None)
+    explicit = retrieval_eval.run(
+        conn, "literal", engine="vector", sources=corpus.ENCODED_SOURCES, store=out, cache_dir=None
+    )
+    rows = {r.query: r for r in by_default}
+    # d1 d2 d3 -- the filing f1 is no answer the store can give
+    assert rows[topic].gold_size == 3, rows[topic]
+    assert by_default == explicit
+    lexical = {r.query: r for r in retrieval_eval.run(conn, "literal", engine="bm25", cache_dir=None)}
+    assert lexical[topic].gold_size == 4  # the filing is a lexical answer

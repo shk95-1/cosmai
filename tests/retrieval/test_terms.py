@@ -88,3 +88,42 @@ def test_the_report_says_how_to_put_a_term_into_the_dictionary(corpus):
     rendered = terms.render(terms.scan(corpus))
     assert "cosmai lexicon" in rendered
     assert terms.DICTIONARY_CSV.name in rendered
+
+
+# ---------- the default source set is the text sources; the ledger is opt-in (#84) ----------
+
+
+@pytest.fixture
+def with_a_filing(corpus):
+    """The ledger beside the text: one `mfds` chunk carrying the same ingredient sentence as a text
+    document, so whether it was walked shows in the document count and in that term's count."""
+    from analysis.retrieval import corpus as sources
+
+    with corpus.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES ('f1#0', 'f1', %s, 0, %s, 'z')",
+            (sources.MFDS, INGREDIENT[0]),
+        )
+    corpus.commit()
+    return corpus
+
+
+def test_terms_scans_the_text_sources_unless_the_ledger_is_asked_for(with_a_filing):
+    """The report exists to grow the topic dictionary from consumer speech, and a filing's item and company
+    names are not speech. Fork #77 added `mfds` to `corpus.SOURCES` and the default scan widened to five
+    sources without a word (shk95-1/cosmai#235 finding 2); the default is the encoded text sources now,
+    like `embed`, and `--source mfds` opts the ledger in."""
+    from analysis.retrieval import corpus as sources
+
+    text_documents = len(TOPICAL) + len(CONTROL) + len(INGREDIENT)
+    by_default = terms.scan(with_a_filing)
+    assert sum(by_default.documents.values()) == text_documents
+    everything = terms.scan(with_a_filing, sources=sources.SOURCES)
+    assert sum(everything.documents.values()) == text_documents + 1
+    ledger_only = terms.scan(with_a_filing, sources=(sources.MFDS,))
+    assert sum(ledger_only.documents.values()) == 1
+    # The same term is counted once from the text and twice with the ledger in.
+    term = next(t for (_topic, t) in by_default.term_docs if t in INGREDIENT[0])
+    assert by_default.term_docs[next(k for k in by_default.term_docs if k[1] == term)] == 1
+    assert everything.term_docs[next(k for k in everything.term_docs if k[1] == term)] == 2
