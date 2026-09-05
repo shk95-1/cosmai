@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, inspect
 
-from analysis.retrieval import corpus
+from analysis.retrieval import corpus, embed
 from analysis.retrieval.chunks import FIELDS
 from cosmai.cli import RETRIEVAL_SOURCES
 
@@ -221,3 +221,11 @@ def test_the_baseline_names_the_store_the_vector_lines_stand_on():
     # A table measured with a store whose vectors do not cover the corpus has to say so inside the table.
     assert int(stamped.group(1)) == int(chunks.group(1).replace(",", ""))
     assert "bm25 두 줄은 그 판본 위의 값이 아니다" in text
+
+
+def test_the_ledger_is_a_searched_source_but_never_an_encoded_one():
+    """#77 decided a fifth source rather than a router branch, and BM25 only. The comment in embed.py
+    promised the exclusion would be one line here the day such a source arrived; this is the line that
+    says it stayed one line -- everything else is encoded."""
+    assert corpus.MFDS in corpus.SOURCES
+    assert set(embed.ENCODED_SOURCES) == set(corpus.SOURCES) - {corpus.MFDS}

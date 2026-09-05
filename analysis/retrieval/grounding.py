@@ -2,7 +2,8 @@
 
 **The gate applies to `vector` and `hybrid` only** (`pipeline.search`). `bm25` ignores a word with df 0 by
 giving it idf 0 and answers with the words that are left, so the gate would turn a partial answer into 0
-results, and that loss is not worth it.
+results, and that loss is not worth it. `ask` applies it to every engine (#76): the LLM call is paid, and
+a df-0 name makes the model refuse anyway.
 
 **This stands in for a cosine floor.** The contract's §Vector floor threw the floor out on a verdict decided
 before measuring -- the top-cosine distributions of real queries (61 topic aliases) and of ingredient names

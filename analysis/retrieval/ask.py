@@ -26,12 +26,16 @@ from psycopg.types.json import Json
 
 from analysis.crosscheck import PAPER_HOLD
 from analysis.polarity.llm import API_KEY, ESTIMATED_TOKENS_PER_CHAR, MAX_RETRIES, usage_of
-from analysis.polarity.pricing import BudgetExceeded, Usage, UsageLedger, price_for
+from analysis.polarity.pricing import BudgetExceeded, PurposeCap, Usage, UsageLedger, price_for
 from analysis.retrieval import bm25, grounding, pipeline, topics
 from analysis.retrieval.vectors import StoreMissing
 
 DEFAULT_MODEL = "claude-sonnet-5"
 PURPOSE = "retrieval_ask"
+# #78/#80, user decision 2026-09-05. The per-call value is read against the reservation, which
+# carries the whole MAX_TOKENS output ceiling below, not against what the call turns out to cost --
+# so it is well above the $0.042 a call has actually cost. Upstream #136 moves both to a knob.
+ASK_CAP = PurposeCap(per_call=Decimal("0.20"), per_day=Decimal("1.00"))
 # ydc's ceiling was 1100, which was a ceiling for the answer alone. Adaptive thinking spends the
 # same budget (analysis/polarity/llm.py:26-29, where a one-sentence classification is given 4096),
 # so at 1100 the thinking eats the three sections and the call is billed for nothing.
@@ -299,38 +303,52 @@ def run(
     # Refused before the corpus is touched: an unpriced model is the caller's typo, and making a
     # person wait through an index build to hear about it teaches nothing.
     price_for(model)
+    # The vector path gates on the sources the store actually carries, and `search` narrows the same
+    # way -- measured once here so the index, the gate, the fingerprint and the ranking are one
+    # decision rather than four (#77 review).
+    grounded_in = pipeline.index_sources(engine, sources)
     # Opened once and handed to `search` below -- rule 6, the log column and the ranking all stand
     # on this one index (`eval.run` passes the same handle down for the same reason).
-    index, origin = pipeline.load_index(conn, sources, cache_dir=cache_dir)
+    index, origin = pipeline.load_index(conn, grounded_in, cache_dir=cache_dir)
     # The version axes are read here, beside the index they describe, and never re-read. An
     # `activate` landing later in the run would otherwise stamp the row with a lexicon the evidence
     # never stood on -- the property #68 pinned for eval rows.
     dictionary = topics.use_active(conn)
-    signature = pipeline.index_signature(conn, sources)
-    count, _latest = pipeline.chunk_census(conn, sources)
+    # The fingerprint names the index that was opened, not the one the flags asked for: on the vector
+    # path those differ, and a row claiming an index nobody built cannot be traced back.
+    signature = pipeline.index_signature(conn, grounded_in)
+    # The census stands on the same set as the fingerprint, or the note's chunk count describes an index
+    # the fingerprint does not (chunk_census's own docstring guards that pairing).
+    count, _latest = pipeline.chunk_census(conn, grounded_in)
     # load_index installed the active query stopword list, which tokenize_query reads.
     frequency = token_frequency(index, query)
-    # The gate is `search`'s, checked here only to record its answer: bm25 is not gated at all
-    # (`pipeline.search`), so for that engine there is nothing to ask.
-    gate = grounding.check(query, index) if engine != "bm25" else None
-    gate_ok = gate is None or gate.ok
+    # The paid path is gated whatever the engine, because a df-0 name makes the model refuse anyway
+    # (#76, row 1 of the #74 table); `search` keeps #48's rule for the unpaid path.
+    gate = grounding.check(query, index)
+    gate_ok = gate.ok
     # The store is opened after the gate and before `search`, which keeps `search`'s own order (a
     # host with no vector file sees StoreMissing only once the gate has passed) while opening the
     # 1.2GB matrix once. `search` prints no coverage line when it is handed a store, so the warning
     # below is the only one.
     loaded = _open_store(store) if engine != "bm25" and gate_ok else None
     stamp, coverage = (loaded.stamp, pipeline.coverage_note(conn, loaded) or "") if loaded else ("", "")
-    hits = pipeline.search(
-        conn,
-        query,
-        engine=engine,
-        top=top,
-        sources=sources,
-        store=store,
-        cache_dir=cache_dir,
-        index=index,
-        vector_store=loaded,
-    )
+    if gate_ok:
+        hits = pipeline.search(
+            conn,
+            query,
+            engine=engine,
+            top=top,
+            sources=sources,
+            store=store,
+            cache_dir=cache_dir,
+            index=index,
+            vector_store=loaded,
+        )
+    else:
+        # Said here because the corpus is no longer searched at all -- this is the line `search`
+        # printed for the vector path, and it is the only reason the person gets for the refusal.
+        print(gate.note, file=sys.stderr)
+        hits = []
     evidence = fold(hits, origin)
     note = "note: " + " · ".join(
         part
@@ -360,7 +378,8 @@ def run(
         # Rule 3, applied by the code. The model is not asked to refuse; it is not asked at all.
         return Answer(status="no_evidence", text=CANNOT_ANSWER, prompt=prompt, evidence=evidence, note=note)
 
-    spend = ledger or UsageLedger(conn)
+    # A ledger handed in by a caller keeps whatever caps it was built with.
+    spend = ledger or UsageLedger(conn, caps={PURPOSE: ASK_CAP})
     params = {
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -433,6 +452,7 @@ def report(answer: Answer, stream=sys.stderr) -> None:
 
 
 __all__ = [
+    "ASK_CAP",
     "BLOCKING",
     "CANNOT_ANSWER",
     "NO_ANSWER",

@@ -1,9 +1,10 @@
 """Puts the sources side by side and finds where they disagree (fork #7). **Nothing is summed.**
 
-규칙의 출처는 ydc `source_composition.py` · `commerce_crosscheck.py` · `cross_source.py` 이고, 슬라이스를
-import 하지 않고 옮겨 적었다. **핀(`v0.1.0` `02440ab`)이 아니라 `v0.3.0`(`e5a1b00`)이다** — 성분 키와
-선크림 문맥이 그 판에서 정정됐고 `cross_source.py` 는 핀 사본에 아예 없었다. 대조는
-`tool/compare-ydc-crosscheck` 가 ydc 레포를 태그째 읽어 돌린다.
+The rules come from ydc `source_composition.py` · `commerce_crosscheck.py` (shk95-1/cosmai-ydc-old `v0.1.0`
+`02440ab`) and `cross_source.py` (`v0.3.0` `e5a1b00`, not the v0.1.0 lineage — the ingredient keys and the
+sunscreen context were corrected in that tag, and the pinned copy never held the file) and were written over
+rather than imported. The comparison is run by `tool/compare-ydc-crosscheck`, which reads the ydc repo at the
+tag.
 
 Why they are not summed: the denominator differs per source -- the composition is against that source's sum
 of 13-topic mentions, the platform attribute rating is the response share inside a `topic_group`, and the

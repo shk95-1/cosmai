@@ -225,6 +225,10 @@ not an orphan **comment**.
   `db/seed/mfds.py` `rekey()` over the stored rows — a rerun of the load cannot repair a key, which is why
   028 grants `needs_runtime` UPDATE as well. `update_policy` has no CHECK — this vocabulary is this
   section's to grow and the DDL is additive only.
+- **Searched since fork #77.** Each filing is also a retrieval document (`source='mfds'`, one chunk of
+  item name · company · `report no. <report_seq>` · `registered <report_date>` · the snapshot label, BM25 only — `entrypoints.md`, the retrieval block). A refresh (a second
+  `mfds_snapshot` row) therefore also means a `cosmai retrieval chunk` run, and the chunk text carries the
+  snapshot label that loaded the row.
 
 ## The ref grammar of a mention row (A20)
 | src | `ref` | note |

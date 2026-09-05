@@ -1132,10 +1132,11 @@ that `corpus_mention` has already answered "which documents speak of this topic"
   공백으로만 나열한 성분표는 성분행 22,705 중 **60**행(고유명 59)이다.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
-**승격 원본은 핀(`v0.1.0 02440ab`)이 아니다** — `cross_source.py` 는 그 뒤 `v0.3.0`(`e5a1b00`)에서 성분 키와
-선크림 문맥이 정정됐고 승격한 것은 그 판이다. 핀 사본(`analysis/slices/ydc/`)은 그 파일을 갖고 있지도
-않았고 #9 가 지웠다 — 태그에서 그 파일을 꺼내 **손대지 않고 돌리는** 절차와 대조 코드는
-`tool/compare-ydc-crosscheck` 한 자리에 있다. 맞대는 것 셋:
+**The promoted source is not the import pin** (`v0.4.0` `76db718`, `versioning.md`) — `cross_source.py` had its
+ingredient keys and its sunscreen context corrected in `v0.3.0` (`e5a1b00`), and that revision is what was
+promoted. The pinned copy (`analysis/slices/ydc/`, `v0.1.0`) never held that file and #9 deleted the copy — the
+procedure that takes the file out of the tag and runs it **untouched**, and the comparison code, sit in one
+place, `tool/compare-ydc-crosscheck`. Three things are put side by side:
 - **상수** 열(키 표 · `SUN_WORDS` · `PAPER_HOLD` · `GROUP_MAP` · 극성 힌트 둘 · `MIN_PRODUCTS` · 해석 문구
   셋)을 ydc 모듈에서 직접 읽어 비교한다 — 옮겨 적다 어긋난 한 글자가 여기서 걸린다.
 - **규칙** 열여덟(`ranks` · `positive_rate` · `polarity` 다섯 · 평가 해석 넷 · `count_terms` 넷)에 같은
@@ -1794,10 +1795,15 @@ judgment is the six lines of §Retrieval measurements, measured on the same foot
 is the same place §Evidence pinned for its own two lines.
 
 ## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
-The LLM is the last layer and makes no conclusion: `search` finds the evidence (gate included), the code folds
-it to one item per document, and the model only says what that evidence says. The decision that this layer
-exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 20 queries
-re-measured on our corpus — is fork #74 and is **not** in this section. The origin is ydc `rag/generate.py`
+The LLM is the last layer and makes no conclusion: `search` finds the evidence, the code folds it to one item
+per document, and the model only says what that evidence says. Since fork #77 the evidence can be an MFDS
+filing (`source='mfds'`, BM25 only — `entrypoints.md`, the retrieval block): a report number or a registered product name
+is answered from the ledger, and the chunk text ends with the snapshot label so the answer says which copy it
+read; "recent" and formulation properties (inorganic, SPF) are not in the ledger and stay unanswered from it. The grounding gate is engine-independent here
+(#76): `ask` checks it before searching whatever `--engine` says, because the call is paid and a df-0 name makes
+the model refuse anyway (row 1 of the #74 table on #69); `search` itself keeps #48's rule and leaves bm25 ungated. The decision that this layer
+exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 17 listed queries
+re-measured on our corpus — is fork #74 (done 2026-09-04, the table is on #69) and is **not** in this section. The origin is ydc `rag/generate.py`
 (v0.4.0 `76db718`), with two corrections the promotion required: text blocks only out of a response that mixes
 thinking blocks (the shape `analysis/polarity/llm.py` already uses), and "no key" as an option (`--dry-run`),
 not a fallback path.
@@ -1825,7 +1831,8 @@ Past four sentences the core is cut.
 one document are folded into one piece of evidence with their texts concatenated in rank order, so a long
 document is one citation, not several.
 
-**Version note** — one stderr line per run: `note: index=<pipeline.index_signature> · chunks=<count> ·
+**Version note** — one stderr line per run (on the vector path `index` and `chunks` both stand on the encoded
+sources the gate read, #77): `note: index=<pipeline.index_signature> · chunks=<count> ·
 dictionary=<topics stamp>[ · store=<vectors stamp>][ · <coverage note>]`. The lexicon and the signature are
 read **once, right after the index is opened and before the search**, so the row and the note stand on the
 lexicon the evidence stood on (the same rule `eval.run` keeps; fork #62, #68). The index and the vector store
@@ -1835,15 +1842,28 @@ are each opened once per run and handed down to `search`.
 characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the $10
 total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
 same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
-the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
-not set until #74 has measured the cost per query.
+the money moved — but refused to the caller (exit 1), never printed as if complete. The per-`purpose` cap for
+`retrieval_ask` is **$0.20 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
+#78 and #80, 2026-09-05; #74 measured $0.025 mean · $0.042 max per settled call over 17 calls, and the reservation
+carries the 4,096-token output ceiling, so the per-call value sits above it): `UsageLedger.reserve` checks both under
+the same advisory lock as the hard stop and before the reservation row — today's spend counts the purpose's settled
+and reserved rows since UTC midnight — and a miss is refused the way the hard stop is (exit 2, no call, no log row;
+fork #80). The values sit next to `PURPOSE` in `analysis/retrieval/ask.py` until upstream #136 makes them a knob.
+The value was set against the reservation, not the settled cost: the reservation is $0.0614 of output ceiling
+plus the prompt at two tokens per character, so ordinary asks reserve $0.078–$0.097 and a `--top 10` fold of ten
+chunks near the 500-character split about $0.109 — $0.10 refused that fold, $0.20 admits it with headroom and
+still refuses a runaway prompt or a dearer model.
+The same decision keeps the conditional answer for a question whose data axis the corpus lacks (sales, a price
+comparison — rows 2 and 5 of the #74 table): no refusal rule is added to the prompt.
 
 **Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
 `called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
 `bm25.tokenize_query`, which drops query stopwords; the gate reads the index axis, so `gate_ok` can be true
 on a token absent from this map) · `doc_ids` (text[], folded, rank order) · `index_fingerprint` ·
 `dictionary_stamp` · `store_stamp` (null on `bm25`) · `model` · `usd` · `answer_chars`. One row per real
-call — not on `--dry-run`, not on the 0-evidence path (no call was made) — inserted after `settle` in its own
+call — not on `--dry-run`, not on the 0-evidence path, not on a gated query (no call was made; since #76 the gate precedes the call for
+every engine, so `gate_ok` is true on every row — DDL 026's column comment, which says bm25 is never gated,
+predates that) — inserted after `settle` in its own
 short transaction, outside the LLM round trip (the 15-second idle-in-transaction rule). These columns are what
 lets the next judgment be measured: the partial answers BM25 gives on the query axis (`pipeline.search`'s
 "unmeasured loss") and the actual query distribution behind fork #11.

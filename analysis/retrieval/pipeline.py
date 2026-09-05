@@ -169,6 +169,7 @@ def run(
     *,
     youtube_schema: str = "tubedepth",
     commerce_schema: str = "trend_radar",
+    mfds_schema: str = "needs",
     since: date | None = None,
     sources: tuple[str, ...] = corpus.SOURCES,
 ) -> ChunkOutcome:
@@ -178,6 +179,7 @@ def run(
         conn,
         youtube_schema=youtube_schema,
         commerce_schema=commerce_schema,
+        mfds_schema=mfds_schema,
         since=since,
         sources=sources,
     )
@@ -389,6 +391,26 @@ def index_signature(conn: psycopg.Connection, sources: tuple[str, ...] | None) -
     return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
 
 
+def index_sources(engine: str, sources: tuple[str, ...] | None) -> tuple[str, ...] | None:
+    """Which sources the grounding gate's index is built over. `vector` narrows to the encoded sources;
+    the two lexical engines keep what the caller asked for.
+
+    The gate asks "does the corpus say this name". For `vector` the corpus that answers is the vector
+    store, and the store carries the encoded sources only -- measured on the whole corpus instead, a token
+    grounded solely by a source the store does not hold passes the gate, the store is opened and the paid
+    call answers from the nearest chunks of a different source (#77 review). `hybrid` keeps the full set
+    because its lexical arm really can answer with one of those chunks.
+
+    For the CLI default (`corpus.SOURCES`) this returns exactly the four the store was burned from, which
+    is the source set `vector` carried before the ledger arrived -- so no cache key and no
+    `index_signature` moves for a query anyone has run before.
+    """
+    if engine != "vector":
+        return sources
+    scope = corpus.SOURCES if sources is None else sources
+    return tuple(name for name in scope if name in corpus.ENCODED_SOURCES)
+
+
 def load_index(
     conn: psycopg.Connection,
     sources: tuple[str, ...] | None = None,
@@ -512,11 +534,14 @@ def search(
     380k chunks, and **the cache is separate per `--source` combination** (`index_signature` bites
     `sources`). A host with no vector file sees `StoreMissing` (2) only **after** paying that cost -- because
     the gate comes before the store.
+
+    **On the vector path that index is narrowed to the encoded sources** (`index_sources`): the gate has to
+    measure the corpus the ranking will come from, and the store carries no ledger filing (#77 review).
     """
     # The three handles are pass-throughs to ranked_chunks, which already takes them: a caller that
     # has to read the index or the store for something else (ask.py reads both for its version note)
     # would otherwise open them a second time here. Behaviour is unchanged when they are None.
-    index = index or load_index(conn, sources, cache_dir=cache_dir)[0]
+    index = index or load_index(conn, index_sources(engine, sources), cache_dir=cache_dir)[0]
     if engine in ("vector", "hybrid") and not (grounded := grounding.check(query, index)).ok:
         # 0 results is an answer the contract already knows (exit code 1) -- no new code is added, only the
         # reason is said.

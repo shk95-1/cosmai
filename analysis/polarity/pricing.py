@@ -12,6 +12,7 @@ the reservation into a single line.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, LiteralString
@@ -60,6 +61,14 @@ class Usage:
     cache_write: int = 0
 
 
+@dataclass(frozen=True)
+class PurposeCap:
+    """A ceiling one purpose carries on top of the shared budget. Either half may be left off."""
+
+    per_call: Decimal | None = None
+    per_day: Decimal | None = None
+
+
 class BudgetExceeded(RuntimeError):
     """The hard stop. At the moment this exception is raised the call has not gone out yet."""
 
@@ -91,6 +100,13 @@ def cost_usd(model: str, usage: Usage, *, batch: bool = False) -> Decimal:
 ADVISORY_KEY = 6
 LOCK: LiteralString = "SELECT pg_advisory_xact_lock(%s)"
 SPENT: LiteralString = "SELECT coalesce(sum(usd), 0) FROM llm_usage"
+# Both states of one purpose: settle() overwrites the reservation row, so a call is `reserve:<p>`
+# until it lands and `<p>` after -- one row either way, never both. The boundary is the UTC day
+# whatever the session's TimeZone is set to.
+SPENT_TODAY_BY_PURPOSE: LiteralString = (
+    "SELECT coalesce(sum(usd), 0) FROM llm_usage WHERE purpose IN (%s, %s) "
+    "AND called_at >= date_trunc('day', now() AT TIME ZONE 'utc') AT TIME ZONE 'utc'"
+)
 RECORD: LiteralString = """
 INSERT INTO llm_usage (model, purpose, input_tokens, output_tokens, cache_read, cache_write, usd, batch_id)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
@@ -115,9 +131,16 @@ class Reservation:
 
 
 class UsageLedger:
-    def __init__(self, conn: psycopg.Connection[Any], *, budget: Decimal = LLM_BUDGET_USD) -> None:
+    def __init__(
+        self,
+        conn: psycopg.Connection[Any],
+        *,
+        budget: Decimal = LLM_BUDGET_USD,
+        caps: Mapping[str, PurposeCap] | None = None,
+    ) -> None:
         self.conn = conn
         self.budget = budget
+        self.caps = dict(caps or {})
 
     def spent(self) -> Decimal:
         with self.conn.cursor() as cur:
@@ -153,6 +176,9 @@ class UsageLedger:
                     f"{model}: this call is estimated at ${usd:.4f} and only ${left:.4f} of the "
                     f"${self.budget:.2f} budget is left (needs.llm_usage)"
                 )
+            cap = self.caps.get(purpose)
+            if cap is not None:
+                self._check_cap(cur, cap, model, purpose, usd)
             cur.execute(
                 RECORD,
                 (
@@ -169,6 +195,26 @@ class UsageLedger:
             reserved = cur.fetchone()
         self.conn.commit()
         return Reservation(id=int(reserved[0]) if reserved else 0, model=model, usd=usd, batch=batch)
+
+    def _check_cap(self, cur: Any, cap: PurposeCap, model: str, purpose: str, usd: Decimal) -> None:
+        """The per-purpose ceilings, read inside reserve's lock and before its row -- a refusal must
+        leave the ledger exactly as it found it."""
+        if cap.per_call is not None and usd > cap.per_call:
+            self.conn.rollback()
+            raise BudgetExceeded(
+                f"{model}: this call is estimated at ${usd:.4f}, over the ${cap.per_call:.2f} "
+                f"per-call cap for {purpose}"
+            )
+        if cap.per_day is not None:
+            cur.execute(SPENT_TODAY_BY_PURPOSE, (purpose, f"reserve:{purpose}"))
+            row = cur.fetchone()
+            today = Decimal(row[0]) if row else Decimal(0)
+            if today + usd > cap.per_day:
+                self.conn.rollback()
+                raise BudgetExceeded(
+                    f"{model}: this call (${usd:.4f}) would take {purpose} to ${today + usd:.4f} "
+                    f"today, over the ${cap.per_day:.2f} per-day cap (UTC day)"
+                )
 
     def settle(
         self,

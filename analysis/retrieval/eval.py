@@ -1,4 +1,5 @@
-"""Search evaluation (slices/ydc/retrieval_eval.py). The scorer that measures whether a searcher is good.
+"""Search evaluation (ydc retrieval_eval.py, v0.1.0 02440ab; changed later in v0.3.0). The scorer that
+measures whether a searcher is good.
 
 The answers come for free -- the topics `topics.match_topics` attaches to a chunk body are the (document,
 topic) labels. Nobody has to label anything by hand. ydc dropped them into `common/mention.csv` in advance,

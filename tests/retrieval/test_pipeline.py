@@ -564,3 +564,142 @@ def test_violations_in_two_batches_read_as_two_coordinates(conn, owner, _schema_
     assert {p.split(": ", 1)[1] for p in missing} == {
         f"{corpus.YOUTUBE_COMMENT}:c{i}#0" for i in (1, 2, 3)
     }, outcome.problems
+
+
+# ---------- the MFDS ledger as a fifth source (#77) ----------
+FILING_TEXT = "sun cream 0 · acme labs · report no. 2018008612 · registered 2026-08-20 · mfds-ydc-v0.4.0"
+
+
+def _seed_filings(conn: psycopg.Connection) -> None:
+    """The ledger stands in the needs schema the pipeline already writes to, so the rows go in as
+    needs_runtime -- 028 grants it INSERT for exactly the load path that put them in production."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, 'mfds-ydc-v0.4.0', 'ydc v0.4.0', "
+            "'eval/mfds/x.csv', 1, '2026-08-20', 'not_updated')"
+        )
+        cur.execute(
+            "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, entp_key, "
+            "snapshot_id) VALUES (2018008612, 'sun cream 0', 'acme labs', '2026-08-20', 'acmelabs', 1)"
+        )
+    conn.commit()
+
+
+def test_a_filing_becomes_one_chunk_under_the_ledger_source(conn, _schema_name):
+    _seed_filings(conn)
+    outcome = pipeline.run(conn, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    assert (outcome.documents, outcome.chunks, outcome.written) == (1, 1, 1)
+    assert outcome.problems == []
+    with conn.cursor() as cur:
+        cur.execute("SELECT chunk_id, doc_id, source, ordinal, text FROM retrieval_chunk")
+        assert cur.fetchall() == [
+            ("mfds:2018008612#0", "mfds:2018008612", "mfds", 0, FILING_TEXT),
+        ]
+
+
+def test_the_index_fingerprint_moves_with_the_source_set(conn, _schema_name):
+    """A source added without the fingerprint moving means the cached index from before it existed
+    answers today's query, and the new source is simply absent -- no error anywhere (#8's rule, #77's
+    case)."""
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    text_only = corpus.SOURCES[: corpus.SOURCES.index(corpus.MFDS)]
+    assert pipeline.index_signature(conn, corpus.SOURCES) != pipeline.index_signature(conn, text_only)
+
+
+REPORT_NO = "2018008612"
+
+
+def test_the_vector_gate_stands_on_the_encoded_sources_only(conn, _schema_name, tmp_path):
+    """The ledger is bm25 only, so a report number is grounded in an index the vector store does not
+    carry. Gated on the whole corpus, `vector` would pass on that token and rank the nearest *text*
+    chunks -- before the ledger was a source the same query was refused here (#77 review, finding 1).
+
+    A store path that does not exist is how "the store was never opened" is measured: past the gate,
+    `vectors.load` raises StoreMissing, which is exactly what `hybrid` below has to do."""
+    _seed_filings(conn)
+    pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    pipeline.run(conn, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    absent = tmp_path / "no-store"
+
+    hits = pipeline.search(conn, REPORT_NO, engine="bm25", top=3, cache_dir=None)
+    assert [hit[0] for hit in hits] == [f"mfds:{REPORT_NO}#0"]
+
+    assert pipeline.search(conn, REPORT_NO, engine="vector", store=absent, cache_dir=None) == []
+
+    # hybrid keeps the full set -- its lexical arm can answer with the filing, so the gate has to let
+    # it through and the store has to be reached.
+    with pytest.raises(vectors.StoreMissing):
+        pipeline.search(conn, REPORT_NO, engine="hybrid", store=absent, cache_dir=None)
+
+
+def test_the_vector_gate_narrowing_is_the_pre_ledger_source_set(conn):
+    """The narrowing must be exactly the four the store was burned from: a different set is a
+    different `index_signature`, which is a 380k-chunk index rebuild nobody asked for."""
+    assert pipeline.index_sources("vector", corpus.SOURCES) == corpus.ENCODED_SOURCES
+    assert pipeline.index_sources("vector", None) == corpus.ENCODED_SOURCES
+    # A narrowed --source stays narrowed, and the two lexical engines are untouched.
+    assert pipeline.index_sources("vector", (corpus.COMMERCE_REVIEW, corpus.MFDS)) == (
+        corpus.COMMERCE_REVIEW,
+    )
+    for engine in ("bm25", "hybrid"):
+        assert pipeline.index_sources(engine, corpus.SOURCES) == corpus.SOURCES
+        assert pipeline.index_sources(engine, None) is None
+
+
+# ---------- a scoped run sweeps its own source only (#79) ----------
+
+
+def _rows_by_source(conn: psycopg.Connection, source: str) -> list[tuple]:
+    """What a run outside this source has to leave byte-identical: the id, the body, and the moment the
+    body was last written."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT chunk_id, text, chunked_at FROM retrieval_chunk WHERE source = %s ORDER BY chunk_id",
+            (source,),
+        )
+        rows = cur.fetchall()
+    conn.commit()
+    return rows
+
+
+def _load_both_sources(conn: psycopg.Connection, schema: str) -> None:
+    # The chunks are built through the run itself: rows put into retrieval_chunk by hand would prove
+    # nothing about what a scan saw, which is the only evidence the sweep stands on.
+    _seed_filings(conn)
+    outcome = pipeline.run(
+        conn, youtube_schema=schema, mfds_schema=schema, sources=(corpus.YOUTUBE_COMMENT, corpus.MFDS)
+    )
+    assert (outcome.documents, outcome.chunks) == (4, 4)
+
+
+def test_a_scoped_sweep_deletes_only_its_own_sources_chunks(conn, owner, _schema_name):
+    """`cosmai retrieval chunk --source youtube_comment` reads no filing at all, so every ledger doc_id
+    looks vanished to it. Swept over the whole table the ledger loses its chunks, and since it is
+    bm25-only `cosmai retrieval embed` never puts them back -- only a full chunk pass would (#77, #79)."""
+    _load_both_sources(conn, _schema_name)
+    ledger = _rows_by_source(conn, corpus.MFDS)
+    assert len(ledger) == 1
+    with owner.cursor() as cur:
+        # Not every comment: a source scanned to 0 documents is left out of the cleanup wholesale, and
+        # then the sweep this test is about never runs.
+        cur.execute("DELETE FROM comments WHERE comment_id IN ('c1', 'c2')")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,))
+    assert (outcome.swept, outcome.vanished) == (True, 2)  # the delete path ran, so this is not inaction
+    assert [row[0] for row in _rows_by_source(conn, corpus.YOUTUBE_COMMENT)] == ["youtube_comment:c3#0"]
+    assert _rows_by_source(conn, corpus.MFDS) == ledger
+
+
+def test_an_incremental_scoped_run_sweeps_nothing_at_all(conn, owner, _schema_name):
+    # `--since` reads no out-of-range document, so nothing in this run is evidence that a document
+    # vanished -- neither in the source it scanned nor in the one it never opened.
+    _load_both_sources(conn, _schema_name)
+    before = _rows_by_source(conn, corpus.YOUTUBE_COMMENT) + _rows_by_source(conn, corpus.MFDS)
+    with owner.cursor() as cur:
+        cur.execute("DELETE FROM comments WHERE comment_id IN ('c1', 'c2')")
+    owner.commit()
+    outcome = pipeline.run(conn, youtube_schema=_schema_name, sources=(corpus.YOUTUBE_COMMENT,), since=SINCE)
+    assert not outcome.swept
+    assert (outcome.vanished, outcome.pruned, outcome.emptied) == (0, 0, 0)
+    assert _rows_by_source(conn, corpus.YOUTUBE_COMMENT) + _rows_by_source(conn, corpus.MFDS) == before

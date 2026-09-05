@@ -1,7 +1,8 @@
 """Asks again with a new sample — `contracts/interfaces.md` §Holdout is canonical (fork #51).
 
-The rules come from ydc `holdout_commerce.py` (v0.3.0) and were written over rather than imported from the
-slice (the way `analysis/crosscheck` and `analysis/sensitivity` did it).
+The rules come from ydc `holdout_commerce.py` (shk95-1/cosmai-ydc-old `v0.3.0` `e5a1b00`; unchanged through
+the import pin `v0.4.0`) and were written over rather than imported from the pinned copy
+(`analysis/slices/ydc/`, deleted, #9) (the way `analysis/crosscheck` and `analysis/sensitivity` did it).
 
 **It makes no new metrics**: it counts the same unit (one review) with the same dictionary, but counts **only
 the reviews never seen before** separately and looks at whether the existing ratios reproduce. Reproduced

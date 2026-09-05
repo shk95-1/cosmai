@@ -49,6 +49,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from analysis import crosscheck, holdout  # noqa: E402
 
+# holdout_commerce.py was born in v0.3.0 and did not change through v0.4.0, so this default still matches
+# the import pin.
 DEFAULT_TAG = "v0.3.0"
 AT = datetime(2026, 8, 20, tzinfo=UTC)
 # The sentences ydc wrote into `demo()` + one line where the platform diverges. Our sources cannot
