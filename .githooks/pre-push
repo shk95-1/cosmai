@@ -36,14 +36,26 @@ fi
 # like a full run. Anything this cannot work out is class A, the strongest thing to have to match.
 # The GIT_* variables git exports to a hook are dropped for the call: the classifier asks git where
 # it is, and under GIT_DIR it would answer for the wrong tree.
+#
+# #232 review (blocker): $earned has to be what this push actually RUNS, not the classifier's
+# unconditional verdict -- tool/checks/test downgrades an owed class A to B under COSMAI_GATE=local
+# below, and a cache entry it then writes as B could never satisfy a comparison still asking for A,
+# so the identical tree re-pushed (the coordinator's merge carrying it, the cache's whole point)
+# would re-run the suite forever. The same downgrade rule applies here: still A, a non-empty owed
+# line, and not forced -> B.
 earned=A
 if [ "$cache" -eq 1 ] && [ -r tool/change_scope.py ] && command -v python3 >/dev/null 2>&1; then
-  earned=$( (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
-             python3 tool/change_scope.py origin/main 2>/dev/null) | sed -n 1p )
+  earned_scope=$( (unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
+                    python3 tool/change_scope.py origin/main 2>/dev/null) )
+  earned=$(printf '%s\n' "$earned_scope" | sed -n 1p)
+  earned_owed=$(printf '%s\n' "$earned_scope" | sed -n 4p)
   case "$earned" in
     A | B | C | N) ;;
     *) earned=A ;;
   esac
+  if [ "$forced" -eq 0 ] && [ "$earned" = A ] && [ -n "$earned_owed" ]; then
+    earned=B
+  fi
 fi
 
 # git feeds the refs being pushed on stdin, one per line:

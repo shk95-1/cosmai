@@ -26,11 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # Plain checkout: `tool/checks/test` with no `--changed` never calls the classifier or the
+      # #197 origin/main rule (both are pre-push-hook concerns), so this run needs no more history
+      # than the default shallow clone gives it (review 2026-09-05 -- the stale reason this carried
+      # from the hook's own comment).
       - uses: actions/checkout@v7
-        with:
-          # The classifier and the #197 origin/main rule need history; this run forces class A
-          # regardless of what they would answer.
-          fetch-depth: 0
 
       - name: install postgresql-client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client

@@ -372,12 +372,14 @@ def try_computed_set(
     glob_readers: dict[str, list[str]],
     none_list: list[str],
     smoke: list[str],
-) -> list[str]:
+) -> tuple[list[str], str | None]:
     """What a still-class-A change owes locally once CI, not this push, covers the whole tree
     (#232 Work 2): the same map/readers/closure pass `classify()` runs for class B, but over the
     full change -- trigger and gate files included -- rather than only what is left after they are
     stripped out. Empty when some file in the change is genuinely unclaimed (an unmapped path, or a
-    test file that no longer exists): that change has no computed set, and stays class A locally too.
+    test file that no longer exists): that change has no computed set, and stays class A locally
+    too -- the second element names that file, for the classifier's reason line to blame (#232
+    review), `None` when every file answered.
     """
     test_files_list = all_test_files(root)
     test_files = set(test_files_list)
@@ -388,7 +390,7 @@ def try_computed_set(
     for path in files:
         if is_test_file(path):
             if not exists_at_head(path):
-                return []
+                return [], path
             mapped.add(path)
             continue
         found = False
@@ -417,8 +419,8 @@ def try_computed_set(
         if subdir_target is not None:
             mapped.update(subdir_target)
             continue
-        return []
-    return sorted(mapped | readers | closure | set(smoke))
+        return [], path
+    return sorted(mapped | readers | closure | set(smoke)), None
 
 
 def classify(base: str) -> tuple[str, str, list[str], list[str]]:
@@ -442,6 +444,15 @@ def classify(base: str) -> tuple[str, str, list[str], list[str]]:
     if not files:
         return NOTHING, f"this tree is {base}'s own: there is no change to verify", [], []
 
+    # A class-A reason plus what it owes locally (#232 review): the blocker, when the owed set
+    # came back empty, says which file made it so -- "the gate list" alone does not say why a gate
+    # change that should have had a computed set did not.
+    def owed_for(reason: str) -> tuple[str, list[str]]:
+        owed, blocker = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
+        if not owed and blocker:
+            reason = f"{reason} (no computed set: {blocker} is unanswerable)"
+        return reason, owed
+
     # The gate's own machinery decides before anything else is asked, and no proof talks it down: a
     # broken classifier that calls itself class C is the one failure nothing downstream can catch.
     # It still may have a computed set to owe locally (#232 Work 2) -- being unconditional is not
@@ -449,23 +460,20 @@ def classify(base: str) -> tuple[str, str, list[str], list[str]]:
     for path in files:
         for prefix in gate:
             if path.startswith(prefix):
-                owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
-                return FULL, f"{path} is on the gate list in tests/scope.toml", [], owed
+                reason, owed = owed_for(f"{path} is on the gate list in tests/scope.toml")
+                return FULL, reason, [], owed
 
     for path in files:
         if path in DYNAMIC_IMPORT_ROOTS:
-            owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
-            return (
-                FULL,
-                f"{path} is a dynamic-import module: nothing traces that import statically",
-                [],
-                owed,
+            reason, owed = owed_for(
+                f"{path} is a dynamic-import module: nothing traces that import statically"
             )
+            return FULL, reason, [], owed
 
     joined = merge_trigger(root, base)
     if joined:
-        owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
-        return FULL, joined, [], owed
+        reason, owed = owed_for(joined)
+        return FULL, reason, [], owed
 
     # The trigger list is next, but #230 lets tool/checks/invariants prove a changed trigger-list
     # file moved no code before it forces A -- a comment-only edit to contracts/ddl/ is not still an
@@ -473,8 +481,8 @@ def classify(base: str) -> tuple[str, str, list[str], list[str]]:
     trigger_files = [p for p in files if any(p.startswith(prefix) for prefix in trigger)]
     failing = invariant_failures(root, base, trigger_files)
     if failing:
-        owed = try_computed_set(root, files, entries, glob_readers, none_list, smoke)
-        return FULL, f"{failing[0]} is on the trigger list in tests/scope.toml", [], owed
+        reason, owed = owed_for(f"{failing[0]} is on the trigger list in tests/scope.toml")
+        return FULL, reason, [], owed
     rest = [p for p in files if p not in trigger_files]
 
     test_files_list = all_test_files(root)

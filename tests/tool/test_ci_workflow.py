@@ -5,10 +5,13 @@ not a project dependency, and this file's shape does not need a real parser to c
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "suite.yml"
+PYTHON_VERSION_PIN = REPO_ROOT / ".python-version"
+PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 
 def text() -> str:
@@ -76,3 +79,22 @@ def test_a_workflow_change_is_mapped_to_its_own_wiring_test():
     body = scope.read_text(encoding="utf-8")
     assert '".github/workflows/*"' in body, body
     assert "tests/tool/test_ci_workflow.py" in body, body
+
+
+def test_the_python_version_pin_matches_requires_python():
+    # #232 review: run 33954240253 failed because nothing pinned the interpreter -- the runner's
+    # system CPython 3.12 wraps argparse's usage text differently from the 3.13 the help snapshot
+    # was recorded under. This is the reader tests/scope.toml gives `.python-version` (a trigger
+    # file with no test naming it has no computed set to owe locally, per review 2026-09-05).
+    assert PYTHON_VERSION_PIN.is_file(), "no .python-version pin"
+    pin = PYTHON_VERSION_PIN.read_text(encoding="utf-8").strip()
+    major, minor = (int(part) for part in pin.split(".")[:2])
+    match = re.search(r'requires-python\s*=\s*">=(\d+)\.(\d+)"', PYPROJECT.read_text(encoding="utf-8"))
+    assert match, "pyproject.toml has no requires-python floor to compare against"
+    floor = (int(match.group(1)), int(match.group(2)))
+    assert (major, minor) >= floor, (pin, floor)
+
+
+def test_a_python_version_change_is_mapped_to_its_own_wiring_test():
+    body = (REPO_ROOT / "tests" / "scope.toml").read_text(encoding="utf-8")
+    assert '".python-version"' in body, body

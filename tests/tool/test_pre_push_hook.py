@@ -313,7 +313,9 @@ def ddl(repo: Path, text: str) -> str:
 
 def test_a_class_c_entry_does_not_skip_a_push_that_earns_class_a(repo: Path):
     # #215 review C2: the entry named the class but the hook read only the stamp, so 38 seconds of
-    # format, lint and three snapshot tests skipped the suite for a DDL change.
+    # format, lint and three snapshot tests skipped the suite for a DDL change. The real repo's map
+    # answers `contracts/ddl/` (#232 review: `try_computed_set` owes a computed set here, so what
+    # this earns is B, not A -- either still outranks a class-C entry, which is the point).
     base = commit(repo, "one")
     origin_main(repo, base)
     sha = ddl(repo, "CREATE TABLE a (id int);\n")
@@ -321,8 +323,9 @@ def test_a_class_c_entry_does_not_skip_a_push_that_earns_class_a(repo: Path):
     assert suite_runs(repo) == 1
 
     done = run_hook(repo, sha)
-    assert suite_runs(repo) == 2, "a class-C entry skipped a class-A push"
-    assert "untested for class A" in done.stdout, done.stdout
+    assert suite_runs(repo) == 2, "a class-C entry skipped a push that earned more"
+    assert "untested for class" in done.stdout, done.stdout
+    assert "untested for class C" not in done.stdout, done.stdout
 
 
 def test_a_class_a_entry_skips_a_push_that_earns_class_c(repo: Path):
@@ -476,3 +479,41 @@ def test_an_unanswerable_change_still_runs_class_a_locally(gate_repo: Path, no_d
     assert "verification: class A" in done.stdout, done.stdout
     assert "class A owed" not in done.stdout, done.stdout
     assert "maps to no entry" in done.stdout, done.stdout
+
+
+# ---------------------------------------------------------------------------------------------
+# Review 2026-09-05 (fix round): $earned must reflect what a local push actually RUNS (the
+# downgrade), or a tree recorded as B-with-owed never satisfies its own cache and every re-push
+# of the identical tree re-runs the suite -- the tested-tree cache's whole reason to exist (#214).
+# The `repo` fixture's FAKE_SUITE (not the real tool/checks/test) records whatever class the test
+# tells it to; the real classifier (carried into the fixture) is what computes $earned itself.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_tree_recorded_as_b_with_owed_skips_a_later_push_of_the_same_tree(repo: Path):
+    # contracts/ddl/ is a trigger the real map also answers (#232 review): the classifier says A
+    # with a non-empty owed line, so this push's $earned is B, not A -- exactly what
+    # COSMAI_GATE=local would have made the real tool/checks/test run and record.
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = ddl(repo, "CREATE TABLE a (id int);\n")
+    first = run_hook(repo, sha, klass="B")
+    assert "untested for class B" in first.stdout, first.stdout
+    assert suite_runs(repo) == 1, first.stdout
+
+    second = run_hook(repo, sha)
+    assert suite_runs(repo) == 1, "a tree recorded at its own earned class re-ran the suite"
+    assert "skipping the suite" in second.stdout, second.stdout
+    assert "class B" in second.stdout, second.stdout
+
+
+def test_a_forced_push_still_runs_over_a_tree_recorded_as_b_with_owed(repo: Path):
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    sha = ddl(repo, "CREATE TABLE a (id int);\n")
+    run_hook(repo, sha, klass="B")
+    assert suite_runs(repo) == 1
+
+    forced = run_hook(repo, sha, force=True)
+    assert suite_runs(repo) == 2, "COSMAI_FORCE_SUITE=1 did not re-run a B-recorded tree"
+    assert "forced by COSMAI_FORCE_SUITE=1" in forced.stdout, forced.stdout
