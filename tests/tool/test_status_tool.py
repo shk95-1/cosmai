@@ -196,18 +196,28 @@ def test_ci_section_is_unavailable_when_gh_fails(run):
 
 
 def test_ci_section_is_unavailable_without_gh(tmp_path: Path):
-    # /usr/bin and /bin are not gh-free on every host (this one has it in both), unlike
-    # docker/nvidia-smi -- so this mirrors the real PATH minus gh specifically, the same technique
-    # tests/tool/test_pre_push_hook.py uses to hide docker/uv/pg_isready.
+    # /usr/bin and /bin are not gh-free on every host (this one has both a real, authenticated gh
+    # and a real docker daemon with a real cosmai-postgres container) -- a PATH that keeps those
+    # dirs wholesale would let this test read the real docker/production state, not just find a
+    # real gh. So this hides docker/nvidia-smi/gh from a mirror of the real PATH (the technique
+    # tests/tool/test_pre_push_hook.py uses for docker/uv/pg_isready) and puts fakes for the first
+    # two in front, the same fakes the `run` fixture's other tests use -- never gh.
     import os
 
-    hide = {"gh"}
-    base = tmp_path / "no-gh-path"
-    shadow_dirs = []
+    own_bin = tmp_path / "own-bin"
+    own_bin.mkdir()
+    (own_bin / "docker").write_text(FAKE_DOCKER, encoding="utf-8")
+    (own_bin / "docker").chmod(0o755)
+    (own_bin / "nvidia-smi").write_text(FAKE_NVIDIA_SMI, encoding="utf-8")
+    (own_bin / "nvidia-smi").chmod(0o755)
+
+    hide = {"gh", "docker", "nvidia-smi"}
+    shadow_root = tmp_path / "no-gh-path"
+    shadow_dirs = [str(own_bin)]
     for index, directory in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
         if not directory or not os.path.isdir(directory):
             continue
-        shadow = base / f"d{index}"
+        shadow = shadow_root / f"d{index}"
         shadow.mkdir(parents=True)
         try:
             entries = os.listdir(directory)
@@ -221,7 +231,7 @@ def test_ci_section_is_unavailable_without_gh(tmp_path: Path):
             except OSError:
                 continue
         shadow_dirs.append(str(shadow))
-    env = {**os.environ, "PATH": os.pathsep.join(shadow_dirs)}
+    env = {**os.environ, "PATH": os.pathsep.join(shadow_dirs), "DOCKER_PS_FAIL": ""}
     done = subprocess.run(
         [str(STATUS)], capture_output=True, text=True, cwd=str(REPO_ROOT), env=env, check=False
     )
