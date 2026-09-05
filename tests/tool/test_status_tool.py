@@ -196,12 +196,32 @@ def test_ci_section_is_unavailable_when_gh_fails(run):
 
 
 def test_ci_section_is_unavailable_without_gh(tmp_path: Path):
-    empty_bin = tmp_path / "empty-bin"
-    empty_bin.mkdir()
+    # /usr/bin and /bin are not gh-free on every host (this one has it in both), unlike
+    # docker/nvidia-smi -- so this mirrors the real PATH minus gh specifically, the same technique
+    # tests/tool/test_pre_push_hook.py uses to hide docker/uv/pg_isready.
     import os
 
-    minimal_path = os.pathsep.join([str(empty_bin), "/usr/bin", "/bin"])
-    env = {**os.environ, "PATH": minimal_path}
+    hide = {"gh"}
+    base = tmp_path / "no-gh-path"
+    shadow_dirs = []
+    for index, directory in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+        if not directory or not os.path.isdir(directory):
+            continue
+        shadow = base / f"d{index}"
+        shadow.mkdir(parents=True)
+        try:
+            entries = os.listdir(directory)
+        except OSError:
+            continue
+        for name in entries:
+            if name in hide:
+                continue
+            try:
+                (shadow / name).symlink_to(os.path.join(directory, name))
+            except OSError:
+                continue
+        shadow_dirs.append(str(shadow))
+    env = {**os.environ, "PATH": os.pathsep.join(shadow_dirs)}
     done = subprocess.run(
         [str(STATUS)], capture_output=True, text=True, cwd=str(REPO_ROOT), env=env, check=False
     )
