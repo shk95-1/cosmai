@@ -1842,9 +1842,19 @@ are each opened once per run and handed down to `search`.
 characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the $10
 total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
 same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
-the money moved — but refused to the caller (exit 1), never printed as if complete. A per-`purpose` cap is
-not set yet: #74 measured $0.025 mean · $0.042 max per call over 17 calls (2026-09-04), and the value is fork
-#78's decision.
+the money moved — but refused to the caller (exit 1), never printed as if complete. The per-`purpose` cap for
+`retrieval_ask` is **$0.20 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
+#78 and #80, 2026-09-05; #74 measured $0.025 mean · $0.042 max per settled call over 17 calls, and the reservation
+carries the 4,096-token output ceiling, so the per-call value sits above it): `UsageLedger.reserve` checks both under
+the same advisory lock as the hard stop and before the reservation row — today's spend counts the purpose's settled
+and reserved rows since UTC midnight — and a miss is refused the way the hard stop is (exit 2, no call, no log row;
+fork #80). The values sit next to `PURPOSE` in `analysis/retrieval/ask.py` until upstream #136 makes them a knob.
+The value was set against the reservation, not the settled cost: the reservation is $0.0614 of output ceiling
+plus the prompt at two tokens per character, so ordinary asks reserve $0.078–$0.097 and a `--top 10` fold of ten
+chunks near the 500-character split about $0.109 — $0.10 refused that fold, $0.20 admits it with headroom and
+still refuses a runaway prompt or a dearer model.
+The same decision keeps the conditional answer for a question whose data axis the corpus lacks (sales, a price
+comparison — rows 2 and 5 of the #74 table): no refusal rule is added to the prompt.
 
 **Log** — `needs.retrieval_ask_log` (DDL 026, append-only by convention — the runtime code only inserts; the role's privileges are the schema defaults): `id` ·
 `called_at` · `query` · `engine` · `gate_ok` · `token_df` (jsonb, per query token — on the query axis,
