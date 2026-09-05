@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -260,6 +261,38 @@ class TestAgainstAFakeClient:
             conn.commit()
             # The same call the test above refuses: with the $0.045 moved off today it is allowed.
             assert ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=500)).usd == Decimal("0.0075")
+
+    def test_the_per_day_window_is_the_utc_day_whatever_the_session_time_zone_says(
+        self, needs_runtime_url: str
+    ):
+        """`SPENT_TODAY_BY_PURPOSE` truncates in UTC on purpose; a naive `date_trunc('day', now())` would be
+        the session's day -- nine hours off in Asia/Seoul -- and no test saw it (fork #86). The probe row
+        sits one minute after the earlier of the two midnights, so at any wall-clock time exactly one of the
+        two readings counts it, and the UTC reading counts it iff that earlier midnight is UTC's."""
+        with connect(needs_runtime_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TimeZone = 'Asia/Seoul'")
+                cur.execute(
+                    "SELECT date_trunc('day', now() AT TIME ZONE 'utc') AT TIME ZONE 'utc',"
+                    " date_trunc('day', now() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul'"
+                )
+                utc_midnight, seoul_midnight = cur.fetchone()  # type: ignore[misc]
+            conn.commit()
+            probe = min(utc_midnight, seoul_midnight) + timedelta(minutes=1)
+            counted_in_utc = probe >= utc_midnight
+            ledger = UsageLedger(conn, caps={"p": PurposeCap(per_day=Decimal("0.05"))})
+            ledger.record("claude-sonnet-5", "p", Usage(output_tokens=2_000))  # $0.030
+            ledger.record("claude-sonnet-5", "reserve:p", Usage(output_tokens=1_000))  # $0.015
+            with conn.cursor() as cur:
+                cur.execute("UPDATE llm_usage SET called_at = %s", (probe,))
+            conn.commit()
+            if counted_in_utc:
+                with pytest.raises(BudgetExceeded, match="per-day cap"):
+                    ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=500))
+            else:
+                assert ledger.reserve("claude-sonnet-5", "p", Usage(output_tokens=500)).usd == Decimal(
+                    "0.0075"
+                )
 
     def test_a_purpose_with_no_cap_is_not_charged_another_purposes_cap(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
