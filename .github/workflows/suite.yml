@@ -39,7 +39,9 @@ jobs:
       # (#232 review): ubuntu-latest's system python3 (3.12) otherwise wraps argparse's usage
       # text differently from the 3.13 the tests/snapshots/cosmai_help.txt snapshot was recorded
       # under, and that alone failed the class-a run.
-      - uses: astral-sh/setup-uv@v10
+      # No major-only alias tag exists for this action (unlike actions/checkout's `v7`) -- pinned
+      # to the exact release tag instead (`v10` alone does not resolve, confirmed the hard way).
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
 
