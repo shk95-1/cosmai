@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The classifier and the #197 origin/main rule need history; this run forces class A
           # regardless of what they would answer.
@@ -35,7 +35,11 @@ jobs:
       - name: install postgresql-client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
 
-      - uses: astral-sh/setup-uv@v6
+      # .python-version pins the interpreter uv resolves here to the same one dev pushes use
+      # (#232 review): ubuntu-latest's system python3 (3.12) otherwise wraps argparse's usage
+      # text differently from the 3.13 the tests/snapshots/cosmai_help.txt snapshot was recorded
+      # under, and that alone failed the class-a run.
+      - uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 

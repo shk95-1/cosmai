@@ -38,6 +38,10 @@ trigger = [
     "tool/checks/",
     "pyproject.toml",
     "uv.lock",
+    # #232 review: `uv sync` resolves this interpreter for the whole suite -- an unpinned or wrong
+    # version is the same "the environment itself changed" risk pyproject.toml and uv.lock sit on
+    # this list for (a class-A run failed on exactly this before the pin existed).
+    ".python-version",
     "analysis/types.py",
     "cosmai/cli.py",
 ]
