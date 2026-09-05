@@ -1,7 +1,9 @@
 """The five formulas of the quarterly time series — `contracts/interfaces.md` §Formulas is canonical (#5).
 
-The rules come from ydc `analysis/slices/ydc/trend.py` (v0.2) and were written over rather than imported
-from the slice (the way `analysis/retrieval/` did it). This module knows no DB: it takes counts (`Counts` ·
+The rules come from ydc `trend.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`, the TEAM_DECISIONS v0.2
+definition; unchanged through the import pin `v0.4.0`, `contracts/versioning.md`) and were written over
+rather than imported from the pinned copy `analysis/slices/ydc/` (deleted, #9) (the way `analysis/retrieval/`
+did it). This module knows no DB: it takes counts (`Counts` ·
 `VideoPanel`) and produces rows, so the same formulas run on the corpus tables and on the raw collection CSV
 with the same code -- that is where the golden comparison stands.
 """

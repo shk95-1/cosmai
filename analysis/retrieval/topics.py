@@ -1,7 +1,7 @@
 """The topic dictionary. Both BM25's token expansion and the answers of the search evaluation come from here.
 
-The rules come from ydc `analysis/slices/ydc/topics.py` (`v0.1.0` `02440ab`) and were written over rather
-than imported from the slice (fork #9 deleted that copy).
+The rules come from ydc `topics.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`) and were written over rather
+than imported from the pinned copy `analysis/slices/ydc/` (fork #9 deleted that copy).
 
 The source of the dictionary is the **active version** of `needs.aspect_lexicon` (ruleset =
 `retrieval-topic`). While it was frozen into this file as literals, editing the dictionary did not go through

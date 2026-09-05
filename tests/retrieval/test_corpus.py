@@ -109,3 +109,54 @@ def test_a_commerce_review_doc_id_carries_the_site(trend_radar_schema, _schema_n
         "commerce_review:hwahae:r1",
         "commerce_review:oliveyoung:r1",
     ]
+
+
+# ---------- the MFDS ledger (#77) ----------
+SNAPSHOT_LABEL = "mfds-ydc-v0.4.0"
+REPORT_NO = 2018008612
+
+
+def _seed_mfds(conn: psycopg.Connection, seqs: tuple[int, ...]) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, %s, 'ydc v0.4.0', 'eval/mfds/x.csv', %s, %s, "
+            "'not_updated')",
+            (SNAPSHOT_LABEL, len(seqs), date(2026, 8, 20)),
+        )
+        for i, seq in enumerate(seqs):
+            cur.execute(
+                "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, "
+                "entp_key, snapshot_id) VALUES (%s, %s, 'acme labs', %s, 'acmelabs', 1)",
+                (seq, f"sun cream {i}", date(2026, 8, 20)),
+            )
+
+
+def test_a_filing_is_one_document_that_names_the_snapshot_it_came_from(needs_runtime_url, _schema_name):
+    # The five parts in order: without the report number and the date in the text, a bm25 hit cannot
+    # answer the two questions the ledger was brought in for (#74 rows 8 and 13).
+    conn = _connect(needs_runtime_url, _schema_name)
+    try:
+        _seed_mfds(conn, (REPORT_NO,))
+        docs = list(corpus.mfds_filings(conn, _schema_name))
+    finally:
+        conn.close()
+    assert [d.doc_id for d in docs] == [f"mfds:{REPORT_NO}"]
+    assert docs[0].source == corpus.MFDS
+    assert docs[0].text == (
+        f"sun cream 0 · acme labs · report no. {REPORT_NO} · registered 2026-08-20 · {SNAPSHOT_LABEL}"
+    )
+
+
+def test_every_filing_survives_the_page_boundary(needs_runtime_url, _schema_name, monkeypatch):
+    # report_seq is a bigint where every other cursor in this module is text, and a cursor out of step
+    # with its column loses rows at a page boundary instead of raising.
+    monkeypatch.setattr(corpus, "BATCH", 2)
+    seqs = tuple(REPORT_NO + i for i in range(5))
+    conn = _connect(needs_runtime_url, _schema_name)
+    try:
+        _seed_mfds(conn, seqs)
+        docs = list(corpus.mfds_filings(conn, _schema_name))
+    finally:
+        conn.close()
+    assert [d.doc_id for d in docs] == [f"mfds:{seq}" for seq in seqs]

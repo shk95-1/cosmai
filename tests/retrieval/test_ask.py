@@ -20,8 +20,8 @@ import pytest
 from sqlalchemy.engine import make_url
 
 from analysis.crosscheck import PAPER_HOLD
-from analysis.polarity.pricing import UsageLedger
-from analysis.retrieval import ask
+from analysis.polarity.pricing import PurposeCap, UsageLedger, cost_usd
+from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
 pytestmark = pytest.mark.postgres
@@ -172,6 +172,21 @@ def test_a_query_the_gate_blocks_never_reaches_the_model(loaded):
     assert log_rows(loaded) == []
 
 
+def test_bm25_is_gated_in_ask_because_the_call_is_paid(loaded):
+    """`pipeline.search` keeps #48's rule -- bm25 answers with the words that remain. `ask` does not:
+    the call is paid, and rule 6 makes the model refuse a df-0 name anyway, so a bm25 query carrying
+    one buys a refusal (#76). It ends where the vector-gated case above ends: no call, no row."""
+    client = FakeClient()
+    # The shape #48 measured: a name the corpus never says beside a word it does say, which is the
+    # only query bm25 still answers -- and so the only one that reaches the model today.
+    answer = ask_it(loaded, f"{ABSENT} {QUERY}", engine="bm25", client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence"
+    assert answer.text == ask.CANNOT_ANSWER
+    assert answer.evidence == ()
+    assert log_rows(loaded) == []
+
+
 def test_chunks_of_one_document_become_one_piece_of_evidence(loaded):
     client = FakeClient()
     answer = ask_it(loaded, client=client)
@@ -212,6 +227,31 @@ def test_a_budget_that_is_already_gone_blocks_before_the_call(loaded):
         ask_it(loaded, client=client, ledger=ledger)
     assert client.calls == []
     assert log_rows(loaded) == []
+
+
+def test_the_ask_cap_refuses_an_over_priced_call_before_it_goes_out(loaded, monkeypatch):
+    """The default ledger -- the one production builds -- carries the retrieval_ask cap, so a call
+    over it takes the hard stop's path: nothing reserved, nothing called, nothing logged."""
+    monkeypatch.setattr(ask, "ASK_CAP", PurposeCap(per_call=Decimal("0.0001")))
+    client = FakeClient()
+    with pytest.raises(ask.BLOCKING):
+        ask_it(loaded, client=client)
+    assert client.calls == []
+    assert log_rows(loaded) == []
+    assert UsageLedger(loaded).spent() == 0
+
+
+def test_a_normal_ask_fits_inside_the_per_call_cap(loaded):
+    """The cap is read against the reservation, not against what the call turns out to cost, and the
+    reservation carries the whole 4,096-token output ceiling. So the value has to admit an ordinary
+    ask or the command refuses every query (#80)."""
+    client = FakeClient()
+    answer = ask_it(loaded, client=client)
+    assert answer.status == "ok" and answer.called
+    per_call = ask.ASK_CAP.per_call
+    assert per_call == Decimal("0.20") and ask.ASK_CAP.per_day == Decimal("1.00")
+    reserved = cost_usd(ask.DEFAULT_MODEL, ask.estimate(ask.system_prompt(), answer.prompt))
+    assert per_call is not None and reserved <= per_call
 
 
 def test_a_model_with_no_price_is_refused_before_the_corpus_is_touched(loaded):
@@ -444,3 +484,80 @@ def test_the_help_lists_every_argument():
         "v",
         ["commerce_review"],
     )
+
+
+# ---------- the MFDS ledger as a fifth source (#77) ----------
+REPORT_NO = "2018008612"
+FILING_DOC = f"mfds:{REPORT_NO}"
+TEXT_SOURCES = tuple(s for s in corpus.SOURCES if s != corpus.MFDS)
+
+
+@pytest.fixture
+def with_a_filing(loaded, _schema_name):
+    """One filing beside the text chunks, put there the way production puts it: ledger rows, then the
+    chunk scan. Inserting the chunk by hand would leave the source list, the reader and the dispatch
+    untested and the test green whatever they say."""
+    with loaded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO mfds_snapshot (snapshot_id, label, source_tag, source_file, source_rows, "
+            "max_report_date, update_policy) VALUES (1, 'mfds-ydc-v0.4.0', 'ydc v0.4.0', "
+            "'eval/mfds/x.csv', 1, '2026-08-20', 'not_updated')"
+        )
+        cur.execute(
+            "INSERT INTO mfds_registration (report_seq, item_name, entp_name, report_date, entp_key, "
+            "snapshot_id) VALUES (%s, 'sun cream alpha', 'acme labs', '2026-08-20', 'acmelabs', 1)",
+            (int(REPORT_NO),),
+        )
+    loaded.commit()
+    pipeline.run(loaded, mfds_schema=_schema_name, sources=(corpus.MFDS,))
+    return loaded
+
+
+def test_a_report_number_reaches_the_model_and_the_log_row_names_the_filing(with_a_filing):
+    """Row 8 of the #74 table: the report number was in the database and the query was refused at the
+    gate with frequency 0, because the ledger was not a source. The log row is what says which filing
+    the answer stood on."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, client=client)
+    assert answer.called and answer.status == "ok"
+    assert [item.doc_id for item in answer.evidence] == [FILING_DOC]
+    (row,) = log_rows(with_a_filing)
+    assert row[4] == [FILING_DOC]  # doc_ids
+    assert row[3][REPORT_NO] == 1  # token_df: the ledger is what makes the number a grounded token
+
+
+def test_the_same_query_finds_nothing_when_the_ledger_is_left_out(with_a_filing):
+    """`--source` restricted to the four text sources: the filing has to be out of the index itself
+    rather than merely ranked away, or the gate would pass on a token no evidence can carry."""
+    client = FakeClient()
+    answer = ask_it(with_a_filing, query=REPORT_NO, sources=TEXT_SOURCES, client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []
+
+
+def test_a_filing_token_does_not_open_the_store_on_the_vector_path(with_a_filing, tmp_path):
+    """The paid half of the same rule (#77 review, finding 1). Grounded on the whole corpus, a report
+    number would pass the gate, open the 1.2GB store and buy an answer built from the ten nearest text
+    chunks -- an answer about something else. Before the ledger was a source this query cost $0, and it
+    still does. The store path does not exist, so reaching it would raise instead of refusing."""
+    client = FakeClient()
+    answer = ask_it(
+        with_a_filing, query=REPORT_NO, engine="vector", store=tmp_path / "no-store", client=client
+    )
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert log_rows(with_a_filing) == []
+
+
+def test_hybrid_still_stands_on_the_filing_because_its_lexical_arm_carries_it(with_a_filing, tmp_path):
+    """The narrowing is the vector path's alone: hybrid ranks the ledger through BM25 and fuses, so its
+    gate keeps the full source set. Reaching the missing store is what says the gate let it through."""
+    with pytest.raises(ask.StoreMissing):
+        ask_it(
+            with_a_filing,
+            query=REPORT_NO,
+            engine="hybrid",
+            store=tmp_path / "no-store",
+            client=FakeClient(),
+        )

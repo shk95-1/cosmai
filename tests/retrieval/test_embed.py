@@ -148,3 +148,16 @@ def test_an_empty_corpus_records_no_chunked_at_max(needs_schema, needs_runtime_u
         connection.close()
     _, _, manifest_path = vectors.paths(tmp_path / "e5base")
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["chunked_at_max"] is None
+
+
+def test_a_ledger_chunk_is_never_handed_to_the_encoder(conn):
+    """The MFDS ledger is BM25 only (#77). A vector neighbour of an ingredient or a report number is a
+    *different* filing, and answering with it is a wrong answer rather than a ranking mistake -- so the
+    exclusion has to hold at the read, not at the ranking."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO retrieval_chunk (chunk_id, doc_id, source, ordinal, text, text_md5) "
+            "VALUES ('mfds:2018008612#0', 'mfds:2018008612', 'mfds', 0, 'sun cream · acme labs', 'x')"
+        )
+    conn.commit()
+    assert [row[1] for row in embed.chunks_to_encode(conn)] == ["youtube_comment", "commerce_review"]

@@ -67,26 +67,26 @@ options:
 
 $ cosmai retrieval chunk --help
 usage: cosmai retrieval chunk [-h] [--since SINCE]
-                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}]
                               [--url URL]
 
 options:
   -h, --help            show this help message and exit
   --since SINCE         Only source rows observed on or after this date.
-  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}
                         Repeatable.
   --url URL             SQLAlchemy URL; default is needs_runtime.
 
 $ cosmai retrieval search --help
 usage: cosmai retrieval search [-h] --query QUERY [--engine {bm25,vector,hybrid}]
-                               [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                               [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}]
                                [--top TOP] [--vectors VECTORS] [--url URL]
 
 options:
   -h, --help            show this help message and exit
   --query QUERY         What to search for.
   --engine {bm25,vector,hybrid}
-  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}
                         Repeatable.
   --top TOP             How many chunks to print.
   --vectors VECTORS     Vector store path; default var/retrieval/...
@@ -94,7 +94,7 @@ options:
 
 $ cosmai retrieval ask --help
 usage: cosmai retrieval ask [-h] --query QUERY [--engine {bm25,vector,hybrid}]
-                            [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                            [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}]
                             [--top TOP] [--model MODEL] [--dry-run] [--vectors VECTORS]
                             [--url URL]
 
@@ -102,7 +102,7 @@ options:
   -h, --help            show this help message and exit
   --query QUERY         What to ask.
   --engine {bm25,vector,hybrid}
-  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}
                         Repeatable.
   --top TOP             How many chunks to fold into evidence.
   --model MODEL         A model priced in analysis/polarity.
@@ -112,14 +112,14 @@ options:
 
 $ cosmai retrieval eval --help
 usage: cosmai retrieval eval [-h] --mode {literal,heldout} [--engine {bm25,vector,hybrid}]
-                             [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                             [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}]
                              [--out OUT] [--vectors VECTORS] [--url URL]
 
 options:
   -h, --help            show this help message and exit
   --mode {literal,heldout}
   --engine {bm25,vector,hybrid}
-  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}
                         Repeatable.
   --out OUT             Write one row per query to this CSV.
   --vectors VECTORS     Vector store path; default var/retrieval/...
@@ -139,12 +139,12 @@ options:
 
 $ cosmai retrieval terms --help
 usage: cosmai retrieval terms [-h]
-                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review}]
+                              [--source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}]
                               [--top TOP] [--url URL]
 
 options:
   -h, --help            show this help message and exit
-  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review}
+  --source {youtube_comment,youtube_video,youtube_transcript,commerce_review,mfds}
                         Repeatable.
   --top TOP             How many unmatched terms to print.
   --url URL             SQLAlchemy URL; default is needs_runtime.

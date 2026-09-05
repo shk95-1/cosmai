@@ -154,7 +154,10 @@ def test_entrypoints_declares_the_subcommand_that_writes_the_judgement_table():
 
 
 def test_the_rules_are_copied_from_the_slice_not_imported_from_it():
-    """슬라이스는 읽기 전용 참조다 — import 하면 #9 가 그 디렉터리를 지우는 날 이 유닛이 함께 죽는다."""
+    """The slice is a read-only reference -- importing it means this unit dies the day #9 deletes the
+    directory."""
     body = (ROOT / "analysis" / "judge" / "__init__.py").read_text(encoding="utf-8")
     assert "analysis.slices" not in body
-    assert "analysis/slices/ydc/judge.py" in body, "규칙의 출처가 헤더에 없다"
+    assert "ydc `judge.py`" in body and "02440ab" in body, (
+        "the source file and the promotion sha are not in the header"
+    )

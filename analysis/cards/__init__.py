@@ -1,9 +1,10 @@
 """R&D opportunity cards made by rules — `contracts/interfaces.md` §Opportunity cards is canonical (fork #6).
 
-규칙의 출처는 ydc `analysis/slices/ydc/cards.py` 이고, 슬라이스를 import 하지 않고 옮겨 적었다. 설계
-원칙 넷을 그대로 받는다: ① 유형은 규칙이 배정한다 -- LLM 이 "이건 제품 공백이야"라고 판단하지 않는다.
-② 모든 수치는 이미 저장된 표에서 그대로 온다. ③ 근거 원문이 없으면 카드로 만들지 않는다. ④ 한계를
-카드 안에 넣는다.
+The rules come from ydc `cards.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`; unchanged through the import
+pin `v0.4.0`, `contracts/versioning.md`) and were written over rather than imported from the pinned copy
+`analysis/slices/ydc/` (deleted, #9). Four design principles are carried over as they stand: (1) the type is
+assigned by a rule, the LLM does not decide "this is a product gap"; (2) every number comes as-is from a
+table already stored; (3) no card without the evidence quote; (4) the limits go inside the card.
 
 This module knows no DB either. Cards make no rows (the contract's §Opportunity cards), so what comes out of
 here is not stored: `analysis/cards/pipeline.py` emits it on stdout -- the moment the same number lives in two

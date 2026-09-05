@@ -25,7 +25,22 @@ YOUTUBE_COMMENT = "youtube_comment"
 YOUTUBE_VIDEO = "youtube_video"
 YOUTUBE_TRANSCRIPT = "youtube_transcript"
 COMMERCE_REVIEW = "commerce_review"
-SOURCES = (YOUTUBE_COMMENT, YOUTUBE_VIDEO, YOUTUBE_TRANSCRIPT, COMMERCE_REVIEW)
+MFDS = "mfds"
+# Appended last: pipeline.index_signature hashes `",".join(sources)`, so putting a name in front of the
+# four would change every existing combination's cache key for no reason.
+SOURCES = (YOUTUBE_COMMENT, YOUTUBE_VIDEO, YOUTUBE_TRANSCRIPT, COMMERCE_REVIEW, MFDS)
+
+# What the vector store carries, and so what the vector path's grounding gate may stand on. `mfds` is
+# out (#77): a nearest neighbour of a filing is a different filing, which is a wrong answer rather than a
+# ranking mistake. It lives here rather than beside the encoder because pipeline.py's gate has to stand on
+# the very tuple the store was burned from, and pipeline cannot import embed -- that module pulls numpy in,
+# and pipeline is imported by a plain `cosmai retrieval chunk` (#77 review).
+ENCODED_SOURCES = (YOUTUBE_COMMENT, YOUTUBE_VIDEO, YOUTUBE_TRANSCRIPT, COMMERCE_REVIEW)
+
+# The two labels a filing's line carries. English rather than the Korean the ledger is filed in:
+# tool/checks/lang refuses an added Hangul line outside its path allowlist and this module is not on
+# it. They are index tokens, so changing one re-tokenizes every filing (#77).
+MFDS_LABELS = ("report no.", "registered")
 
 
 @dataclass(frozen=True)
@@ -48,7 +63,7 @@ ORDER BY video_id, comment_id LIMIT %s
 
 # video_snapshots holds the same video several times, so only the newest is used. There is no description
 # column, so only the title is used -- ydc joined title + description from the API response
-# (video_text in analysis/slices/ydc/trend.py).
+# (video_text in ydc trend.py, v0.1.0 02440ab).
 VIDEOS = pgsql.SQL("""
 SELECT DISTINCT ON (video_id) video_id, title FROM {schema}.video_snapshots
 WHERE video_id > %s AND (%s::date IS NULL OR published_at::date >= %s::date)
@@ -69,9 +84,29 @@ ORDER BY source, review_key LIMIT %s
 """)
 
 
-def _keyset(conn: psycopg.Connection, query: pgsql.Composed, params: tuple, key_len: int) -> Iterator[tuple]:
-    """Feeds a few key columns of the last row back as the cursor of the next page."""
-    cursor: tuple = ("",) * key_len
+# The natural key of a filing is MFDS's own report number, and mfds_snapshot says which copy of the
+# ledger the row came from -- an answer that quotes a filing has to be able to name it (#77).
+FILINGS = pgsql.SQL("""
+SELECT r.report_seq, r.item_name, r.entp_name, r.report_date, s.label
+FROM {schema}.mfds_registration r
+JOIN {schema}.mfds_snapshot s ON s.snapshot_id = r.snapshot_id
+WHERE r.report_seq > %s ORDER BY r.report_seq LIMIT %s
+""")
+
+
+def _keyset(
+    conn: psycopg.Connection,
+    query: pgsql.Composed,
+    params: tuple,
+    key_len: int,
+    start: tuple | None = None,
+) -> Iterator[tuple]:
+    """Feeds a few key columns of the last row back as the cursor of the next page.
+
+    `start` is the value below every key, and the default is the empty string because every key here
+    is text. A numeric key needs its own (`mfds_filings`) -- compared against `''` the statement does
+    not run at all, and one that silently paged from the wrong end would lose rows instead."""
+    cursor: tuple = start if start is not None else ("",) * key_len
     while True:
         with conn.cursor() as cur:
             cur.execute(query, (*cursor, *params, BATCH))
@@ -118,15 +153,49 @@ def commerce_reviews(conn: psycopg.Connection, schema: str, since: date | None =
         yield Document(review_doc_id(source, review_key), COMMERCE_REVIEW, body or "")
 
 
+def filing_text(
+    report_seq: int, item_name: str, entp_name: str, report_date: date, snapshot_label: str
+) -> str:
+    """The one line one filing is searched by. Kept in this one place for the reason `review_doc_id` is:
+    the chunk contract test and the reader would otherwise each carry their own copy of the grammar."""
+    number, registered = MFDS_LABELS
+    return " · ".join(
+        (
+            item_name,
+            entp_name,
+            f"{number} {report_seq}",
+            f"{registered} {report_date:%Y-%m-%d}",
+            snapshot_label,
+        )
+    )
+
+
+def mfds_filings(conn: psycopg.Connection, schema: str, since: date | None = None) -> Iterator[Document]:
+    # A filing has no time of its own that a scan could ride: the ledger is loaded whole per snapshot and
+    # report_date is when it was filed, not when we saw it. So since is not applied here, as in
+    # youtube_transcripts.
+    query = FILINGS.format(schema=pgsql.Identifier(schema))
+    # -1 rather than "": report_seq is a bigint, and the cursor has to sit below every key the column can
+    # hold -- from 0 a report_seq of 0 would be dropped from the corpus with nothing to show for it.
+    rows = _keyset(conn, query, (), key_len=1, start=(-1,))
+    for report_seq, item_name, entp_name, report_date, label in rows:
+        yield Document(
+            f"{MFDS}:{report_seq}",
+            MFDS,
+            filing_text(report_seq, item_name, entp_name, report_date, label),
+        )
+
+
 def documents(
     conn: psycopg.Connection,
     *,
     youtube_schema: str = "tubedepth",
     commerce_schema: str = "trend_radar",
+    mfds_schema: str = "needs",
     since: date | None = None,
     sources: tuple[str, ...] = SOURCES,
 ) -> Iterator[Document]:
-    """The four sources as one stream. Sources are not chosen by hard-coding, so another source is one line
+    """The five sources as one stream. Sources are not chosen by hard-coding, so another source is one line
     here."""
     if YOUTUBE_COMMENT in sources:
         yield from youtube_comments(conn, youtube_schema, since)
@@ -136,3 +205,5 @@ def documents(
         yield from youtube_transcripts(conn, youtube_schema, since)
     if COMMERCE_REVIEW in sources:
         yield from commerce_reviews(conn, commerce_schema, since)
+    if MFDS in sources:
+        yield from mfds_filings(conn, mfds_schema, since)
