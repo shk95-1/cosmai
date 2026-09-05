@@ -106,7 +106,7 @@ collect_ci_owed() {
         esac
         co_channel=${co_name%/*}
         co_answer=$(python3 "$issue_tool_dir/ci_owed.py" "origin/$co_name" "origin/main" 2>/dev/null) \
-            || co_answer="not owed"
+            || co_answer="unavailable"
         printf '%s\t%s\n' "$co_channel#$co_number" "$co_answer"
     done > "$co_tmp"
     jq -R -s 'split("\n") | map(select(length > 0) | split("\t")) | map({(.[0]): .[1]}) | add // {}' \
