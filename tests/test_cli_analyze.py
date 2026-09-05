@@ -13,8 +13,20 @@ from typing import Any
 import pytest
 
 import analysis.pipeline
+import analysis.polarity.ownership as ownership
 from analysis import registry
+from analysis.polarity import SUNCARE_CATEGORY
+from analysis.polarity.ownership import ALWAYS, Owner
 from cosmai.cli import STAGES, main
+
+# OWNERS is suspended empty (#242): these tests patch it back in locally to prove the CLI wiring around a
+# registered scope, independent of the shipped table's current (empty) state.
+_SUNBLOCK_OWNED = {SUNCARE_CATEGORY: Owner("stub-v9", ALWAYS)}
+
+
+@pytest.fixture
+def sunblock_owned(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ownership, "OWNERS", _SUNBLOCK_OWNED)
 
 
 class _FakeConn:
@@ -104,24 +116,38 @@ def registered(monkeypatch: pytest.MonkeyPatch) -> _StubPolarity:
 
 
 def test_impl_hands_the_registered_classifier_to_the_stage(
-    recorded: list[dict[str, Any]], registered: _StubPolarity
+    recorded: list[dict[str, Any]], registered: _StubPolarity, sunblock_owned: None
 ):
     """남의 scope(선블록의 주인은 gemma4 다)를 지정한 실행도 여기서 막지 않는다 — 그 거절은 단계의
     몫이고 entrypoints.md 는 그것을 failed run + 종료 코드 1 로 약속한다."""
-    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "선블록"]) == 0
+    # OWNERS is suspended empty (#242): `sunblock_owned` patches a scope back in to exercise this wiring.
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", SUNCARE_CATEGORY]) == 0
     assert recorded == [
-        {"stage": "polarity", "since": None, "scope": "선블록", "missing": False, "polarity": registered}
+        {
+            "stage": "polarity",
+            "since": None,
+            "scope": SUNCARE_CATEGORY,
+            "missing": False,
+            "polarity": registered,
+        }
     ]
 
 
 def test_missing_reaches_the_stage_as_the_cron_will_type_it(
-    recorded: list[dict[str, Any]], registered: _StubPolarity
+    recorded: list[dict[str, Any]], registered: _StubPolarity, sunblock_owned: None
 ):
     """`--missing` 을 판정하는 곳은 단계다(소유가 없으면 거절) — CLI 는 그것을 나르기만 한다."""
-    argv = ["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", "선블록", "--missing"]
+    # OWNERS is suspended empty (#242): `sunblock_owned` patches a scope back in to exercise this wiring.
+    argv = ["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", SUNCARE_CATEGORY, "--missing"]
     assert main(argv) == 0
     assert recorded == [
-        {"stage": "polarity", "since": None, "scope": "선블록", "missing": True, "polarity": registered}
+        {
+            "stage": "polarity",
+            "since": None,
+            "scope": SUNCARE_CATEGORY,
+            "missing": True,
+            "polarity": registered,
+        }
     ]
 
 
@@ -145,6 +171,16 @@ def test_an_impl_on_a_scope_with_no_owner_is_refused_before_the_pass_starts(
     assert "ownership.py" in capsys.readouterr().out
 
 
+def test_the_shipped_table_now_refuses_sunblock_too_while_owners_is_suspended(
+    recorded: list[dict[str, Any]], registered: _StubPolarity, capsys: pytest.CaptureFixture[str]
+):
+    """The consequence of #242, intended: with OWNERS suspended empty even the sunblock scope (once the
+    owner's own) is refused the same way as any other unregistered category, until re-registration."""
+    assert main(["analyze", "polarity", "--impl", "ollama:gemma4:latest", "--scope", SUNCARE_CATEGORY]) == 2
+    assert not recorded
+    assert "ownership.py" in capsys.readouterr().out
+
+
 def test_no_impl_still_leaves_the_rule_in_place(recorded: list[dict[str, Any]]):
     assert main(["analyze", "polarity"]) == 0
     assert recorded[0]["polarity"] is None
@@ -162,15 +198,23 @@ def test_an_impl_the_registry_does_not_know_is_blocked_before_the_stage_runs(
 def test_a_paid_impl_without_a_scope_is_refused_before_a_single_call_goes_out(
     recorded: list[dict[str, Any]],
     registered: _StubPolarity,
+    sunblock_owned: None,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
     """eval 은 --split 으로 막는다. analyze 에는 split 이 없고 기본이 전량이라 --scope 가 그 자리다."""
+    # OWNERS is suspended empty (#242): `sunblock_owned` patches a scope back in to exercise this wiring.
     monkeypatch.setattr(registry, "is_paid", lambda task, spec: True)
     assert main(["analyze", "polarity", "--impl", "llm:claude-sonnet-5"]) == 2
     assert not recorded
     assert "spends money" in capsys.readouterr().out
-    assert main(["analyze", "polarity", "--impl", "llm:claude-sonnet-5", "--scope", "선블록"]) == 0
+    assert main(["analyze", "polarity", "--impl", "llm:claude-sonnet-5", "--scope", SUNCARE_CATEGORY]) == 0
     assert recorded == [
-        {"stage": "polarity", "since": None, "scope": "선블록", "missing": False, "polarity": registered}
+        {
+            "stage": "polarity",
+            "since": None,
+            "scope": SUNCARE_CATEGORY,
+            "missing": False,
+            "polarity": registered,
+        }
     ]

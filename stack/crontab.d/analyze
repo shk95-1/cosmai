@@ -12,15 +12,16 @@
 # 서로 어긋나도 아무도 모른다.
 0 5 * * *   cosmai analyze all
 #
-# The owner's (gemma4's) pass. This used to be a spot where only the formula was written down with no
-# wiring behind it, and #32 filled in all three at once: the analyze service in
-# stack/docker-compose.yml receives OLLAMA_URL (the default is the Windows Tailscale address WSL2's
-# mirroring inherits -- the only path measured to round-trip POST /api/chat from inside a container),
-# right after the stage starts it asks that address for /api/tags once and stops with a failed run plus
-# exit code 1 if it cannot be reached (the preflight in analysis/polarity/ollama.py), and 26 categories
-# were registered in the ownership table at the same time. A registration with no line is a hole, and a
-# line with no registration is an empty run, so all three only ever move together in one PR.
-0 8 * * *   cosmai analyze polarity --impl ollama:gemma4:latest --missing
+# Suspended 2026-09-06 (#242): the `0 8` gemma4 line that used to stand here is gone. The Tailscale GPU
+# host it depended on no longer answers /api/tags, and this host's own ollama is CPU-only with too little
+# memory for the 9.2 GiB Q4_K_M weights -- a local CPU-only ollama cannot carry the ~2,800 calls/day steady
+# state either way (the issue's evaluation comment has the measurements). `OWNERS` in
+# analysis/polarity/ownership.py holds no gemma4 scope while this line is absent -- a registration with no
+# line is a hole, and a line with no registration is an empty run, so the two only ever move together.
+# To re-enable: a model host that answers /api/tags, OLLAMA_URL pointed at it, the ownership entries back in
+# OWNERS (the 26 with CRON_SINCE, the sunblock block with ALWAYS), and this line back -- all in one PR.
+#
+# The commentary below (T, the GPU window, the two-step procedure) is kept for the day the line returns.
 #
 # **왜 0 8 인가 -- 이 명령의 T 는 아직 미측정이다.**
 # 규칙은 그대로다: 인접한 두 줄의 간격이 앞 줄의 **최악** 소요 T 보다 넓어야 한다. #16 의 analyze 락은
@@ -43,13 +44,14 @@
 # 05:00 을 뒤로 민다. 넘긴 밤의 analyze all 은 skip 되고, 모든 단계가 자연키 upsert 라 다음 05:00 이
 # 그 밤의 몫까지 그대로 가져간다.
 #
-# **GPU window: 08:00-16:00 UTC (17:00-01:00 KST).** There is one GPU, and overlapping with another
-# repo's (the fork's) `cosmai retrieval embed` (380k chunks, 20.6 minutes idle) stretches to 5h38m --
-# both sides pay the same cost (measured in #28). An advisory lock cannot see another process, so the
-# window is fixed by documentation instead: `embed` is run to avoid this window. The 8h width is not a
-# T, it is an **upper-bound estimate** -- margin added on top of the only measured value (the full
-# pass's 6h44m), and once T is pinned down this width narrows along with it. The same sentence also
-# appears in stack/README.md.
+# **GPU window: 08:00-16:00 UTC (17:00-01:00 KST) -- void while the `0 8` line is absent (#242).** There
+# is one GPU, and overlapping with another repo's (the fork's) `cosmai retrieval embed` (380k chunks, 20.6
+# minutes idle) stretches to 5h38m -- both sides pay the same cost (measured in #28). An advisory lock
+# cannot see another process, so the window is fixed by documentation instead: `embed` is run to avoid this
+# window. The 8h width is not a T, it is an **upper-bound estimate** -- margin added on top of the only
+# measured value (the full pass's 6h44m), and once T is pinned down this width narrows along with it. The
+# same sentence also appears in stack/README.md. The fork's `retrieval embed` has nothing to avoid until the
+# `0 8` line comes back.
 #
 # Times are UTC (this file's own convention, and compose pins TZ=UTC). Moving the timezone to KST is
 # #36, and moving the whole file over in one go is #89 -- this line follows the file's current
@@ -57,7 +59,7 @@
 # nothing to recompute.
 #
 # Handing one more category to gemma4 is still a two-step procedure, but the two steps are no longer
-# glued together (#97):
+# glued together (#97) -- applies once the `0 8` line above is back (#242):
 #   1) Add that lexicon_category, gemma4's version, and the first month the owner will be responsible
 #      for (since) to OWNERS in analysis/polarity/ownership.py, and deploy it. Writing since as next
 #      month leaves the month before it kept current by the 05:00 line above, so registering it and

@@ -19,11 +19,13 @@ from psycopg import sql as pgsql
 from sqlalchemy import create_engine, text
 
 from analysis import pipeline
+from analysis.aggregate import POSITIVE
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
-from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET
+from analysis.polarity import GENERIC_RULESET, SUNCARE_CATEGORY, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
-from analysis.polarity.ownership import NO_OWNERS, OWNERS
+from analysis.polarity.ollama import OllamaPolarity
+from analysis.polarity.ownership import ALWAYS, NO_OWNERS, Owner
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from cosmai.cli import main
 from db import seed
@@ -245,19 +247,27 @@ def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
 def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):
     """크론이 부르는 모양 그대로다: 소유 표를 아무도 인자로 말하지 않아도 배송값(#31)이 선다. 이 픽스처의
     리뷰는 전부 선블록이라 규칙은 리뷰를 한 건도 쓰지 않고, 주인이 라벨한 행은 그 자리에 남는다."""
+    # OWNERS is suspended empty (#242): an explicit owners= table stands in for the shipped one.
     commerce, youtube = sources
+    gemma4 = OllamaPolarity().version
+    owners = {SUNCARE_CATEGORY: Owner(gemma4, ALWAYS)}
     with connect(analysis_url) as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO need_mention (src, site, ref, need_key, polarity, observed_at, "
             "observed_at_resolution, month, sentence, category, lexicon_category, "
             "extractor_version, polarity_version) VALUES ('review', 'oliveyoung', 'A1/R1', '백탁', "
             "'만족', '2026-03-04', 'day', '2026-03', '백탁이 너무 심해서 최악이에요', %s, '선블록', %s, %s)",
-            (CATEGORY, EXTRACTOR_VERSION, OWNERS["선블록"].version),
+            (CATEGORY, EXTRACTOR_VERSION, gemma4),
         )
         conn.commit()
     with connect(analysis_url) as conn:
         found = pipeline.run_stage(
-            conn, "all", commerce_schema=commerce, youtube_schema=youtube, captured_at=CAPTURED_DATE
+            conn,
+            "all",
+            commerce_schema=commerce,
+            youtube_schema=youtube,
+            captured_at=CAPTURED_DATE,
+            owners=owners,
         )
     assert found.status == "ok", found.detail
     with connect(analysis_url) as conn, conn.cursor() as cur:
@@ -266,7 +276,7 @@ def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sour
             "WHERE src = 'review'"
         )
         # 규칙이 이 문장을 다시 뽑았다면 '불만'/rule-v2.2 한 줄만 남았을 것이다 (제자리 upsert).
-        assert cur.fetchall() == [("선블록", "만족", OWNERS["선블록"].version)]
+        assert cur.fetchall() == [(SUNCARE_CATEGORY, POSITIVE, gemma4)]
 
 
 def test_a_second_analyze_all_produces_the_same_metrics_row_for_row(
