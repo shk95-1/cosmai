@@ -121,7 +121,12 @@ fi
 # --changed: the suite the push has to pay for is the one this change can break (#215). The base is
 # origin/main because that is what the push is measured against; a checkout that has no origin/main
 # gets class A from the classifier, which is the same suite this line ran before.
-"$script" --changed origin/main || {
+#
+# COSMAI_GATE=local (#232): CI runs class A on every push now, so this push never has to -- a
+# trigger, gate or merge change that would have earned A locally instead runs the computed set it
+# owes, and tool/checks/test prints that it is owed. COSMAI_FORCE_SUITE=1 still forces a real local
+# A (the offline fallback, #214); tool/checks/test itself honours that.
+COSMAI_GATE=local "$script" --changed origin/main || {
   printf '\033[31m✗ Tests failed. Push blocked.\033[0m\n' >&2
   exit 1
 }

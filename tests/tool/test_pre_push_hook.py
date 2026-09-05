@@ -358,3 +358,121 @@ def test_an_entry_from_before_the_class_was_recorded_never_skips(repo: Path):
     assert suite_runs(repo) == 1
     run_hook(repo, sha)
     assert suite_runs(repo) == 2, "a class-less entry was read as evidence"
+
+
+# ---------------------------------------------------------------------------------------------
+# #232 Work 2: CI runs class A on every push now, so the hook never runs it locally on its own.
+# These tests carry the REAL tool/checks/test (not the fake) so the downgrade -- which lives
+# there, gated on COSMAI_GATE=local -- is exercised through the actual hook. A PATH that mirrors
+# the real one but hides docker/uv/pg_isready lets the real script run far enough to print its
+# verification line and then stop at `require_command`, before it would ever start a container.
+# ---------------------------------------------------------------------------------------------
+
+REAL_CARRIED = CARRIED + ("tool/checks/suite-lock",)
+
+
+@pytest.fixture
+def gate_repo(tmp_path: Path) -> Path:
+    """Like `repo`, but tool/checks/test is the real script -- the one place #232's downgrade lives."""
+    root = tmp_path / "gate-repo"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(root)], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.email", "t@example.com"], check=True)
+    subprocess.run(["git", "-C", str(root), "config", "user.name", "t"], check=True)
+    for carried in REAL_CARRIED:
+        target = root / carried
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO_ROOT / carried, target)
+    real_test = root / "tool" / "checks" / "test"
+    shutil.copy2(REPO_ROOT / "tool" / "checks" / "test", real_test)
+    real_test.chmod(0o755)
+    (root / "tool" / "checks" / "tested-tree").write_text(
+        TESTED_TREE.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    return root
+
+
+@pytest.fixture(scope="module")
+def no_docker_path(tmp_path_factory: pytest.TempPathFactory) -> str:
+    """A PATH with every real command this run needs, minus docker/uv/pg_isready -- so the real
+    tool/checks/test reaches `require_command` and stops there instead of starting a container.
+    """
+    hide = {"docker", "uv", "pg_isready"}
+    base = tmp_path_factory.mktemp("no-docker-path")
+    shadow_dirs = []
+    for index, directory in enumerate(os.environ.get("PATH", "").split(os.pathsep)):
+        if not directory or not os.path.isdir(directory):
+            continue
+        shadow = base / f"d{index}"
+        shadow.mkdir()
+        try:
+            entries = os.listdir(directory)
+        except OSError:
+            continue
+        for name in entries:
+            if name in hide:
+                continue
+            try:
+                (shadow / name).symlink_to(os.path.join(directory, name))
+            except OSError:
+                continue
+        shadow_dirs.append(str(shadow))
+    return os.pathsep.join(shadow_dirs)
+
+
+def run_gate_hook(
+    repo: Path, no_docker_path: str, *shas: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    stdin = "".join(f"refs/heads/main {sha} refs/heads/main {ZERO}\n" for sha in shas)
+    env = {
+        "HOME": str(repo),
+        "PATH": no_docker_path,
+        **(extra_env or {}),
+    }
+    return subprocess.run(
+        ["sh", str(HOOK)],
+        cwd=str(repo),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+
+def write_and_commit(repo: Path, path: str, text: str) -> str:
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", "feat: x"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_a_trigger_change_pushes_the_computed_set_and_prints_it_is_owed(gate_repo: Path, no_docker_path: str):
+    base = write_and_commit(gate_repo, "contracts/ddl/needs/001.sql", "CREATE TABLE a (id int);\n")
+    origin_main(gate_repo, base)
+    sha = write_and_commit(gate_repo, "contracts/ddl/needs/002.sql", "CREATE TABLE b (id int);\n")
+    done = run_gate_hook(gate_repo, no_docker_path, sha)
+    assert "verification: class B" in done.stdout, done.stdout
+    assert "class A owed — CI runs it on this push" in done.stdout, done.stdout
+
+
+def test_cosmai_force_suite_runs_a_real_class_a_locally(gate_repo: Path, no_docker_path: str):
+    base = write_and_commit(gate_repo, "contracts/ddl/needs/001.sql", "CREATE TABLE a (id int);\n")
+    origin_main(gate_repo, base)
+    sha = write_and_commit(gate_repo, "contracts/ddl/needs/002.sql", "CREATE TABLE b (id int);\n")
+    done = run_gate_hook(gate_repo, no_docker_path, sha, extra_env={"COSMAI_FORCE_SUITE": "1"})
+    assert "verification: class A" in done.stdout, done.stdout
+    assert "class A owed" not in done.stdout, done.stdout
+
+
+def test_an_unanswerable_change_still_runs_class_a_locally(gate_repo: Path, no_docker_path: str):
+    base = write_and_commit(gate_repo, "somewhere/file.py", "x = 1\n")
+    origin_main(gate_repo, base)
+    sha = write_and_commit(gate_repo, "somewhere/file.py", "x = 2\n")
+    done = run_gate_hook(gate_repo, no_docker_path, sha)
+    assert "verification: class A" in done.stdout, done.stdout
+    assert "class A owed" not in done.stdout, done.stdout
+    assert "maps to no entry" in done.stdout, done.stdout
