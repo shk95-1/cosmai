@@ -141,6 +141,33 @@ def partial_page(repo: str, issues: list[dict], labels: list[str] | None = None)
 
 
 FAKE_GH = """#!/bin/sh
+# #232: `ready`'s CI-status lookup and `audit`'s nightly section both call `gh api` outside the
+# graphql loop below -- checked first, by substring on the whole argument list, because neither
+# carries a `-f query=` arg the loop's own matching depends on.
+case "$*" in
+  *"/check-runs"*)
+    if [ -n "$FAKE_GH_CI_FAIL" ]; then echo "fake gh: the API said no" >&2; exit 1; fi
+    # This stands in for `gh api ... --jq '<expr>'` as a whole: the fake prints the expression's
+    # own final answer directly, the same string the real --jq (gojq, bundled) would have produced.
+    printf '%s\\n' "${FAKE_GH_CI_CONCLUSION:-success}"
+    exit 0
+    ;;
+  *"workflows/suite.yml/runs"*)
+    if [ -n "$FAKE_GH_NIGHTLY_FAIL" ]; then echo "fake gh: the API said no" >&2; exit 1; fi
+    if [ -n "$FAKE_GH_NIGHTLY_MISSING" ]; then
+      echo '{"workflow_runs":[]}'
+      exit 0
+    fi
+    if [ -n "$FAKE_GH_NIGHTLY_CONCLUSION" ]; then
+      concl="\\"$FAKE_GH_NIGHTLY_CONCLUSION\\""
+    else
+      concl=null
+    fi
+    printf '{"workflow_runs":[{"created_at":"%s","conclusion":%s}]}\\n' \\
+      "${FAKE_GH_NIGHTLY_DATE:-2026-09-05T17:00:00Z}" "$concl"
+    exit 0
+    ;;
+esac
 # The fork pattern is tested first because "cosmai" is a substring of "cosmai-import-ydc":
 # the looser case would answer for both repos and the cross-repo tests would prove nothing.
 for arg in "$@"; do
@@ -216,6 +243,12 @@ def run(tmp_path: Path):
             "FAKE_GH_FAIL": fixture_kwargs.get("gh_fails_on", ""),
             "FAKE_GH_ERRORS": fixture_kwargs.get("gh_errors_on", ""),
             "FAKE_GH_PARTIAL": fixture_kwargs.get("gh_partial_on", ""),
+            "FAKE_GH_CI_FAIL": "1" if fixture_kwargs.get("ci_fails") else "",
+            "FAKE_GH_CI_CONCLUSION": fixture_kwargs.get("ci_conclusion", ""),
+            "FAKE_GH_NIGHTLY_FAIL": "1" if fixture_kwargs.get("nightly_fails") else "",
+            "FAKE_GH_NIGHTLY_MISSING": "1" if fixture_kwargs.get("nightly_missing") else "",
+            "FAKE_GH_NIGHTLY_DATE": fixture_kwargs.get("nightly_date", ""),
+            "FAKE_GH_NIGHTLY_CONCLUSION": fixture_kwargs.get("nightly_conclusion", ""),
         }
         return subprocess.run(
             [str(ISSUE), *args],
@@ -275,6 +308,89 @@ def test_a_blocker_in_the_other_repo_blocks(run):
             fork=[issue(6, "work on the fork", labels=("ch:analysis/retrieval",))],
         ).stdout
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# #232 Work 3: `ready` names the CI status of each open issue branch's tip.
+# ---------------------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ci_checkout(tmp_path: Path) -> Path:
+    """A repo with one remote-tracking branch shaped like a worker's own: `origin/tool/11-thing`."""
+    repo = tmp_path / "ci-checkout"
+    git, env = _git(repo)
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=env
+    )
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=env)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=env)
+    sha = subprocess.run(
+        [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True, env=env
+    ).stdout.strip()
+    subprocess.run(
+        [*git, "update-ref", "refs/remotes/origin/tool/11-thing", sha],
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    return repo
+
+
+def _ready_line_for(stdout: str, key: str) -> str:
+    return next(line for line in stdout.splitlines() if key in line)
+
+
+def test_ready_shows_the_ci_status_of_a_branch_that_earned_it(run, ci_checkout: Path):
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        cwd=ci_checkout,
+        ci_conclusion="success",
+    )
+    assert done.returncode == 0, done.stderr
+    assert "ci: success" in _ready_line_for(done.stdout, "cosmai#11"), done.stdout
+
+
+def test_ready_shows_a_red_ci_run(run, ci_checkout: Path):
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        cwd=ci_checkout,
+        ci_conclusion="failure",
+    )
+    assert "ci: failure" in _ready_line_for(done.stdout, "cosmai#11"), done.stdout
+
+
+def test_ready_shows_ci_none_for_a_branch_with_no_check_run(run, ci_checkout: Path):
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        cwd=ci_checkout,
+        ci_conclusion="none",
+    )
+    assert "ci: none" in _ready_line_for(done.stdout, "cosmai#11"), done.stdout
+
+
+def test_ready_reports_ci_unavailable_when_the_api_call_fails(run, ci_checkout: Path):
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        cwd=ci_checkout,
+        ci_fails=True,
+    )
+    assert "ci: unavailable" in _ready_line_for(done.stdout, "cosmai#11"), done.stdout
+
+
+def test_ready_prints_no_ci_for_an_issue_with_no_branch(run, ci_checkout: Path):
+    # #12 has no origin branch in ci_checkout (only #11 does): nothing to look up, nothing printed.
+    done = run(
+        "ready",
+        upstream=[epic(10, "tool", subs=(12,)), issue(12, "unstarted", labels=("ch:tool",))],
+        cwd=ci_checkout,
+    )
+    assert "ci:" not in _ready_line_for(done.stdout, "cosmai#12"), done.stdout
 
 
 def test_ready_leads_with_the_resources_the_running_issues_hold(run):
@@ -513,6 +629,63 @@ def test_audit_reports_drift_without_failing(run):
     # The fork fixture is missing five of the six shared labels, which is what makes a rule
     # unenforceable in one repo while reading as enforced in the other.
     assert "when-touched" in done.stdout
+
+
+# ---------------------------------------------------------------------------------------------
+# #232 Work 3: `audit`'s first section is the last nightly (scheduled) run of suite.yml.
+# ---------------------------------------------------------------------------------------------
+
+
+def _nightly_block(stdout: str) -> str:
+    return stdout.split("nightly")[1].split("\n\n")[0]
+
+
+def test_audit_reports_a_green_nightly_first(run):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_date="2026-09-05T17:00:00Z",
+        nightly_conclusion="success",
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip().startswith("nightly"), done.stdout
+    block = _nightly_block(done.stdout)
+    assert "2026-09-05T17:00:00Z" in block and "success" in block, done.stdout
+    assert "⚠" not in block, done.stdout
+
+
+def test_audit_flags_a_red_nightly(run):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_date="2026-09-05T17:00:00Z",
+        nightly_conclusion="failure",
+    )
+    block = _nightly_block(done.stdout)
+    assert "failure" in block, done.stdout
+    assert "⚠" in block, done.stdout
+
+
+def test_audit_flags_a_missing_nightly(run):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_missing=True,
+    )
+    block = _nightly_block(done.stdout)
+    assert "no scheduled run" in block, done.stdout
+    assert "⚠" in block, done.stdout
+
+
+def test_audit_reports_nightly_unavailable_when_the_api_call_fails(run):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_fails=True,
+    )
+    assert done.returncode == 0, done.stderr
+    block = _nightly_block(done.stdout)
+    assert "(unavailable)" in block, done.stdout
 
 
 def test_the_tool_says_it_is_unverified_when_gh_is_missing(tmp_path: Path):

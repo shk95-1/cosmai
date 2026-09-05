@@ -5,7 +5,9 @@
 #
 # `gate` is the classifier's own machinery: a wrong entry here is the one error the classifier
 # cannot catch itself, so a change touching one of these is class A no matter how small it looks --
-# no proof talks it down (#230).
+# no proof talks it down (#230). Since #232, "class A" is a verdict CI always backstops, not
+# necessarily a run this push pays for itself: a gate change judges its own blast radius locally
+# too (the computed set it owes, when it has one), and the whole-suite run happens on GitHub.
 gate = [
     "tests/conftest.py",
     "tests/scope.toml",
@@ -38,6 +40,10 @@ trigger = [
     "tool/checks/",
     "pyproject.toml",
     "uv.lock",
+    # #232 review: `uv sync` resolves this interpreter for the whole suite -- an unpinned or wrong
+    # version is the same "the environment itself changed" risk pyproject.toml and uv.lock sit on
+    # this list for (a class-A run failed on exactly this before the pin existed).
+    ".python-version",
     "analysis/types.py",
     "cosmai/cli.py",
 ]
@@ -263,3 +269,11 @@ none = [
 # tests/test_ruff_extend_include.py rglobs the whole tool/ tree for python-shebang scripts (#202,
 # #220) rather than naming any one of them, so the readers map's basename scan can never find it.
 "tool/*" = ["tests/test_ruff_extend_include.py"]
+# .github/ is on the `none` list above (nothing at runtime reads it), which would otherwise leave a
+# workflow edit at zero tests -- but .github/workflows/suite.yml is #232's own wiring, and this test
+# is its wiring test (#232 Work 4).
+".github/workflows/*" = ["tests/tool/test_ci_workflow.py"]
+# The interpreter the class-a run and every dev push resolve has to be the one the tests/snapshots/
+# cosmai_help.txt snapshot was recorded under (review 2026-09-05: a mismatch here is exactly what
+# broke run 33954240253); no basename scan finds it by prefix, so it is a reader like the two above.
+".python-version" = ["tests/tool/test_ci_workflow.py"]
