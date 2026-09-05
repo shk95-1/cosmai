@@ -24,6 +24,7 @@ A file this cannot read at either end fails closed, same as tool/invariants.py.
 
 from __future__ import annotations
 
+import ast
 import re
 import shutil
 import subprocess
@@ -55,13 +56,13 @@ CONTRACTS_BASENAMES = {
 HEADING_LINE = re.compile(r"^#+\s+(.*)$")
 HEADING_CUT = re.compile(r" \(| — | -- ")
 
-# A `§token` immediately after a GitHub issue number ("#10 §A-2") points into that issue's own
-# numbering, not into this tree -- section-names.md documents the same exemption for its own examples.
+# A `§` immediately after a GitHub issue number points into that issue's own numbering, not into this
+# tree -- section-names.md documents the same exemption for its own examples.
 ISSUE_ANCHOR = re.compile(r"#\d+\s*$")
 
-# A `§token` naming a section of a document this ledger does not track (STATE.md, a TEAM_DECISIONS
-# proposal, an architect/ note, the claude-api skill's own sections) is out of this resolver's scope --
-# none of those numbering schemes are declared here, and none should be.
+# A `§` naming a section of a document this ledger does not track (STATE.md, a TEAM_DECISIONS proposal,
+# an architect/ note, a skill's own sections) is out of this resolver's scope -- none of those
+# numbering schemes are declared here, and none should be.
 EXTERNAL_DOC = re.compile(
     r"(STATE\.md|TEAM_DECISIONS(?:_v[\d.]+)?|architect/\S*|claude-api\s+skill|\bskill)\s*$",
     re.IGNORECASE,
@@ -144,44 +145,161 @@ def resolve_anchor(rest_flat: str, vocab_sorted: list[str]) -> bool:
     return False
 
 
-def check_anchors(rev: str) -> tuple[int, list[str]]:
-    """(count of §tokens judged, file:line for each that does not resolve)."""
+def python_prose_lines(text: str) -> dict[int, str]:
+    """The docstring lines and `#` comment lines of a Python file -- its only prose.
+
+    An ordinary string literal (a test fixture's invented anchor, this module's own format strings)
+    is a placeholder or data, not an anchor a translation review should judge (#234 review, blocker 1).
+    """
+    import io
+    import tokenize
+
+    lines = text.split("\n")
+    prose: dict[int, str] = {}
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        tree = None
+    if tree is not None:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            body = node.body
+            first = body[0] if body else None
+            if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)):
+                continue
+            if not isinstance(first.value.value, str):
+                continue
+            start, end = first.value.lineno, getattr(first.value, "end_lineno", first.value.lineno)
+            for ln in range(start, end + 1):
+                if 1 <= ln <= len(lines):
+                    prose[ln] = lines[ln - 1]
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                prose[tok.start[0]] = lines[tok.start[0] - 1]
+    except Exception:  # noqa: BLE001 -- unparsable python: comments are lost, docstrings still counted
+        pass
+    return prose
+
+
+def prose_lines_for(path: str, kind: str, text: str) -> dict[int, str]:
+    """The lines of `path` a translation review actually judges -- not a code or fixture string."""
+    lines = text.split("\n")
+    if kind == "markdown":
+        return dict(enumerate(lines, start=1))
+    if kind == "python":
+        return python_prose_lines(text)
+    if kind in ("sql", "shell", "js", "hash", "dockerfile"):
+        return {i: line for i, line in enumerate(lines, start=1) if is_comment(line, kind)}
+    return {}
+
+
+def anchor_tokens(path: str, prose: dict[int, str], all_lines: list[str]) -> list[tuple[int, str, str]]:
+    """(line, the raw text right after `§`, the display snippet) for every in-scope token in `prose`."""
+    found: list[tuple[int, str, str]] = []
+    for i in sorted(prose):
+        line = prose[i]
+        for m in re.finditer("§", line):
+            pos = m.start()
+            rest = line[pos + 1 :]
+            if not rest or not (rest[0].isalpha() or is_hangul(rest[0])):
+                continue  # not a name token: a bare `§`, or one followed by a digit/punctuation
+            before = line[:pos]
+            context = (all_lines[i - 2] if i >= 2 else "") + " " + before
+            if ISSUE_ANCHOR.search(context) or EXTERNAL_DOC.search(context):
+                continue
+            found.append((i, rest, rest[:40].rstrip()))
+    return found
+
+
+def check_anchors(rev: str, paths: list[str]) -> tuple[int, list[str]]:
+    """(count of anchor tokens judged, "path:line: snippet" for each in `paths` that does not resolve)."""
     vocab_sorted = sorted(build_anchor_vocab(rev), key=len, reverse=True)
     judged = 0
     failures: list[str] = []
-    for path in ls_tree(rev, *SCOPE_PATHS):
+    for path in paths:
         text = show(rev, path)
         if text is None:
             continue
-        lines = text.split("\n")
-        for i, line in enumerate(lines, start=1):
-            for m in re.finditer("§", line):
-                pos = m.start()
-                rest = line[pos + 1 :]
-                if not rest or not (rest[0].isalpha() or is_hangul(rest[0])):
-                    continue  # not a name token: a bare `§`, or one followed by a digit/punctuation
-                before = line[:pos]
-                context = (lines[i - 2] if i >= 2 else "") + " " + before
-                if ISSUE_ANCHOR.search(context) or EXTERNAL_DOC.search(context):
-                    continue
-                judged += 1
-                rest_flat = rest.replace("`", "")
-                if not resolve_anchor(rest_flat, vocab_sorted):
-                    failures.append(f"{path}:{i}")
+        kind = invariants.kind_of(path, text)
+        prose = prose_lines_for(path, kind, text)
+        if not prose:
+            continue
+        all_lines = text.split("\n")
+        for i, rest, snippet in anchor_tokens(path, prose, all_lines):
+            judged += 1
+            rest_flat = rest.replace("`", "")
+            if not resolve_anchor(rest_flat, vocab_sorted):
+                failures.append(f"{path}:{i}: §{snippet}")
     return judged, failures
 
 
 # ---------- (a) invariants ----------
 
 
-def check_invariants(base: str, files: list[str]) -> list[str]:
+def string_literal_positions(text: str) -> list[tuple[int, str]] | None:
+    """Every string `Constant`'s (line, value), in `ast.walk` order -- position i means the same thing
+    in two trees whose blanked fingerprint already matched (#234 review, blocker 2)."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    invariants.strip_docstrings(tree)
+    return [
+        (node.lineno, node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    ]
+
+
+def moved_literals(before_text: str, after_text: str) -> tuple[list[int], int] | None:
+    """(head-side lines of a moved literal, count of literals translated in place) or None if unusable.
+
+    `--strings-blanked` proves the shape is unchanged but blanks every literal alike, so a pure swap
+    between two positions reads as "0 differ" -- a changed position whose new value is some OTHER
+    changed position's old value moved rather than translated.
+    """
+    before = string_literal_positions(before_text)
+    after = string_literal_positions(after_text)
+    if before is None or after is None or len(before) != len(after):
+        return None
+    changed = [i for i, ((_, ov), (_, nv)) in enumerate(zip(before, after, strict=True)) if ov != nv]
+    old_by_value: dict[str, list[int]] = {}
+    for i in changed:
+        old_by_value.setdefault(before[i][1], []).append(i)
+
+    moved_lines: list[int] = []
+    for i in changed:
+        new_value = after[i][1]
+        if any(j != i for j in old_by_value.get(new_value, [])):
+            moved_lines.append(after[i][0])
+    translated = len(changed) - len(moved_lines)
+    return sorted(set(moved_lines)), translated
+
+
+def check_invariants(base: str, files: list[str]) -> tuple[list[str], dict[str, int]]:
     start = merge_base_or(base)
-    failures = []
+    failures: list[str] = []
+    translated_counts: dict[str, int] = {}
     for path in files:
         reason = invariants.differs(start, "HEAD", path, blank_strings=True)
         if reason:
             failures.append(f"{path}: {reason}")
-    return failures
+            continue
+        before = invariants.blob(start, path)
+        after = invariants.blob("HEAD", path)
+        if before is None or after is None or invariants.kind_of(path, before) != "python":
+            continue
+        moved = moved_literals(before, after)
+        if moved is None:
+            continue
+        moved_lines, translated = moved
+        for line in moved_lines:
+            failures.append(f"{path}:{line}: a string literal moved rather than translated")
+        if translated:
+            translated_counts[path] = translated
+    return failures, translated_counts
 
 
 # ---------- (c) the Hangul-line ledger ----------
@@ -320,42 +438,65 @@ def render_compose(rev: str, workdir: Path) -> subprocess.CompletedProcess:
 
 
 def check_compose(base: str, changed: list[str]) -> tuple[str, str]:
-    """('ok'|'differs'|'skipped'|'error', a note)."""
+    """('ok'|'differs'|'skipped'|'error', a note).
+
+    Both sides erroring alike (an unset `COSMAI_*` on a clean host) says nothing about the translation
+    -- only an asymmetric result (one side renders, the other doesn't, or they render differently) is
+    this check's business (#234 review, fix-when-touched).
+    """
     if not any(f.startswith("stack/") for f in changed):
         return "ok", "no stack/ file changed"
     if shutil.which("docker") is None:
         return "skipped", "docker is not installed on this host"
 
     with tempfile.TemporaryDirectory(prefix="cosmai-translation-compose-") as tmp:
-        renders = {}
+        results: dict[str, subprocess.CompletedProcess] = {}
         for rev, name in ((merge_base_or(base), "base"), ("HEAD", "head")):
             wt = Path(tmp) / name
             git("worktree", "add", "--detach", str(wt), rev)
             try:
-                done = render_compose(rev, wt)
-                if done.returncode != 0:
-                    return "error", f"docker compose config failed at {name}: {done.stderr.strip()}"
-                renders[name] = done.stdout
+                results[name] = render_compose(rev, wt)
             finally:
                 git("worktree", "remove", "--force", str(wt))
-        if renders["base"] == renders["head"]:
-            return "ok", "byte-identical"
-        return "differs", "docker compose config differs between base and HEAD"
+        base_done, head_done = results["base"], results["head"]
+        base_ok, head_ok = base_done.returncode == 0, head_done.returncode == 0
+        if base_ok and head_ok:
+            if base_done.stdout == head_done.stdout:
+                return "ok", "byte-identical"
+            return "differs", "docker compose config differs between base and HEAD"
+        if not base_ok and not head_ok and base_done.stderr == head_done.stderr:
+            first_line = base_done.stderr.strip().splitlines()[0] if base_done.stderr.strip() else ""
+            return "skipped", f"errors identically at base and HEAD -- {first_line}"
+        return "error", (
+            f"asymmetric: base {'ok' if base_ok else 'error'}, head {'ok' if head_ok else 'error'}"
+        )
 
 
 # ---------- report ----------
 
 
+def undeclared_anchors(rev: str) -> list[str]:
+    """Every undeclared `§` anchor anywhere in the tree at `rev` -- an audit item, not this exit
+    status: pre-existing gaps in section-names.md are not this branch's fault (#234 review, blocker 1).
+    """
+    _, failures = check_anchors(rev, ls_tree(rev, *SCOPE_PATHS))
+    return failures
+
+
 def main(argv: list[str]) -> int:
+    if "--undeclared" in argv:
+        for line in undeclared_anchors("HEAD"):
+            print(line)
+        return 0
     if not argv:
-        print("usage: translation.py <base>", file=sys.stderr)
+        print("usage: translation.py <base> | translation.py --undeclared", file=sys.stderr)
         return 2
     base = argv[0]
     start = merge_base_or(base)
     changed = [f for f in git("diff", "--name-only", "--no-renames", start, "HEAD").split("\n") if f]
 
-    inv_failures = check_invariants(base, changed)
-    anchor_count, anchor_failures = check_anchors("HEAD")
+    inv_failures, translated_counts = check_invariants(base, changed)
+    anchor_count, anchor_failures = check_anchors("HEAD", changed)
     hangul_ledger, hangul_failures = check_hangul(base, changed)
     compose_status, compose_note = check_compose(base, changed)
 
@@ -364,6 +505,8 @@ def main(argv: list[str]) -> int:
     print(f"invariants: {len(changed)} file(s), {len(inv_failures)} differ")
     for line in inv_failures:
         print(f"  {line}")
+    for path, count in sorted(translated_counts.items()):
+        print(f"  {path}: {count} literal(s) translated")
     print()
     print(f"anchors: {anchor_count} §token(s) judged, {len(anchor_failures)} unresolved")
     for line in anchor_failures:

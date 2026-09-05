@@ -112,14 +112,61 @@ def test_exit_1_on_invented_anchor(repo: Path) -> None:
     assert "interfaces.md" in result.stdout
 
 
-def test_exit_1_on_moved_string_literal(repo: Path) -> None:
-    base_tree(repo)
-    write(repo, "tool/greet.py", fixture("greet_reworded.py"))
-    commit(repo, "quietly reword the return value")
+def test_exit_0_on_a_single_in_place_translation_and_it_is_counted(repo: Path) -> None:
+    write(repo, "tool/messages.py", fixture("single_translate_before.py"))
+    commit(repo, "base tree")
+    write(repo, "tool/messages.py", fixture("single_translate_after.py"))
+    commit(repo, "translate the one literal")
+
+    result = translation(repo, "HEAD~1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "1 literal(s) translated" in result.stdout
+
+
+def test_exit_1_on_a_pure_swap_of_two_literals(repo: Path) -> None:
+    """A moved literal: the value at one changed position reappears at another changed position."""
+    write(repo, "tool/messages.py", fixture("swap_before.py"))
+    commit(repo, "base tree")
+    write(repo, "tool/messages.py", fixture("swap_after.py"))
+    commit(repo, "quietly swap the two return values")
 
     result = translation(repo, "HEAD~1")
     assert result.returncode == 1
-    assert "greet.py" in result.stdout
+    assert "messages.py:5" in result.stdout
+    assert "messages.py:9" in result.stdout
+
+
+def test_string_literal_anchor_is_not_judged(repo: Path) -> None:
+    """A `§`-shaped value inside a string literal is a fixture's placeholder, not a real anchor --
+    even though the file carrying it is itself part of the changed diff (its docstring is translated)."""
+    write(repo, "tool/placeholder.py", fixture("anchor_placeholder_before.py"))
+    commit(repo, "base tree")
+    write(repo, "tool/placeholder.py", fixture("anchor_placeholder_after.py"))
+    commit(repo, "translate the docstring; the placeholder literal is untouched")
+
+    result = translation(repo, "HEAD~1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "NoSuchSection" not in result.stdout
+
+
+def test_undeclared_mode_lists_tree_wide_gaps_without_failing(repo: Path) -> None:
+    base_tree(repo)
+    write(
+        repo,
+        "contracts/interfaces.md",
+        "# Interfaces\n\n## Ingredients (fork #6)\n\nSee §Undeclared for the rule.\n",
+    )
+    commit(repo, "an old, never-declared anchor already in the tree")
+
+    result = subprocess.run(
+        ["python3", str(REPO_ROOT / "tool" / "translation.py"), "--undeclared"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        env=CLEAN_ENV,
+    )
+    assert result.returncode == 0
+    assert "interfaces.md:5" in result.stdout
 
 
 def test_exit_1_on_dropped_comment_block(repo: Path) -> None:
