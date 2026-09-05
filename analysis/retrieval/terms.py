@@ -40,7 +40,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, LiteralString
 
-from analysis.retrieval import bm25, topics
+from analysis.retrieval import bm25, corpus, topics
 from analysis.retrieval.topics import DICTIONARY_CSV
 
 NOUN_TAGS = frozenset({"NNG", "NNP", "SL"})  # common noun · proper noun · foreign word
@@ -149,12 +149,18 @@ def _term_patterns(dictionary: topics.Topics) -> list[tuple[str, str, str, str, 
 
 def scan(conn: Any, sources: tuple[str, ...] | None = None) -> Scan:
     """One pass over the corpus produces the material for both tables. The dictionary is the active version
-    of this DB."""
+    of this DB.
+
+    With no `sources` the pass covers the text sources (`corpus.ENCODED_SOURCES`, the set `embed` encodes),
+    not every source: the report exists to grow the topic dictionary from consumer speech, and a filing's
+    item and company names are not speech. The ledger enters only when asked for (`--source mfds`) -- #77
+    had widened the default to five sources without saying so (#84).
+    """
     dictionary = topics.use_active(conn)
     found = Scan(dictionary=dictionary)
     terms = _term_patterns(dictionary)
     covered: dict[str, bool] = {}
-    for _doc_id, text in _documents(conn, sources):
+    for _doc_id, text in _documents(conn, corpus.ENCODED_SOURCES if sources is None else sources):
         lowered = text.lower()
         hits = topics.match_topics(text, include_excluded=True, dictionary=dictionary)
         bucket = TOPICAL if hits else CONTROL
