@@ -561,3 +561,22 @@ def test_hybrid_still_stands_on_the_filing_because_its_lexical_arm_carries_it(wi
             store=tmp_path / "no-store",
             client=FakeClient(),
         )
+
+
+# ---------- the gate precedes the dry run too (#85) ----------
+
+
+def test_the_dry_run_is_gated_too(loaded, capsys):
+    """The gate runs before the dry-run return (#76 put it at the top of `run`), so `ask --dry-run` on a
+    name the corpus never says previews exactly what the paid run would do: no call, an empty evidence
+    block, the gate's note on stderr, no row. `retrieval search` keeps the ungated view (#48). The PR that
+    carried #76 called the dry-run path untouched; it is gated, and this pins the order (fork #85)."""
+    client = FakeClient()
+    # bm25 would answer this query from the word it does say -- only the gate leaves the block empty.
+    answer = ask_it(loaded, f"{ABSENT} {QUERY}", engine="bm25", dry_run=True, client=client)
+    assert client.calls == []
+    assert answer.status == "no_evidence" and answer.evidence == ()
+    assert "== evidence ==" in answer.text and "d1" not in answer.text
+    assert ABSENT in capsys.readouterr().err
+    assert log_rows(loaded) == []
+    assert UsageLedger(loaded).spent() == 0
