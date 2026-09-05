@@ -31,7 +31,8 @@ remote.
 ## Paths the fork owns
 
 Everything PR #59 (`3b464fa...5c04ef5`) added that upstream had no file for, grouped by directory,
-plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests).
+plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests; PR #227: the
+ydc import pin test).
 The fork writes these without asking; upstream does not edit them outside a merge.
 
 ```ownership:fork-owned
@@ -70,6 +71,7 @@ tests/test_panel_quarter_contract.py
 tests/test_panel_seed.py
 tests/test_sensitivity_*.py
 tests/test_trend_*.py
+tests/test_ydc_pin.py
 tool/compare-ydc-*
 tool/measure-*
 tool/show-lexicon-stamp
