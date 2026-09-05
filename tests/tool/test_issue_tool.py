@@ -840,6 +840,100 @@ def test_the_todo_survey_reads_main_not_the_working_tree(run, checkout: Path):
     assert "cosmai#9" in missing and "cosmai#7" not in missing, done.stdout
 
 
+def _git(repo: Path) -> tuple[list[str], dict[str, str]]:
+    """A git command prefix scoped to `repo`, with GIT_* stripped so a nested checkout is not fooled
+    into acting on the enclosing worktree."""
+    return ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)], {
+        k: v for k, v in os.environ.items() if not k.startswith("GIT_")
+    }
+
+
+@pytest.fixture
+def wave_checkout(tmp_path: Path) -> Path:
+    """A repo on main with a merged `wave/tool` branch and no issue branch left open.
+
+    This is the exact shape AGENTS.md says must not happen: the wave rule deletes `wave/<channel>`
+    locally and on origin once it merges, and nothing enforced that until #196.
+    """
+    repo = tmp_path / "wave-checkout"
+    git, env = _git(repo)
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=env
+    )
+    (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=env)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=env)
+    subprocess.run([*git, "branch", "wave/tool"], check=True, capture_output=True, env=env)
+    return repo
+
+
+def test_audit_reports_a_merged_wave_branch_left_on_a_local_ref(run, wave_checkout: Path):
+    # #196: `wave/tool` is an ancestor of main (merged) and no `tool/<n>-*` branch is left open, so
+    # this is the exact leftover the wave rule says must not survive the wave.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=wave_checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("Merged wave branch left behind")[1].split("\n\n")[0]
+    assert "wave/tool" in block, done.stdout
+
+
+def test_audit_reports_a_merged_wave_branch_left_on_a_remote_tracking_ref(run, wave_checkout: Path):
+    # The wave rule deletes the branch on origin too; a checkout that only fetched (not pruned) sees
+    # it as `origin/wave/<channel>` instead of a local branch, and that has to be caught the same way.
+    git, env = _git(wave_checkout)
+    sha = subprocess.run(
+        [*git, "rev-parse", "wave/tool"], check=True, capture_output=True, text=True, env=env
+    ).stdout.strip()
+    subprocess.run([*git, "branch", "-D", "wave/tool"], check=True, capture_output=True, env=env)
+    subprocess.run(
+        [*git, "update-ref", "refs/remotes/origin/wave/tool", sha], check=True, capture_output=True, env=env
+    )
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=wave_checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("Merged wave branch left behind")[1].split("\n\n")[0]
+    assert "wave/tool" in block, done.stdout
+
+
+def test_audit_stays_silent_on_an_open_wave_with_an_unmerged_issue_branch(run, wave_checkout: Path):
+    # The guard: a fresh wave branch that has not diverged from main is trivially "merged" too, and
+    # without this guard every open wave would be misreported as a leftover the moment it is cut.
+    git, env = _git(wave_checkout)
+    subprocess.run(
+        [*git, "checkout", "-qb", "tool/117-carry", "main"], check=True, capture_output=True, env=env
+    )
+    (wave_checkout / "carry.txt").write_text("still open\n", encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=env)
+    subprocess.run([*git, "commit", "-qm", "chore: carry"], check=True, capture_output=True, env=env)
+    subprocess.run([*git, "checkout", "-q", "main"], check=True, capture_output=True, env=env)
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
+        cwd=wave_checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("Merged wave branch left behind")[1].split("\n\n")[0]
+    assert "none" in block, done.stdout
+
+
+def test_audit_stays_silent_with_no_wave_branch(run, checkout: Path):
+    # The common case -- no channel is mid-wave -- must not print anything under the new item.
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(7,)), issue(7, "work", labels=("ch:tool",), parent=10)],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    block = done.stdout.split("Merged wave branch left behind")[1].split("\n\n")[0]
+    assert "none" in block, done.stdout
+
+
 @pytest.mark.parametrize("origin_is_fork", [False, True], ids=["upstream-checkout", "fork-checkout"])
 def test_recheck_names_each_reason_with_the_checklist_items_to_walk(
     run, monkeypatch, fork_origin_checkout: Path, origin_is_fork: bool

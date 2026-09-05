@@ -16,4 +16,16 @@
 - Reproduction (a corollary of A19, #144): the mention set that made one `metrics_*` row is retraced from the version list in `analysis_run.versions.extractor` (`;`-separated) and that row's axes (`scope`·`need_key`·`month`·`product_ref`) alone — except that a `scope='all'` rollup row's `need_key` is already the name folded through `needs.need_key.canonical` (A17), so that one column has to be matched on the canonical rather than on the raw `need_mention.need_key`, or the folded synonym mentions drop out wholesale — and `versions.polarity` is not matched alongside, because one `extractor_version` can hold two polarity versions and it is the version that run's polarity step used rather than a population. The retrace holds **only while no `analyze` run has finished after that one**: `analyze polarity` deletes and re-inserts per `(src, month)` (`analysis/polarity/pipeline.py`) and leaves neither a time window nor a watermark, so a metrics run after it cannot restore the population. In such a cell the screen writes "a run rewrote the mentions after this run" instead of a mention list — it does not show a quietly wrong list.
 - `needs.panel_roster.version` (one row per version) and the `panel_channel.version`·`metrics_topic_quarter.panel_version` that point at it by FK are **integers** — an exception to the string rule above (`rule-vX.Y`), and the shape of `version`·`active` on the dictionaries (`entity_lexicon`·`aspect_lexicon`). A panel changes by seed rather than by code, so its version attaches per load (fork #3, values in #31).
 - The evaluation sets (`labeled_set`) have no version. When a label changes it is replaced by a new row with a new `labeled_at` and `labeler`.
+- `trend_radar` and `tubedepth` have **no version of their own**. Their canonical form is
+  `contracts/ddl/current/app.<schema>.sql` (a `pg_dump --schema-only` baseline) plus every
+  `contracts/ddl/<schema>/NNN_*.sql` applied in filename order — that composition is the schema, and
+  the two dumps are never re-dumped to fold a change back in, or applying the additive file again
+  would fail on a column that already exists. Their `alembic_version` table is part of the baseline
+  and holds no row: the old repos that ran alembic against these schemas are archived, nothing in
+  this repo writes that table, and a rebuilt database is therefore not a database alembic could
+  resume. There is no ledger either (`needs.schema_migration` is the needs schema's alone), because
+  `db/migrate.sh` step (0) is all-or-nothing: it composes the two schemas on a database that has
+  neither and skips a database that has them (#178). That question is asked of `alembic_version`
+  rather than of the schema name -- the table is the baseline's own marker, so a schema standing
+  without it is a build that died part-way and not a schema to leave alone.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).

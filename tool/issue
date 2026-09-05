@@ -287,6 +287,13 @@ def outside_fences:
 # choice: this file must not contain the Hangul the rule below exists to catch.
 def hangul: test("[\\x{1100}-\\x{11FF}\\x{3130}-\\x{318F}\\x{A960}-\\x{A97F}\\x{AC00}-\\x{D7A3}\\x{FFA0}-\\x{FFDC}]");
 def title_tag($en): (.title | startswith("[" + $en + "]"));
+# The wave rule names branches without an "origin/" prefix; a scan that mixes local and
+# remote-tracking refs has to fold both spellings onto the same channel before comparing them.
+def strip_origin: if startswith("origin/") then .[7:] else . end;
+def wave_channel: strip_origin as $s | if ($s | startswith("wave/")) then $s[5:] else empty end;
+def is_issue_branch_for($ch):
+  strip_origin as $s
+  | ($s | startswith($ch + "/")) and ($s[($ch | length) + 1:] | test("^[0-9]+-"));
 def ready_channels($all; $user):
   ($all | targets($user)) as $t
   | ($t | map({(.key): .}) | add // {}) as $byk
@@ -496,6 +503,14 @@ AUDIT='
     | . as $i | select([$todos[] | select(test("TODO\\(#" + ($i.number | tostring) + "\\)"))] | length == 0) | .key],
   merged_worktrees: [$worktrees[] | split("\t") | {path: .[0], branch: .[1]}
     | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
+  # #196: a wave branch merged into main but never deleted (locally or on origin) leaves the next
+  # wave of the same channel to start from a stale base -- invisible to every check that keys on
+  # "/<n>-" because a wave branch carries no issue number. Guarded against the fresh-open-wave case
+  # (wave/<ch> == main while the wave is still open) by requiring no unmerged issue branch remain.
+  merged_wave_channels: (
+    ([$merged_all[] | wave_channel] | unique) as $mwc
+    | [$mwc[] as $ch | select([$unmerged_all[] | select(is_issue_branch_for($ch))] | length == 0) | $ch]
+  ),
   missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)],
   foreign_closes: $foreign_closes,
   fork_behind: $fork_behind,
@@ -514,6 +529,7 @@ block("Queue per channel"; [.channels[] | "  " + .channel + " (" + .epic + ") ·
 + block("TODO(#n) marker with no open when-touched issue"; [.todo_without_issue[] | "  " + .])
 + block("open when-touched issue with no marker in the code"; [.when_touched_without_todo[] | "  " + .])
 + block("Worktree left behind after its branch was merged"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
++ block("Merged wave branch left behind"; [.merged_wave_channels[] | "  wave/" + .])
 + block("Shared label missing from a repo"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
 + block("Closed by a commit that belongs to the other repo"; [.foreign_closes[] | "  " + .])
 + block("fork behind on shared surfaces"; [.fork_behind[] | "  " + .])
@@ -590,6 +606,13 @@ case "$cmd" in
         # Local git is half of the audit: a branch or a worktree that outlived its issue is
         # only visible from the checkout, never from the API.
         merged=$(git branch --merged main --format='%(refname:short)' 2>/dev/null || true)
+        # A wave branch is deleted on origin too when the wave ends (AGENTS.md), so the merged-wave
+        # check needs remote-tracking refs as well as local ones -- `origin/HEAD` is a symbolic ref,
+        # not a branch, and is dropped before it can be misread as a channel named "HEAD".
+        merged_all=$(git branch --all --merged main --format='%(refname:short)' 2>/dev/null \
+            | grep -v '^origin/HEAD$' || true)
+        unmerged_all=$(git branch --all --no-merged main --format='%(refname:short)' 2>/dev/null \
+            | grep -v '^origin/HEAD$' || true)
         worktrees=$(git worktree list --porcelain \
             | awk '/^worktree /{p=$2} /^branch /{b=$2; sub("refs/heads/", "", b); print p"\t"b}')
         # main, not the working tree: every worktree shares the ref but has its own edits, so a
@@ -632,6 +655,8 @@ case "$cmd" in
             --argjson memo_days "$MEMO_DAYS" \
             --arg primary "${primary##*/}" \
             --argjson merged "$(printf '%s' "$merged" | jq -R -s "$to_lines")" \
+            --argjson merged_all "$(printf '%s' "$merged_all" | jq -R -s "$to_lines")" \
+            --argjson unmerged_all "$(printf '%s' "$unmerged_all" | jq -R -s "$to_lines")" \
             --argjson worktrees "$(printf '%s' "$worktrees" | jq -R -s "$to_lines")" \
             --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
             --argjson foreign_closes "$(printf '%s' "$foreign_closes" | jq -R -s "$to_lines")" \
