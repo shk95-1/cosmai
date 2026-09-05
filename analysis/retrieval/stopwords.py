@@ -92,8 +92,9 @@ def load(conn: Any, *, version: int | None = None) -> QueryStopwords:
     return from_rows((row[0], row[1]) for row in rows)
 
 
-# Unlike `topics` there is no change notification (`on_change`) -- nothing is cached off this list, which is
-# the same reason the index cache does not bite on it (the query axis builds no index).
+# Unlike `topics`, nothing is cached off this list (bm25 keys its caches on the topic dictionary's
+# fingerprint, #81), which is the same reason the index cache does not bite on it (the query axis builds no
+# index).
 _active: QueryStopwords | None = None
 
 

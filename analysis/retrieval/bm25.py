@@ -10,7 +10,8 @@ from __future__ import annotations
 import math
 import re
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +34,8 @@ KIWI_TAGS = frozenset({"NNG", "NNP", "VA", "VV", "XR", "MAG"})
 NOUN_TAGS = frozenset({"NNG", "NNP"})
 # 0 으로 두면 등록해도 기존 분석을 못 이겨 `신제품` 이 신(XPN) + 제품(NNG) 으로 갈린다.
 USER_WORD_SCORE = 3.0
+# The locative particle (U+C5D0). An alias ending in it is a phrase, not a word, and cannot go into Kiwi.
+PARTICLE = "\uc5d0"
 
 # This directory is canonical -- a copy with the same md5 sat in analysis/slices/ydc/seeds/ and made the
 # canonical copy look like two; #9 deleted that copy (#18 M15).
@@ -45,76 +48,120 @@ DICTIONARIES = (DICT_DIR / "user_dictionary.tsv", DICT_DIR / "ingredient_diction
 TOKENIZER_INPUTS = DICTIONARIES
 
 
-_kiwi = None
-_topic_words: list[str] | None = None
-_expand_words: list[str] | None = None
-# No cap: one entry per token, so it stops at the vocabulary size of the corpus (measured, 3,000 chunks ->
-# 3,013 entries · about 92B, and 150 queries run after that added 2), and the postings built from that
-# vocabulary are already held far larger by the same process -- a process is one CLI run (#18 M16).
-_expanded: dict[str, tuple[str, ...]] = {}
+@dataclass
+class _Derived:
+    """Everything this module derives from one topic dictionary: the tokenizer with the aliases registered
+    on it, the registration and expansion lists, and the expansion memo. It survives `topics.forget()` and a
+    `topics.use()` of the same content -- the retrieval tests install the same dictionary before every test
+    and a CLI run installs one per process, so the Kiwi build (measured 1.8 s and 266 MB) happens once per
+    dictionary rather than once per test (#81).
+
+    The expansion memo has no cap: one entry per token, so it stops at the vocabulary size of the corpus
+    (measured, 3,000 chunks -> 3,013 entries · about 92B, and 150 queries run after that added 2), and the
+    postings built from that vocabulary are already held far larger by the same process -- a process is one
+    CLI run (#18 M16)."""
+
+    source: topics.Topics
+    kiwi: Kiwi | None = None
+    topic_words: list[str] | None = None
+    expand_words: list[str] | None = None
+    expanded: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
-def _forget_topics(_dictionary: topics.Topics | None) -> None:
-    """When the active topic dictionary changes, everything derived from it here goes stale -- one survivor
-    is enough to produce tokens of two mixed dictionaries. Kiwi cannot remove a registered user word, so
-    building a new one is the only way."""
-    global _kiwi, _topic_words, _expand_words
-    _kiwi = None
-    _topic_words = None
-    _expand_words = None
-    _expanded.clear()
+# By fingerprint, least recently used first, at most KEPT of them. Two rather than one: the suite alternates
+# between the repo dictionary and a wider one around a few tests, and one slot rebuilt Kiwi on every return;
+# a CLI run installs one dictionary and fills one slot. The bound is the memory: one Kiwi is 266 MB.
+_derived: OrderedDict[str, _Derived] = OrderedDict()
+KEPT = 2
+# alias -> whether Kiwi has to be told about it. The verdict comes from a Kiwi with no user dictionary on it
+# and depends on no dictionary, so it is kept for the process: the bare analyzer is built only for an alias no
+# dictionary of this process has carried yet -- once, in a CLI run (#81).
+_registrable: dict[str, bool] = {}
 
 
-topics.on_change(_forget_topics)
+def _for_active() -> _Derived:
+    """The cache for the active dictionary. Its key is the fingerprint, which `from_rows` makes from the
+    whole content -- so a dictionary object carrying the same fingerprint is the same dictionary, unless it
+    was built by hand around a borrowed fingerprint (tests do). Then its content decides, not the label."""
+    dictionary = topics.active()
+    cache = _derived.get(dictionary.fingerprint)
+    if cache is not None and cache.source is not dictionary:
+        if cache.source.entries == dictionary.entries:
+            cache.source = dictionary  # the next call answers on identity alone
+        else:
+            cache = None
+    if cache is None:
+        if dictionary.fingerprint not in _derived and len(_derived) >= KEPT:
+            _derived.popitem(last=False)
+        cache = _derived[dictionary.fingerprint] = _Derived(source=dictionary)
+    _derived.move_to_end(dictionary.fingerprint)
+    return cache
 
 
 def topic_words() -> list[str]:
     """The aliases to register wholesale with Kiwi. Kiwi is asked before registering -- what is already one
     word, and inflected forms (VA · VV), have to be left out. Nailing an inflected form down as a noun breaks
     morpheme integration."""
-    global _topic_words
-    if _topic_words is not None:
-        return _topic_words
+    return _topic_words_of(_for_active())
 
-    from kiwipiepy import Kiwi
 
-    bare = Kiwi()  # for the decision, with no user dictionary on it
+def _topic_words_of(cache: _Derived) -> list[str]:
+    if cache.topic_words is not None:
+        return cache.topic_words
+    bare: Any = None  # for the decision, with no user dictionary on it; built only when an alias needs it
     words = set()
-    for entry in topics.active().entries:
+    for entry in cache.source.entries:
         for alias in entry["ko"]:
             # An alias with a space in it, or with a particle attached, is not a word and cannot go into Kiwi.
-            if " " in alias or len(alias) < 2 or alias.endswith("에"):
+            if " " in alias or len(alias) < 2 or alias.endswith(PARTICLE):
                 continue
-            # kiwipiepy's overloads tie a single-sentence input together with the batch return, so it cannot
-            # be narrowed.
-            tokens: Any = bare.tokenize(alias)
-            if len(tokens) == 1 and tokens[0].form == alias:
-                continue  # already one word
-            if any(t.tag.split("-")[0] in {"VA", "VV"} for t in tokens):
-                continue  # 활용형이다. 명사로 박으면 `하얗게` 질의가 `하얘` 문서를 놓친다
-            words.add(alias)
-    _topic_words = sorted(words)
-    return _topic_words
+            verdict = _registrable.get(alias)
+            if verdict is None:
+                if bare is None:
+                    from kiwipiepy import Kiwi
+
+                    bare = Kiwi()
+                # kiwipiepy's overloads tie a single-sentence input together with the batch return, so it
+                # cannot be narrowed.
+                tokens: Any = bare.tokenize(alias)
+                # Already one word: nothing to register. An inflected form (VA · VV): nailed down as a noun,
+                # a query in one inflection misses the document that carries another.
+                verdict = _registrable[alias] = not (
+                    (len(tokens) == 1 and tokens[0].form == alias)
+                    or any(t.tag.split("-")[0] in {"VA", "VV"} for t in tokens)
+                )
+            if verdict:
+                words.add(alias)
+    cache.topic_words = sorted(words)
+    return cache.topic_words
 
 
-def kiwi(dictionaries: tuple[Path, ...] = DICTIONARIES) -> Kiwi:
-    """Kiwi 를 한 번만 만든다. 사전 없이 쓰면 백탁이 백 + 탁 으로 쪼개진다."""
-    global _kiwi
-    if _kiwi is None:
-        from kiwipiepy import Kiwi
+def kiwi() -> Kiwi:
+    """The tokenizer for the active dictionary: the two packaged dictionaries and the active dictionary's
+    aliases registered on one Kiwi. Without the dictionaries a compound ingredient name splits into its
+    morphemes. Kiwi cannot remove a registered user word, so a dictionary with other aliases means building a
+    new one (#81)."""
+    return _kiwi_of(_for_active())
 
-        _kiwi = Kiwi()
-        for dictionary in dictionaries:
-            # A missing one is not passed over quietly: an index without the dictionary gets the ranking
-            # wrong with no error.
-            if not dictionary.exists():
-                raise FileNotFoundError(f"Kiwi 사전이 없다: {dictionary}")
-            _kiwi.load_user_dictionary(str(dictionary))
-        # The canonical topic aliases are the active dictionary (needs.aspect_lexicon), so they are not
-        # copied into the TSV but put in here.
-        for word in topic_words():
-            _kiwi.add_user_word(word, "NNG", USER_WORD_SCORE)  # pyright: ignore[reportArgumentType]
-    return _kiwi
+
+def _kiwi_of(cache: _Derived) -> Kiwi:
+    if cache.kiwi is not None:
+        return cache.kiwi
+    from kiwipiepy import Kiwi
+
+    built = Kiwi()
+    for dictionary in DICTIONARIES:
+        # A missing one is not passed over quietly: an index without the dictionary gets the ranking wrong
+        # with no error.
+        if not dictionary.exists():
+            raise FileNotFoundError(f"the Kiwi dictionary is missing: {dictionary}")
+        built.load_user_dictionary(str(dictionary))
+    # The canonical topic aliases are the active dictionary (needs.aspect_lexicon), so they are not copied
+    # into the TSV but put in here.
+    for word in _topic_words_of(cache):
+        built.add_user_word(word, "NNG", USER_WORD_SCORE)  # pyright: ignore[reportArgumentType]
+    cache.kiwi = built
+    return built
 
 
 def is_korean(text: str) -> bool:
@@ -126,21 +173,28 @@ def is_korean(text: str) -> bool:
 
 def expand_words() -> list[str]:
     """Every alias used for substring expansion. A different set from the registration list."""
-    global _expand_words
-    if _expand_words is None:
-        aliases = (a for e in topics.active().entries for a in e["ko"])
-        _expand_words = sorted({a for a in aliases if " " not in a and len(a) >= 2})
-    return _expand_words
+    return _expand_words_of(_for_active())
+
+
+def _expand_words_of(cache: _Derived) -> list[str]:
+    if cache.expand_words is None:
+        aliases = (a for e in cache.source.entries for a in e["ko"])
+        cache.expand_words = sorted({a for a in aliases if " " not in a and len(a) >= 2})
+    return cache.expand_words
 
 
 def expand(token: str) -> tuple[str, ...]:
     """When a token holds a topic alias, the alias is emitted too. Applied symmetrically to query and
     document."""
-    hit = _expanded.get(token)
+    return _expand(_for_active(), token)
+
+
+def _expand(cache: _Derived, token: str) -> tuple[str, ...]:
+    hit = cache.expanded.get(token)
     if hit is None:
-        extra = [w for w in expand_words() if w != token and w in token]
+        extra = [w for w in _expand_words_of(cache) if w != token and w in token]
         hit = (token, *extra)
-        _expanded[token] = hit
+        cache.expanded[token] = hit
     return hit
 
 
@@ -149,8 +203,9 @@ def tokenize(text: str) -> list[str]:
     text = unicodedata.normalize("NFKC", text or "")
     if not is_korean(text):
         return LATIN_RE.findall(text.lower())
+    cache = _for_active()  # resolved once: this runs per chunk while an index is built
     out = []
-    tokens: Any = kiwi().tokenize(text)  # the same reason as above
+    tokens: Any = _kiwi_of(cache).tokenize(text)  # the same reason as above
     for token in tokens:
         tag = token.tag.split("-")[0]  # VA-I -> VA; miss this and a predicate query gets 0 tokens
         if tag not in KIWI_TAGS:
@@ -160,7 +215,7 @@ def tokenize(text: str) -> list[str]:
         out.append(token.form.lower())
     # Kiwi splits on an attached symbol, so it cannot give `SPF50+` as one lump. The regex takes that.
     out.extend(t for t in LATIN_RE.findall(text.lower()) if len(t) >= 2)
-    return [t for token in out for t in expand(token)]
+    return [t for token in out for t in _expand(cache, token)]
 
 
 def tokenize_query(text: str) -> list[str]:

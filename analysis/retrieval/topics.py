@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, LiteralString
@@ -242,32 +242,20 @@ def load(conn: Any, *, version: int | None = None) -> Topics:
 
 
 _active: Topics | None = None
-_listeners: list[Callable[[Topics | None], None]] = []
-
-
-def on_change(listener: Callable[[Topics | None], None]) -> None:
-    """What to call when the active dictionary changes. The caches derived from the dictionary (bm25's Kiwi
-    and its expansion list) hang off here -- topics importing bm25 would be a cycle, so the direction was
-    turned around."""
-    _listeners.append(listener)
 
 
 def use(dictionary: Topics) -> Topics:
-    """Makes this dictionary the process's active dictionary."""
+    """Makes this dictionary the process's active dictionary. What bm25 derives from it (the Kiwi with the
+    aliases registered, the expansion list) is keyed on the fingerprint over there (#81), so installing the
+    same content again -- the retrieval tests do it before every test -- costs no rebuild."""
     global _active
-    changed = _active is None or _active.fingerprint != dictionary.fingerprint
     _active = dictionary
-    if changed:
-        for listener in _listeners:
-            listener(dictionary)
     return dictionary
 
 
 def forget() -> None:
     global _active
     _active = None
-    for listener in _listeners:
-        listener(None)
 
 
 def active() -> Topics:
