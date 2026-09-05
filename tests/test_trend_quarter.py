@@ -1,4 +1,5 @@
-"""분기 시계열의 다섯 수식이 계약 문장 그대로인가 (포크 #5, `contracts/interfaces.md` §수식).
+"""Are the five formulas of the quarterly time series exactly the contract's sentences (fork #5,
+`contracts/interfaces.md` §Formulas).
 
 DB 없이 돈다. 수식이 셈에서 갈라져 있는 것이 이 파일이 존재할 수 있는 이유이고, ydc `trend.py` 와의
 1:1 골든(`tests/test_trend_golden.py`)이 서는 자리도 같은 갈라짐이다.
@@ -72,7 +73,7 @@ PANEL = _panel(
 
 
 def test_the_grid_is_dense_so_a_quarter_with_no_mention_is_still_a_row():
-    """0 셀을 지우면 persistence 의 기준선이 올라가 모든 주제의 값이 움직인다 (§수식)."""
+    """Delete the 0 cells and persistence's baseline rises, moving every topic's value (§Formulas)."""
     built = _rows(COUNTS, PANEL)
     assert set(built) == {(t, q) for t in TOPICS for q in ("2024Q2", "2025Q1", "2025Q2")}
     empty = built[("백탁", "2025Q1")]
@@ -179,7 +180,8 @@ def test_unique_ratio_is_the_share_of_the_mentions_that_are_not_copy_paste():
 
 
 def test_channel_diffusion_is_the_same_number_on_the_comment_row_as_on_the_video_row():
-    """두 항 다 영상에서 나온 채널 분포를 쓰므로 이 컬럼은 source 에 의존하지 않는다 (§수식)."""
+    """Both terms use the channel distribution taken from the videos, so this column does not depend on source
+    (§Formulas)."""
     videos = _rows(COUNTS, PANEL)
     comments = _rows(COUNTS, PANEL, source="youtube_comment")
     assert all(videos[key].channel_diffusion == comments[key].channel_diffusion for key in videos)
@@ -198,7 +200,8 @@ def test_channel_diffusion_mixes_breadth_and_evenness():
 
 
 def test_channel_count_is_not_the_numerator_of_the_diffusion_term():
-    """이름이 비슷하다고 첫 항의 분자로 쓰면 댓글 행의 확산도가 달라진다 (§수식)."""
+    """Use it as the first term's numerator because the names look alike and the comment rows' diffusion
+    changes (§Formulas)."""
     comments = _rows(COUNTS, PANEL, source="youtube_comment")
     assert comments[("백탁", "2024Q2")].channel_count == 3  # 그 source 에서 그 주제를 낸 채널 수
     assert len(PANEL.per_channel[("백탁", "2024Q2")]) == 3
@@ -212,7 +215,7 @@ def test_the_stored_digits_are_the_digits_the_contract_pins():
     pinned = next(
         line
         for line in INTERFACES.read_text(encoding="utf-8").splitlines()
-        if line.strip().startswith("자리수:")
+        if line.strip().startswith("Decimal places:")
     )
     assert dict(DIGITS) == {name: int(digits) for name, digits in re.findall(r"`(\w+)` (\d+)", pinned)}
 

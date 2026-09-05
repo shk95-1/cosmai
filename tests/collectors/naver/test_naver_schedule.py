@@ -55,18 +55,18 @@ def _all_collector_times() -> list[tuple[str, tuple[str, ...]]]:
 
 
 def _entrypoints_schedule_block() -> str:
-    """The §스케줄 fenced block in contracts/entrypoints.md -- copied from the commerce/youtube
+    """The §Schedule fenced block in contracts/entrypoints.md -- copied from the commerce/youtube
     guards rather than imported, since tests/ is not a package and a cross-test import would be the
     more fragile of the two."""
     text = ENTRYPOINTS_MD.read_text(encoding="utf-8")
-    start = text.index("## 스케줄")
+    start = text.index("## Schedule")
     fence_start = text.index("```", start) + 3
     fence_end = text.index("```", fence_start)
     return text[fence_start:fence_end]
 
 
 def _contract_named_datasets() -> set[str]:
-    """Dataset names mentioned on the `naver:` line of the §스케줄 block. Commerce and youtube state
+    """Dataset names mentioned on the `naver:` line of the §Schedule block. Commerce and youtube state
     a time/period per dataset there; naver states a schedule in prose (`datalab once a month ...`), so
     this checks the weaker thing prose can promise -- every dataset gets named at all."""
     for raw in _entrypoints_schedule_block().splitlines():
@@ -79,12 +79,12 @@ def _contract_named_datasets() -> set[str]:
 
 
 def test_the_contract_names_every_naver_dataset():
-    # Same guard commerce and youtube keep over their §스케줄 lines (#93): if the naver line stops
+    # Same guard commerce and youtube keep over their §Schedule lines (#93): if the naver line stops
     # naming a dataset, that dataset's schedule is nowhere in the contract and nothing else notices.
     named = _contract_named_datasets()
     all_naver = {d.value for d in Dataset}
     assert named == all_naver, (
-        f"contracts/entrypoints.md §스케줄 names naver datasets {sorted(named)}, "
+        f"contracts/entrypoints.md §Schedule names naver datasets {sorted(named)}, "
         f"but every naver dataset is {sorted(all_naver)}"
     )
 
@@ -102,7 +102,7 @@ def test_every_naver_dataset_has_a_cron_line(dataset: Dataset):
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)
 def test_no_naver_line_starts_on_minute_zero(dataset: Dataset):
-    # Same rule commerce's daily lines follow (contracts/entrypoints.md §스케줄): minute 0 is the
+    # Same rule commerce's daily lines follow (contracts/entrypoints.md §Schedule): minute 0 is the
     # hourly ranking walk's own start.
     minute = _times_by_dataset()[dataset.value][0]
     assert minute != "0", f"naver {dataset.value} starts on minute 0, the hourly ranking walk's minute"

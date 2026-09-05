@@ -78,8 +78,8 @@ x-cron: &cron
     postgres:
       condition: service_healthy
   environment:
-    # contracts/entrypoints.md §DB 접속 노브. 망 안에서는 서비스명:5432 가 호스트의 127.0.0.1:5434 와
-    # 같은 DB 다 — db/runtime.py 의 host_and_port() 가 세 자리에서 이 둘만 읽는다.
+    # contracts/entrypoints.md §DB connection knobs. Inside the network the service name on 5432 is the same
+    # DB as the host's 127.0.0.1:5434 — host_and_port() in db/runtime.py reads only these two of the three.
     COSMAI_DB_HOST: postgres
     COSMAI_DB_PORT: "5432"
     # db/secrets.py's COSMAI_SECRET_FILE. A location, not a value.
@@ -87,9 +87,9 @@ x-cron: &cron
     # supercronic streams each job's stdout straight through, so if it were ever buffered, `docker logs`
     # would sit empty while the job runs and fill all at once when it exits.
     PYTHONUNBUFFERED: "1"
-    # stack/crontab.d/* 여섯 파일이 전부 첫 줄에서 UTC 라고 선언하고 contracts/entrypoints.md §스케줄
-    # 의 시각도 UTC 다. 이 줄이 없으면 그것이 베이스 이미지가 마침 UTC 라는 우연이고, 이미지를 바꾸는
-    # 날 여섯 스케줄이 한꺼번에 움직인다.
+    # All six stack/crontab.d/* files declare UTC on their first line and the times in
+    # contracts/entrypoints.md §Schedule are UTC too. Without this line that would be a coincidence of the
+    # base image happening to be UTC, and the day the image changes all six schedules move at once.
     TZ: UTC
   volumes:
     # Read-only: no scheduler ever writes to this file. The host path is a variable, not a literal, and
@@ -149,9 +149,9 @@ services:
           - shared-postgres
 
   # --- Collection ---------------------------------------------------------------------------------
-  # 커머스 4사. 여섯 줄이 한 컨테이너인 이유는 하나의 요청 예산을 나눠 쓰기 때문이다: crontab.d 의
-  # 간격 규칙(contracts/entrypoints.md §스케줄)은 이 줄들이 서로 겹치지 않는다는 전제 위에 있고,
-  # 컨테이너를 쪼개면 그 전제를 지킬 자리가 없어진다.
+  # The four commerce sites. The six lines are one container because they share one request budget: the
+  # interval rule in crontab.d (contracts/entrypoints.md §Schedule) stands on the premise that these lines do
+  # not overlap each other, and splitting the container leaves no place to keep that premise.
   #
   # **Sits behind a profile, so `docker compose up -d` never starts it** -- the live transport is
   # attached, so real requests go out the moment it starts, and when the first one goes out is a time a

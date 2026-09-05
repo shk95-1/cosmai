@@ -29,7 +29,7 @@ class EvalSet:
     extra_value: str = ""
 
 
-# interfaces.md §평가 하네스가 대조하는 기준선 — 행 순서까지 표와 같다.
+# interfaces.md §Baselines — the same as the table down to the row order.
 BASELINES: tuple[EvalSet, ...] = (
     EvalSet(
         task="polarity",
@@ -93,8 +93,9 @@ OBSERVED: tuple[EvalSet, ...] = (
 )
 
 
-# interfaces.md §규칙 실측 — 채택 조건은 계약이 요구하는 바닥이고, 구현 교체는 규칙이 실제로 낸 이 숫자를
-# 넘어야 한다. 두 표가 갈라지면 tests/test_baselines.py 가 잡는다.
+# interfaces.md §Rule measurement — the adoption condition is the floor the contract demands, and replacing
+# an implementation has to beat this number the rules actually produced. When the two tables part,
+# tests/test_baselines.py catches it.
 RULE_MEASURED: Mapping[str, Mapping[str, Mapping[str, Decimal]]] = {
     "polarity": {
         "sun holdout 100": {"acc": Decimal(".870"), "P:불만": Decimal(".915")},

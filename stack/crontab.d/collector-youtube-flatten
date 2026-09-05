@@ -1,4 +1,4 @@
-# UTC. flatten 15m and prune 1d, from contracts/entrypoints.md §스케줄. These two share a container
+# UTC. flatten 15m and prune 1d, from contracts/entrypoints.md §Schedule. These two share a container
 # because neither makes an external request -- flatten reads stored payloads into the snapshot tables
 # and prune deletes aged rows, so they have no budget to be throttled apart by, unlike watch and work.
 #

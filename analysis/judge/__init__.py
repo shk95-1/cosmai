@@ -1,13 +1,14 @@
-"""트렌드 유형 7종 판정과 두 점수 — `contracts/interfaces.md` §판정 이 정본이다 (포크 #40).
+"""The verdict of the seven trend types and the two scores — `contracts/interfaces.md` §Verdict is canonical
+(fork #40).
 
 The rules come from ydc `analysis/slices/ydc/judge.py` (v0.2) and were written over rather than imported from
 the slice (the way `analysis/trend/` did it). This module knows no DB: it takes metric rows
 (`MetricsTopicQuarterRow`) and produces judgement rows, so the same rules run on the stored table and on the
 raw collection CSV with the same code -- that is where the golden comparison stands.
 
-판정 상수 다섯의 근거와 채택/재적합 판단은 계약 §판정 의 표가 지고, `tests/test_judge_constants.py`
-가 그 표와 이 파일의 수를 대조한다. 값만 여기 있고 근거가 계약에 없으면 "왜 0.35 인가"에 답할 자리가
-없다.
+The grounds for the five verdict constants and the adopt-or-refit judgment are carried by the table in the
+contract's §Verdict, and `tests/test_judge_constants.py` compares that table against the numbers in this file.
+With only the values here and no grounds in the contract there is no place to answer "why 0.35".
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
 # then (`contracts/versioning.md`).
 JUDGEMENT_VERSION = "v0.2"
 
-# --- 상수 (근거와 채택 판단은 계약 §판정 의 표) ---
+# --- constants (the grounds and the adoption judgment are the table of the contract's §Verdict) ---
 TAU = 0.35
 DIFFUSION_TAU = 0.089
 EVIDENCE_FLOOR = 50.0
@@ -39,7 +40,7 @@ W_SCORE: Mapping[str, float] = {
     "channel_diffusion": 0.20,
     "evidence_strength": 0.20,
 }
-# 저장 자리수 (계약 §판정 "판정 자리수", 024 의 numeric(p,s)).
+# Stored decimal places (the contract's §Verdict, "verdict decimal places"; 024's numeric(p,s)).
 DIGITS: Mapping[str, int] = {"evidence_strength": 1, "opportunity_score": 1, "gap_pp": 2}
 
 # --- vocabulary ---
@@ -52,7 +53,7 @@ DIFFUSING = "채널 확산"
 THIN = "근거 부족"
 HELD = "판정 보류"
 RUNNING = "미확정(진행 중)"
-# 일곱이 유형이고 둘은 판정하지 않았다는 말이다 (계약 §판정).
+# Seven of them are types and two say that no verdict was made (the contract's §Verdict).
 TREND_TYPES = (SURGE, FADING, STICKY, SPIKE, EMERGING, DIFFUSING, THIN)
 NOT_A_VERDICT = (HELD, RUNNING)
 UNJUDGED = (THIN, *NOT_A_VERDICT)
@@ -68,8 +69,9 @@ VIDEO = "youtube_video"
 
 
 class SparseGrid(LookupError):
-    """판정은 조밀한 격자를 전제한다 — 직전 3분기·전년 동분기·전 기간 최고를 그 주제의 이력에서
-    꺼내므로, 빠진 칸을 만나면 0 이 아니라 "모른다"를 만난다 (계약 §판정)."""
+    """The verdict assumes a dense grid — it pulls the previous 3 quarters, the same quarter last year and the
+    whole-period peak out of that topic's history, so meeting a missing cell means meeting "I do not know"
+    rather than 0 (the contract's §Verdict)."""
 
 
 class MissingValue(LookupError):
@@ -131,9 +133,9 @@ def percentile_rank(sorted_values: Sequence[int], value: int) -> float:
 def evidence_strength(doc_rank: float, channel_ratio: float, unique_ratio: float) -> float:
     """0-100. The three terms are each put on 0-1 and summed with weights.
 
-    `channel_ratio` 는 `channel_count / denom_channels` 이고, 이것은 `channel_diffusion` 이 쓰는 두
-    채널 비율과 **또 다른 세 번째** 비율이다 (계약 §판정 의 표). 영상 행에서는 첫 두 비율이 우연히
-    같은 수라, 갈리는 것은 댓글 행뿐이다.
+    `channel_ratio` is `channel_count / denom_channels`, and this is **yet a third** ratio beside the two
+    channel ratios `channel_diffusion` uses (the table of the contract's §Verdict). On a video row the first
+    two ratios happen to be the same number, so what parts is the comment rows alone.
     """
     return (
         W_EVIDENCE["documents"] * min(1.0, doc_rank)
@@ -159,7 +161,8 @@ def _classify(
     quarters: Sequence[str],
     is_last: bool,
 ) -> tuple[str, str]:
-    """판정 순서 — 위에서 먼저 걸리면 종료한다. 순서 자체가 정의다 (계약 §판정)."""
+    """Verdict order — caught higher up, it stops there. The order itself is the definition (the contract's
+    §Verdict)."""
     if is_last:
         return RUNNING, ""
     if evidence < EVIDENCE_FLOOR or cell.mentions < MIN_DOCUMENTS:
@@ -307,7 +310,8 @@ def judge(rows: Sequence[MetricsTopicQuarterRow]) -> list[TopicQuarterJudgementR
             trend_type=verdicts[_key(row)][0],
             judged=verdicts[_key(row)][0] not in UNJUDGED,
             evidence_strength=evidence[_key(row)],
-            # v1 은 언제나 true 다. 게이트가 꺼져 있다는 사실이 행에서 읽혀야 한다 (계약 §판정).
+            # v1 is always true. That the gate is off has to be readable off the row (the contract's
+            # §Verdict).
             single_source=True,
             opportunity_score=scores.get(_key(row)),
             gap_pp=gaps.get(_cell(row)),

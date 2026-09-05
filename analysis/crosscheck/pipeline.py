@@ -1,9 +1,10 @@
 """The chunk index + the commerce source + the judgement of that run -> the three cross-source answers
 (fork #7).
 
-**이 파이프라인은 아무것도 쓰지 않는다.** 세 답의 행은 (주제) 또는 (성분) 하나가 키인데 022 의 분기
-입자는 여덟 칸이 키이고, 커머스 쪽에는 그중 분기도 명부도 없다 (`contracts/interfaces.md` §대조). 그래서
-산출은 표가 아니라 답이고, 읽기 전용이라 운영 DB 에 그대로 돌린다.
+**This pipeline writes nothing.** A row of the three answers is keyed by one (topic) or one (ingredient),
+while 022's quarterly grain is keyed by eight columns and the commerce side has neither the quarter nor the
+roster among them (`contracts/interfaces.md` §Crosscheck). So the output is an answer rather than a table,
+and being read-only it is run against the production DB as it is.
 
 The chunk index is scanned once. Scanned in one stream, the transaction stays open until the matching ends,
 and `needs_runtime`'s `transaction_timeout` (60 seconds) is a cap on the **total lifetime** of a transaction
@@ -102,11 +103,12 @@ class Built:
 
     @property
     def status(self) -> str:
-        """`ok` = 대조표가 계산됐다. **어긋남은 여기 실리지 않는다.**
+        """`ok` = the crosscheck table was computed. **A disagreement is not carried here.**
 
-        소스가 어긋난다는 것은 이 명령이 답하려고 존재하는 발견이지 실행의 실패가 아니고, 그 신호는 표의
-        `reading` 열이 이미 싣는다. `partial` 은 "이 산출을 믿지 마라" 하나만 뜻한다 (계약 §종료 코드,
-        #41 이 §민감도 에서, #6 이 카드에서 못 박은 그 자리).
+        That the sources disagree is the finding this command exists to give rather than a failure of the
+        run, and that signal is already carried by the table's `reading` column. `partial` means only "do not
+        trust this output" (the contract's §exit codes, the place #41 pinned in §Sensitivity and #6 in the
+        cards).
         """
         return "ok" if not self.violations else "partial"
 
@@ -322,7 +324,7 @@ def load(
         if not ranked:
             raise NoCrosscheck(
                 "no suncare product in rank_snapshot; run `cosmai collect commerce` -- the ranking is "
-                "what decides the commerce population (contracts/interfaces.md §대조)"
+                "what decides the commerce population (contracts/interfaces.md §Crosscheck)"
             )
         cur.execute(commerce_sql(commerce_schema, SUN_REVIEWS), where)
         sun_reviews = {corpus.review_doc_id(source, key) for source, key in cur.fetchall()}
@@ -366,7 +368,8 @@ def load(
 
 
 def _latest(rows: list[tuple]) -> dict[tuple[str, str, str], list[tuple[str, float]]]:
-    """(제품, 선택지)별 최신 시점 한 행만. 전부 세면 제품 수가 시점 수만큼 부풀려진다 (계약 §평가)."""
+    """One row per (product, option) at the newest point in time only. Count them all and the product count is
+    inflated by the number of points (the contract's §Rating)."""
     newest: dict[tuple[str, str, str, str], tuple] = {}
     for source, product, group, name, share, captured_at in rows:
         key = (str(source), str(product), str(group), str(name))

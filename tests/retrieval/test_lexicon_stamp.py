@@ -1,8 +1,9 @@
 """The way to stamp the dictionary revision again (`tool/show-lexicon-stamp`, fork #62).
 
-계약(`contracts/interfaces.md` §검색 실측)이 적어 둔 사전 판본을 다시 확인하는 자리다 --
-`tool/show-vector-stamp` 가 벡터 축에서 하는 일과 같고, 내는 문자열도 `retrieval eval` 이
-행마다 싣는 그것과 **같아야 한다**. 두 벌이 되면 계약이 인용한 판본과 행이 적은 판본이 갈린다.
+the place that confirms again the dictionary version the contract (`contracts/interfaces.md`
+§Retrieval measurements) wrote down -- the same as what `tool/show-vector-stamp` does on the vector axis, and
+the string it emits **has to be** the one `retrieval eval` puts on every row. With two copies, the version the
+contract quoted parts from the version the rows record.
 """
 
 from __future__ import annotations

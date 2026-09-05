@@ -4,9 +4,10 @@
 giving it idf 0 and answers with the words that are left, so the gate would turn a partial answer into 0
 results, and that loss is not worth it.
 
-**코사인 하한선 대신이다.** 계약 §벡터 하한선 이 재기 전에 정한 판정으로 하한선을 버렸다 -- 진짜
-질의(주제 별칭 61개)와 코퍼스에 없는 성분명의 최고 코사인 분포가 갈리지 않아서, 문턱은 무관한 결과를
-통과시키면서 맞는 결과를 자르는 쪽으로만 작동한다. 코사인은 안 갈리지만 **df 는 갈린다.**
+**This stands in for a cosine floor.** The contract's §Vector floor threw the floor out on a verdict decided
+before measuring -- the top-cosine distributions of real queries (61 topic aliases) and of ingredient names
+absent from the corpus do not part, so a threshold only works in the direction of letting an unrelated result
+through while cutting a right one. The cosine does not part, but **df does.**
 
 One rule. **If any query token of length `ZERO_DF_MINLEN` or more has a chunk frequency of 0, it is blocked.**
 That means the corpus has never once said that name, so even when search results come back they have nothing
@@ -17,7 +18,7 @@ so `len(postings[term])` is a chunk count rather than a document count. Only 0-o
 decision is the same, but it is a different word from what `eval.docs_with_tokens` does (folding into
 documents), and it is written apart here.
 
-버린 갈래가 둘이고 둘 다 실측으로 **이득 0 · 손해 2** 였다(계약 §벡터 하한선 의 표).
+Two branches were dropped and both measured **gain 0 · loss 2** (the table of the contract's §Vector floor).
 
   길이 3 으로 내리기   `재도포` 와 `ZnO`(-> `zno`) 두 별칭이 막히는데 가짜 차단은 그대로다. 짧은 토큰의
                        df 0 은 "없는 이름" 의 근거로 약하다 -- 부분문자열로도 0 이 될 수 있다.

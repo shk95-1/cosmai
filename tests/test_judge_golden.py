@@ -71,8 +71,9 @@ ECHOED = {
 }  # fmt: skip
 # ydc 는 임계값을 행마다 컬럼으로 적고 우리는 run 의 versions 에 든다 (A19).
 THRESHOLDS = {"tau": TAU, "diffusion_tau": DIFFUSION_TAU}
-# ydc 는 사유를 사람이 읽는 한 문장으로 적는다. 앞 조각이 사유이고, `above_half_peak` 의 괄호 안 수는
-# 같은 run 의 지표 행에서 다시 나오는 파생이라 우리는 저장하지 않는다 (계약 §판정).
+# ydc writes the reason as one human-readable sentence. The front piece is the reason, and the number inside
+# `above_half_peak`'s parentheses is a derivation that comes back out of the same run's metric row, so we do
+# not store it (the contract's §Verdict).
 REASONS = {
     "": "",
     "전년 동분기 표본 부족": NO_PRIOR_YEAR,

@@ -1,5 +1,6 @@
--- 수집기 run 하나가 한 dataset 에 대해 낸 결과 한 줄. contracts/entrypoints.md §공통 운영 뷰의 12컬럼을
--- 이름·순서·타입 그대로 낸다 (P16 의 표가 이 뷰 하나로 나와야 한다).
+-- One line per result a collector run produced for one dataset. It emits the 12 columns of
+-- contracts/entrypoints.md §Common operations view with the same names, order and types (P16's table has to
+-- come out of this one view).
 --
 -- Three arms feed it -- commerce (trend_radar's run+fetch_log), naver (naver_run+naver_fetch_log),
 -- youtube (tubedepth.jobs). #77 added youtube: the three reasons it was left out at stage 3 (no run,
@@ -9,11 +10,12 @@
 -- as a wait queue for them. Only youtube gives a number -- 0 (the queue is empty) and NULL (there is no
 -- queue) have to read differently in the table.
 --
--- elapsed_ms 의 뜻이 팔마다 다르다. commerce·naver 는 fetch 한 번의 왕복이고, youtube 는 job 하나의
--- 전체 벽시계(claim→finish)다(#101). 캐시 적중 job 은 fetch 를 아예 안 해서 왕복으로는 잴 것이 없기
--- 때문이다. 그래서 youtube 의 p90_ms 는 "요청이 얼마나 느렸나" 가 아니라 "일감 하나를 처리하는 데
--- 얼마나 걸렸나" 이고, 같은 이유로 requests 도 HTTP 요청 수가 아니라 끝난 job 수다 -- 캐시로 답한
--- job 도 1 로 센다 (jobs 에 캐시 적중을 표시하는 컬럼이 없다). 계약 §공통 운영 뷰가 같은 말을 한다.
+-- elapsed_ms means something different per arm. commerce and naver mean one fetch's round trip, while
+-- youtube means one job's whole wall clock (claim->finish) (#101). A job answered from cache never fetches,
+-- so there is no round trip to measure. So youtube's p90_ms is not "how slow was the request" but "how long
+-- did one unit of work take", and for the same reason requests is not a count of HTTP requests but of
+-- finished jobs -- a job answered from cache counts as 1 (jobs has no column marking a cache hit). The
+-- contract's §Common operations view says the same thing.
 --
 -- requests is every fetch_log row, and ok/blocked/failed are only the three buckets the contract defines
 -- (2xx / 403,429 / error or 5xx) -- if the three sum to less than requests, the gap is a response that

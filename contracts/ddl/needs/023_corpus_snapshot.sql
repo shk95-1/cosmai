@@ -54,13 +54,14 @@ CREATE TABLE needs.corpus_document (
   channel_id     text NOT NULL,             -- a comment carries its parent video's channel too (where the panel join happens)
   published_at   timestamptz NOT NULL,
   url            text,
-  -- 정규화된 표면형이다. 규칙은 매니페스트의 text_rule (contracts/formats.md §코퍼스 스냅샷).
-  -- 빈 문자열이 있다(quality_flags = 'empty_text'): 행을 지우지 않는 것이 규칙 8 이다.
+  -- A normalised surface form. The rule is the manifest's text_rule (contracts/formats.md §Corpus snapshot).
+  -- Empty strings exist (quality_flags = 'empty_text'): not deleting the row is rule 8.
   text            text NOT NULL,
   quality_flags   text NOT NULL DEFAULT '',
   source_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-  -- source_metadata 안에 있던 값을 열로 올린다. 조회수·좋아요가 "이 시점의 값"이라는 한계를 읽으려면
-  -- (interfaces.md §모집단의 한계) 시점이 JSON 안이 아니라 행의 칸이어야 한다.
+  -- Raises a value that sat inside source_metadata to a column. To read the limitation that view and
+  -- like counts are "the value as of this moment" (interfaces.md §Limitations of the population), that
+  -- moment has to be a column of the row rather than a key inside the JSON.
   collected_at   timestamptz NOT NULL,
   source_run     text NOT NULL,             -- one element of corpus_snapshot.source_runs
   PRIMARY KEY (snapshot_id, source, source_item_id),

@@ -220,8 +220,9 @@ def price_events(
 
 
 def latest_categories(snapshots: Iterable[RankSnapshot]) -> dict[tuple[str, str], str]:
-    """제품의 카테고리는 가장 최근 스냅샷이 말한다 — polarity 쪽 DISTINCT ON ... ORDER BY captured_at
-    DESC 와 같은 규칙이어야 두 자리가 같은 문자열을 적는다 (contracts/formats.md §카테고리 표기)."""
+    """A product's category is said by the most recent snapshot — it has to be the same rule as polarity's
+    DISTINCT ON ... ORDER BY captured_at DESC for the two places to write the same string
+    (contracts/formats.md §Category notation)."""
     out: dict[tuple[str, str], tuple[datetime, str]] = {}
     for s in snapshots:
         if not s.category_name:
@@ -255,8 +256,8 @@ def denominators(
                 source=source,
                 product_key=product,
                 captured_at=captured_at,
-                # formats.md §카테고리 표기: 사이트가 발행한 경로를 자르지 않는다 — leaf 로 자르면
-                # need_mention.category 에서 나온 metrics_need.scope 와 절대 같아지지 않는다 (#123).
+                # formats.md §Category notation: the path the site published is not cut — cut it to the
+                # leaf and it never equals the metrics_need.scope that came from need_mention.category (#123).
                 category=categories.get((source, product)) or None,
                 site_review_count=stat.review_count if stat else None,
                 low_collected=low,

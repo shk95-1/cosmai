@@ -1,4 +1,5 @@
-"""`needs.collector_health`: 계약 §공통 운영 뷰의 12컬럼을 commerce + naver + youtube 세 팔이 채운다.
+"""`needs.collector_health`: the 12 columns of the contract's §Common operations view are filled by the three
+arms commerce + naver + youtube.
 
 그 계약은 contracts/entrypoints.md 의 절이다. youtube 팔은 #77 이 붙였고, 원천이 run 이 아니라
 `tubedepth.jobs` 라 한 행이 (dataset, started_at 의 1시간 버킷) 하나다.
@@ -424,8 +425,8 @@ _PG_TYPE = {"text": "text", "timestamptz": "timestamp with time zone", "int": "i
 
 
 def _contract_columns(md: str) -> list[tuple[str, str]]:
-    block = re.search(r"## 공통 운영 뷰[^\n]*\n```sql\n(.*?)\n```", md, re.DOTALL)
-    assert block, "contracts/entrypoints.md §공통 운영 뷰 에 sql 펜스가 없다"
+    block = re.search(r"## Common operations view[^\n]*\n```sql\n(.*?)\n```", md, re.DOTALL)
+    assert block, "contracts/entrypoints.md §Common operations view has no sql fence"
     body = re.sub(r"--[^\n]*", "", block.group(1))
     pairs = [p.split() for p in body.replace("\n", " ").split(",") if p.strip()]
     return [(name, _PG_TYPE[kind]) for name, kind in pairs]

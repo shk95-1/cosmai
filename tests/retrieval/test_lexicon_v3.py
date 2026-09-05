@@ -3,12 +3,13 @@
 When #37 discarded ydc `lexicon.json` it left 5 alias kinds as "there is nowhere for them to go" and 7
 candidate kinds out of the 32 in `protected`. This issue attaches one of **listed / held / unlisted** to each
 of those twelve (plus the 3 kinds #37 already rejected).
-원장은 `tool/measure-lexicon-candidates` 의 `LEDGER` 이고 계약 문장은 `contracts/formats.md`
-§주제 사전 v3 다. 여기서 되묻는 것은 셋이다.
+The ledger is `LEDGER` in `tool/measure-lexicon-candidates` and the contract sentence is
+`contracts/formats.md` §Topic lexicon v3. Three things are asked again here.
 
-1. 원장이 **등재**라 적은 표기는 적재 원본에 행으로 있고, **아닌** 표기는 행이 없다.
-2. 적재 원본은 얼어붙은 v1(`frozen_topics.py`)에 **이 원장이 적은 것만** 더한 사전이다 -- 그 등식이
-   깨지면 `contracts/interfaces.md` §검색 실측 여섯 줄이 어느 사전 위의 값인지 말할 수 없게 된다.
+1. A surface the ledger marked **listed** is a row in the loaded source, and one marked **not** has no row.
+2. The loaded source is the frozen v1 (`frozen_topics.py`) plus **only what this ledger writes** -- break
+   that equation and the six lines of `contracts/interfaces.md` §Retrieval measurements can no longer say
+   which dictionary their values stand on.
 3. 미등재 근거 중 **코드로 다시 물을 수 있는 것**은 코드가 묻는다: `톤업크림` 은 `톤업` 이 이미 보고,
    `sunstick`·`케미컬` 은 레포 자신의 바닥(`terms.MIN_DOCS`) 아래이며, `올영` 은 자리(kind=brand)가
    있어도 `올리브영` 이 `tier='stop'` 이라 링커가 그 표면을 아예 안 본다.
@@ -102,8 +103,8 @@ def test_no_refused_term_slipped_into_the_loading_source():
 
 
 def test_the_loading_source_is_the_frozen_v1_plus_exactly_this_ledger():
-    """v1 과의 차이가 **정확히 이 원장**이라는 것. 여기가 깨지면 `contracts/interfaces.md`
-    §검색 실측 여섯 줄이 어느 사전 위의 값인지 말할 수 없다."""
+    """That the difference from v1 is **exactly this ledger**. Break this and the six lines of
+    `contracts/interfaces.md` §Retrieval measurements cannot say which dictionary their values stand on."""
     loaded = csv_topics()
     assert [e["topic"] for e in loaded.entries] == [e["topic"] for e in frozen_topics.TOPICS]
     for got, want in zip(loaded.entries, expected_entries(), strict=True):

@@ -335,8 +335,9 @@ def test_a_lock_that_went_missing_mid_run_is_said_out_loud(
 def test_a_second_analyze_run_yields_instead_of_interleaving(
     loaded: str, _schema_name: str, held_elsewhere: None
 ):
-    """수집기와 같은 모양이다 (contracts/entrypoints.md §수집기): 못 잡으면 건너뛰고 사유를 남기고
-    partial(1). 기다리지 않는다 — 4시간짜리 패스 뒤에 줄 선 05:00 은 다음 05:00 까지도 줄에 있다."""
+    """The same shape as a collector (contracts/entrypoints.md §Collectors): if it cannot take the lock it
+    skips, leaves a reason and ends partial (1). It does not wait — the 05:00 queued behind a four-hour pass
+    is still in the queue at the next 05:00."""
     with connect(loaded) as conn:
         found = run_stage(conn, "aggregate", commerce_schema=_schema_name)
     assert found.status == "partial", found.status

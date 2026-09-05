@@ -1,8 +1,9 @@
--- 분기 표의 두 불변식을 저장된 행에 대고 되묻는다. 비어 있으면 참이다 (contracts/interfaces.md §수식,
--- "분기 표의 행 집합"). 계약이 문장으로만 있으면 적재기(#5)가 언급 0 셀을 지우거나 trend_use 밖 주제를
--- 섞어도 아무도 못 잡는다 -- 둘 다 표를 오류 없이 다른 뜻으로 만든다.
--- db/migrate.sh 가 배포마다 다시 적용한다. CREATE OR REPLACE 는 컬럼이 그대로일 때만 성공하므로 DROP 을
--- 앞세운다.
+-- Asks the two invariants of the quarterly table back against the stored rows. Empty means true
+-- (contracts/interfaces.md §Formulas, "the quarterly table's row set"). With the contract as a sentence
+-- alone, nobody catches the loader (#5) deleting 0-mention cells or mixing in topics outside trend_use --
+-- both make the table mean something else with no error.
+-- db/migrate.sh reapplies it on every deploy. CREATE OR REPLACE only succeeds while the columns stay the
+-- same, so a DROP goes first.
 
 DROP VIEW IF EXISTS needs.metrics_topic_quarter_violation;
 CREATE VIEW needs.metrics_topic_quarter_violation AS

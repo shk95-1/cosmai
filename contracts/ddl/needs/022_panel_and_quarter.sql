@@ -22,9 +22,10 @@ CREATE TABLE needs.panel_roster (
   PRIMARY KEY (version)
 );
 
--- 역할이 needs 파생에 사는 이유: 원천(tubedepth)의 채널 표는 upstream 계약이고 tool/checks/ddl-drift
--- 가 지키는 자리라, 포크가 컬럼을 더할 자리가 아니다. 명부에 없는 채널은 패널 밖이고, 그래서 분모에
--- 들어가지 않는다 -- 이것이 이 표의 뜻이다 (contracts/formats.md §패널 명부 CSV).
+-- Why the role lives in the needs derivation: the source (tubedepth) channel table is an upstream
+-- contract and the place tool/checks/ddl-drift guards, so it is not a place for the fork to add a
+-- column. A channel not in the roster is outside the panel and so does not enter the denominator --
+-- that is what this table means (contracts/formats.md §Panel roster CSV).
 CREATE TABLE needs.panel_channel (
   channel_id    text NOT NULL,
   version       int  NOT NULL REFERENCES needs.panel_roster,  -- roster version; the shape of a dictionary (version + active)
@@ -41,14 +42,16 @@ CREATE TABLE needs.panel_channel (
 CREATE INDEX ON needs.panel_channel (version, panel_role) WHERE active;
 
 -- ---------- quarterly grain ----------
--- 월(metrics_need · metrics_wish)의 대체가 아니라 추가다. 기존 표에 입자를 가리키는 열을 더하면
--- 이미 있는 행의 뜻이 바뀌므로 표를 나눴고, 어느 표가 어느 입자의 정본인지는 계약이 말한다
--- (contracts/formats.md §시간 의 "집계 그레인의 정본"). 뷰가 아닌 것도 뜻이다: 분기 값은 그 시점의
--- 확정값이라, 매 조회마다 다시 계산하면 "그때 확정한 값"과 "지금 다시 센 값"이 갈린다.
+-- Not a replacement for the month (metrics_need · metrics_wish) but an addition. Adding a column
+-- that points at the grain to an existing table changes what its existing rows mean, so the tables
+-- were split, and which table is canonical for which grain is said by the contract
+-- (contracts/formats.md §Time's "the canonical table per aggregate grain"). Not being a view is
+-- meaning too: a quarterly value is the value settled at that moment, so recomputing it on every
+-- query parts "the value settled then" from "the value recounted now".
 CREATE TABLE needs.metrics_topic_quarter (
   run_id        bigint NOT NULL REFERENCES needs.analysis_run,
   scope         text NOT NULL,             -- a category name, or 'all' (the metrics_need.scope vocabulary)
-  -- 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다.
+  -- The registry of the topic axis is aspect_lexicon(ruleset='retrieval-topic').aspect, not needs.need_key.
   -- 두 축은 `백탁` 하나만 겹친다(tests/test_panel_quarter_contract.py) -- USING (need_key) 로 조인하면
   -- 주제 하나를 돌려주고 나머지를 조용히 떨어뜨리므로, 이름이 그 축을 말한다.
   topic_key     text NOT NULL,
@@ -64,11 +67,12 @@ CREATE TABLE needs.metrics_topic_quarter (
   panel_version int  NOT NULL REFERENCES needs.panel_roster,
   panel_role    text NOT NULL CHECK (panel_role IN ('product','expert')),
   mentions         int NOT NULL,           -- numerator: documents this topic matched
-  documents        int NOT NULL,           -- 그 분기 그 모집단의 문서 수 (§수식 의 "분기 문서 모집단")
+  documents        int NOT NULL,           -- documents of that population in that quarter (the quarterly document population, §Formulas)
   quarter_mentions int NOT NULL,           -- composition denominator: that quarter's trend_use topic mentions summed
   denom_channels   int NOT NULL,           -- panel channels that entered the computation that quarter
-  -- 자리수가 곧 판정 게이트의 해상도다(ydc judge.py 의 TAU·DIFFUSION_TAU 는 반올림된 값 위에서 맞춰졌다).
-  -- 맨 numeric 이면 저장이 자리수를 지키지 않아, 같은 run 이 두 벌의 값을 갖는다 (interfaces.md §수식).
+  -- The decimal places are the resolution of the verdict gate (ydc judge.py's TAU·DIFFUSION_TAU were
+  -- fitted on rounded values). A bare numeric does not keep the decimal places in storage, and then one
+  -- run holds two sets of values (interfaces.md §Formulas).
   composition       numeric(9,5),          -- mentions / quarter_mentions
   velocity_yoy      numeric(10,4),         -- ln(composition[q]) - ln(composition[same quarter last year])
   persistence       numeric(4,3),

@@ -89,7 +89,7 @@ def test_ranking_derivations_upsert_the_same_rows_on_a_second_run(
     assert [(r[0], r[3]) for r in daily] == [("p", 7), ("q", 2)]
     assert [(r[3], r[4]) for r in events] == [("drop", 3)]
     # 사이트가 발행한 경로 그대로다 — leaf 로 자르면 metrics_need.scope 와 만나지 못한다
-    # (contracts/formats.md §카테고리 표기, #123).
+    # (contracts/formats.md §Category notation, #123).
     assert denoms == [("p", "화장품 > 선케어 > 선블록", 4, True)]
 
 

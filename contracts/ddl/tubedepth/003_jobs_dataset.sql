@@ -6,8 +6,9 @@
 -- production's expected state. Production already carries this file (issue #102 approval boundary,
 -- contracts/entrypoints.md); step (0) skips a schema that is there, so nothing re-applies it.
 --
--- #102, judged on collector_health's youtube arm being absent (contracts/entrypoints.md §공통 운영
--- 뷰) because `jobs.kind` (`video.metadata` 계열) and the youtube dataset vocabulary
+-- #102, judged on collector_health's youtube arm being absent
+-- (contracts/entrypoints.md §Common operations view) because `jobs.kind` (the `video.metadata` family)
+-- and the youtube dataset vocabulary
 -- (`watch|work|flatten|prune`) are different words in the same-looking column: `kind` says what was
 -- fetched, `dataset` says which `cosmai collect youtube --dataset` verb produced the row. Nullable:
 -- existing rows (created before this migration) have no CLI verb to backfill from.

@@ -478,8 +478,9 @@ def _run_trend(args: argparse.Namespace) -> int:
                 print(made.note, file=sys.stderr)
                 for violation in made.violations:
                     print(f"  {violation}", file=sys.stderr)
-                # **카드 0건은 1 이 아니다** -- 규칙이 다 돌고 나온 답이다. 1 은 규칙에 걸렸는데 근거
-                # 원문이 없어 카드로 서지 못한 셀이 있을 때뿐이다 (#41 이 §민감도 에서 못 박은 자리).
+                # **Zero cards is not a 1** -- it is the answer after every rule has run. A 1 is only for a
+                # cell the rules caught that could not stand as a card because the evidence's original text
+                # is missing (the place #41 pinned in §Sensitivity).
                 return 0 if made.status == "ok" else 1
             outcome = acts[args.action](conn)
     # Having no roster, no snapshot, no topic dictionary and no metric or judgement row yet is blocked
@@ -552,7 +553,8 @@ def _run_eval(args: argparse.Namespace) -> int:
     if args.check_baseline:
         misses = [miss for result in results for miss in result.misses]
         try:
-            # 채택 조건은 바닥이고, 교체 조건은 규칙 실측 이상이다 (interfaces.md §규칙 실측).
+            # The adoption condition is the floor, and the replacement condition is at or above the rule
+            # measurement (interfaces.md §Rule measurement).
             misses += list(adoption_misses(args.task, {r.name: dict(r.metrics) for r in results}))
         except LookupError as unusable:
             print(unusable)

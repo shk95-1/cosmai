@@ -185,8 +185,8 @@ def test_one_where_on_the_view_reaches_the_quote_from_a_judged_cell(judged: str)
     """Exactly the completion criterion of this issue -- from one cell to the evidence text, a person writes
     no join.
 
-    그 한 줄에 `run_id` 가 드는 것도 계약이다(§근거): 뷰는 run 을 가리지 않으므로 한 스냅샷·명부에
-    run 이 둘이면 같은 셀이 겹쳐 나오고 `rank` 가 1..n 이 아니게 된다.
+    That `run_id` is on that one line is contract too (§Evidence): the view does not filter by run, so with
+    two runs under one snapshot and roster the same cell comes out twice and `rank` stops being 1..n.
     """
     with connect(judged) as conn:
         judge_run(conn)
@@ -211,10 +211,11 @@ def test_the_candidate_query_takes_the_partial_index_the_corpus_declares(judged:
     """`source = 'youtube_comment'` 하나만 걸면 023 의 부분 인덱스를 못 타고 26만 행을 훑는다
     (#5 운영 실측: 30초 statement_timeout 에 죽는다). 두 술어가 나란히 서 있어야 한다.
 
-    문자열만 보지 않고 **계획을 묻는다** -- #5 가 잡은 것은 술어의 모양이 아니라 운영에서의 timeout 이고,
-    술어가 그대로여도 인덱스가 사라지면(023 을 고치면) 이 테스트만 초록으로 남는다. 표본 크기에서도
-    계획이 그 인덱스를 고르는지는 아래가 확인한다. 전량(261,317문서)에서도 같은 인덱스를 타고 178ms 다
-    (2026-08-26, 계약 §근거 "전량 실측").
+    It asks for **the plan** rather than looking at the string alone -- what #5 caught was the timeout in
+    production rather than the shape of the predicate, and with the predicate unchanged but the index gone
+    (fix 023) this test alone would stay green. Whether the plan picks that index at fixture size is checked
+    below. Over everything (261,317 documents) it rides the same index at 178ms
+    (2026-08-26, the contract's §Evidence, "full measurement").
     """
     from analysis.evidence import pipeline
     from analysis.trend.pipeline import PANEL_ROLE, TOPIC_FILTER
@@ -288,7 +289,8 @@ def test_the_cli_writes_the_evidence_and_then_renders_the_cards(judged: str, cap
     # stdout is markdown alone -- a note left inside the redirected `.md` makes that file not a document.
     assert "trend cards run=" not in printed.out
     assert "trend cards run=" in printed.err
-    # **카드 0건은 실패가 아니다.** 규칙이 다 돌고 나온 답이고, #41 이 §민감도 에서 못 박은 자리와 같다.
+    # **Zero cards is not a failure.** It is the answer after every rule has run, the same place #41 pinned in
+    # §Sensitivity.
     assert main(["trend", "cards", "--quarter", "2024Q1", "--url", judged]) == 0
     assert "cards=0" in capsys.readouterr().err
 

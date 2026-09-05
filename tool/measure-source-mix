@@ -29,8 +29,8 @@ BM25 index (without a cache, over ten minutes on 380k chunks -- 474 seconds meas
     uv run --extra retrieval tool/measure-source-mix --json
     uv run --extra retrieval tool/measure-source-mix --part mix   # does not open the index
 
-종료 코드: 0 답이 계산됐다 · 2 막힘(활성 주제 사전이 없다 · 청크가 비었다 -- `contracts/entrypoints.md`
-§검색 의 blocked 와 같은 자리다).
+exit codes: 0 an answer was computed · 2 blocked (no active topic dictionary · the chunks are empty -- the
+same place as blocked in `contracts/entrypoints.md` §Search).
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ sys.path.insert(0, str(ROOT))
 from analysis.retrieval import eval as retrieval_eval  # noqa: E402
 from analysis.retrieval import topics  # noqa: E402
 
-K = 10  # 상위 k. 계약 §검색 실측 과 `analysis/retrieval/eval.K` 가 쓰는 그 k 다
+K = 10  # the top k. The same k the contract's §Retrieval measurements and `analysis/retrieval/eval.K` use
 # The threshold for "buried". The same order of magnitude as ydc's rank 293 and beyond-300, and ten
 # times k -- the only ground a split stands on is that a minority source is **not** near the top k, so
 # that absence has to be visible as an order of magnitude.

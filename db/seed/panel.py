@@ -2,7 +2,7 @@
 
 Every ratio ydc produces uses this roster as its denominator. The source is
 `eval/panel/channels_v1.csv`'s 11 columns, and only six of them go into the table -- what gets dropped
-and why is carried by `contracts/formats.md` §패널 명부 CSV.
+and why is carried by `contracts/formats.md` §Panel roster CSV.
 
 A version has the same shape as the lexicons (`entity_lexicon`/`aspect_lexicon`): loading assigns a
 `version` and swaps it in through `active` (contracts/versioning.md). But unlike a lexicon, this table

@@ -199,8 +199,9 @@ def test_the_topic_dictionary_is_not_read_as_a_polarity_aspect(seeded: str):
 
 
 def test_diff_compares_a_csv_against_a_db_version(seeded: str, tmp_path: Path, capsys):
-    """이 명령은 DB 버전끼리만 비교했다 -- "레포의 CSV 가 지금 켜져 있는 사전인가"를 물을 길이
-    레포 안에 없었고, `interfaces.md` §검색 실측 의 판본 되짚기가 그 물음이었다."""
+    """This command compared DB versions only -- there was no way inside the repository to ask "is the
+    repository's CSV the dictionary that is switched on now", and the version retracing of
+    `interfaces.md` §Retrieval measurements was that question."""
     csv = _csv(tmp_path, "brand_v2.csv", BRAND_V2)
     main(["lexicon", "load", "--kind", "brand", "--version", "2", csv, "--url", seeded])
     capsys.readouterr()

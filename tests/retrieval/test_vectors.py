@@ -234,7 +234,8 @@ def test_the_tool_counts_the_ids_instead_of_quoting_the_manifest(store):
 
 
 def test_the_tool_is_blocked_when_the_store_is_not_readable(tmp_path, store):
-    """읽을 수 없는 저장소는 실패가 아니라 막힘이다 -- `entrypoints.md` §검색 의 blocked 와 같은 자리다."""
+    """An unreadable store is a block rather than a failure -- the same place as blocked in `entrypoints.md`
+    §Search."""
     gone = _stamp_tool(str(tmp_path / "없다"))
     assert gone.returncode == 2 and gone.stderr.strip() and not gone.stdout.strip()
     _, _, manifest = vectors.paths(store)

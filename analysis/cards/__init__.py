@@ -1,12 +1,13 @@
-"""R&D 기회 카드를 규칙으로 만든다 — `contracts/interfaces.md` §기회 카드 가 정본이다 (포크 #6).
+"""R&D opportunity cards made by rules — `contracts/interfaces.md` §Opportunity cards is canonical (fork #6).
 
 규칙의 출처는 ydc `analysis/slices/ydc/cards.py` 이고, 슬라이스를 import 하지 않고 옮겨 적었다. 설계
 원칙 넷을 그대로 받는다: ① 유형은 규칙이 배정한다 -- LLM 이 "이건 제품 공백이야"라고 판단하지 않는다.
 ② 모든 수치는 이미 저장된 표에서 그대로 온다. ③ 근거 원문이 없으면 카드로 만들지 않는다. ④ 한계를
 카드 안에 넣는다.
 
-이 모듈도 DB 를 모른다. 카드는 행을 만들지 않으므로(계약 §기회 카드) 여기서 나온 것은 저장되지 않고
-`analysis/cards/pipeline.py` 가 stdout 으로 낸다 -- 같은 수가 두 곳에 살면 그 순간 정본을 다툰다.
+This module knows no DB either. Cards make no rows (the contract's §Opportunity cards), so what comes out of
+here is not stored: `analysis/cards/pipeline.py` emits it on stdout -- the moment the same number lives in two
+places they fight over being canonical.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from analysis.evidence import TOP_PER_CELL
 from analysis.judge import DIFFUSING, SPIKE, STICKY, SURGE, UNJUDGED
 from analysis.types import TopicQuarterJudgementRow
 
-# 보고서의 손잡이이지 적합된 값이 아니다 -- 근거가 팀 합의뿐이라는 것을 계약 §기회 카드 가 적는다.
+# A handle of the report rather than a fitted value -- that the only ground is team agreement is written down
+# by the contract's §Opportunity cards.
 GAP_PRODUCT_GAP = 2.0  # the smallest gap (%p) counted as a product gap
 SATURATED_COMPOSITION = 15.0  # the smallest comment share (%) counted as saturated
 
@@ -28,7 +30,8 @@ VERIFIED_GROWTH = "검증된 성장"
 FAD_RISK = "단기 유행 위험"
 SATURATED = "포화 시장"
 UPSTREAM_RESEARCH = "선행 연구 기회"
-# 규칙이 걸리는 순서다. 위에서 먼저 걸리면 끝난다 -- 순서 자체가 정의인 것은 §판정 과 같다.
+# The order the rules catch in. Caught higher up, it ends there -- the order itself being the definition is
+# the same as §Verdict.
 CARD_TYPES = (EXPRESSION_GAP, PRODUCT_GAP, VERIFIED_GROWTH, FAD_RISK, SATURATED, UPSTREAM_RESEARCH)
 # It is not deleted from the vocabulary because the rule stands as it is the day that input arrives. Laying a
 # missing input down as 0 makes that type quietly never appear (the same sentence as not laying the fourth
@@ -42,8 +45,9 @@ IMPLEMENTED = tuple(kind for kind in CARD_TYPES if kind not in UNAVAILABLE)
 RISING = (SURGE, SPIKE)
 STEADY = (STICKY, DIFFUSING)
 
-# 카드가 자기 근거를 의심하라고 다는 주석이다. 색인·추출 축의 불용어 목록이 아니고(포크 #37 이 처분한
-# 것은 그 축이다), 제 자리는 주제 사전의 extra 다 -- 옮기는 것은 사전 판본을 올리는 일이다 (계약 §기회 카드).
+# A note a card attaches telling you to doubt its own evidence. It is not a stopword list of the index and
+# extraction axis (what fork #37 disposed of is that axis); its proper place is the topic dictionary's extra
+# -- moving it there means raising the dictionary version (the contract's §Opportunity cards).
 GENERIC_ALIAS: Mapping[str, frozenset[str]] = {
     "발림성": frozenset({"제형", "텍스처"}),
     "성분_신제품": frozenset({"성분"}),
@@ -86,8 +90,9 @@ class CellFacts:
 class Deck:
     """한 분기의 카드 묶음과, 규칙에 걸렸는데 근거 원문이 없어 서지 못한 셀.
 
-    둘을 갈라 내는 것은 종료 코드 때문이다 -- "규칙에 걸린 셀이 없다"는 규칙이 다 돌고 나온 정상적인
-    답이고, "걸렸는데 근거가 없다"는 잘린 산출이다 (계약 §기회 카드).
+    The two are told apart because of the exit code -- "no cell was caught by the rules" is the normally
+    computed answer after every rule has run, while "it was caught but has no evidence" is a truncated output
+    (the contract's §Opportunity cards).
     """
 
     cards: tuple[Card, ...]
@@ -199,8 +204,9 @@ def alias_rank(entries: Iterable[Mapping[str, object]]) -> dict[str, dict[str, i
 
 
 def quote_order(topic_key: str, quote: Quote, ranks: Mapping[str, Mapping[str, int]]) -> tuple[int, int]:
-    """구체적인 별칭이 먼저, 그다음 좋아요. 상한이 3 이라 이 정렬은 고르지 않고 줄만 다시 세운다 --
-    일반어로 걸린 근거를 실제로 밀어내려면 `TOP_PER_CELL` 이 커져야 한다 (계약 §기회 카드)."""
+    """The more specific alias first, then the like count. With the ceiling at 3 this sort does not choose
+    but only re-orders the queue -- actually pushing out evidence caught by a general word needs
+    `TOP_PER_CELL` to grow (the contract's §Opportunity cards)."""
     place = ranks.get(topic_key, {}).get(quote.matched_term or "", 99)
     return (place, -quote.like_count)
 

@@ -111,7 +111,8 @@ SELECT m.topic_id, v.quarter, c.quality_flags = '' AS counted,
  GROUP BY 1, 2, 3
 """
 )  # noqa: S608
-# 축의 두 변은 갈라져 있다 (interfaces.md §분기 표의 행 집합): 분기는 이 산출에 존재하는 것이고 주제는
+# The two sides of the axis are split (interfaces.md §The quarterly table's row set): the quarters are those
+# existing in this output, and the topics are
 # every `trend_use=true` row of the registry (`aspect_lexicon(ruleset='retrieval-topic')`). Building the axis
 # from observed distinct values would make a topic that never hit disappear from the table quietly, while the
 # grid stays rectangular and the invariant view does not catch it. So this query is used to find observations

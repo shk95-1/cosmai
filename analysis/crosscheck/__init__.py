@@ -5,9 +5,10 @@ import 하지 않고 옮겨 적었다. **핀(`v0.1.0` `02440ab`)이 아니라 `v
 선크림 문맥이 그 판에서 정정됐고 `cross_source.py` 는 핀 사본에 아예 없었다. 대조는
 `tool/compare-ydc-crosscheck` 가 ydc 레포를 태그째 읽어 돌린다.
 
-왜 합산하지 않나. 소스마다 분모가 다르다 -- 구성비는 그 소스의 13주제 언급 합 대비, 플랫폼 속성 평가는
-`topic_group` 안의 응답 비중, 성분 담론은 문서 수다. 더하거나 평균 내면 그 순간 뜻이 없어진다. 그래서
-**크기가 아니라 순위와 방향**을 본다 (`contracts/interfaces.md` §대조).
+Why they are not summed: the denominator differs per source -- the composition is against that source's sum
+of 13-topic mentions, the platform attribute rating is the response share inside a `topic_group`, and the
+ingredient discourse is a document count. Add or average them and the meaning is gone that instant. So what
+is looked at is **rank and direction rather than size** (`contracts/interfaces.md` §Crosscheck).
 
 Only the rules live here. The DB is `analysis/crosscheck/pipeline.py`, and that side feeds these functions
 their values -- the same split as `analysis/sensitivity`.
@@ -32,9 +33,10 @@ VIDEO_TITLE = "youtube_video"
 COMMERCE_REVIEW = "commerce_review"
 SOURCES = (COMMENT, TRANSCRIPT, VIDEO_TITLE, COMMERCE_REVIEW)
 
-# 제작자 쪽은 자막이다. ydc 의 `youtube_video` 는 영상 설명이었지만 우리 `youtube_video` 청크는 제목
-# 한 줄이라(analysis/retrieval/corpus.py 의 VIDEOS) 제작자 언어의 그릇이 아니다 -- 5,908문서에서 주제
-# 언급이 1,123건뿐이다. 제목 열은 표에 남되 해석 규칙을 물지 않는다 (계약 §구성).
+# The creator side is the transcript. ydc's `youtube_video` was the video description, but our
+# `youtube_video` chunk is the title line alone (VIDEOS in analysis/retrieval/corpus.py) and so is no vessel
+# for creator language -- 5,908 documents carry only 1,123 topic mentions. The title column stays in the
+# table but is not asked for an interpretation rule (the contract's §Composition).
 CREATOR = TRANSCRIPT
 CONSUMER = COMMERCE_REVIEW
 
@@ -84,7 +86,8 @@ NEGATIVE_HINTS = ("느껴져요", "아쉬", "부족", "무거", "끈적", "밀�
 NEUTRAL_HINTS = ("보통",)
 POLARITY_CSV = Path(__file__).resolve().parent / "audit" / "polarity_v1.csv"
 
-# 우리 판정에 document_count >= 5 를 요구하면서 이 대조에만 예외를 두면 이중 기준이다 (계약 §평가).
+# Requiring document_count >= 5 for our verdict while making an exception for this crosscheck alone is a
+# double standard (the contract's §Rating).
 MIN_PRODUCTS = 5
 POSITIVE_RATE_HIGH = 80.0
 GAP_PP_MATERIAL = 1.0
@@ -120,8 +123,9 @@ class RatingRow:
 
 # NAVER 성분 그룹 -> 성분표에서 찾을 이름 조각. 소문자·공백 제거 후 부분문자열로 본다.
 #
-# **두 글자 별칭을 성분명 부분문자열로 쓰면 안 된다** (ydc v0.3.0 e5a1b00 의 정정). 아래 REJECTED_TERMS
-# 가 되돌리면 무엇이 잡히는지를 든다 -- 우리 표에서 다시 감사한 값이다 (계약 §성분).
+# **A two-character alias must not be used as an ingredient-name substring** (the correction in ydc v0.3.0
+# e5a1b00). REJECTED_TERMS below carries what gets caught if it is put back -- values re-audited on our own
+# table (the contract's §Ingredients).
 INGREDIENT_KEYS: dict[str, tuple[str, ...]] = {
     "PDRN": ("피디알엔", "pdrn", "폴리데옥시리보뉴클레오타이드"),
     "엑소좀": ("엑소좀", "exosome"),
@@ -186,7 +190,8 @@ READ_NOT_SUNCARE = "선크림 담론이 아니다"
 # `tool/measure-crosscheck-keys` 이고, CI 는 그 일을 할 수 없다(운영 표에 닿지 못한다).
 KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.csv"
 
-# 성분표를 성분명으로 쪼개는 규칙 둘. 우리 원천에만 있는 함정이라 ydc 에 대응이 없다 (계약 §성분).
+# Two rules that split an ingredient list into ingredient names. A trap our source alone has, so ydc has no
+# counterpart (the contract's §Ingredients).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 STAR_NOTE_RE = re.compile(r"^[^\S\n]*\*.*$", re.MULTILINE)
 # An ingredient list written with spaces and no commas stays one lump. Splitting it quietly would stand the
@@ -376,7 +381,8 @@ def ratings(
             youtube_gap_pp=gap,
             youtube_trend_type=trend_type,
         )
-        # 표본이 얇은 주제는 수치를 그대로 싣되 해석을 쓰지 않는다 (계약 §평가).
+        # A topic with a thin sample carries the numbers as they are but gets no interpretation written (the
+        # contract's §Rating).
         made.append(row if row.thin else replace(row, reading=rating_reading(mean, gap)))
     made.sort(key=lambda row: (-row.products_rated, row.topic_key))
     return tuple(made)

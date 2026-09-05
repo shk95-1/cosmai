@@ -1,4 +1,4 @@
-# UTC. analyze all is DB-only (no external fetch), so contracts/entrypoints.md §스케줄 exempts it from
+# UTC. analyze all is DB-only (no external fetch), so contracts/entrypoints.md §Schedule exempts it from
 # the gap rule the commerce walks follow (the analyze lock sets a different one -- see the owner-pass
 # note below) -- which is also why it is not in the commerce container:
 # nothing it does competes for a host budget, and a commerce collector stopped for a rollback must not

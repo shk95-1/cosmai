@@ -34,9 +34,10 @@ WITH runs AS (
     FROM needs.collector_health
     WHERE dataset IS NOT NULL AND dataset <> ''
     UNION ALL
-    -- 분석 두 줄. 증분 패스는 note 의 missing= 으로 갈린다(contracts/entrypoints.md §분석) --
-    -- 크론 줄로는 안 갈리고 stage 는 구현 판본을 달고 있어 그대로 쓸 수 없다.
-    -- eval:*·trend-quarter:* 는 크론 단계가 아니라 여기 오지 않는다.
+    -- The two analysis lines. An incremental pass is told apart by missing= in the note
+    -- (contracts/entrypoints.md §Analysis) -- a cron line does not tell them apart, and stage carries an
+    -- implementation version and cannot be used as it stands.
+    -- eval:* and trend-quarter:* are not cron stages and never reach this view.
     SELECT
         CASE WHEN stage = 'analyze:all' THEN 'analyze:all' ELSE 'analyze:polarity_missing' END,
         coalesce(finished_at, started_at),

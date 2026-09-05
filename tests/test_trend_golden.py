@@ -1,7 +1,8 @@
 """승격이 값을 바꾸지 않았음을 기계가 말한다: ydc `trend.py` 출력과 우리 산출의 1:1 골든 (포크 #5).
 
-#3 등급 A 리뷰가 남긴 질문 -- "§수식이 ydc 를 옮겨 적은 것인지 서술한 것인지" -- 은 문서로는 답할 수
-없다. 답은 **같은 스냅샷에서 두 구현이 같은 수를 내는가**이고, 이 파일이 그 대조다.
+#3's grade A review left a question -- "is §Formulas a transcription of ydc or a description of it" -- that a
+document cannot answer. The answer is **whether two implementations produce the same numbers from the same
+snapshot**, and this file is that comparison.
 
 The fixed input is one set, `tests/fixtures/trend_sample/`. The whole 2026-08-19 corpus (261,317
 rows, 174M) lives in `archive/`, which is read-only, so the repository keeps a representative slice.

@@ -1,13 +1,15 @@
-"""계약 §근거 가 인용하는 픽스처 수치를 매번 다시 재서 맞댄다 (포크 #6).
+"""Re-measures every time the fixture numbers the contract's §Evidence quotes and compares them (fork #6).
 
 숫자를 계약에 적고 재는 길을 남기지 않으면, 픽스처가 자라는 순간 그 숫자는 조용히 거짓이 된다. #41 이
 `tool/compare-ydc-sensitivity` 로 연 자리를 이 파일이 `tool/measure-evidence-fixture` 로 잇는다.
 
-세 벌을 한자리에서 맞댄다.
-  ① `tool/measure-evidence-fixture --json` -- 코퍼스 CSV 에서 매니페스트 규칙으로 다시 잰 값
-  ② `contracts/interfaces.md` §근거 의 문장에 박힌 수
-  ③ `analysis/evidence/pipeline.py` 가 DB 에서 실제로 낸 산출
-①과 ③이 갈리면 도구가 파이프라인의 사본이 아니게 된 것이고, ①과 ②가 갈리면 계약이 낡은 것이다.
+Three sets are compared in one place.
+  (1) `tool/measure-evidence-fixture --json` -- the value re-measured from the corpus CSVs by the manifest
+  rules
+  (2) the numbers embedded in the sentences of `contracts/interfaces.md` §Evidence
+  (3) the output `analysis/evidence/pipeline.py` actually produced from the DB
+When (1) and (3) part, the tool has stopped being a copy of the pipeline; when (1) and (2) part, the contract
+is stale.
 """
 
 from __future__ import annotations
@@ -44,7 +46,7 @@ def measured() -> dict[str, dict[str, float]]:
 @lru_cache(maxsize=1)
 def contract() -> str:
     body = INTERFACES.read_text(encoding="utf-8")
-    start = body.index("## 근거 (판정 셀을 받치는 소비자 발화")
+    start = body.index("## Evidence (the consumer speech that holds up a verdict cell")
     return body[start : body.index("\n## ", start)]
 
 
@@ -83,8 +85,8 @@ def test_every_number_the_gates_paragraph_cites_is_the_number_the_tool_counts():
         (71, "tied_cells"),
         (251, "rows"),
     ):
-        assert gates[name] == value, f"{name}: 계약은 {value}, 도구는 {gates[name]}"
-        assert str(value) in body, f"{name}={value} 가 계약 §근거 에 없다"
+        assert gates[name] == value, f"{name}: the contract says {value}, the tool says {gates[name]}"
+        assert str(value) in body, f"{name}={value} is not in the contract's §Evidence"
 
 
 def test_every_number_the_retrieval_table_cites_is_the_number_the_tool_measures():
@@ -104,10 +106,10 @@ def test_every_number_the_retrieval_table_cites_is_the_number_the_tool_measures(
 
 
 def test_the_table_says_it_is_not_the_same_ruler_as_the_all_source_measurement():
-    """천장 없이 옮겨 적으면 전 소스 `.864` 와 나란히 놓여 "BM25 가 약하다"로 읽힌다."""
+    """Copied without its ceiling it sits beside the all-source `.864` and reads as "BM25 is weak"."""
     table = contract()
-    assert "§검색 실측 과 같은 자가 아니다" in table
-    assert "천장" in table
+    assert "not the same footing as §Retrieval measurements" in table
+    assert "ceiling" in table
     assert "#11 의 기본 엔진 판단에 입력으로 쓰지 않는다" in table
 
 

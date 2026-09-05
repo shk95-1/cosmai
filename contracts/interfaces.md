@@ -1,4 +1,4 @@
-# 분석 패키지 인터페이스 (Python, 타입은 dataclass/Protocol)
+# Analysis package interfaces (Python; the types are dataclass/Protocol)
 
 `analysis/types.py` and this code block **must be the same** — `tests/test_contract_types.py` compares the dataclass fields.
 The audit ids (B·A·T) are the item numbers of the 2026-08-23 contract audit (issue #17).
@@ -309,7 +309,7 @@ class PanelRosterRow:  # → needs.panel_roster (fork #3). One roster version �
 @dataclass(frozen=True)
 class PanelChannelRow:  # → needs.panel_channel (fork #3). The 43-channel panel roster; the seed fills the values (#31)
     channel_id: str
-    version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
+    version: int  # the roster version. The same shape as a dictionary (formats.md §Panel roster CSV)
     panel_role: str  # product | expert — a channel off the roster is off the panel and the denominator
     handle: str | None = None
     channel_title: str | None = None
@@ -319,20 +319,20 @@ class PanelChannelRow:  # → needs.panel_channel (fork #3). The 43-channel pane
 
 
 @dataclass(frozen=True)
-class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (canonical for the quarter, formats.md §Time)
     run_id: int
     scope: str  # a category name | 'all' (the metrics_need.scope vocabulary)
-    # 주제 축의 레지스트리는 aspect_lexicon(ruleset='retrieval-topic').aspect 이고 needs.need_key 가 아니다
+    # The registry of the topic axis is aspect_lexicon(ruleset='retrieval-topic').aspect, not needs.need_key
     topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
     quarter: str  # 'YYYYQn'
     source: str  # youtube_video | youtube_comment — video descriptions and comments are shown side by side, not merged
-    content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
+    content_type: str  # long_form | short_form — the denominator is long-form only (§Formulas)
     panel_version: int  # the population of this ratio: panel_channel.version
     panel_role: str  # which population of that roster. product | expert
     mentions: int  # numerator: documents this topic matched
     documents: int  # documents of that population in that quarter
     quarter_mentions: int  # composition denominator: that quarter's trend_use topic mentions summed
-    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
+    denom_channels: int  # panel channels in that quarter's output. Both sources use one value (§Formulas)
     composition: float | None = None
     velocity_yoy: float | None = None
     persistence: float | None = None
@@ -345,7 +345,7 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
 
 
 @dataclass(frozen=True)
-class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
+class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (a derivation, not an aggregate — §Verdict)
     # The first eight columns are metrics_topic_quarter's primary key as they stand. A verdict takes one row
     # of that table and emits one row, so those eight are the FK — a verdict row cannot exist without the metric row that grounds it.
     run_id: int
@@ -358,7 +358,7 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
     panel_role: str
     trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
     judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
-    evidence_strength: float  # 0~100 (§판정)
+    evidence_strength: float  # 0~100 (§Verdict)
     single_source: bool  # was this verdict made on one source only. v1 (YouTube alone) is always true
     opportunity_score: float | None = None  # normalised 0-100 in the product group. NULL when unscored
     gap_pp: float | None = None  # comment composition - video composition (%p). A (topic, quarter) fact
@@ -366,7 +366,7 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
 
 
 @dataclass(frozen=True)
-class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀을 받치는 소비자 발화 — §근거)
+class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (the speech under a verdict cell — §Evidence)
     # The first eight columns are topic_quarter_judgement's primary key as they stand. That the evidence
     # points at the verdict cell rather than the metric row — whoever asks for evidence read the type.
     run_id: int
@@ -377,14 +377,14 @@ class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀�
     content_type: str
     panel_version: int
     panel_role: str
-    rank: int  # 그 셀 안 좋아요 내림차순 자리. 1 부터 빈칸 없이 (§근거)
+    rank: int  # the like-count descending slot inside that cell. From 1 with no gaps (§Evidence)
     snapshot_id: int  # the observation version the evidence document lives in. doc_id alone does not part it from a re-collection
     doc_id: str  # the body is not here — the corpus is canonical and the view topic_quarter_evidence_quote joins them
     like_count: int  # why it was chosen. A snapshot as of collected_at; a later count differs
     matched_term: str | None = None  # the term corpus_mention already recorded. No rematching here
 
 
-# ---------- 민감도 (반사실 산출. 어느 표에도 저장되지 않는다 — §민감도) ----------
+# ---------- sensitivity (a counterfactual output. Stored in no table — §Sensitivity) ----------
 @dataclass(frozen=True)
 class PanelSensitivityRow:  # does the panel composition change the conclusion (ydc panel_sensitivity.py)
     source: str
@@ -475,7 +475,7 @@ class Predictor(Protocol):  # an eval implementation. Batch in, labels in the sa
     def __call__(self, rows: Sequence[LabeledRow]) -> Sequence[str]: ...
 ```
 
-## 수식 (구현이 이 정의를 따른다)
+## Formulas (the implementation follows these definitions)
 
 - **population_share_pct** (`metrics_need`) = `100 * (low_mentioning / denom_low) * site_low_pct`
   - `low_mentioning` = the number of ≤2-star reviews mentioning this need_key among the products of that
@@ -493,7 +493,7 @@ class Predictor(Protocol):  # an eval implementation. Batch in, labels in the sa
   - B7: the seed's `seed:slice-p1` rows were computed not by this formula but by a collection-sample
     approximation (`100 * low_mentioning / denom_site`). The second pass targets a difference of ±0.05
     between the two values, and it is not a golden.
-- 분기 입자의 수식은 전부 **패널**을 분모로 쓴다 (`metrics_topic_quarter`, formats.md §패널 명부 CSV).
+- Every formula of the quarterly grain uses the **panel** as its denominator (`metrics_topic_quarter`, formats.md §Panel roster CSV).
   모집단은 행 안에 있다: `panel_version`(어느 명부인지) · `panel_role`(그 명부의 어느 모집단인지) ·
   `denom_channels`(그 분기에 실제로 산출에 든 채널 수) · `documents` · `quarter_mentions`. 분모는 **장문
   영상만**이다(`content_type='long_form'`): 쇼츠는 설명란이 비어 매칭률이 24%(장문 64%)인데 그 비중이
@@ -514,25 +514,28 @@ class Predictor(Protocol):  # an eval implementation. Batch in, labels in the sa
     댓글이 달리므로 댓글 시각으로 분기를 만들면 분모가 정의되지 않는다.
   - `denom_channels` 는 두 `source` 에서 **같다** — 그 분기에 위 세 조건을 통과한 영상을 낸 채널의 수다
     (댓글은 채널이 아니라 영상에 달린다).
-- **분기 표의 행 집합** — 한 (`run_id`, `scope`, `source`, `content_type`, `panel_version`, `panel_role`)
-  안에서 이 표는 **조밀한 격자**다: `trend_use=true` 인 주제(현재 13개) × 그 산출에 존재하는 분기 전부에
-  행이 하나씩 있고, 언급이 0인 칸도 행이 된다(`mentions=0` · `composition=0` · `unique_ratio=1` ·
+- **The quarterly table's row set** — inside one (`run_id`, `scope`, `source`, `content_type`,
+  `panel_version`, `panel_role`) this table is **a dense grid**: there is one row for each topic with
+  `trend_use=true` (13 today) × every quarter existing in that computation, and a cell with 0 mentions
+  becomes a row too (`mentions=0` · `composition=0` · `unique_ratio=1` ·
   `sample_ok=false`). `trend_use=false` 인 주제(`추천_재구매`·`선크림` — 각각 영상의 76%·93%를 쳐서
   판별력이 없다)는 필터·장르 표시로만 쓰이고 이 표에 행을 갖지 않는다. 그래서 두 불변식이 참이고, 뷰
   `needs.metrics_topic_quarter_violation`(`db/views/`)이 저장된 행에 대고 그것을 되묻는다 — 비어 있으면 참이다.
-  1. 격자가 조밀하다: `count(*) = count(distinct topic_key) * count(distinct quarter)`.
-  2. 분모가 닫힌다: 한 분기의 `sum(mentions)` 가 그 분기 행들이 다 같이 들고 있는 `quarter_mentions` 다.
-  저장된 표에 `SUM(mentions) GROUP BY quarter` 를 돌리는 사람이 맞으려면 그 둘이 서 있어야 한다. 언급 0 셀을
-  지우면 첫째가 깨지고 `persistence` 의 기준선이 함께 올라간다.
+  1. The grid is dense: `count(*) = count(distinct topic_key) * count(distinct quarter)`.
+  2. The denominator closes: a quarter's `sum(mentions)` is the `quarter_mentions` that all the rows of that
+     quarter hold together.
+  For someone running `SUM(mentions) GROUP BY quarter` over the stored table to be right, those two have to
+  stand. Delete the 0-mention cells and the first breaks, and `persistence`'s baseline rises with it.
 - **composition** (`metrics_topic_quarter`) = `mentions / quarter_mentions` — not a document-based share
   but **the composition across topics**. The median YouTuber description length fell from 1,253 to 709
   characters over three years, so a share loses only its numerator while the denominator stands and 10 of
   the 13 topics fall together (-28.6%p in total). A composition cancels because numerator and denominator
   shrink together. In a quarter where `quarter_mentions` is 0 it is `0`, not NULL.
-- **velocity_yoy** (`metrics_topic_quarter`) = `ln(composition[q]) - ln(composition[전년 동분기])`. 조건은
-  셋이다: 전년 동분기가 그 산출에 **존재하는 분기**여야 하고(없으면 비교 상대가 없다), **양쪽 분기 모두
-  `mentions >= 5`** 여야 한다. 하나라도 아니면 NULL — 표본 부족을 급등으로 읽지 않는다. 전년 동분기인 것은
-  계절성 때문이다 (formats.md §시간).
+- **velocity_yoy** (`metrics_topic_quarter`) = `ln(composition[q]) - ln(composition[same quarter last year])`.
+  There are three conditions: the same quarter of the previous year has to be **a quarter that exists** in
+  that computation (with none there is nothing to compare against), and **both quarters must have
+  `mentions >= 5`**. Fail any one and it is NULL — a thin sample is not read as a surge. That the partner is
+  the same quarter of the previous year is because of seasonality (formats.md §Time).
 - **persistence** (`metrics_topic_quarter`) = the share of quarters in the window whose `composition`
   exceeded that topic's median over the whole period. The window is **at most 4 existing quarters ending
   at that row's quarter** (not the globally latest 4) and `window_quarters` is its length. The baseline's
@@ -560,14 +563,15 @@ class Predictor(Protocol):  # an eval implementation. Batch in, labels in the sa
   number**: the count of channels that produced that topic on that row's `source` (on a
   `youtube_comment` row, the channels of the videos the topic's comments hang on), and using it as the
   first term's numerator because the names look alike changes the comment rows' diffusion.
-- **저장 자리수** (`metrics_topic_quarter` 의 비율 칸) — 아래 자리수로 반올림해 저장한다. 판정 임계값(ydc
-  `judge.py` 의 `TAU`·`DIFFUSION_TAU`)이 반올림된 값 위에서 맞춰진 수라, 자리수가 곧 그 게이트의 해상도다.
-  022 가 `numeric(p,s)` 로 그 자리수를 들고 있어, 저장이 자리수를 지키는 것은 DDL 이 강제한다.
-  자리수: `composition` 5 · `velocity_yoy` 4 · `persistence` 3 · `unique_ratio` 4 · `channel_diffusion` 3.
+- **Stored decimal places** (the ratio columns of `metrics_topic_quarter`) — stored rounded to the decimal
+  places below. The verdict thresholds (`TAU`·`DIFFUSION_TAU` in ydc `judge.py`) are numbers fitted on
+  rounded values, so the decimal places are the resolution of that gate. 022 holds those places as
+  `numeric(p,s)`, so the DDL enforces that storage keeps them.
+  Decimal places: `composition` 5 · `velocity_yoy` 4 · `persistence` 3 · `unique_ratio` 4 · `channel_diffusion` 3.
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: the slice has no cap, so the contract sets the constant). An implementation that uses no cap leaves this column NULL.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — if a 3-star review is mixed into the RATING_ASC sample, or there are fewer than 150 at ≤2 stars, then the ≤2-star rows are complete. 150 is the collection sample ceiling (`REVIEW_PAGES 3 x 50`) and `collectors/commerce/scope.json` (#7) and `formats.md` hold the same value.
 
-## `metrics_need` 의 월 행 (`month <> ''`, #129)
+## `metrics_need`'s month rows (`month <> ''`, #129)
 
 `month <> ''` rows exist **only as the category total (`product_ref = ''`)** — the product axis has
 whole-period rows alone. A month row is remeasured from that month's mentions alone, and a value that
@@ -584,13 +588,15 @@ for that month are NULL (restored relative times pile into the one collection-ba
 month is always right. The whole-period row (`month = ''`) is unaffected by this rule and counts every
 comment — so the sum of the month rows' `yt_*` can be smaller than, or NULL against, the whole-period
 row's `yt_*`.
-## 판정 (트렌드 유형 7종과 두 점수 — `topic_quarter_judgement`, 포크 #40)
+## Verdict (the seven trend types and the two scores — `topic_quarter_judgement`, fork #40)
 
-판정은 **집계가 아니라 파생**이다. 입력이 문서가 아니라 한 run 의 `metrics_topic_quarter` 행 전부이고,
-산출은 그 행과 **1:1**(같은 여덟 칸이 키이자 FK)이다. 그래서 이 표는 `formats.md` §시간 의 "집계 그레인의
-정본" 에 줄을 갖지 않는다 — 그 표가 닫는 질문은 "이 그레인의 **언급 수·채널 수·지속성**을 어디에 묻는가"
-이고, 판정 표는 그 셋을 하나도 들지 않는다. 세는 칸이 없으므로 정본을 다툴 상대가 없다. 이름이
-`metrics_` 로 시작하지 않는 것도 같은 문장이다.
+The verdict is **a derivation, not an aggregate**. Its input is not documents but all the
+`metrics_topic_quarter` rows of one run, and its output is **1:1** with those rows (the same eight columns
+are both key and FK). So this table has no line in "the canonical table per aggregate grain" of
+`formats.md` §Time — the question that table closes is "where do I ask for **the mention count, the channel
+count and the persistence** of this grain", and the verdict table carries none of the three. With no
+counting column it has no rival to be canonical over. That its name does not start with `metrics_` is the
+same sentence.
 
 판정은 §분기 표의 행 집합 의 **조밀한 격자를 전제한다**: `신규 등장` 은 직전 3분기를, `사라짐` 은 전 기간
 최고 분기를, `채널 확산` 은 전년 동분기를 그 주제의 이력에서 꺼낸다. 언급 0 칸이 행으로 남아 있지 않으면
@@ -609,14 +615,16 @@ row's `yt_*`.
     | `evidence_strength` 채널 항 | `channel_count` (그 행의 source 에서 그 주제를 낸 채널 수) | `denom_channels` | **있다** (댓글 행과 영상 행이 다른 값) |
     | `channel_diffusion` 첫 항(넓이) | 그 주제를 낸 **영상** 채널 수 | `denom_channels` | 없다 (두 행이 같은 값) |
     | `channel_diffusion` 둘째 항(고름) | 채널별 **영상** 언급 분포의 섀넌 엔트로피 | `ln(그 분포에 든 채널 수)` | 없다 (두 행이 같은 값) |
-    `youtube_video` 행에서는 첫 두 비율이 우연히 같은 수이고, 그래서 **영상만 보고 있으면 이 차이가
-    보이지 않는다.** 갈리는 것은 댓글 행이다.
-  - `unique_ratio` 항은 이 코퍼스에서 사실상 상수다(중앙 1.0, 최저 0.9939) — 25점이 모든 셀에 같이
-    들어간다. 항을 빼지 않는 것은 재게시가 많은 소스(NAVER·커머스)가 붙으면 변별력이 생기기 때문이고,
-    지금은 **정보가 없다는 사실**이 산출물에 남는다.
-  - 저장 전 소수 **1자리**로 반올림한다. `EVIDENCE_FLOOR` 비교도 `opportunity_score` 의 항도 그 반올림된
-    값을 쓴다 — 자리수가 곧 그 게이트의 해상도다(§수식 "저장 자리수" 와 같은 문장).
-- **판정 순서** — 위에서 먼저 걸리면 종료한다. 순서 자체가 정의다.
+    On a `youtube_video` row the first two ratios happen to be the same number, and so **looking at videos
+    alone hides this difference.** What parts is the comment rows.
+  - The `unique_ratio` term is effectively a constant on this corpus (median 1.0, minimum 0.9939) — 25 points
+    go into every cell alike. The term is not removed because a source with much reposting (NAVER, commerce)
+    joining would give it discriminating power, and for now **the fact that there is no information** stays
+    in the output.
+  - Rounded to **1 decimal place** before storage. Both the `EVIDENCE_FLOOR` comparison and the
+    `opportunity_score` term use that rounded value — the decimal places are the resolution of that gate (the
+    same sentence as "stored decimal places" in §Formulas).
+- **Verdict order** — caught higher up, it stops there. The order itself is the definition.
   1. 그 source 의 **마지막 분기**면 `미확정(진행 중)`. 진행 중이라 문서 수가 덜 찼다.
   2. `evidence_strength < EVIDENCE_FLOOR` 또는 `mentions < MIN_DOCUMENTS` 면 `근거 부족`.
   3. 직전 3분기가 **존재하고** 그 셋의 `composition` 이 모두 `NEW_TOPIC_MAX_SHARE` 미만이고
@@ -662,7 +670,7 @@ row's `yt_*`.
   값이 언제나 같은 칸을 두는 것은 그 게이트가 **꺼져 있다는 사실**이 행에서 읽혀야 하기 때문이다 —
   NAVER·커머스가 붙어 이 칸이 false 가 되는 날 그 조건이 켜진다.
 
-### 판정 상수 (`analysis/judge` 한 곳에 모여 있고 `tests/test_judge_constants.py` 가 이 표와 대조한다)
+### Verdict constants (gathered in `analysis/judge` alone, and `tests/test_judge_constants.py` compares this table against it)
 #3 등급 A 리뷰가 "저장된 값 위에서 맞춰진 산물" 이라고 넘긴 다섯이다. 아래는 **그 값이 무엇 위에서
 나왔는가**와 **그대로 채택하는가 다시 맞추는가**의 답이고, 재현은 2026-08-26 포크 #40 이 원 산출
 (`reports/trend_sunscreen_v0.2.csv` 338행 = 이 표의 338행, #5 가 셀 차이 0 으로 대조)에서 했다.
@@ -672,7 +680,7 @@ row's `yt_*`.
 | `TAU` | `0.35` | 관측 `abs(velocity_yoy)` 분포의 75분위. **소스별로 따로 뽑아 거의 같은 값이 나온 것이 근거다** — 재현: 영상 76셀 중앙 0.215 · 75분위 **0.366** · 90분위 0.594 · 최대 0.887, 댓글 108셀 중앙 0.218 · 75분위 **0.357** · 90분위 0.526 · 최대 1.290. **분위는 이 표 전체가 아래 `DIFFUSION_TAU` 줄과 같은 `sorted(v)[int(q*n)]` 정의를 쓴다** — `statistics.median` 으로 세면 중앙이 0.207/0.216 이고, 두 수는 정의가 다른 두 답이지 반올림 차가 아니다(포크 #41 이 정정). 댓글 90분위는 TEAM_DECISIONS_v0.2 §3.1.1 이 0.525 로 적은 그 수다(실측 0.5257 — 표는 버림, 여기는 반올림이고 컷에는 닿지 않는다). 나머지는 그 표와 같은 수 | **그대로 채택.** 다시 맞춰도 0.357~0.366 으로 돌아오고, 둘을 하나로 내려 고정한 것이 팀 결정이다. **한 번만 뽑아 고정하는 것**이 이 값의 요점이다 — 매 산출마다 다시 뽑으면 조용한 분기에도 언제나 상위 25%가 `급상승` 이 된다 |
 | `DIFFUSION_TAU` | `0.089` | 전년 동분기 행이 존재하는 **234셀**(13주제 × 9분기 × 2소스)의 `abs(Δchannel_diffusion)` 75분위. 재현: n=**234** · 중앙 **0.042** · 75분위 **0.089** · 90분위 **0.496** — `judge.py` 주석의 세 수와 자리까지 일치. 분위는 `sorted(v)[int(q*n)]` 로 뽑는다 | **그대로 채택.** 0 으로 두면(= "오르기만 하면 확산") 판정된 89셀 중 **52셀(58%)** 이 `채널 확산` 한 곳으로 몰려 분류의 정보량이 사라진다. 이 컷에서 52 → **14셀**(재현 일치). 소스가 늘면 그 소스의 분포에서 다시 뽑아야 한다 |
 | `EVIDENCE_FLOOR` | `50.0` | **적합된 값이 아니다.** v1 에서 온 0~100 척도의 중간이고 TEAM_DECISIONS 는 값만 적는다. 이 코퍼스에서의 실측 결과: `evidence_strength` 중앙 59.95(`statistics.median`; 위 `TAU` 줄의 `sorted(v)[int(q*n)]` 정의로는 60.1 — 포크 #41 이 정정), 338셀 중 111셀(33%)이 `근거 부족` 이고 그중 **51셀은 이 컷 하나로만** 걸린다(`mentions < 5` 로만 걸리는 셀은 **0**). 감도: 40 → 73셀 · 50 → 111셀 · 60 → 156셀 | **재적합하지 않고 채택한다 — 맞출 정답이 없기 때문이다.** `backtest.csv` 11행은 이미 **판정된** 셀의 적중만 보고(`trend_type` 은 급상승·신규 등장·사라짐·단기 피크뿐) `근거 부족` 판정에 대해서는 아무 말도 하지 않는다. 근거가 "팀 합의" 하나뿐이라는 사실을 여기 적는 것이 이 줄의 일이다 |
-| `MIN_DOCUMENTS` | `5` | `metrics_topic_quarter.sample_ok` 의 게이트와 **같은 수**(022 의 `CHECK (sample_ok = (mentions >= 5))`, §수식 의 `velocity_yoy` 조건) | 채택하되 **따로 정의하지 않는다** — `analysis.trend.MIN_MENTIONS` 를 그대로 든다. 실측상 이 게이트가 단독으로 거르는 셀은 0이라 `EVIDENCE_FLOOR` 에 완전히 가려져 있다 |
+| `MIN_DOCUMENTS` | `5` | **the same number** as the gate of `metrics_topic_quarter.sample_ok` (022's `CHECK (sample_ok = (mentions >= 5))`, the `velocity_yoy` condition in §Formulas) | Adopted but **not defined separately** — `analysis.trend.MIN_MENTIONS` is taken as it is. Measured, this gate alone filters 0 cells, so it is entirely hidden behind `EVIDENCE_FLOOR` |
 | `NEW_TOPIC_MAX_SHARE` | `0.01` | TEAM_DECISIONS §3.2 의 "직전 3분기 구성비 < 1%". 적합값이 아니라 읽기 좋은 팀 합의 수다. 감도: 0.005 → 1셀 · 0.01 → 5셀 · 0.02 → 10셀 | 채택. 근거가 합의뿐이라는 것을 적는다 |
 | `W_EVIDENCE` | `documents 43.75` · `channels 31.25` · `unique 25.0` | v1 의 4요소(근거 수 35 · 채널 25 · 비중복 20 · 제품·주제 매칭 신뢰도 20)에서 **`entity_link` 가 없어 계산할 수 없는 넷째를 빼고 남은 셋을 0.8 로 나눈 재정규화**다(35/.8 · 25/.8 · 20/.8). 산술이 곧 근거이고 테스트가 그 나눗셈을 검사한다 | 채택. 넷째 항을 0으로 깔면 모든 주제가 조용히 20점 깎여 `EVIDENCE_FLOOR` 가 오작동한다. `entity_link` 가 생기면 4요소 원안으로 되돌아간다 |
 | `W_SCORE` | `velocity .35` · `persistence .25` · `channel_diffusion .20` · `evidence_strength .20` | **이 코퍼스에서 적합된 값이 아니다.** TEAM_DECISIONS_v0.2 §1 "v1에서 그대로 채택하는 것" 목록에 있는 v1 합의값이다 | 채택. 근거가 "v1 합의" 하나뿐임을 적는다 — 넷의 합이 1.0 이라는 것 말고는 이 값을 지지하는 실측이 없다 |
@@ -681,176 +689,204 @@ row's `yt_*`.
 - 판정 상수가 바뀌면 그것은 정의가 바뀐 것이므로 `analysis_run.versions.judgement` 를 올린다
   (`versioning.md`). ydc 는 같은 사실을 행마다 `tau`·`diffusion_tau` 컬럼으로 적는데, 이 레포는 A19 에
   따라 집계·파생 표에 `*_version` 컬럼을 두지 않으므로 그 자리가 run 이다.
-- **저장 자리수** (`topic_quarter_judgement`) — 024 가 `numeric(p,s)` 로 그 자리수를 들고 있어, 저장이
-  자리수를 지키는 것은 DDL 이 강제한다.
-  판정 자리수: `evidence_strength` 1 · `opportunity_score` 1 · `gap_pp` 2
+- **Stored decimal places** (`topic_quarter_judgement`) — 024 holds those places as `numeric(p,s)`, so the
+  DDL enforces that storage keeps them.
+  Verdict decimal places: `evidence_strength` 1 · `opportunity_score` 1 · `gap_pp` 2
 
-## 민감도 (결론이 흔들리는가 — 저장하지 않는 세 답, 포크 #41)
+## Sensitivity (does the conclusion wobble — three answers that are not stored, fork #41)
 
-셋(`panel_sensitivity` · `backtest` · `spam_ad_flags`)은 **지표를 만들지 않는다.** §수식 과 §판정 을 모집단만
-바꿔 다시 돌려, 그 run 의 결론이 그 선택에 흔들리는지를 잰다. 그래서 이 셋은 §판정 **뒤에** 온다 — 흔들릴
-결론이 먼저 있어야 한다.
+The three (`panel_sensitivity` · `backtest` · `spam_ad_flags`) **make no metrics.** They re-run §Formulas and
+§Verdict with only the population changed and measure whether that run's conclusion wobbles under that
+choice. So the three come **after** §Verdict — there has to be a conclusion to wobble first.
 
-**어느 표에도 쓰지 않는다.** 이유는 규율이 아니라 어휘다: 세 측정이 만드는 행은 반사실 모집단의 것이고,
-`panel_role='product+expert'` 도 "광고 영상을 뺀 산출"도 "2025Q2 까지만 아는 산출"도 022 의 닫힌 어휘
-(`panel_role IN ('product','expert')`)와 `analysis_run` 에 자리가 없다. 자리를 만드는 것은 추가만의 범위가
-아니라 저장된 비율의 뜻을 바꾸는 일이므로, 산출은 표가 아니라 **답**이다(`cosmai trend sensitivity` 의
-stdout). 쓰지 않는 덕에 이 명령은 운영 DB 에 그대로 돌아간다.
+**Nothing is written to any table.** The reason is vocabulary rather than discipline: the rows the three
+measurements make belong to a counterfactual population, and neither `panel_role='product+expert'` nor "the
+output with ad videos removed" nor "the output that knows only up to 2025Q2" has a place in 022's closed
+vocabulary (`panel_role IN ('product','expert')`) or in `analysis_run`. Making a place is not within
+additive-only scope but a change to what a stored ratio means, so the output is not a table but **an answer**
+(the stdout of `cosmai trend sensitivity`). Writing nothing is what lets this command be run against the
+production DB as it is.
 
-**기저는 다시 센다.** 저장된 `metrics_topic_quarter` 행을 그대로 쓰지 않는 것은, 차이가 뜻을 가지려면 기저와
-변형이 **같은 코드 경로**에서 나와야 하기 때문이다. 대신 다시 센 기저가 저장된 행과 같은지 되묻고, 다르면
-그 사실(`baseline_drift`)이 먼저 나온다 — 그때 이 명령의 모든 차이는 뜻이 없다.
+**The baseline is recounted.** The stored `metrics_topic_quarter` rows are not used as they are because, for
+a difference to mean anything, baseline and variant have to come out of **the same code path**. Instead the
+recounted baseline is asked back against the stored rows, and on a difference that fact (`baseline_drift`)
+comes first — every difference this command reports is meaningless then.
 
-**두 창은 유도한다.** `최근 4분기` = 마지막(진행 중) 분기 **앞**의 네 달력 분기, `직전 4분기` = 그 앞의 네
-달력 분기. ydc 는 이 여덟을 값으로 박아 뒀는데(`RECENT` = 2025Q3~2026Q2 · `PRIOR` = 2024Q3~2025Q2) 그것은 이
-코퍼스에 묶인 상수라, 여기서는 같은 문장을 유도한다(2026-08-19 코퍼스에서 같은 여덟 분기다). **관측 목록의
-인덱스가 아니라 달력으로 세는 것**이 뜻이다 — 언급이 없어 행이 빠진 분기도 창의 한 칸을 차지해 0 으로 들어가야
-한다.
+**The two windows are derived.** `the last 4 quarters` = the four calendar quarters **before** the last (in
+progress) quarter, `the previous 4 quarters` = the four calendar quarters before those. ydc nailed these
+eight down as values (`RECENT` = 2025Q3-2026Q2 · `PRIOR` = 2024Q3-2025Q2), but that is a constant tied to
+this corpus, so here the same sentence is derived (on the 2026-08-19 corpus they are the same eight
+quarters). **Counting by the calendar rather than by the index of the observed list** is the meaning — a
+quarter whose row is missing for want of mentions still takes a slot of the window and enters as 0.
 
-### 패널 민감도 (`PanelSensitivityRow` — ydc `panel_sensitivity.py`)
-- 묻는 것: **패널 구성이 결론을 바꾸는가.** product 34채널만인 산출과 43채널 전부(product+expert)인 산출을
-  나란히 돌려 두 델타(최근 4분기 구성비 − 직전 4분기 구성비)를 비교한다.
-- 개별 채널을 재분류하는 대신 선택 자체를 재는 것은, ydc 가 재분류를 시도해 **텍스트 지표로는 두 집단이
-  구분되지 않는다**는 것을 실측했기 때문이다(팀이 직접 분류한 20채널에서 성분·스펙 주제 비중 expert 중앙
-  17.7% 대 product 15.3%, 최고값 39.7%가 product 인 채널이다). 기획안 §4 의 "결론이 필터 조건에 따라 크게
-  달라지면 필터 민감 신호로 표시한다"가 요구하는 검사가 이것이다.
-- `sample_ok` = 그 주제의 **충족 분기**(언급이 §수식 의 표본 게이트 5를 넘는 분기)가 관측 분기의 **절반을
-  넘는가**. ydc 는 13분기 산출에서 이 문장을 `>= 7` 로 박아 뒀고, 여기서는 관측 분기 수에서 유도한다.
-  충족 분기가 절반 미만인 셀은 애초에 판정 대상이 아니라 뒤집힘을 세지 않는다.
+### Panel sensitivity (`PanelSensitivityRow` — ydc `panel_sensitivity.py`)
+- What it asks: **does the panel composition change the conclusion.** The product-only-34-channel output and
+  the all-43-channel (product+expert) output are run side by side and their two deltas (last-4-quarter
+  composition − previous-4-quarter composition) compared.
+- Measuring the choice itself rather than reclassifying individual channels is because ydc tried the
+  reclassification and measured that **the two groups are not told apart by text metrics** (over the 20
+  channels the team classified by hand, the ingredient-and-spec topic share was a median 17.7% for expert
+  against 15.3% for product, and the highest value, 39.7%, is a product channel). This is the check the
+  proposal's §4 demands with "when the conclusion changes greatly with the filter condition, mark it as a
+  filter-sensitive signal".
+- `sample_ok` = whether that topic's **passing quarters** (quarters whose mentions clear the sample gate of 5
+  in §Formulas) are **more than half** of the observed quarters. ydc nailed this sentence down as `>= 7` on
+  its 13-quarter output; here it is derived from the observed quarter count. A cell whose passing quarters
+  are under half is not a verdict target to begin with, so its flips are not counted.
 - **뒤집힘** = 판정 대상 셀 중 두 델타의 부호가 다르고 한쪽이라도 `MATERIAL_PP = 0.5`%p 만큼 움직인 것.
   폭을 요구하지 않으면 0 근처를 오가는 셀이 전부 뒤집힘으로 잡힌다 — 전량에서 실제로 한 셀
   (`youtube_comment` / `백탁`, −0.03 → +0.03)이 그렇게 잡힌다. 0.5 는 관측된 3년 변화량 범위(−5.5 ~ +2.6%p)에서
   눈에 보이는 최소 폭이다.
 
-### 후향 검증 (`BacktestRow` — ydc `backtest.py`)
+### Backtest (`BacktestRow` — ydc `backtest.py`)
 - 묻는 것: 판정이 "지나고 보니 그랬다"가 아니라 **"그때 알 수 있었다"인가.** 과거 분기 C 까지만 알던 것처럼
   지표를 다시 세어 직전 분기 T 를 판정하고, C 이후 `HORIZON` 분기에 그 방향이 유지됐는지 본다.
 - **T 가 아니라 C 로 자른다.** 판정은 마지막 분기를 `미확정(진행 중)` 으로 두므로(§판정 순서 1), T 를
   판정하려면 C = T 다음 분기까지 데이터가 있어야 한다. 운영도 그렇게 돈다.
-- **자르는 것이 핵심이다.** `persistence` 의 기준선이 전 기간 중앙값이라(§수식), 자르지 않고 과거를 판정하면
-  아직 오지 않은 분기를 보고 기준선을 정한 셈이 된다. `velocity_yoy` 는 전년 동분기만 쓰므로 누출이 없다.
+- **The cut is the point.** `persistence`'s baseline is the whole-period median (§Formulas), so judging the
+  past without cutting amounts to fixing the baseline by looking at quarters that have not arrived.
+  `velocity_yoy` uses the same quarter of the previous year alone, so it leaks nothing.
 - 방향이 있는 유형만 검증한다: `급상승`·`신규 등장`(상승 유지) · `사라짐`(하락 유지) · `단기 피크`(피크 소멸).
   `지속 인기`·`채널 확산` 은 방향 예측이 아니라 상태 서술이라 뺀다 — 넣으면 적중률이 부풀려진다.
 - **기준을 두 개 낸다.** 기준 A 의 직전 구간에는 급상승한 분기 T 자체가 들어 있어 "T 보다 더 올라야 적중"이
   되고, 평균 회귀만으로 실패가 나온다. 기준 B(`before_excl_pp`)는 T 를 뺀 직전 구간과 비교해 **"올라간 수준이
   유지됐는가"**를 묻는다. 두 질문이 다르고, 둘 중 하나만 내면 결과를 고른 것이 된다. `단기 피크` 는 두 기준이
   같은 질문(T 분기보다 낮아졌는가)이 된다.
-- **기저율을 같이 낸다.** 판정과 무관하게 전체 셀 중 몇 %가 올랐는지를 함께 계산한다(직전·이후가 둘 다 0인
-  셀은 세지 않는다). 적중률이 기저율보다 높지 않으면 그 판정에는 정보가 없다 — 적중률만 내는 후향 검증은
-  검증이 아니라 홍보다.
-- 구간을 1년(`HORIZON` = `LOOKBACK` = 4)으로 둔 것은 계절성이다: 직전·이후 둘 다 네 분기를 다 담아야 여름 효과가
-  상쇄된다. §수식 의 `persistence` 창과 같은 4다.
+- **The base rate is emitted alongside.** Regardless of the verdict, what percentage of all cells rose is
+  computed too (a cell whose before and after are both 0 is not counted). A hit rate no higher than the base
+  rate means that verdict carries no information — a backtest that emits the hit rate alone is not
+  verification but promotion.
+- The horizon is a year (`HORIZON` = `LOOKBACK` = 4) because of seasonality: both the previous and the
+  following window have to hold all four quarters for the summer effect to cancel. The same 4 as
+  `persistence`'s window in §Formulas.
 
-### 광고·협찬 표시 (`AdSensitivityRow` — ydc `spam_ad_flags.py`)
-- 묻는 것: 기획안 §4 가 요구하는 두 가지 — 광고·협찬을 **표시**하고, 빼도 결론이 같은지 **확인**한다. 앞의
-  것만 하면 표시해 놓고 아무도 안 읽는 컬럼이 된다.
-- 표시하는 것 셋(어휘는 `variant` 의 닫힌 넷: `ad_video` · `creator_comment` · `promo_comment` · `all_flagged`):
-  | 표식 | 무엇 | 어디서 |
+### Ad and sponsorship marking (`AdSensitivityRow` — ydc `spam_ad_flags.py`)
+- What it asks: the two things the proposal's §4 demands — **mark** ads and sponsorships, and **confirm**
+  whether the conclusion is the same with them removed. Do only the first and it becomes a column that is
+  marked and read by nobody.
+- The three things marked (the vocabulary is `variant`'s closed four: `ad_video` · `creator_comment` · `promo_comment` · `all_flagged`):
+  | mark | what | from where |
   |---|---|---|
-  | `ad_video` | 광고·협찬 영상 | `source_metadata.has_paid_product_placement`(유튜버 자체 신고)와 설명란 문구의 **합집합**. 신고는 누락이 있어(TEAM_DECISIONS §9) 전량 실측 신고 254편 · 문구 **407**편 · 합집합 465편 · 겹침 196편이고, **문구로만 잡히는 211편**은 신고 필드로는 보이지 않는다. 출처의 docstring 은 문구 410 · 문구만 214 라고 적는데 그 수는 **어느 상태에서도 재현되지 않는다** — 포크 #41 이 그 파일의 birth 커밋(`9fd7ec0`, 그 뒤로 `AD_RE` 도 모집단 정의도 안 바뀌었다)을 같은 두 run 에 돌려 407 을 다시 받았다. 함께 적힌 겹침 196 은 407 과 맞는 수다(254+407−465). 낡은 것은 410/214 다 |
-  | `creator_comment` | 채널 운영자 본인 댓글 | `source_metadata.author_channel_hash` = `sha256("youtube:" + channel_id)[:24]` 라 채널 id 로 되만들 수 있다. 추정이 아니라 정확한 매칭이다. 운영자 고정 댓글은 설명란을 옮긴 것에 가까워, 댓글 계열에 두면 **소비자 반응이라는 계열의 정의가 깨진다** |
-  | `promo_comment` | 판매 링크·공동구매·마켓 공지 댓글 | 정규식. 운영자 댓글이 **먼저**라 문서 하나는 두 집합에 겹쳐 들지 않는다. **묶음 단위에서는 겹칠 수 있다** — 같은 (부모 영상, 텍스트) 에 운영자 사본과 남의 사본이 섞이면 그 묶음이 두 표식을 다 든다(ydc 와 같은 동작이고, 그래서 `all_flagged` 의 제외 집합은 두 집합의 합보다 작을 수 있다) |
+  | `ad_video` | an ad or sponsored video | the **union** of `source_metadata.has_paid_product_placement` (the uploader's own report) and a phrase in the description. The report has gaps (TEAM_DECISIONS §9), so over everything the measurement is 254 reported · **407** by phrase · 465 in union · 196 overlapping, and the **211 caught by phrase only** are invisible to the report field. The source's docstring writes 410 by phrase and 214 by phrase only, and those numbers **do not reproduce in any state** — fork #41 ran that file's birth commit (`9fd7ec0`; neither `AD_RE` nor the population definition changed after it) over the same two runs and got 407 back. The 196 overlap written alongside is the number that agrees with 407 (254+407−465). What is stale is 410/214 |
+  | `creator_comment` | a comment by the channel's own operator | `source_metadata.author_channel_hash` = `sha256("youtube:" + channel_id)[:24]`, so it can be rebuilt from a channel id. It is an exact match, not an estimate. An operator's pinned comment is closer to a copy of the description, so leaving it in the comment series **breaks the definition of that series as consumer reaction** |
+  | `promo_comment` | a sales-link, group-buy or market-notice comment | a regular expression. Operator comments come **first**, so one document never falls into both sets. **At bundle grain they can overlap** — when an operator's copy and someone else's copy share the same (parent video, text), that bundle carries both marks (the same behaviour as ydc, which is why `all_flagged`'s exclusion set can be smaller than the sum of the two sets) |
 - **버린 규칙**: 전화번호 정규식(6건)과 도박·대출 사전(4건)은 재보니 걸린 것이 거의 전부 오검출이었다
   (`토토톡` · `40대출산맘` · `무향`). 0.01%를 잡으려고 오검출을 남기지 않는다. 흔한 스팸 유형(도박·리딩방)이 이
   패널에는 없다.
-- **제외는 (부모 영상, 정규화 텍스트) 묶음 단위다.** 복붙 한 쪽만 빼면 `unique_ratio` 의 분자와 분모가 다른
-  모집단을 세게 된다(코퍼스 규칙 9의 `duplicate_in_parent` 가 그 묶음의 나머지다). 영상이 빠지면 그 영상의
-  댓글도 함께 빠진다 — 분기 귀속이 부모 영상이기 때문이다(규칙 3).
-- **사라진 셀과 뒤집힌 셀을 나눈다.** 표본이 줄어 판정이 사라진 것(`lost`)과 유형이 바뀐 것(`flipped_cells`)을
-  섞으면 "제외하니 결론이 다 바뀐다"로 보이는데, 실은 대부분 표본 미달이다.
+- **Exclusion is at (parent video, normalised text) bundle grain.** Remove only one side of a copy-paste and
+  `unique_ratio`'s numerator and denominator count different populations (corpus rule 9's
+  `duplicate_in_parent` is the rest of that bundle). When a video drops out its comments drop out with it —
+  because quarter attribution is the parent video's (rule 3).
+- **Lost cells and flipped cells are kept apart.** Mix the verdicts lost to a shrunk sample (`lost`) with
+  the ones whose type changed (`flipped_cells`) and it looks like "the exclusion changed every conclusion",
+  when in truth most of it is a sample falling short.
 
-### 민감도 상수 (`analysis/sensitivity` 한 곳에 모여 있다)
-| 상수 | 값 | 무엇 위에서 나왔나 | 판단 |
+### Sensitivity constants (gathered in `analysis/sensitivity` alone)
+| constant | value | what it came out of | judgment |
 |---|---|---|---|
 | `MATERIAL_PP` | `0.5` | 관측된 3년 변화량 범위(−5.5 ~ +2.6%p)에서 눈에 보이는 최소 폭. 적합값이 아니라 읽기 기준이다 | 채택. 0 으로 두면 전량에서 `백탁` 댓글 셀(−0.03 → +0.03)이 뒤집힘으로 잡혀 답이 뒤집힌다 |
-| `HORIZON` · `LOOKBACK` | `4` · `4` | 계절성. §수식 의 `persistence` 창(`WINDOW_QUARTERS`)과 같은 수이고, 따로 정의하지 않고 그것을 든다 | 채택. 4 미만이면 직전·이후 구간이 여름을 한쪽에만 담는다 |
-| 판정 대상 게이트 | 관측 분기의 **절반 초과** | ydc 는 13분기 산출에서 `>= 7` 로 박아 뒀다. 같은 문장을 관측 분기 수에서 유도하면 13분기에서 7 이 나온다 | 유도로 채택. 값으로 박으면 분기가 늘어난 산출에서 조용히 헐거워진다 |
-| `MIN_MENTIONS` | `5` | §수식 의 표본 게이트와 **같은 수**다 | 따로 정의하지 않는다 — `analysis.trend.MIN_MENTIONS` 를 그대로 든다 |
+| `HORIZON` · `LOOKBACK` | `4` · `4` | seasonality. The same number as `persistence`'s window (`WINDOW_QUARTERS`) in §Formulas, and it is taken from there rather than defined separately | Adopted. Under 4, the previous and following windows hold the summer on one side only |
+| the verdict-target gate | **more than half** of the observed quarters | ydc nailed it down as `>= 7` on its 13-quarter output. Deriving the same sentence from the observed quarter count gives 7 at 13 quarters | Adopted as a derivation. Nailed down as a value it quietly loosens on an output with more quarters |
+| `MIN_MENTIONS` | `5` | **the same number** as the sample gate in §Formulas | Not defined separately — `analysis.trend.MIN_MENTIONS` is taken as it is |
 
 - **The two branches the sample golden could not see** (a cell where `sample_ok` stands · a promo comment)
   were asserted absent by `tests/test_sensitivity_golden.py`, so that line broke first the day the sample
   changed. #57 re-cut the sample (product channels 4 → 11) and both branches are live — the flip verdict
   runs and reaches a cell, and promo rows move — with the seven goldens (#5 · #40 · #41's three · #6's two)
   regenerated at once by `tool/measure-trend-sample`.
-- **전량 대조는 CI 가 지킬 수 없다**(261,317문서는 `archive/` 에 있고 읽기 전용이다). 절차와 대조 코드는
-  `tool/compare-ydc-sensitivity` 한 자리에 있다 — ydc 세 스크립트를 손대지 않고 돌려 산출본 셋을 만들고 행
-  단위로 맞댄다. 2026-08-26 실행: 패널 26행 · 후향 11행 · 표시 104행, **차이 0**.
+- **CI cannot hold the full comparison** (the 261,317 documents are in `archive/` and it is read-only). The
+  procedure and the comparison code are in one place, `tool/compare-ydc-sensitivity` — it runs ydc's three
+  scripts untouched, makes three outputs and compares them row by row. Run 2026-08-26: panel 26 rows ·
+  backtest 11 rows · marking 104 rows, **difference 0**.
 
-## 근거 (판정 셀을 받치는 소비자 발화 — `topic_quarter_evidence`, 포크 #6)
+## Evidence (the consumer speech that holds up a verdict cell — `topic_quarter_evidence`, fork #6)
 
-근거는 집계도 파생도 아니라 **포인터**다. 판정이 지표 행 하나에서 행 하나를 만든다면(§판정), 근거는 그
-셀을 만든 문서 몇 개를 도로 가리킨다 — 본문을 베끼지 않는 것이 그 뜻이고, 셀에서 원문까지는 뷰
-`needs.topic_quarter_evidence_quote` 가 잇는다. **판정 격자의 셀 하나에서 근거 원문까지 손으로 조인하지
-않고 닿는다**는 이 이슈의 완료 기준이 그 뷰 한 줄이다.
+Evidence is neither an aggregate nor a derivation but **a pointer**. If the verdict makes one row out of one
+metric row (§Verdict), evidence points back at a few of the documents that made that cell — not copying the
+body is what that means, and the view `needs.topic_quarter_evidence_quote` joins a cell to the original text.
+**Reaching from one cell of the verdict grid to the evidence's original text without joining by hand** is
+this issue's completion criterion, and that one view is it.
 
-**그 한 줄에는 `run_id` 가 든다.** 뷰는 run 을 가리지 않으므로 한 스냅샷·명부에 run 이 둘 이상 있으면 같은
-셀이 겹쳐 나오고 `rank` 가 1..n 이 아니게 된다. 정본 필터는 둘 중 하나다 — `run_id` 를 명시하거나,
-`analysis_run.note` 로 그 스냅샷·명부의 run 을 찾아 거는 것(`analysis/trend/pipeline.py` 의 `note_of`,
-파이프라인 셋이 쓰는 바로 그 길)이다. 화면이 "최신 run" 을 원하면 그 note 로 고른 `run_id` 가 최신이다.
+**That one line carries `run_id`.** The view does not filter by run, so with more than one run under a single
+snapshot and roster the same cell comes out twice and `rank` stops being 1..n. The canonical filter is one of
+two — name the `run_id`, or find that snapshot and roster's run through `analysis_run.note` and filter on it
+(`note_of` in `analysis/trend/pipeline.py`, the very path the three pipelines use). When a screen wants "the
+latest run", the `run_id` chosen by that note is the latest.
 
-- **모집단은 지표·판정과 같다.** `analysis/evidence/pipeline.py` 는 모집단을 다시 적지 않고
-  `analysis/trend/pipeline.py` 의 `POPULATION` CTE 를 그대로 든다. 다시 적으면 카드가 인용하는 발화와
-  그 카드에 적힌 숫자의 분모가 갈리고, 갈린 것은 둘 다 그럴듯해서 보이지 않는다.
-- **선별 규칙 넷** (ydc `evidence_comments.py` 의 규칙이고, 순서가 아니라 넷이 모두 걸린다):
-  1. 후보는 그 셀의 `source` 가 낸 문서 중 `quality_flags = ''` 인 것이다. 빈 본문(`empty_text`)과 같은
-     영상 안 복붙(`duplicate_in_parent`)은 인용하지 않는다 — 지표는 후자를 `unique_ratio` 의 분모에
-     세지만(§수식) 그것은 세는 일이고 인용은 다른 일이다.
+- **The population is the same as the metrics' and the verdict's.** `analysis/evidence/pipeline.py` does not
+  write the population again; it takes the `POPULATION` CTE of `analysis/trend/pipeline.py` as it is. Written
+  again, the speech a card quotes and the numbers written on that card would stand on different denominators,
+  and once parted both look plausible enough to stay invisible.
+- **Four selection rules** (they are ydc `evidence_comments.py`'s rules, and all four apply rather than in
+  order):
+  1. The candidates are the documents that cell's `source` produced with `quality_flags = ''`. An empty body
+     (`empty_text`) and a copy-paste inside the same video (`duplicate_in_parent`) are not quoted — the
+     metrics count the latter in `unique_ratio`'s denominator (§Formulas), but counting is one job and
+     quoting is another.
   2. **The creator's own comments are dropped.** The author is the creator when the hash of the
      video's channel (`sha256('youtube:' || channel_id)`, first 24 characters — the collector's own rule
      for hashing the author channel id) equals `source_metadata.author_channel_hash`. Most top-liked
      comments are pinned ones (timelines, greetings, summaries), not consumer speech. Of the fixture's
      719 candidate comments, **21** are dropped here (41 of 1216 candidate pairs).
-  3. 주제는 `corpus_mention` 이 이미 단 것을 쓰고 본문을 다시 매칭하지 않는다. `matched_term` 도 그 행의
-     값이다 — 다시 매칭하면 지표가 센 언급과 근거가 고른 언급이 다른 규칙 위에 서게 된다.
+  3. The topic is the one `corpus_mention` already attached; the body is not rematched. `matched_term` is
+     that row's value too — rematch and the mentions the metrics counted and the mentions the evidence chose
+     would stand on different rules.
   4. The order is `like_count` descending and **ties break on `doc_id`**. The second key is a contract
      because ydc leaned on CSV read order (Python's sort is stable, so file order decided the winner of a
      tie). A stored table must yield the same rows on a rerun, so that seat cannot be left empty: of the
      96 fixture cells that carry evidence, **71** have a tie (a tie is a cell with **two or more
      candidates on the same like count**, not merely a cell with two or more candidates), and with the
      second key **57** of the 251 rows pick a different document. What does not change is the like ladder.
-  - 셀당 상한은 `TOP_PER_CELL = 3`. 카드 한 장에 들어가는 수라 025 의 CHECK 이 아니라 여기가 그 자리다 —
-    DDL 은 추가만이라 한번 적은 상한을 되돌릴 수 없다. **그 수의 자리는 여기 하나여야 한다**: 카드가 인용
-    상한을 따로 들면 근거만 늘려도 카드는 셋에 머문다. `analysis/cards.build` 의 기본값이 이 상수를
-    import 하고, `tests/test_cards_rules.py` 가 두 이름이 같은 객체인지 본다.
-- **이 절의 픽스처 수치는 재는 길이 있다.** `tool/measure-evidence-fixture` 가 코퍼스 CSV 에서 다시 재고
-  (`--json`), `tests/test_evidence_numbers.py` 가 그 값과 이 문장들·`analysis/evidence/pipeline.py` 의 DB
-  산출을 함께 맞댄다 — 픽스처가 자라면 테스트가 먼저 빨개진다. 숫자를 적고 재는 길을 안 남기면 그 숫자는
-  조용히 거짓이 된다 (#41 의 `tool/compare-ydc-sensitivity` 와 같은 자리).
-- **전량 실측** (2026-08-26 · 일회용 컨테이너 · 261,317문서 · 105,358언급): 후보 **15,602**행 ·
-  근거 **480**행 · 셀 **163** · `topic_quarter_evidence_violation` **0행** · 두 번 돌려 같은 수(멱등).
-  후보 질의는 **178ms**(`EXPLAIN (ANALYZE, BUFFERS)`, 023 의
-  `corpus_document (snapshot_id, parent_item_id) WHERE content_type='comment'` 부분 인덱스를 탄다) 이고
-  `cosmai trend evidence` 전체가 프로세스 기동까지 **0.52s** · 최대 상주 **73MB** 다. 본문을 싣지 않고
-  포인터와 좋아요만 끌어오기 때문이고, 이 수가 없으면 "가볍다"는 잰 적 없는 단언이다.
+  - The per-cell ceiling is `TOP_PER_CELL = 3`. It is the number that goes into one card, so this rather than
+    025's CHECK is its place — the DDL is additive only, so a ceiling once written cannot be taken back.
+    **That number must have this one place**: if a card held its own quotation ceiling, adding evidence alone
+    would leave the card at three. `analysis/cards.build`'s default imports this constant, and
+    `tests/test_cards_rules.py` checks that the two names are the same object.
+- **The fixture numbers of this section have a way to be measured.** `tool/measure-evidence-fixture`
+  re-measures them from the corpus CSVs (`--json`), and `tests/test_evidence_numbers.py` compares that value
+  against these sentences and against the DB output of `analysis/evidence/pipeline.py` together — when the
+  fixture grows, the test goes red first. Write a number down and leave no way to measure it and that number
+  quietly becomes false (the same place as #41's `tool/compare-ydc-sensitivity`).
+- **Full measurement** (2026-08-26 · throwaway container · 261,317 documents · 105,358 mentions): candidates
+  **15,602** rows · evidence **480** rows · cells **163** · `topic_quarter_evidence_violation` **0 rows** ·
+  the same numbers on a second run (idempotent). The candidate query is **178ms**
+  (`EXPLAIN (ANALYZE, BUFFERS)`; it rides 023's partial index
+  `corpus_document (snapshot_id, parent_item_id) WHERE content_type='comment'`), and the whole of
+  `cosmai trend evidence` is **0.52s** including process start, with a peak resident of **73MB**. That is
+  because it pulls pointers and like counts rather than carrying the body, and without these numbers "it is
+  light" is an assertion never measured.
 - **The axis is the verdict grid.** Topics with `trend_use = false` (the sunscreen and
   repurchase-recommendation topics) have no verdict cell, so no evidence either. ydc produced 313 rows over
   15 topics; only **251 rows** over 13 topics have a seat in this table.
-- **좋아요는 행에 남긴다.** collected_at 시점의 스냅샷이라(§모집단의 한계) 나중에 다시 세면 다른 수가
-  나온다 — 그때 이 정렬을 설명할 수 있는 것은 저장된 값뿐이다.
+- **The like count stays on the row.** It is a snapshot as of collected_at (§Limitations of the population),
+  so counting again later gives a different number — and then the stored value is the only thing that can
+  explain this ordering.
 
-### `cosmai retrieval search` 로 대체하지 않는다 (그 답과 실측 — 포크 #11 이 기다린 답)
-근거를 고르는 일은 검색처럼 보이지만 세 자리에서 어긋난다.
-- **모집단**: `retrieval_chunk` 의 원천은 수집기 스키마(`tubedepth`·`trend_radar`, `analysis/retrieval/corpus.py`)
-  이고 지표·판정의 원천은 `needs.corpus_*` 의 2026-08-19 관측 판본이다. 검색이 낸 댓글이 그 셀의 분모에
-  든 문서라는 보장이 없고, 보장이 없는 근거는 근거가 아니다.
+### `cosmai retrieval search` does not replace it (that answer and its measurement — the answer fork #11 waited for)
+Choosing evidence looks like search, but it parts from it in three places.
+- **Population**: `retrieval_chunk`'s source is the collector schemas (`tubedepth`·`trend_radar`,
+  `analysis/retrieval/corpus.py`), while the metrics' and the verdict's source is the 2026-08-19 observation
+  version of `needs.corpus_*`. There is no guarantee that a comment search returned is a document inside that
+  cell's denominator, and evidence with no guarantee is not evidence.
 - **Unit**: search answers with a `chunk_id`; the unit of evidence is the document. A comment over 500
   characters is split into pieces (30 of the fixture's 2605 population comments).
-- **순서**: 검색은 질의와의 어휘 유사도로, 근거는 좋아요로 줄을 세운다. 그리고 "이 주제를 말한 문서"는
-  `corpus_mention` 이 이미 답한 것이라, 검색을 다시 돌리는 것은 같은 질문에 **다른 규칙으로** 두 번째
-  답을 만드는 일이다.
+- **Order**: search lines them up by lexical similarity to the query, evidence by like count. And "which
+  documents spoke of this topic" has already been answered by `corpus_mention`, so running search again is
+  making a second answer to the same question **by a different rule**.
 
-**이 표는 §검색 실측 과 같은 자가 아니다.** 축(질의 = 별칭 하나, 정답 = 주제 단위)은 `retrieval eval` 의
-literal 모드와 같지만 코퍼스가 다르다 — 전 소스 381,950청크가 아니라 **그 판정 모집단의 댓글**뿐이다. 작은
-코퍼스에서는 P@10 에 코퍼스가 정하는 천장이 생긴다: 정답이 3건인 주제는 어떤 엔진도 P@10 이 0.3 을 넘지
-못한다. 그래서 아래는 언제나 천장을 함께 적는다. 천장 없이 옮겨 적으면 전 소스의 `.864` 와 나란히 놓여
-"BM25 가 약하다"로 읽히는데, 그것은 이 표가 하는 말이 아니다.
+**This table is not the same footing as §Retrieval measurements.** The axis (query = one alias, gold at topic
+grain) is the same as `retrieval eval`'s literal mode, but the corpus differs — not the 381,950 chunks of
+every source but **the comments of that verdict population** alone. On a small corpus P@10 acquires a ceiling
+the corpus sets: on a topic with 3 correct answers no engine can pass P@10 0.3. So the ceiling is always
+written alongside below. Copied without its ceiling it sits beside the all-source `.864` and reads as
+"BM25 is weak", which is not what this table says.
 
 Measured (2026-09-04 on the #57 re-cut, first measured 2026-08-27 · topic lexicon **v3** · the fixture's
 population comments 2605 = 2646 chunks · the queries are the 63 topic aliases · the index of
 `analysis/retrieval/bm25` and the scoring of `analysis/retrieval/eval`, gold from `corpus_mention`. The way
 to re-measure is `tool/measure-evidence-fixture`, and `tests/test_evidence_numbers.py` holds this table to it):
 
-| 무엇을 재는가 | 값 |
+| what is measured | value |
 |---|---|
 | How far BM25's top-10 overlaps `corpus_mention`'s answer | P@10 **.770** (this corpus's ceiling **1.000**) · MRR@10 .771 · Hit@10 84.1% |
 | Share of the 251 chosen evidence rows inside the top-10 of **any alias** of their topic | **103/251 = 41.0%** |
@@ -868,7 +904,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 말(`백탁` 이 아니라 `허옇게 떠요`)로 코퍼스를 뒤질 때이고, 그 자리는 heldout 모드이며 벡터가 유일하게 0 을
 넘은 자리다(§검색 실측).
 
-### 기회 카드 (유형은 규칙이 정한다 — `cosmai trend cards`, ydc `cards.py`)
+### Opportunity cards (the rules decide the type — `cosmai trend cards`, ydc `cards.py`)
 - **Zero cards is not a failure.** It is the normally computed answer after every rule has run, and in
   this sample too 9 of 13 quarters have none. Why the exit code does not say so, and the one case that
   becomes `partial(1)` instead (**a cell the rules caught but with no evidence text to stand a card on**),
@@ -915,7 +951,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
   다만 카드는 아직 그 답을 싣지 않는다(카드 본문을 바꾸는 일이라 #7 이 하지 않았다). 자막 이득은
   여전히 원천이 없어 빠져 있다. 빠졌다는 사실은 이 줄에 남고, 카드에 빈 절로 남지 않는다.
 
-## 대조 (소스를 나란히 놓는다 — 저장하지 않는 세 답, 포크 #7)
+## Crosscheck (the sources put side by side — three answers that are not stored, fork #7)
 
 셋(ydc `source_composition.py` · `commerce_crosscheck.py` · `cross_source.py` 의 성분 축)은 **합산하지
 않는다.** 소스마다 분모가 다르다 — 구성비는 그 소스의 13주제 언급 합 대비, 플랫폼 속성 평가는 `topic_group`
@@ -953,7 +989,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 플랫폼이 선케어 보드·카테고리에 실제로 올린 제품이 그 모집단이고, 그 술어는 `SUN_BOARD='suncare'` 와
 `SUN_CATEGORY`(`선케어`·`선크림`·`선블록`·`선스틱`·`선쿠션` 을 담은 `category_name`) 다.
 
-### 구성 (`SourceShare` — ydc `source_composition.py`)
+### Composition (`SourceShare` — ydc `source_composition.py`)
 - 묻는 것: **같은 주제를 소스마다 얼마나 말하는가.** 유튜브만으로는 "이 주제가 실제로 중요한가"에 답할 수
   없다 — 언급량으로 만든 값을 언급량으로 검증하면 순환이고, 유튜브 안의 자막·댓글은 같은 플랫폼이라 편향을
   공유한다. 소스가 다르면 편향도 다르므로, 여러 소스가 같은 방향을 말하면 그것이 근거가 된다.
@@ -973,7 +1009,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
   "영상은 안 다루는데 댓글·리뷰에는 있음"(`commerce > 0 and creator < 0.5 and comment > creator * 3`)도
   같이 온다.
 
-### 평가 (`RatingRow` — ydc `commerce_crosscheck.py`)
+### Rating (`RatingRow` — ydc `commerce_crosscheck.py`)
 - 묻는 것: **언급량과 독립된 검증.** 우리 판정은 전부 언급량에서 나왔다. `trend_radar.review_topic` 은
   올리브영·다이소가 자체 리뷰 설문으로 집계한 속성 평가라, 언급량과 독립된 유일한 검증 재료다.
 - **값이 아니라 방향을 본다.** 두 지표는 분모가 다르다 — 우리 `composition` 은 주제 간 구성비, 커머스
@@ -1007,7 +1043,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 - **`MIN_PRODUCTS = 5` 미만인 주제에는 해석을 쓰지 않는다.** 우리 판정에 `document_count >= 5` 를 요구하면서
   이 대조에만 예외를 두면 이중 기준이다. 그 사실은 종료 코드가 아니라 표와 `note` 가 싣는다.
 
-### 성분 (`IngredientRow` — ydc `cross_source.py` 의 성분 축)
+### Ingredients (`IngredientRow` — the ingredient axis of ydc `cross_source.py`)
 - 묻는 것: **성분을 말하는 곳과 쓰는 곳이 같은가.** ydc 는 NAVER 검색·논문·선케어 처방·담론 넷을 놓았다.
   여기서는 **담론 셋**(유튜브 전체 · 유튜브의 선크림 문맥 · 커머스 리뷰)만 선다. 나머지 셋은 아래 이유로
   이 레포에서 서지 않는다.
@@ -1065,19 +1101,19 @@ that `corpus_mention` has already answered "which documents speak of this topic"
   유튜브 933문서 중 **149문서**(16.0%)뿐이다(ydc 는 1,522건 중 187건). 담론은 성분명 매칭과 달리 원문
   그대로 본다(ydc `count_terms`) — 자유 문장에서 공백을 접으면 낱말 경계를 넘어 붙어 없는 언급이 생긴다.
 
-### 대조 상수 (`analysis/crosscheck` 한 곳에 모여 있다)
+### Crosscheck constants (gathered in `analysis/crosscheck` alone)
 | 상수 | 값 | 무엇 위에서 나왔나 | 판단 |
 |---|---|---|---|
-| `MIN_PRODUCTS` | `5` | §수식 의 표본 게이트와 **같은 수**다 — 판정에 5를 요구하면서 대조에만 예외를 두면 이중 기준이다 | 채택. `analysis.trend.MIN_MENTIONS` 와 같은 수이되 세는 것이 문서가 아니라 제품이라 따로 이름을 갖는다 |
+| `MIN_PRODUCTS` | `5` | **the same number** as the sample gate in §Formulas — requiring 5 for the verdict while making an exception for the crosscheck alone is a double standard | Adopted. The same number as `analysis.trend.MIN_MENTIONS`, but it carries its own name because what it counts is products rather than documents |
 | `LEAD_PP` | `5.0` | ydc `source_composition.reading` 의 세 갈래가 전부 이 폭이다 | 채택. 우리 실측에서 `백탁`(커머스 9.80 대 자막 3.32)·`지속력_워터프루프`(1.10 대 6.36)가 이 폭으로 갈린다 |
 | `THIN_PP` | `2.0` | 같은 규칙의 "영상 설명으로는 관측 불가" 문턱 | 채택 |
 | `SPARSE_PP` · `TALK_RATIO` | `0.5` · `3` | ydc `cross_source.topic_table` 의 "영상은 안 다루는데 댓글·리뷰에는 있음" | 채택. 우리 표에서는 한 주제도 걸리지 않는다 — 자막이 설명보다 두껍기 때문이고, 규칙을 지우면 원천이 바뀌는 날 되살릴 근거가 없다 |
 | `SUN_SHARE_LOW` | `25` | 선크림 문맥 비율이 이 아래면 그 수를 "선크림 담론" 으로 읽지 말라고 말한다. 우리 실측 PDRN 149/933(16.0%, **문서**)이 이 아래다. ydc 의 187/1,522(12.3%)는 **청크**를 센 값이라 같은 자 위에 있지 않다 — 방향이 같다는 것만 말한다 | 채택. 적합값이 아니라 읽기 기준이다 — 4분의 1 은 "대체로 선크림 얘기다" 라고 말할 수 있는 최소선이고, 전량에서 열 성분이 **전부** 이 아래라 이 열은 지금 경고 하나를 뜻한다 |
 | `POSITIVE_RATE_HIGH` | `80` | ydc `commerce_crosscheck.reading` 의 만족도 문턱 | 채택. 우리 실측 두 셀(`발림성` 71.7% · `자극_눈시림` 74.5%)이 둘 다 이 아래다 |
-| `GAP_PP_MATERIAL` | `1.0` | 같은 규칙의 "많이 말한다" 문턱(`gap_pp` = 댓글 구성비 − 영상 구성비, §판정) | 채택 |
+| `GAP_PP_MATERIAL` | `1.0` | the same rule's threshold for the comments saying much more (`gap_pp` = comment composition − video composition, §Verdict) | Adopted |
 | `FORMULA_HOLD` · `PAPER_HOLD` | `True` · `True` | 위 두 줄의 모집단 근거 | 채택. 켜는 조건은 각각 #10 의 성분 데이터셋과 검증 프로토콜이다 |
 
-### 전량 실측 (2026-08-27, 운영 DB 읽기 전용)
+### Full measurement (2026-08-27, production DB read-only)
 - **이 값들은 주제 사전 v2 위의 기록이다**(포크 #56). v3 의 델타는 `파데프리` 하나다 —
   `톤업_메이크업베이스` 가 +636(+14.6%)이 되고, `선크림` 의 다섯 표기는 `trend_use=false` 라, `속건조` 는
   `new` 0 이라 이 절에 영향이 없다. 그래서 v3 를 켠 뒤 다시 재야 하는 것은 그 주제를 분모로 쓰는 구성비
@@ -1095,7 +1131,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 - 성분: 감사 의심 **0건**(고친 키 기준, 금지 목록을 잡은 키 없음). 별칭 셋의 값은 위 표에 있고, 쉼표 없이
   공백으로만 나열한 성분표는 성분행 22,705 중 **60**행(고유명 59)이다.
 
-### ydc 와의 대조 (2026-08-27 실행, 38줄 **차이 0**)
+### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
 **승격 원본은 핀(`v0.1.0 02440ab`)이 아니다** — `cross_source.py` 는 그 뒤 `v0.3.0`(`e5a1b00`)에서 성분 키와
 선크림 문맥이 정정됐고 승격한 것은 그 판이다. 핀 사본(`analysis/slices/ydc/`)은 그 파일을 갖고 있지도
 않았고 #9 가 지웠다 — 태그에서 그 파일을 꺼내 **손대지 않고 돌리는** 절차와 대조 코드는
@@ -1108,8 +1144,9 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 - `cross_source.topic_table` 이 **함수 안에 리터럴로** 들고 있는 셋(`SPARSE_PP` 0.5 · `TALK_RATIO` 3 ·
   `READ_COMMENT_ONLY` 문구)은 함수를 부를 수 없어 그 소스를 읽어 맞댄다. 안 그러면 "차이 0" 이 이 셋을
   덮지 않는데 덮는 것처럼 읽힌다.
-- **`polarity` 는 그룹을 주지 않고 맞댄다** — 우리 쪽 정본은 확인된 표이고(§평가) ydc 에는 그 표가 없다.
-  그룹 없는 답이 힌트만 도는 답이라 그 자리에서 둘이 같다.
+- **`polarity` is compared without being handed a group** — our canonical form is the table a person
+  confirmed (§Rating) and ydc has no such table. An answer with no group is an answer riding on hints alone,
+  so at that place the two are the same.
 - **감사**: ydc 의 성분표 CSV(31,246행 · 577제품)를 양쪽 감사에 그대로 먹여 키별 (행, 제품)을 비교한다.
   원천이 같은 유일한 자리라 **이 이슈에서 가능한 유일한 1:1** 이고, 열 키 전부 일치한다(`시카센텔라`
   429행 · 202제품 = **35.0%** · `레티날` 0행 — 정정 전 `시카` 의 41.1% 가 아니다).
@@ -1125,7 +1162,7 @@ that `corpus_mention` has already answered "which documents speak of this topic"
 말아 올리기 셋(`swing`·`moved`·`entered`/`left`)뿐이다. 저장된 행에서 SQL 한 줄로 나오는 값을 위해 두
 번째 산출 경로를 만들면 그 순간 정본을 다툰다. 그 세 값을 화면이 원하면 뷰가 답이지 승격이 아니다.
 
-## 홀드아웃 (새 표본으로 되묻는다 — 저장하지 않는 답, 포크 #51)
+## Holdout (asking again with a new sample — an answer that is not stored, fork #51)
 
 ydc `holdout_commerce.py` 승격분. **새로 쌓인 커머스 리뷰로 기존 결론을 검증한다 — 숫자를 갈아치우지
 않는다.** 같은 코드로 **한 번도 안 본 리뷰만** 세서 기존 비율이 재현되는지 본다. 재현되면 결론이 표본에
@@ -1139,7 +1176,7 @@ retrieval chunk` 가 한 번 돌 때마다 움직이고(오늘의 홀드아웃�
 옆에서만 뜻을 갖는다. 저장하면 움직이는 경계를 한 시점에 얼려 놓고 그 사실이 행에 안 실린다. 그래서
 산출은 표가 아니라 **답**이고(`cosmai trend holdout` 의 stdout), 읽기 전용이라 운영 DB 에 그대로 돌린다.
 
-### 두 팔을 가르는 것은 날짜가 아니라 청크 색인이다
+### What splits the two arms is not a date but the chunk index
 ydc 는 `captured_at < 2026-08-24` 라는 **손으로 고른 컷오프**로 갈랐다. 그 레포에는 "우리가 무엇을
 봤는가" 가 행으로 남아 있지 않아서다(분석 입력이 CSV 한 장이었다). 우리에게는 그 행이 있다 —
 `needs.retrieval_chunk(source='commerce_review')` 의 `doc_id` 가 곧 **분석이 실제로 본 리뷰의 명부**다.
@@ -1150,9 +1187,10 @@ ydc 는 `captured_at < 2026-08-24` 라는 **손으로 고른 컷오프**로 갈�
 | `seen` (기존) | `doc_id` 가 청크 색인에 있는 리뷰 | 청크 색인 위에 선 우리 산출(§대조 의 구성·성분, BM25 색인)이 실제로 센 그 리뷰들이다 |
 | `holdout` | 같은 모집단인데 청크 색인에 없는 리뷰 | **한 번도 안 본 리뷰.** 수집기가 그 뒤로 쓴 것이다 |
 
-날짜 컷오프보다 나은 자리가 둘이다. **인자가 없다** — 고르는 길이 둘이면 분모도 둘이 된다(§평가 가
-분기를 인자로 받지 않는 것과 같은 규약). 그리고 `captured_at` 은 **수집 시각이지 우리가 본 시각이 아니라**,
-컷오프 이전에 수집됐지만 청크는 그 뒤에 구워진 리뷰가 날짜 규칙에서는 조용히 기존 팔에 든다.
+There are two places where this is better than a date cutoff. **There is no argument** — two ways of choosing
+makes two denominators (the same convention as §Rating not taking a quarter as an argument). And `captured_at`
+is **the collection time, not the time we saw it**, so a review collected before the cutoff whose chunk was
+baked after it falls quietly into the seen arm under a date rule.
 `captured_at` 은 대신 **답의 일부로 실린다** — 아래 §창.
 
 **모집단은 §대조 와 같은 술어다**: `SUN_BOARD`·`SUN_CATEGORY` 가 정한 선케어 랭킹 제품의 리뷰. 두 팔이
@@ -1160,7 +1198,7 @@ ydc 는 `captured_at < 2026-08-24` 라는 **손으로 고른 컷오프**로 갈�
 빈 본문은 청크를 만들지 않으므로 그것을 남기면 "안 본 리뷰" 가 아니라 "볼 것이 없는 리뷰" 가 홀드아웃을
 채운다. 뺀 수는 `note` 가 센다.
 
-### 추출 규칙 — 정지·전순서·행수 대조는 어디가 지는가
+### The extraction rules — where the stop, the total order and the row-count comparison land
 ydc 는 2026-08-23 에 **정렬 없는 페이징으로 "중복 37%" 라는 없는 결과**를 만들었고, 그 뒤 세 가지를 손으로
 얹었다(`count=exact` → 전순서 정렬 페이징 → 행수·유일성 대조). **우리는 그 셋을 손으로 하지 않는다 —
 자리가 다르기 때문이다.** 없는 방어를 있다고 적지 않기 위해 어디가 지는지 적는다:
@@ -1188,7 +1226,7 @@ ydc 는 2026-08-23 에 **정렬 없는 페이징으로 "중복 37%" 라는 없�
 둔다 — 활성 판본이 이 명령 도중에 바뀌면 두 팔이 다른 사전으로 매칭된 것이 아니라(사전은 한 번 읽어
 둘 다에 쓴다) 표가 어느 판본의 것인지가 `note` 에 없다는 뜻이다.
 
-### 지표 (`TopicRow`) — 분모가 둘이고, 섞지 않는다
+### Metrics (`TopicRow`) — there are two denominators and they are not mixed
 같은 사전(`analysis.retrieval.topics.match_topics`, `trend_use` 주제)·같은 단위(**리뷰 1건**)로 두 팔을
 센다. 한 리뷰에 같은 주제가 여러 표기로 나와도 한 번이다(ydc `rates` 의 규칙). 분모는 **둘 다 싣되 차를
 분모를 넘어 내지 않는다**:
@@ -1196,7 +1234,7 @@ ydc 는 2026-08-23 에 **정렬 없는 페이징으로 "중복 37%" 라는 없�
 | 열 | 분모 | 무엇에 답하나 |
 |---|---|---|
 | `rate` (언급률) | **그 팔의 리뷰 수** | ydc 의 축이다. 수준이 통째로 움직였는가 |
-| `share` (구성비) | **그 팔의 `trend_use` 주제 언급 합** | §구성 의 축이다. 주제 사이의 자리가 움직였는가 |
+| `share` (composition) | **that arm's sum of `trend_use` topic mentions** | the axis of §Composition. Did the place among the topics move |
 
 둘이 갈릴 수 있고 그 갈림이 답의 일부다 — 모든 주제의 언급률이 함께 오르면 구성비는 그대로다(수집이
 바뀐 것), 한 주제만 오르면 둘 다 움직인다(그 말이 실제로 는 것). **판정은 ydc 의 축(언급률)에서 한다**
@@ -1227,7 +1265,7 @@ ydc 는 2026-08-23 에 **정렬 없는 페이징으로 "중복 37%" 라는 없�
 보드가 좁아지는 날 기존 팔의 꼬리도 얇아지기 때문이다. **꼬리가 0으로 묶이는 것은 홀드 팔의 사실이고**,
 그 자리는 게이트가 아니라 아래 `RANK_TOP` 이 진다.
 
-### 갈리면 왜 갈리는가 — 세 갈래를 각각 잰다
+### Why they part when they part — the three branches are each measured
 비율이 통째로 움직였을 때 ydc 가 실제로 밟은 순서다. **원인을 셋으로 갈라 각각 재고, 답이 남는 것을 본다.**
 
 - **창** (`window_reading`) — 홀드아웃이 **새 기간**인가 **같은 창이 길어진 것**인가. 두 팔의 `captured_at`
@@ -1249,7 +1287,7 @@ ydc 는 2026-08-23 에 **정렬 없는 페이징으로 "중복 37%" 라는 없�
   제품만으로 다시 세어** 바스켓 효과를 뺀 차를 낸다. 이것은 `수집 상한 10` 과 같은 계열이다 — **수집
   과정이 관측값을 만든다.**
 
-### 판정 (`verdict`) — 네 갈래 전부 종료 코드 0 이다
+### Verdict (`verdict`) — all four branches are exit code 0
 ydc `holdout_commerce.report` 의 세 갈래를 그대로 들고 넷째를 우리 축이 더한다. 기준은 **언급률**이다.
 - `재현` — 모든 게이트 통과 주제의 `|Δrate|` 가 `MATERIAL_PP` 이하. 수준도 순위도 재현된다.
 - `순위 재현` — 상위 `RANK_TOP` 이 그대로인데 수준이 움직였다. **우리 결론은 순위를 쓰므로 유지된다** —
@@ -1266,19 +1304,20 @@ ydc `holdout_commerce.report` 의 세 갈래를 그대로 들고 넷째를 우�
 §민감도 의 "흔들린다는 1 이 아니다", §대조 의 "어긋난다는 1 이 아니다"와 **같은 자리, 같은 문장**이다.
 ydc 도 그렇다(`report` 는 언제나 0 을 낸다).
 
-**기존 산출물을 덮어쓰지 않는다.** 이 명령은 아무 표도 쓰지 않고, §대조 가 낸 값을 다시 계산하지도
-않는다 — 기존 팔은 이 명령이 **같은 코드로 새로** 센 값이라 §구성 의 커머스 열과 **같은 자 위에 있지
-않다**(그쪽은 청크 본문을 세고 `normalize_text` 를 거친다). 그래서 두 값을 빼지 않는다. 이 명령 안의
-비교는 언제나 같은 함수를 탄 두 팔 사이에서만 한다.
+**It does not overwrite an existing output.** This command writes to no table, and it does not recompute the
+values §Crosscheck produced either — the seen arm is a value this command counted **afresh with the same
+code**, so it is **not on the same footing** as the commerce column of §Composition (that side counts chunk
+bodies and goes through `normalize_text`). So the two values are not subtracted. Every comparison inside this
+command is between the two arms alone, which rode the same function.
 
-### 홀드아웃 상수 (`analysis/holdout` 한 곳에 모여 있다)
+### Holdout constants (gathered in `analysis/holdout` alone)
 | 상수 | 값 | 무엇 위에서 나왔나 | 판단 |
 |---|---|---|---|
 | `MATERIAL_PP` | `1.5` | ydc `holdout_commerce.report` 의 `abs(d) <= 1.5` — "홀드아웃이 3분의 1 크기라 표본 흔들림이 있다. 1.5%p 를 넘으면 사람이 본다" | 채택. 적합값이 아니라 **사람이 볼지 정하는 문턱**이고, 우리 홀드아웃도 기존보다 작다 |
 | `RANK_TOP` | `2` | 같은 함수의 `ra[:2] == rb[:2]` | 채택. **뒤에 붙은 `and ra[-1] == rb[-1]`(최하위 일치)는 옮기지 않는다** — ydc 의 다섯 주제는 전부 값을 가졌지만 우리 13주제 축의 꼬리는 0으로 묶여 최하위가 동률이라, 그 자리를 검사하면 정렬 순서를 검사하게 된다. **전량 실측(2026-08-27)이 그 자리를 실제로 밟았다** — 홀드 팔에서 `혼합자차`·`SPF_PA` 가 둘 다 0건이라 그 등수는 안정 정렬이 축 순서로 정한 것이고, ydc 규칙을 그대로 옮겼으면 거기서 동전 던지기가 판정을 갈랐다 |
-| `MIN_MENTIONS` (순위 게이트) | `5` | §수식 의 표본 게이트와 **같은 수**다 — 판정에 5를 요구하면서 여기만 예외를 두면 이중 기준이다 | 채택. §평가 의 `MIN_PRODUCTS` 와 같은 자리이되 세는 것이 제품이 아니라 문서라 `analysis.trend.MIN_MENTIONS` 를 그대로 든다 |
+| `MIN_MENTIONS` (the rank gate) | `5` | **the same number** as the sample gate in §Formulas — requiring 5 for the verdict while making an exception here alone is a double standard | Adopted. The same place as `MIN_PRODUCTS` in §Rating, but what it counts is documents rather than products, so `analysis.trend.MIN_MENTIONS` is taken as it is |
 
-### 전량 실측 (2026-08-27, 운영 DB 읽기 전용 — `cosmai trend holdout`, 코디네이터 세션이 실행)
+### Full measurement (2026-08-27, production DB read-only — `cosmai trend holdout`, run by the coordinator session)
 ```
 seen=6,349 holdout=975 topics=13 ranked=13 reproduced=7/13 scale=1.42→1.34
 verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 0)
@@ -1298,7 +1337,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 - 추출 규칙이 정말 DB 로 넘어갔는가도 같이 쟀다: `SUN_JOIN` 의 `SELECT DISTINCT` 로 팬아웃이 없다
   (모집단 7,324 = 조인 뒤 7,324) · 페이징 없음 · `review_pkey` 실재.
 
-### ydc 와의 대조 (2026-08-27 실행, 9줄 **차이 0**)
+### Comparison against ydc (run 2026-08-27, 9 lines, **difference 0**)
 `tool/compare-ydc-holdout` 이 태그(`v0.3.0`)에서 `holdout_commerce.py` 를 꺼내 **손대지 않고** 돌리고
 (`--demo` 만 — 인자 없이 돌리면 그 머신의 PostgREST 로 나간다), 둘을 맞댄다:
 - **상수** 셋. ydc 는 `report` **안에 리터럴로** 들고 있어 함수를 부를 수 없으므로 그 소스를 읽어
@@ -1314,11 +1353,12 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 (`tests/test_holdout_rules.py`), 원천을 맞대는 일은 사람이 한 번 돌린다(`tests/test_holdout_pipeline.py`
 는 모양·막힘·종료 코드와 "아무것도 안 썼는가" 를 진다 — §대조 와 같은 가름이다).
 
-## 모집단의 한계 (숫자를 읽는 법 — `manifest.limitations`, 포크 #4)
-2026-08-19 코퍼스(`needs.corpus_*`, `formats.md` §코퍼스 스냅샷)를 걷은 두 런이 스스로 적어 둔 여덟
-문장이다. 위 §수식 이 값을 **어떻게 만드는가**를 말한다면 이 절은 만들어진 값이 **무엇이 아닌가**를
-말한다 — 이 문장이 계약에 없으면 나중에 숫자만 남고, 같은 숫자가 다른 뜻으로 읽힌다. 여덟 줄은
-`db/corpus/contract.py` 에 상수로 서 있고 적재기가 매니페스트와 대조한다.
+## Limitations of the population (how to read the numbers — `manifest.limitations`, fork #4)
+These are the eight sentences the two runs that gathered the 2026-08-19 corpus (`needs.corpus_*`,
+`formats.md` §Corpus snapshot) wrote down about themselves. If §Formulas above says **how** a value is made,
+this section says what the made value **is not** — without these sentences in the contract only the numbers
+are left later, and the same number gets read as something else. The eight lines stand as constants in
+`db/corpus/contract.py` and the loader compares them against the manifest.
 
 - 모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).
   - 고정 패널이므로 이 비율은 "한국 유튜브에서"가 아니라 "이 43채널에서"다. 분모가 행 안에 있는 것(`panel_version`·`panel_role`)이 그래서다.
@@ -1331,7 +1371,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 - 댓글은 주제 사전에 걸린 영상만 받는다. 전체 영상의 댓글 분모는 존재하지 않는다.
   - **댓글 쪽 비율의 분모는 언제나 "주제가 걸린 영상의 댓글"이다.** 전체 영상의 댓글 분모는 만들 수 없으므로, 댓글 구성비를 "소비자 관심의 점유율"로 읽으면 틀린다.
 - 댓글 published_at은 댓글 자체 시각이다. 분기 귀속은 video_id로 부모 영상에 붙인다.
-  - 그래서 분기는 댓글 시각이 아니라 부모 영상의 분기다(§수식 의 "분기 문서 모집단", `parent_item_id`).
+  - So the quarter is the parent video's rather than the comment's (the quarterly document population bullet of §Formulas, `parent_item_id`).
 - 댓글은 계속 쌓이므로 최근 분기는 구조적으로 과소 집계된다.
   - **최근 분기의 하락은 트렌드가 아닐 수 있다.** YoY 판정이 최근 분기를 만질 때 이 한계가 먼저다.
 - order=relevance는 유튜브 비공개 알고리즘이며 좋아요 순이 아니다.
@@ -1340,7 +1380,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 이 한계들은 재수집(#38)으로 사라지지 않는다 — 같은 방법으로 다시 걷기 때문이다. 사라지는 것은
 2026-08-19 이라는 시점뿐이고, 그래서 스냅샷을 덮지 않고 판본으로 나란히 둔다.
 
-## 평가 하네스가 대조하는 기준선 (규칙 구현, 2026-08-23 실측)
+## Baselines the evaluation harness compares against (the rule implementation, measured 2026-08-23)
 | task | 평가셋 | 규칙 기준선 | 채택 조건 (단일 임계값) |
 |---|---|---|---|
 | polarity (선케어 홀드아웃) | sun holdout 100 | acc .77 · 불만 P .89 / R .70 | acc ≥ .77 그리고 P:불만 ≥ .89 |
@@ -1366,7 +1406,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
   30/39 = .769 · 37/39 = .949 이고, `tests/test_cli_eval.py` 가 그 채택 집합으로 재현을 검사한다.
 - 구현 교체(규칙→LLM, 사전 버전 업)는 이 표를 갱신하는 PR 로만 들어온다.
 
-### 규칙 실측 (2026-08-24, #3 구현체) — 구현 교체의 기준
+### Rule measurement (2026-08-24, #3's implementation) — the bar for replacing an implementation
 | 평가셋 | 규칙 실측 |
 |---|---|
 | sun holdout 100 | acc .870 · P:불만 .915 |
@@ -1390,7 +1430,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
   이 프롬프트 판본은 **ollama 전용**이라 Claude 경로의 `PROMPT_DATE=20260824` 와 무관하다 — 위 Sonnet/Opus 숫자는 그대로 유효하다.
 - 이 표는 **기록**이다 — 하네스가 대조하는 기준선(계약 바닥 표·위 규칙 실측 표)은 이 표로 바뀌지 않는다.
 
-## 검색 실측 (#28 단계 4 — 2026-08-25, 전 소스 · 청크 381,950 · 질의는 주제 별칭)
+## Retrieval measurements (#28 step 4 — 2026-08-25, every source · 381,950 chunks · the queries are the topic aliases)
 | mode | engine | 질의 | P@10 | MRR@10 | Hit@10 |
 |---|---|---|---|---|---|
 | literal | bm25 | 61 | .864 | .893 | 91.8% |
@@ -1472,7 +1512,7 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
   것은 이 이슈가 하지 않았다** — 여섯 줄은 그대로 v1 판본의 기록이고, 재측정은 그때 `dictionary`·`store`
   두 열을 함께 실은 원값 위에 선다.
 
-## 벡터 하한선 (두지 않는다 — 분포가 갈리지 않는다, 포크 #48)
+## Vector floor (not added — the distributions do not part, fork #48)
 `analysis/retrieval/vectors.py` 의 `search` 에는 유사도 하한선이 없다 — 코사인으로 정렬해 상위 k 를 그대로
 낸다. 그렇다고 "있으면 좋겠다"로 넣으면 안 된다: **e5 코사인은 좁은 띠에 뭉쳐 있다.** 문서-문서가 아니라
 질의-문서라 거의 다 한 구간에 들어오고, 분포가 실제로 갈리지 않으면 하한선은 **무관한 결과를 통과시키면서
@@ -1536,7 +1576,7 @@ next remeasurement replaces this line with the stamp it was measured on.
 - **그래서 `vectors.search` 에 하한선을 두지 않는다.** 넣는 날 `tests/retrieval/test_vector_floor.py` 의
   `test_search_fills_top_k_however_far_the_query_is` 가 빨개지고, 그때 이 절을 함께 고쳐야 한다.
 
-### 그러면 근거 없는 질의는 무엇이 막는가 — 청크빈도 (`analysis/retrieval/grounding.py`)
+### Then what stops a query with no grounding — chunk frequency (`analysis/retrieval/grounding.py`)
 코사인은 안 갈리지만 **빈도는 갈린다.** 규칙 하나다: **길이 4 이상인 질의 토큰 중 청크빈도가 0 인 것이
 있으면 막는다.** 코퍼스가 그 이름을 한 번도 말한 적이 없다는 뜻이라, 검색 결과가 나와도 그 이름과 무관한
 문서다. 막힌 질의는 결과 0건 + stderr 한 줄이고 종료 코드는 이미 있는 `1`(결과 없음)이다.
@@ -1586,10 +1626,11 @@ next remeasurement replaces this line with the stamp it was measured on.
 - **빈도는 색인 축에서 읽는다**(`bm25.tokenize` · `Index.postings`) — 질의 불용어 목록(포크 #46)을 타지
   않는다. `eval.docs_with_tokens` 가 같은 이유로 같은 축이다. 위 표를 잰 시점의 활성 불용어 목록은
   비어 있었으므로(`version=None`, 2026-08-27) 두 토큰화는 같은 토큰을 냈고, 표는 어느 축으로 읽어도 같다.
-- **게이트는 `pipeline.search` 에만 있다.** `retrieval eval` 은 타지 않으므로 §검색 실측 여섯 줄이 이
-  게이트로 움직이지 않는다 — 타더라도 안 움직인다는 것이 위 표 셋째 줄 첫 칸의 **0** 이다.
+- **The gate is on `pipeline.search` alone.** `retrieval eval` does not ride it, so the six lines of
+  §Retrieval measurements do not move under this gate — and that they would not move even if it did ride it
+  is the **0** in the first column of the third row of the table above.
 
-## 소스별 분배 (더하지 않는다 — 전역 상위 k 가 구성비를 따라가지 않는다, 포크 #54)
+## Per-source allocation (not added — the global top k does not follow the composition, fork #54)
 `ranked_chunks(..., sources=...)` 는 `sources` 로 후보를 **좁힐** 뿐, 남은 것 중 전역 상위 k 를 낸다 — 소스별
 몫이 없다. ydc `rag/engine.py` 는 소스마다 따로 뽑아 합치는데, 그 이유는 자기 색인의 **92%가 짧은 유튜브
 댓글**이라 전역 상위 k 가 `mfds` 를 **293위**로, `ingredient` 를 **300위 밖**으로 밀어냈기 때문이다. 같은
@@ -1651,21 +1692,22 @@ literal` 이 쓰는 그 주제 별칭 63개 중 후보가 있는 **59개**(`재�
   140 characters would sit at `avg_len`), which needs a re-chunk and a re-embed of production and a new
   retrieval-measurements table — its own issue. `youtube_video` has the same shape (38 of its 47 candidate queries
   outside the top 10 · median 35 · max 777) and the same reading applies.
-- **그래서 분배(각 소스 k/n 씩 뽑아 합치기 · RRF)를 `ranked_chunks` 에 더하지 않는다.** 분배는 공짜가
-  아니다 — 상위 k 의 자리를 관련도가 아니라 소속으로 나눠 주므로, 고칠 쏠림이 없으면 남는 것은 손해뿐이다.
-  §검색 실측 의 정답은 소스와 무관한 (문서, 주제) 라벨이라 그 손해가 곧 P@10 하락으로 나온다.
+- **So an allocation (drawing k/n per source and merging · RRF) is not added to `ranked_chunks`.** An
+  allocation is not free — it hands out the top k slots by membership rather than by relevance, so with no
+  skew to fix all that is left is the loss. The gold of §Retrieval measurements is a (document, topic) label
+  independent of the source, so that loss comes straight out as a fall in P@10.
 - **다시 재야 하는 때**: 이 판정은 위 구성비 위에 선다. 한 소스가 자라 지배 소스의 상위 10 점유율이 색인
   구성비를 넘으면 첫 관문이 뒤집히므로, 코퍼스가 크게 자라거나 소스가 늘면 `tool/measure-source-mix` 를
   다시 돌린다. `sources` 로 **좁히는** 기능은 그대로다 — 이 절이 없다고 말하는 것은 몫이지 좁힘이 아니다.
 
-## 질의 라우팅 (라우터를 붙이지 않는다 — 성분명 판정의 정본이 없다, 포크 #47)
+## Query routing (no router is attached — there is no canonical decision on an ingredient name, fork #47)
 ydc `v0.3.0` 의 `rag/router.py` 는 질의마다 규칙으로 엔진을 고른다(LLM 을 안 쓴다 — 결정적이고 왜 그렇게
 갔는지 항상 말할 수 있다). **승격하지 않는다.** 라우터가 보는 **신호 넷 중 둘의 원천이 없고**(성분명 ·
 등록번호) 그에 딸려 **갈래 둘이 막히며**(`bm25` 의 성분명 쪽 · `multi_source`), 성분명 자리에 지금 있는
 유일한 목록을 쓰면 ydc 가 밟은 함정을 그대로 밟기 때문이다. 남은 신호 둘만 보는 라우터를 실제로 재 보면
 옳게 보낸 질의가 0개다(아래 §오라우팅 실측 의 여섯째 줄).
 
-### 성분명 판정의 정본은 토크나이저 사전이 아니다
+### The canonical decision on an ingredient name is not the tokeniser dictionary
 `analysis/retrieval/dict/ingredient_dictionary.tsv`(1,877표기, `bm25.DICTIONARIES`)는 **Kiwi 토크나이저
 사전**이다. 담론어가 일부러 들어 있다 — 사전 없이 색인하면 `백탁` 이 `백`+`탁` 으로 쪼개지기 때문이고
 (`bm25.kiwi`), 그것이 이 파일이 하는 일이다. 그걸 "성분명 목록"으로 읽으면 그 말이 든 **자연어 질의가
@@ -1684,7 +1726,7 @@ ydc 의 정본은 성분표(`data/external/product_ingredient_function_repaired.
 upstream `slopindustries/cosmai#73` 이 2026-08-26 에 "전성분은 수집기로 걷는다, 외부 CSV 는 들이지
 않는다"로 정했다. 그래서 이 축은 그 수집이 서기 전까지 열리지 않는다(포크 #10 이 보류로 든 자리).
 
-### 네 갈래와 원천 (무엇에 막혀 있나)
+### The four branches and their sources (what each is blocked by)
 | 갈래 | 신호 | 우리 원천 | 상태 |
 |---|---|---|---|
 | `bm25` | 성분명 | 없다 (위 표) | **막힘** — upstream `slopindustries/cosmai#73` |
@@ -1701,7 +1743,7 @@ upstream `slopindustries/cosmai#73` 이 2026-08-26 에 "전성분은 수집기�
 재는 그 주제 별칭 73개)를 통과시키면 `bm25` 로 가는 질의가 **2개, 옳게 보낸 것은 0개**다 — `밀려` 가 브랜드
 `려` 에, `화이트닝` 이 브랜드 `화이트` 에 걸린다. **이득 0 · 손해 2 이므로 기본값보다 나쁘다.**
 
-### 이진으로 갈리지 않는 자리는 우리에게도 있다 (`multi_source`)
+### There are places that do not split in two for us either (`multi_source`)
 ydc 의 `콜라겐 들어간 제품 뭐가 좋아` — `콜라겐` 은 진짜 성분이면서 담론어다(담론/제품 비율 콜라겐 281 ·
 판테놀 7). 우리 자리는 활성 주제 사전이 그대로 가리킨다: 성분 표기 축(`mfds_inci`)과 사람이 쓰는 말 축(`ko`)에
 **둘 다** 오른 표기가 **3개** 있다 — `아보벤존`·`옥토크릴렌`·`자외선차단제`. 진짜 성분이면서 사람이 그 말로
@@ -1711,7 +1753,7 @@ ydc 의 `콜라겐 들어간 제품 뭐가 좋아` — `콜라겐` 은 진짜 �
 같이 있으면 **고르지 말고 둘 다 낸다** — 라우터를 붙이는 날 이 규칙이 함께 온다. 하나를 고르면 반드시
 한쪽을 잃고, 그것은 소스를 합산하지 않는 것과 같은 논리다.
 
-### 오라우팅 실측 (2026-08-27 · 우리 사전 · 재는 길은 `tool/measure-query-routing`)
+### Misrouting measurement (2026-08-27 · our own dictionary · the way to measure it is `tool/measure-query-routing`)
 ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector`)에 성분명 목록으로 우리 토크나이저 사전을
 넣고, 자연어 판정은 ydc 와 같이 Kiwi 의 서술어 태그(`VA`·`VV`·`EF`·`EC`·`VCP`·`VCN`)로 한다.
 `tests/retrieval/test_query_routing.py` 가 아래 수와 도구의 산출을 매번 맞댄다.
@@ -1742,13 +1784,14 @@ ydc 초판의 이진 규칙(정확 신호가 있으면 `bm25`, 없으면 `vector
 - 이 표는 §검색 실측 과 **같은 자가 아니다**. 축이 다르다 — 저쪽은 질의 61/60개가 전부 주제 별칭이고 점수는
   P@10 이며, 이쪽은 자연어 문장 10개이고 값은 갈래 배정이다. 나란히 놓으면 안 된다.
 
-### 포크 #11 에 넘기는 것
+### What is handed to fork #11
 #11(검색 기본 엔진)은 **기본값 하나를 고르는** 이슈이고 라우터는 그 질문을 질의마다 규칙으로 답하는 안이다.
 넘기는 것은 하나뿐이다: **라우터는 #11 을 대체하지 못한다** — 신호 넷 중 둘이 막혀 갈래 둘이 서지 않고,
 남은 신호 둘만으로 세우면 실측으로 이득 0 · 손해 2 라 기본값보다 나쁘다. 성분표가 오기 전에는 그 상태가
 바뀌지 않는다. 그러니 #11 은 기본값을 골라야 한다.
-**위 표의 일곱 줄은 어느 것도 #11 의 입력이 아니다** — 기본 엔진 판단의 입력은 전 소스에서 같은 자로 잰
-§검색 실측 여섯 줄이고, §근거 가 자기 두 줄에 대해 못 박은 것과 같은 자리다.
+**Not one of the seven lines of the table above is an input to #11** — the input to the default-engine
+judgment is the six lines of §Retrieval measurements, measured on the same footing over every source, and it
+is the same place §Evidence pinned for its own two lines.
 
 ## Answer layer (`cosmai retrieval ask` — a summary of retrieval results, fork #73)
 The LLM is the last layer and makes no conclusion: `search` finds the evidence (gate included), the code folds
@@ -1808,7 +1851,7 @@ lets the next judgment be measured: the partial answers BM25 gives on the query 
 **Exit codes and streams** are in the retrieval section of `entrypoints.md` (the `ask` continuation of its
 exit-code bullet); `tests/retrieval/test_ask.py` holds every sentence above that names a behaviour.
 
-## 패스 기준 (2026-08-23 결정: 6단계까지 무정지 → 2차 패스에서 기준선)
+## Pass criteria (2026-08-23 decision: no stop through step 6 → the baseline in the second pass)
 | 패스 | 유닛 완료 기준 | 검사 |
 |---|---|---|
 | 1차 | 계약 시그니처 구현 + `cosmai eval <task>`가 그 유닛의 평가셋에서 **점수를 산출**한다(기준선 미달 허용) + `analyze <stage>` 멱등 | eval 출력 행이 `needs.analysis_run.note`에 기록, 점수는 이슈 코멘트 |
