@@ -205,6 +205,8 @@ def rekey(cur: psycopg.Cursor[Any]) -> int:
     why 028 grants `UPDATE` rather than `SELECT, INSERT` alone. It is not called by `load`: a re-key
     is a consequence of changing the function, so it is run deliberately.
     """
+    # TODO(#88): no empty-key guard here, unlike rows(): a folding change that sends one company to the
+    # empty key surfaces as a CheckViolation from the UPDATE, half-way through, without the company name.
     cur.execute(ALL_KEYS_SQL)
     moved = 0
     for report_seq, entp_name, entp_key in cur.fetchall():

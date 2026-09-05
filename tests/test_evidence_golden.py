@@ -257,6 +257,8 @@ def test_the_quotes_on_a_card_are_the_quotes_ydc_put_there(quoted: str):
             if not (same_terms and same_text):
                 moved.append(f"{quarter} {card.topic_key}")
     # The topic ids are Korean corpus data; the quarters carry the same fact without them (#192 D12).
+    # TODO(#89): a weaker fact than before the translation -- the (quarter, topic_key) pairs belong in a
+    # fixture CSV under tests/fixtures/ so the full comparison comes back.
     assert [line.split(" ", 1)[0] for line in moved] == ["2025Q2", "2025Q3"], moved
 
 
