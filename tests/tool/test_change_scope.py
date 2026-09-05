@@ -13,6 +13,7 @@ git history, and this checkout's history is not a fixture anybody can pin.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -163,7 +164,9 @@ def test_a_changed_test_file_is_its_own_scope(repo: Path):
         repo, "tests/test_linker.py", "def test_a():\n    assert 1\n", "def test_a():\n    assert 2\n"
     )
     assert scope.klass == "B", scope.raw
-    assert scope.tests == ["tests/test_linker.py"], scope.tests
+    # The smoke set (#231) always rides along; the changed test file itself is what proves it is
+    # its own scope.
+    assert "tests/test_linker.py" in scope.tests, scope.tests
 
 
 def test_a_changed_conftest_is_class_a(repo: Path):
@@ -302,9 +305,13 @@ def test_a_comment_only_gitignore_change_is_class_c(repo: Path):
     assert scope.klass == "C", scope.raw
 
 
-def test_a_gitignore_pattern_change_is_class_b(repo: Path):
+def test_a_gitignore_pattern_change_is_class_c(repo: Path):
+    # #231 item 3: nothing at runtime reads a .gitignore, so a real pattern edit costs no test
+    # either -- #230's empty map entry made this B without saying so anywhere; this is where the
+    # decision belongs, and it belongs at C, not B.
     scope = change(repo, ".gitignore", "# the old wording\n*.pyc\n", "# the old wording\n*.pyo\n")
-    assert scope.klass == "B", scope.raw
+    assert scope.klass == "C", scope.raw
+    assert scope.tests == [], scope.tests
 
 
 def test_every_gate_file_stays_class_a_even_for_a_comment_only_edit(repo: Path):
@@ -362,3 +369,198 @@ def test_a_deleted_test_file_is_class_a(repo: Path):
     commit(repo, "after")
     scope = classify(repo, base)
     assert scope.klass == "A", scope.raw
+
+
+# ---------------------------------------------------------------------------------------------
+# #231: the computed set -- readers map, import closure, smoke, the trigger list, no-answer paths.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_readers_map_hit_selects_the_test_that_names_the_file(repo: Path):
+    # The 2026-09-04 break this issue exists to close: contracts/formats.md is data to a test that
+    # names it in its own source, and the map's directory prefix alone never saw that.
+    write(repo, "tests/test_names_the_resource.py", 'RESOURCE = "contracts/formats.md"\n')
+    write(repo, "contracts/formats.md", "# Formats\n\nOld body.\n")
+    base = commit(repo, "before")
+    write(repo, "contracts/formats.md", "# Formats\n\nNew body.\n")
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert "tests/test_names_the_resource.py" in scope.tests, scope.tests
+
+
+def test_the_import_closure_finds_an_indirect_importer_and_nothing_else(repo: Path):
+    # analysis/helper.py is imported only by analysis/user.py, which tests/test_indirect.py imports
+    # in turn -- the closure has to cross that one hop, and it must not drag in an unrelated test.
+    write(repo, "analysis/helper.py", "def calc(x):\n    return x\n")
+    write(
+        repo, "analysis/user.py", "from analysis import helper\n\n\ndef run(x):\n    return helper.calc(x)\n"
+    )
+    write(
+        repo,
+        "tests/test_indirect.py",
+        "from analysis import user\n\n\ndef test_a():\n    assert user.run(1) == 1\n",
+    )
+    write(repo, "tests/test_unrelated.py", "def test_b():\n    assert True\n")
+    base = commit(repo, "before")
+    write(repo, "analysis/helper.py", "def calc(x):\n    return x + 1\n")
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "B", scope.raw
+    assert "tests/test_indirect.py" in scope.tests, scope.tests
+    assert "tests/test_unrelated.py" not in scope.tests, scope.tests
+
+
+def test_every_computed_change_carries_the_smoke_set(repo: Path):
+    scope = change(repo, "analysis/linker/rules.py", PY_BEFORE, PY_CHANGED)
+    assert scope.klass == "B", scope.raw
+    for smoke_test in (
+        "tests/test_cli_help.py",
+        "tests/test_version_strings.py",
+        "tests/test_registry_loading.py",
+        "tests/test_scope_map.py",
+        "tests/stack/test_stack_wiring.py",
+    ):
+        assert smoke_test in scope.tests, scope.tests
+
+
+def test_a_merge_that_joins_two_channels_is_class_a(repo: Path):
+    write(repo, "root.py", "x = 1\n")
+    base = commit(repo, "root")
+    subprocess.run(["git", "-C", str(repo), "branch", "side-a"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "side-a"], check=True)
+    write(repo, "analysis/one.py", "y = 1\n")
+    commit(repo, "analysis change")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(repo), "branch", "side-b"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "side-b"], check=True)
+    write(repo, "collectors/two.py", "z = 1\n")
+    commit(repo, "collectors change")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(repo), "merge", "--no-ff", "-m", "merge a", "side-a"], check=True)
+    subprocess.run(["git", "-C", str(repo), "merge", "--no-ff", "-m", "merge b", "side-b"], check=True)
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
+    assert "merge" in scope.reason.lower(), scope.reason
+
+
+def test_a_merge_that_only_brings_in_main_is_not_a_trigger(repo: Path):
+    write(repo, "analysis/one.py", "y = 1\n")
+    base = commit(repo, "root")
+    subprocess.run(["git", "-C", str(repo), "branch", "feature"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feature"], check=True)
+    write(repo, "collectors/two.py", "z = 1\n")
+    commit(repo, "feature change")
+    subprocess.run(
+        ["git", "-C", str(repo), "merge", "--no-ff", "-m", "merge base into feature", base], check=True
+    )
+    scope = classify(repo, base)
+    assert scope.klass != "A" or "merge" not in scope.reason.lower(), scope.raw
+
+
+def test_a_none_class_change_set_runs_no_tests(repo: Path):
+    write(repo, ".gitignore", "*.pyc\n")
+    write(repo, "playbook/x.md", "# Old\n")
+    write(repo, ".github/x.yml", "name: old\n")
+    base = commit(repo, "before")
+    write(repo, ".gitignore", "*.pyo\n")
+    write(repo, "playbook/x.md", "# New\n")
+    write(repo, ".github/x.yml", "name: new\n")
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "C", scope.raw
+    assert scope.tests == [], scope.tests
+
+
+def test_tests_snapshots_maps_to_the_cli_help_snapshot_test(repo: Path):
+    scope = change(repo, "tests/snapshots/help.txt", "old\n", "new\n")
+    assert "tests/test_cli_help.py" in scope.tests, scope.tests
+
+
+def test_a_comment_only_trigger_file_next_to_a_real_mapped_change_is_class_b(repo: Path):
+    # A trigger file proven unmoved does not raise the ceiling for the rest of the change: the real
+    # code change decides the class on its own.
+    write(repo, "contracts/ddl/needs/001.sql", "-- old\nCREATE TABLE a (id int);\n")
+    write(repo, "analysis/linker/rules.py", PY_BEFORE)
+    base = commit(repo, "before")
+    write(repo, "contracts/ddl/needs/001.sql", "-- new\nCREATE TABLE a (id int);\n")
+    write(repo, "analysis/linker/rules.py", PY_CHANGED)
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "B", scope.raw
+    assert "tests/test_linker.py" in scope.tests, scope.tests
+
+
+def test_a_comment_only_trigger_file_next_to_a_real_trigger_change_is_class_a(repo: Path):
+    write(repo, "contracts/ddl/needs/001.sql", "-- old\nCREATE TABLE a (id int);\n")
+    write(repo, "contracts/ddl/needs/002.sql", "CREATE TABLE b (id int);\n")
+    base = commit(repo, "before")
+    write(repo, "contracts/ddl/needs/001.sql", "-- new\nCREATE TABLE a (id int);\n")
+    write(repo, "contracts/ddl/needs/002.sql", "CREATE TABLE b (id bigint);\n")
+    commit(repo, "after")
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
+    assert "002.sql" in scope.reason, scope.reason
+
+
+# ---------------------------------------------------------------------------------------------
+# Review 2026-09-05 fix round: the none list must not preempt the readers map, and one-sided
+# merges are trigger candidates too.
+# ---------------------------------------------------------------------------------------------
+
+
+def _load_real_module():
+    """The module under test, loaded from THIS checkout's own tool/change_scope.py -- blocker 1
+    asks for verification against the real repo, not only a fixture, because the real readers map
+    is what has to actually name tests/test_corpus_import.py.
+    """
+    spec = importlib.util.spec_from_file_location("change_scope_real", CLASSIFIER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_nested_readme_is_selected_by_the_real_repos_readers_map():
+    # Review 2026-09-05 blocker 1: contracts/README.md is read by name (Path("contracts") /
+    # "README.md") in tests/test_corpus_import.py -- the none list's bare "README" entry must not
+    # swallow it before the readers map gets a look.
+    module = _load_real_module()
+    test_files = module.all_test_files(REPO_ROOT)
+    found = module.readers_of(REPO_ROOT, "contracts/README.md", test_files, {})
+    assert "tests/test_corpus_import.py" in found, found
+
+
+def test_a_root_readme_only_change_is_class_c_with_no_tests(repo: Path):
+    # A repository-root README has no test of its own and nothing nests inside it, unlike
+    # contracts/README.md -- the bare "README" none-list entry is scoped to exactly this.
+    scope = change(repo, "README.md", "# Old\n", "# New\n")
+    assert scope.klass == "C", scope.raw
+    assert scope.tests == [], scope.tests
+
+
+def test_unreachable_does_not_flag_a_tool_star_reader_or_a_docs_test():
+    # Review 2026-09-05 blocker 3 and 4: tests/test_ruff_extend_include.py is now pinned under
+    # "tool/*" in [readers], and tests/test_agents_md.py is named by AGENTS.md and sits in `docs` --
+    # `--unreachable`'s model has to see both, not just the map/readers-table/closure/smoke union.
+    module = _load_real_module()
+    unreachable = set(module.unreachable_tests(REPO_ROOT))
+    assert "tests/test_ruff_extend_include.py" not in unreachable, unreachable
+    assert "tests/test_agents_md.py" not in unreachable, unreachable
+
+
+def test_an_ordinary_merge_into_an_unmoved_main_is_still_a_joining_merge(repo: Path):
+    # Review 2026-09-05 blocker 2: the shape almost every wave merge and fork PR actually has --
+    # main has not moved since the branch forked, so the first side of the merge is empty. The old
+    # "both sides must be non-empty" rule let exactly this shape through as small.
+    write(repo, "root.py", "x = 1\n")
+    base = commit(repo, "root")
+    subprocess.run(["git", "-C", str(repo), "branch", "feature"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feature"], check=True)
+    write(repo, "tool/thing.py", "y = 1\n")
+    write(repo, "tests/test_thing.py", "def test_a():\n    assert 1\n")
+    commit(repo, "feature change")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(repo), "merge", "--no-ff", "-m", "merge feature", "feature"], check=True)
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
+    assert "merge" in scope.reason.lower(), scope.reason

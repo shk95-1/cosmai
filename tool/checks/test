@@ -6,8 +6,8 @@
 # `tool/checks/test` alone is that whole suite. `tool/checks/test --changed [<base>]` asks what the
 # change can break first (#215) and runs the smallest verification that answers it:
 #
-#   A  the whole suite      the database, the packaging, the gate itself, or anything unmapped
-#   B  the mapped tests + the DB-free suite    code under one package (tests/scope.toml)
+#   A  the whole suite      the trigger list, the gate itself, a joining merge, or anything unmapped
+#   B  the computed set     mapped tests + the readers map + the import closure + smoke (#231)
 #   C  format·lint·lang + the snapshot tests   prose, or code tool/checks/invariants proves is unmoved
 #   N  format·lint, recorded nowhere           a tree identical to the base: there is nothing to verify
 set -e
@@ -194,20 +194,22 @@ case "$change_class" in
         fi
         ;;
     B)
-        # An entry can map to no tests at all (a directory nothing imports), and a bare `uv run
-        # pytest` there would collect the whole suite -- the opposite of what this class is for.
+        # #231: the computed set IS the verification now -- the mapped tests, the readers map, the
+        # import closure and the smoke set, unioned by tool/change_scope.py. No whole-tree DB-free
+        # arm any more: that used to be the safety net for whatever the map missed, and the readers
+        # map and the closure are that net now, sized to the change instead of to the whole tree.
+        # An entry can still resolve to no tests at all (a directory nothing imports and nothing
+        # reads), and a bare `uv run pytest` there would collect the whole suite -- the opposite of
+        # what this class is for.
+        #
+        # This stays a focused session, not COSMAI_FULL_SUITE: the #30 registration guard in
+        # tests/conftest.py only fires at the end of a whole-tree run, and none of the five smoke
+        # tests need it -- test_registry_loading.py restores the registry itself, in its own
+        # teardown fixture, the same as any other test that touches it (#231).
         if [ -n "$change_tests" ]; then
             printf '→ pytest %s\n' "$change_tests"
             uv run pytest $change_tests
         fi
-        # The whole suite minus the part that needs the database: a package's own tests say the
-        # package is right, and this says nothing else in the tree noticed. The marker expression
-        # repeats the two the ini file excludes, because -m on the command line replaces it.
-        # COSMAI_FULL_SUITE: this is a whole-tree session, which is the shape the #30 registration
-        # guard exists for -- one file poisoning the next (#215 review I5). The mapped run above is
-        # a focused session and stays without it.
-        printf '→ pytest (the DB-free suite)\n'
-        COSMAI_FULL_SUITE=1 uv run pytest -m 'not postgres and not live and not local_llm'
         ;;
     *)
         printf '→ pytest\n'

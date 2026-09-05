@@ -8,8 +8,11 @@ three throwaway scripts. This is those three, kept:
             gate that cannot see them is a gate that lets behaviour through as prose (#215 review C1)
   sql       the statements with their comments stripped, whitespace normalized OUTSIDE quotes only
   shell/js  the diff itself: every added and removed line must be a comment line (a shebang is not)
-  hash      YAML, TOML, Dockerfile, crontab, .gitignore/.dockerignore, .env* -- the diff itself, every
-            added and removed line must start with `#` (#230; no shebang exception, none of these run)
+  hash      YAML, TOML, Dockerfile (any basename starting with `Dockerfile`, so `Dockerfile.cron`
+            counts too, #231 Work 7c), crontab, .gitignore/.dockerignore, .env* -- the diff itself,
+            every added and removed line must start with `#` (#230; no shebang exception, none of
+            these run) -- except a Dockerfile's `# syntax=`/`# escape=` line, which Docker itself
+            reads as a directive, not prose (#231 Work 7e)
   markdown  the anchors and literals a translation has to carry across (`§2`, `#214`, code spans)
 
 `--strings-blanked` is the translation reviewer's mode, and only theirs: it also blanks every string
@@ -71,8 +74,10 @@ def kind_of(path: str, text: str) -> str:
         return "shell"
     if name.endswith((".yml", ".yaml", ".toml")):
         return "hash"
-    if name == "dockerfile" or name.endswith(".dockerfile"):
-        return "hash"
+    # Any basename starting with "Dockerfile" -- "Dockerfile", "Dockerfile.cron", and a
+    # "*.Dockerfile" suffix all name the same kind of file (#231 Work 7c).
+    if name.startswith("dockerfile") or name.endswith(".dockerfile"):
+        return "dockerfile"
     if path.startswith(HASH_PATH_PREFIXES):
         return "hash"
     if name in (".gitignore", ".dockerignore"):
@@ -202,6 +207,14 @@ def is_comment_line(line: str, kind: str) -> bool:
         # Only a line whose diff text starts with `#` counts -- a `#` in the middle (a quoted value,
         # an inline comment beside a real change) never makes the line itself a comment (#230).
         return line.startswith("#")
+    if kind == "dockerfile":
+        if not line.startswith("#"):
+            return False
+        # `# syntax=` and `# escape=` are parser directives Docker itself reads before the first
+        # instruction -- changing one changes what the build does, so it is not a comment (#231
+        # Work 7e). Docker only honours them written this way (a leading "#" then no space).
+        directive = line[1:].lstrip().lower()
+        return not (directive.startswith("syntax=") or directive.startswith("escape="))
     # A block-comment continuation is `*` alone or `* something`; `*next() {}` is a generator method.
     return line == "*" or line.startswith("* ") or line.startswith(COMMENT_PREFIXES["js"])
 
