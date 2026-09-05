@@ -26,12 +26,16 @@ from psycopg.types.json import Json
 
 from analysis.crosscheck import PAPER_HOLD
 from analysis.polarity.llm import API_KEY, ESTIMATED_TOKENS_PER_CHAR, MAX_RETRIES, usage_of
-from analysis.polarity.pricing import BudgetExceeded, Usage, UsageLedger, price_for
+from analysis.polarity.pricing import BudgetExceeded, PurposeCap, Usage, UsageLedger, price_for
 from analysis.retrieval import bm25, grounding, pipeline, topics
 from analysis.retrieval.vectors import StoreMissing
 
 DEFAULT_MODEL = "claude-sonnet-5"
 PURPOSE = "retrieval_ask"
+# #78/#80, user decision 2026-09-05. The per-call value is read against the reservation, which
+# carries the whole MAX_TOKENS output ceiling below, not against what the call turns out to cost --
+# so it is well above the $0.042 a call has actually cost. Upstream #136 moves both to a knob.
+ASK_CAP = PurposeCap(per_call=Decimal("0.10"), per_day=Decimal("1.00"))
 # ydc's ceiling was 1100, which was a ceiling for the answer alone. Adaptive thinking spends the
 # same budget (analysis/polarity/llm.py:26-29, where a one-sentence classification is given 4096),
 # so at 1100 the thinking eats the three sections and the call is billed for nothing.
@@ -374,7 +378,8 @@ def run(
         # Rule 3, applied by the code. The model is not asked to refuse; it is not asked at all.
         return Answer(status="no_evidence", text=CANNOT_ANSWER, prompt=prompt, evidence=evidence, note=note)
 
-    spend = ledger or UsageLedger(conn)
+    # A ledger handed in by a caller keeps whatever caps it was built with.
+    spend = ledger or UsageLedger(conn, caps={PURPOSE: ASK_CAP})
     params = {
         "model": model,
         "max_tokens": MAX_TOKENS,
@@ -447,6 +452,7 @@ def report(answer: Answer, stream=sys.stderr) -> None:
 
 
 __all__ = [
+    "ASK_CAP",
     "BLOCKING",
     "CANNOT_ANSWER",
     "NO_ANSWER",

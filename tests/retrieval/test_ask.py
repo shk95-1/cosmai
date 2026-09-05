@@ -20,7 +20,7 @@ import pytest
 from sqlalchemy.engine import make_url
 
 from analysis.crosscheck import PAPER_HOLD
-from analysis.polarity.pricing import UsageLedger
+from analysis.polarity.pricing import PurposeCap, UsageLedger, cost_usd
 from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
@@ -227,6 +227,31 @@ def test_a_budget_that_is_already_gone_blocks_before_the_call(loaded):
         ask_it(loaded, client=client, ledger=ledger)
     assert client.calls == []
     assert log_rows(loaded) == []
+
+
+def test_the_ask_cap_refuses_an_over_priced_call_before_it_goes_out(loaded, monkeypatch):
+    """The default ledger -- the one production builds -- carries the retrieval_ask cap, so a call
+    over it takes the hard stop's path: nothing reserved, nothing called, nothing logged."""
+    monkeypatch.setattr(ask, "ASK_CAP", PurposeCap(per_call=Decimal("0.0001")))
+    client = FakeClient()
+    with pytest.raises(ask.BLOCKING):
+        ask_it(loaded, client=client)
+    assert client.calls == []
+    assert log_rows(loaded) == []
+    assert UsageLedger(loaded).spent() == 0
+
+
+def test_a_normal_ask_fits_inside_the_per_call_cap(loaded):
+    """The cap is read against the reservation, not against what the call turns out to cost, and the
+    reservation carries the whole 4,096-token output ceiling. So the value has to admit an ordinary
+    ask or the command refuses every query (#80)."""
+    client = FakeClient()
+    answer = ask_it(loaded, client=client)
+    assert answer.status == "ok" and answer.called
+    per_call = ask.ASK_CAP.per_call
+    assert per_call == Decimal("0.10") and ask.ASK_CAP.per_day == Decimal("1.00")
+    reserved = cost_usd(ask.DEFAULT_MODEL, ask.estimate(ask.system_prompt(), answer.prompt))
+    assert per_call is not None and reserved <= per_call
 
 
 def test_a_model_with_no_price_is_refused_before_the_corpus_is_touched(loaded):
