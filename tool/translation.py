@@ -188,10 +188,17 @@ def python_prose_lines(text: str) -> dict[int, str]:
 
 
 def prose_lines_for(path: str, kind: str, text: str) -> dict[int, str]:
-    """The lines of `path` a translation review actually judges -- not a code or fixture string."""
+    """The lines of `path` a translation review actually judges -- not a code or fixture string.
+
+    A comment or docstring under `tool/` or `tests/` TALKS ABOUT anchors (this very module's own
+    examples, a test's invented-anchor fixture) rather than citing one -- never scanned, no matter what
+    it says (#234 review round 2, blocker 1 was still reachable through that gap).
+    """
     lines = text.split("\n")
     if kind == "markdown":
         return dict(enumerate(lines, start=1))
+    if path.startswith(("tool/", "tests/")):
+        return {}
     if kind == "python":
         return python_prose_lines(text)
     if kind in ("sql", "shell", "js", "hash", "dockerfile"):
@@ -282,6 +289,10 @@ def moved_literals(before_text: str, after_text: str) -> tuple[list[int], int] |
     """
     before = string_literal_positions(before_text)
     after = string_literal_positions(after_text)
+    # An f-string whose interpolation count changed shifts every later Constant's list index even
+    # though `--strings-blanked` (`Blind.visit_JoinedStr`) already judged the structure identical --
+    # this skips per-position pairing for the whole file rather than risk a wrong pairing (fix-when-
+    # touched, #234 review round 2: no reported case yet, only a length-mismatch escape hatch).
     if before is None or after is None or len(before) != len(after):
         return None
     changed = [i for i, ((_, ov), (_, nv)) in enumerate(zip(before, after, strict=True)) if ov != nv]

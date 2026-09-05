@@ -156,6 +156,34 @@ def test_an_issue_anchor_wrapped_onto_the_next_line_is_out_of_scope(repo: Path) 
     assert result.stdout.splitlines()[0] == "0"
 
 
+def test_a_tool_or_tests_comment_about_anchors_is_never_judged(repo: Path) -> None:
+    """A comment/docstring under `tool/` or `tests/` TALKS ABOUT the `§` syntax -- it never cites one,
+    no matter what example string it quotes (#234 review round 2, blocker 1 was still reachable)."""
+    write(
+        repo,
+        "tool/example.py",
+        '"""Describes the pattern, does not cite it: a wrapped line reads "...#10\\n§A-2".\n\n'
+        'A test fixture\'s own invented anchor, §NoSuchSection, is a placeholder too.\n"""\n',
+    )
+    commit(repo, "add a module whose docstring quotes anchor-shaped examples")
+
+    result = check_anchors_direct(repo, "HEAD", ["tool/example.py"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[0] == "0"
+
+    # The same invented shape, in a changed contracts/*.md PROSE line, still fails -- this rule
+    # narrows WHERE anchors are judged, it does not widen what counts as a resolved one.
+    write(
+        repo,
+        "contracts/x.md",
+        '# X\n\nA wrapped line reads "...#10\\n§A-2". §NoSuchSection is invented too.\n',
+    )
+    commit(repo, "the same shapes, but as real contracts prose")
+    result = check_anchors_direct(repo, "HEAD", ["contracts/x.md"])
+    assert result.returncode == 0  # check_anchors itself always exits 0; failures are in its stdout
+    assert "NoSuchSection" in result.stdout
+
+
 def test_exit_0_on_a_single_in_place_translation_and_it_is_counted(repo: Path) -> None:
     write(repo, "tool/messages.py", fixture("single_translate_before.py"))
     commit(repo, "base tree")
