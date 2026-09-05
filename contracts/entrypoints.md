@@ -362,11 +362,12 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   filing alone is still refused there instead of buying a call answered from unrelated text chunks. `chunk` scans it with the
   others; `--since` does not apply (a snapshot has no per-row time). The default `--source` set is all five,
   ledger included (`corpus.SOURCES`, restated in `cosmai/cli.py`), so `ask` with no `--source` can answer a
-  report number; a scoped run (`--source <one>`) sweeps only its own source's vanished documents (fork #79).
+  report number — `terms` alone is handed an absent `--source` as none and scans the text sources (fork #84,
+  its bullet below); a scoped run (`--source <one>`) sweeps only its own source's vanished documents (fork #79).
   The first load in production was one `cosmai retrieval chunk --source mfds` run by the coordinator
   (2026-09-05, 4,735 chunks); a refresh of the ledger needs the same run again. Adding the source moved the index
-  fingerprint (`index_signature` hashes the source set), so the first `search`/`ask`/`eval`/`terms` after #77
-  rebuilds the cache (`chunk` never reads it) — except under `--engine vector`, whose index is narrowed to the
+  fingerprint (`index_signature` hashes the source set), so the first `search`/`ask`/`eval` after #77
+  rebuilds the cache (`chunk` and `terms` never read it) — except under `--engine vector`, whose index is narrowed to the
   four encoded sources by `index_sources` in `search`, `ask` and, since fork #82, `eval`, so its signature did
   not move and no 380k-chunk rebuild happens there. Source: rows 8 and 13 of the #74 acceptance table on fork #69 — the seed alone lifted neither.
 - **The topic lexicon is the active version of `needs.aspect_lexicon`** (`ruleset='retrieval-topic'`, fork
@@ -467,7 +468,8 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   `interfaces.md` §Per-source allocation, and the way to measure it is `tool/measure-source-mix`.
 - `terms` emits, as two stdout tables, the high-frequency nouns that dictionary **misses** and the
   document counts of the dictionary's own surfaces — material for a person to read and fix the CSV above.
-  With no `--source` it scans the four text sources (`corpus.ENCODED_SOURCES`, the set `embed` encodes), not
+  With no `--source` it scans the four text sources (`corpus.ENCODED_SOURCES`, the set `embed` encodes — the
+  CLI passes the absent option through as none for `terms` alone, every other worker gets the five), not
   the ledger: the report grows the dictionary from consumer speech, and a filing's item and company names are
   not speech — `--source mfds` opts the ledger in (fork #84; #77 had widened the default to five without
   saying so).

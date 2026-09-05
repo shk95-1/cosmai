@@ -312,7 +312,12 @@ def _run_retrieval(args: argparse.Namespace) -> int:
         # is wrong, and unpacking after the connection makes a subcommand that lacks one option die with
         # AttributeError only once it has connected.
         # embed has no --source: the options differ per subcommand, so the default is used when absent.
-        sources = tuple(args.source) if getattr(args, "source", None) else corpus.SOURCES
+        requested = tuple(args.source) if getattr(args, "source", None) else None
+        # Every worker but `terms` gets the five-source set when none was asked for. `terms` is handed
+        # the request as it is, None included, so its own default (the text sources, fork #84) applies:
+        # a default inside a worker is dead on this path otherwise, because the CLI hands each worker a
+        # concrete tuple (the wave-5 review of #84).
+        sources = requested or corpus.SOURCES
         store = Path(args.vectors) if getattr(args, "vectors", None) else None
         conn = _connect(args.url)
     except (ValueError, LookupError, psycopg.Error) as refused:
@@ -332,7 +337,7 @@ def _run_retrieval(args: argparse.Namespace) -> int:
             if args.action == "embed":
                 return _run_retrieval_embed(conn, args, store)
             if args.action == "terms":
-                return _run_retrieval_terms(conn, args, sources)
+                return _run_retrieval_terms(conn, args, requested)
             if args.action == "ask":
                 return _run_retrieval_ask(conn, args, sources, store)
             hits = pipeline.search(
@@ -380,7 +385,7 @@ def _run_retrieval_ask(
     return 0 if answer.status == "ok" else 1
 
 
-def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str, ...]) -> int:
+def _run_retrieval_terms(conn: Any, args: argparse.Namespace, sources: tuple[str, ...] | None) -> int:
     from analysis.retrieval import terms
 
     scanned = terms.scan(conn, sources=sources)
