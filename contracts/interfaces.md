@@ -1801,7 +1801,7 @@ filing (`source='mfds'`, BM25 only — `entrypoints.md`, the retrieval block): a
 is answered from the ledger, and the chunk text ends with the snapshot label so the answer says which copy it
 read; "recent" and formulation properties (inorganic, SPF) are not in the ledger and stay unanswered from it. The grounding gate is engine-independent here
 (#76): `ask` checks it before searching whatever `--engine` says, because the call is paid and a df-0 name makes
-the model refuse anyway (row 1 of the #74 table on #69); `search` itself keeps #48's rule and leaves bm25 ungated. The decision that this layer
+the model refuse anyway (row 1 of the #74 table on #69); `search` itself keeps #48's rule and leaves bm25 ungated. It precedes the dry run as well: `ask --dry-run` on such a name previews the refusal — an empty evidence block, the gate's note on stderr, no row — while `retrieval search` keeps the ungated view (#48); fork #85 pins the order. The decision that this layer
 exists and what it is for is fork #69 (decision A, 2026-09-03); the acceptance measurement — ydc's 17 listed queries
 re-measured on our corpus — is fork #74 (done 2026-09-04, the table is on #69) and is **not** in this section. The origin is ydc `rag/generate.py`
 (v0.4.0 `76db718`), with two corrections the promotion required: text blocks only out of a response that mixes
