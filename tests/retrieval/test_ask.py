@@ -249,7 +249,7 @@ def test_a_normal_ask_fits_inside_the_per_call_cap(loaded):
     answer = ask_it(loaded, client=client)
     assert answer.status == "ok" and answer.called
     per_call = ask.ASK_CAP.per_call
-    assert per_call == Decimal("0.10") and ask.ASK_CAP.per_day == Decimal("1.00")
+    assert per_call == Decimal("0.20") and ask.ASK_CAP.per_day == Decimal("1.00")
     reserved = cost_usd(ask.DEFAULT_MODEL, ask.estimate(ask.system_prompt(), answer.prompt))
     assert per_call is not None and reserved <= per_call
 

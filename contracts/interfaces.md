@@ -1843,16 +1843,16 @@ characters × the polarity rate + the output ceiling), `settle` after, `purpose=
 total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
 same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
 the money moved — but refused to the caller (exit 1), never printed as if complete. The per-`purpose` cap for
-`retrieval_ask` is **$0.10 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
+`retrieval_ask` is **$0.20 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
 #78 and #80, 2026-09-05; #74 measured $0.025 mean · $0.042 max per settled call over 17 calls, and the reservation
 carries the 4,096-token output ceiling, so the per-call value sits above it): `UsageLedger.reserve` checks both under
 the same advisory lock as the hard stop and before the reservation row — today's spend counts the purpose's settled
 and reserved rows since UTC midnight — and a miss is refused the way the hard stop is (exit 2, no call, no log row;
 fork #80). The values sit next to `PURPOSE` in `analysis/retrieval/ask.py` until upstream #136 makes them a knob.
-The headroom is thin by design: the reservation is $0.0614 of output ceiling plus the prompt at two tokens per
-character, so a `--top 10` fold of ten chunks near the 500-character split reserves about $0.109 and is refused
-while ordinary asks (measured $0.078–$0.097) pass; if that bites, the choice is a higher value or a tighter
-estimate (`ESTIMATED_TOKENS_PER_CHAR`), the user's call, not a silent change here.
+The value was set against the reservation, not the settled cost: the reservation is $0.0614 of output ceiling
+plus the prompt at two tokens per character, so ordinary asks reserve $0.078–$0.097 and a `--top 10` fold of ten
+chunks near the 500-character split about $0.109 — $0.10 refused that fold, $0.20 admits it with headroom and
+still refuses a runaway prompt or a dearer model.
 The same decision keeps the conditional answer for a question whose data axis the corpus lacks (sales, a price
 comparison — rows 2 and 5 of the #74 table): no refusal rule is added to the prompt.
 
