@@ -87,6 +87,33 @@ collect_ci_status() {
     rm -f "$ci_tmp"
 }
 
+# #233 (#228 D4'): whether the same branch owes a green class-A run before it merges -- cheap
+# enough for every open branch because it only diffs two refs already on `origin`, never checking
+# the branch out (tool/ci_owed.py, which reads tests/scope.toml's gate/trigger lists).
+collect_ci_owed() {
+    co_tmp=$(mktemp)
+    git for-each-ref refs/remotes/origin --format='%(refname:short)' 2>/dev/null \
+    | while read -r co_ref; do
+        co_name=${co_ref#origin/}
+        case "$co_name" in
+            */[0-9]*-*) ;;
+            *) continue ;;
+        esac
+        co_tail=${co_name##*/}
+        co_number=${co_tail%%-*}
+        case "$co_number" in
+            '' | *[!0-9]*) continue ;;
+        esac
+        co_channel=${co_name%/*}
+        co_answer=$(python3 "$issue_tool_dir/ci_owed.py" "origin/$co_name" "origin/main" 2>/dev/null) \
+            || co_answer="not owed"
+        printf '%s\t%s\n' "$co_channel#$co_number" "$co_answer"
+    done > "$co_tmp"
+    jq -R -s 'split("\n") | map(select(length > 0) | split("\t")) | map({(.[0]): .[1]}) | add // {}' \
+        "$co_tmp"
+    rm -f "$co_tmp"
+}
+
 # #232 Work 3: the last scheduled (nightly) run of suite.yml -- what `tool/issue audit` puts first
 # and `tool/status`'s `== ci ==` block repeats. {"available": false} when the call itself failed,
 # distinct from {"available": true, "run": null} when it answered with no scheduled run at all.
@@ -401,7 +428,11 @@ def ci_suffix($channel):
   # (AGENTS.md: `<channel>/<issue#>-<slug>`, e.g. `tool/11-thing`, never `ch:tool/11-thing`).
   ((if ($channel | startswith("ch:")) then $channel[3:] else $channel end)
    + "#" + (.key | split("#")[1])) as $ci_key
-  | if ($ci[$ci_key] // null) != null then " · ci: " + $ci[$ci_key] else "" end;
+  # #233: the A-owed flag rides the same key -- shown only alongside a CI status, since neither
+  # means anything for an issue with no branch on origin.
+  | if ($ci[$ci_key] // null) != null then
+      " · ci: " + $ci[$ci_key] + " · A " + ($owed[$ci_key] // "not owed")
+    else "" end;
 [.held as $h | "in progress " + ($h.in_progress | tostring)
  + (if ($h.resources | length) == 0 then ""
     else " · held: " + ([$h.resources[] | .resource + " " + (.keys | join(", "))] | join(" · ")) end)]
@@ -594,13 +625,20 @@ AUDIT='
                 + (if $age_hours > 36 then " (" + ($age_hours | floor | tostring) + "h old)" else "" end)),
          warn: ($concl != "success" or $age_hours > 36)}
     end
-  )
+  ),
+  # #233 Work 3: pipeline_health/collector_health rows, read straight through -- $ops carries
+  # "(unavailable)" when docker or the container itself could not answer both queries.
+  ops_available: $ops_available,
+  ops: $ops
 }
 '
 
 RENDER_AUDIT='
 def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  none"] else $lines end);
 (["", "nightly"] + ["  " + .nightly.line + (if .nightly.warn then " ⚠" else "" end)])
++ (["", "ops"] + (if (.ops_available | not) then ["  (unavailable)"]
+                  elif (.ops | length) == 0 then ["  none"]
+                  else [.ops[] | "  " + .] end))
 + block("Queue per channel"; [.channels[] | "  " + .channel + " (" + .epic + ") · " + (.length | tostring) + " open"
       + (if .needs_user > 0 then " · needs-user " + (.needs_user | tostring) else "" end)
       + " · head " + (.head // "none")])
@@ -651,7 +689,8 @@ case "$cmd" in
             # #232 Work 3: the ci lookup only matters for the rendered form -- --json is the model
             # a script reads, and a script that wants CI status calls the API itself.
             ci_json=$(collect_ci_status "$(pick_primary)")
-            printf '%s' "$model" | jq -r --argjson ci "$ci_json" "$RENDER_READY"
+            owed_json=$(collect_ci_owed)
+            printf '%s' "$model" | jq -r --argjson ci "$ci_json" --argjson owed "$owed_json" "$RENDER_READY"
         fi
         ;;
     recheck)
@@ -711,6 +750,26 @@ case "$cmd" in
         # #232 Work 3: the nightly's own section is first, ahead of everything git-derived below --
         # a red or missing nightly is the more urgent of the two kinds of drift this command reports.
         nightly_json=$(nightly_status "$primary")
+        # #233 Work 3: ops signals, read the way tool/status's `== db ==` block reads them --
+        # docker exec psql into cosmai-postgres, never through pick_primary (this is the database,
+        # not a repo). Both queries have to succeed for the section to be "available" at all: a
+        # query that dies partway through (a column renamed under a migration in flight) must read
+        # as unavailable, not as a clean ops report.
+        if command -v docker >/dev/null 2>&1 \
+            && ops_pipeline=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
+                "select stage_key || ': ' || freshness from needs.pipeline_health
+                 where freshness in ('late', 'stalled') order by stage_key" 2>/dev/null) \
+            && ops_collector=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
+                "select collector || ':' || coalesce(dataset, '') || ' failed (run ' || run_id || ')'
+                 from needs.collector_health where status = 'failed'
+                 order by started_at desc limit 20" 2>/dev/null); then
+            ops_available=true
+        else
+            ops_available=false
+            ops_pipeline=""
+            ops_collector=""
+        fi
+        ops_lines=$(printf '%s\n%s\n' "$ops_pipeline" "$ops_collector" | grep -v '^$' || true)
         # #175's own detector, called rather than reimplemented: judging "foreign" is one script's
         # job. `upstream` is the fork-checkout remote name; on an upstream checkout it does not
         # exist, so there is nothing to compare against and the section says so instead of erroring.
@@ -745,6 +804,8 @@ case "$cmd" in
         printf '%s' "$graph_json" | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
             --argjson memo_days "$MEMO_DAYS" \
             --argjson nightly "$nightly_json" \
+            --argjson ops_available "$ops_available" \
+            --argjson ops "$(printf '%s' "$ops_lines" | jq -R -s "$to_lines")" \
             --arg primary "${primary##*/}" \
             --argjson merged "$(printf '%s' "$merged" | jq -R -s "$to_lines")" \
             --argjson merged_all "$(printf '%s' "$merged_all" | jq -R -s "$to_lines")" \
