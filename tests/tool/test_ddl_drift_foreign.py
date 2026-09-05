@@ -203,6 +203,30 @@ def test_the_two_ddl_guards_do_not_see_it():
     assert FOREIGN not in set(DDL_DIR.glob("*.sql"))
 
 
+def test_a_broken_needs_restore_fails_only_that_clause():
+    """#117: a partial declaration of an FK-bound group of needs tables (the referenced table
+    excluded, the referencing one still present) makes the throwaway restore of production.needs.sql
+    die -- the referencing table's FK now points at nothing. Whether an FK binds two tables can only
+    be known by asking the production DB, so this scenario itself is invisible in the suite (the
+    file's own docstring above) -- what is checked here is that ddl-drift no longer lets `set -e`
+    take the whole script down over it, which would erase the two verdicts the loop above already
+    printed (the #114 failure again). That restore is the only step wrapped in `if`; every other
+    step in the file still relies on `set -e` to stop the script."""
+    body = DRIFT.read_text(encoding="utf-8")
+    guarded = 'if docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \\'
+    assert guarded in body
+    restore_start = body.index(guarded)
+    else_start = body.index("else", restore_start)
+    fi_end = body.index("\nfi", else_start)
+    branch = body[else_start:fi_end]
+    assert "$work/restore.needs.err" in body[restore_start:else_start]
+    assert 'echo "ddl-drift: $needs_db.needs FAILED -- $reason"' in branch
+    assert "status=1" in branch
+    # The other two verdicts come off the loop above, textually before this guard, so their
+    # report() calls run and print regardless of what happens inside the guard.
+    assert body.index('report "$db.$schema"') < restore_start
+
+
 def test_ddl_drift_reads_the_file_through_the_rule():
     body = DRIFT.read_text(encoding="utf-8")
     assert "contracts/ddl/needs/foreign.txt" in body

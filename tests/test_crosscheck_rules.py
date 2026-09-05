@@ -1,4 +1,4 @@
-"""대조의 규칙 (포크 #7, 계약 `contracts/interfaces.md` §대조).
+"""The crosscheck rules (fork #7, the contract `contracts/interfaces.md` §Crosscheck).
 
 ydc 세 스크립트의 `demo()` 가 못 박은 입력·출력이 여기 그대로 온다 -- 승격이 답을 바꾸지 않았다는
 말은 같은 입력에 같은 답이 나온다는 뜻이고, 우리 원천으로는 그 입력을 재현할 수 없으므로 출처가
@@ -19,7 +19,8 @@ def test_ranks_puts_the_largest_first():
 
 
 def test_each_source_carries_its_own_denominator():
-    """소스 간 문서 수를 합산하지 않는다. 각자 자기 분모로 계산한 뒤 나란히 본다 (계약 §구성)."""
+    """Document counts are not summed across sources. Each computes with its own denominator and they are read
+    side by side (the contract's §Composition)."""
     mentions = {
         crosscheck.COMMENT: {"백탁": 1, "발림성": 3},
         crosscheck.COMMERCE_REVIEW: {"백탁": 30, "발림성": 10},
@@ -136,7 +137,8 @@ def test_a_thin_topic_keeps_its_numbers_but_loses_its_reading():
 
 
 def test_the_sample_gate_is_the_same_number_the_verdict_uses():
-    """판정에 5를 요구하면서 이 대조에만 예외를 두면 이중 기준이다 (계약 §평가)."""
+    """Requiring 5 for the verdict while making an exception for this crosscheck alone is a double standard
+    (the contract's §Rating)."""
     assert crosscheck.MIN_PRODUCTS == MIN_MENTIONS
 
 
@@ -160,8 +162,9 @@ def test_every_mapped_topic_exists_on_the_dictionary_axis():
 
 
 def test_the_confirmed_table_answers_before_the_hints():
-    """힌트 목록도 벤더 문자열 위의 부분문자열이라 성분 키와 같은 병이 있다. 운영 어휘 23개에 먹여
-    보니 다섯이 뒤집혔고(2026-08-27), 그래서 정본은 사람이 확인한 표다 (계약 §평가)."""
+    """The hint list is a substring over a vendor string too, so it has the same illness as an ingredient key.
+    Fed the 23 production terms, five flipped (2026-08-27), and that is why the canonical form is the table a
+    person confirmed (the contract's §Rating)."""
     flipped = {
         ("자극도", "자극이 있어요"),
         ("보습력", "약간 건조해요"),

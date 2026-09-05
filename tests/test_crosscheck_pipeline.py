@@ -165,7 +165,8 @@ def test_the_quarter_rule_falls_back_only_when_there_is_nothing_to_fall_back_fro
 
 
 def test_the_ranking_decides_which_commerce_documents_count(crossable: str):
-    """선케어 보드에 오른 제품의 리뷰만 든다 -- 이름 부분문자열로 고르지 않는다 (계약 §대조).
+    """Only the reviews of products on the suncare board are taken -- they are not picked by a name substring
+    (the contract's §Crosscheck).
 
     모집단의 두 다리를 갈라 세었다: `sun` 은 `board='suncare'` 로만, `sun2` 는 `category_name` 으로만
     걸린다. 3 이 나온다는 것은 두 다리가 **각각** 살아 있다는 뜻이고, 어느 하나를 지우면 2 가 된다.
@@ -190,8 +191,9 @@ def test_a_product_outside_the_suncare_boards_is_not_rated_either(crossable: str
 
 
 def test_only_the_latest_snapshot_of_a_choice_is_counted(crossable: str):
-    """시점별 스냅샷이라 (제품, 선택지)별 최신 한 행만 쓴다. 전부 세면 제품 수가 시점 수만큼 부풀려지고,
-    옛 시점의 값이 평균에 섞인다 -- 픽스처의 `t1` 은 08.18 에 20, 08.20 에 70 이다 (계약 §평가)."""
+    """It is a per-point snapshot, so only the newest row per (product, option) is used. Count them all and
+    the product count is inflated by the number of points, and an old point's value mixes into the mean --
+    the fixture's `t1` is 20 on 08.18 and 70 on 08.20 (the contract's §Rating)."""
     with connect(crossable) as conn:
         built = build(conn, commerce_schema="")
     (rating,) = built.ratings
@@ -200,8 +202,9 @@ def test_only_the_latest_snapshot_of_a_choice_is_counted(crossable: str):
 
 
 def test_a_source_that_publishes_a_weight_instead_of_a_share_is_not_averaged_in(crossable: str):
-    """`share_pct` 가 NULL 인 소스는 비중이 아니라 가중치(`score`)를 싣는다. 섞어 평균 내면 아무것도
-    보여 주지 않고 틀린다 -- 운영에서 그 소스가 10,842행이다 (계약 §평가)."""
+    """A source whose `share_pct` is NULL carries a weight (`score`) rather than a share. Mix them and average
+    and it shows nothing while being wrong -- in production that source is 10,842 rows (the contract's
+    §Rating)."""
     with connect(crossable) as conn:
         built = build(conn, commerce_schema="")
     (rating,) = built.ratings
@@ -287,7 +290,7 @@ def test_no_suncare_product_in_the_ranking_is_blocked_not_failed(
 
 
 def test_the_sources_disagreeing_is_not_a_partial_outcome(crossable: str):
-    """**어긋남은 발견이지 실패가 아니다** -- #41 이 §민감도 에서 못 박은 자리와 같다."""
+    """**A disagreement is a finding, not a failure** -- the same place #41 pinned in §Sensitivity."""
     with connect(crossable) as conn:
         outcome = run(conn, commerce_schema="")
     assert outcome.status == "ok" and outcome.violations == ()
@@ -334,9 +337,9 @@ def test_a_commerce_group_pointing_off_the_dictionary_axis_makes_the_answer_part
 def test_the_cli_turns_a_violation_into_exit_one(
     crossable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    """계약 §종료 코드 의 1 이 실제로 CLI 에서 나오는가. 검사용 스키마 하나가 needs 와 trend_radar 를
-    함께 담으므로(tests/conftest.py) 배포 기본값 대신 search_path 를 보게 한다 -- 운영
-    `needs_runtime` 의 search_path 는 `needs` 뿐이라 기본값이 `trend_radar` 여야 한다."""
+    """Does the 1 of the contract's §exit codes actually come out of the CLI? One test schema holds needs and
+    trend_radar together (tests/conftest.py), so it is made to read search_path instead of the deploy default
+    -- production `needs_runtime`'s search_path is `needs` alone, so the default has to be `trend_radar`."""
     monkeypatch.setattr(pipeline, "COMMERCE_SCHEMA", "")
     monkeypatch.setitem(crosscheck.GROUP_MAP, "향", "없는주제")
     assert main(["trend", "crosscheck", "--url", crossable]) == 1
@@ -347,7 +350,7 @@ def test_the_cli_turns_a_violation_into_exit_one(
 def test_the_cli_gives_zero_when_the_sources_merely_disagree(
     crossable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    """**어긋남은 발견이지 실패가 아니다** -- #41 이 §민감도 에서 못 박은 자리와 같다."""
+    """**A disagreement is a finding, not a failure** -- the same place #41 pinned in §Sensitivity."""
     monkeypatch.setattr(pipeline, "COMMERCE_SCHEMA", "")
     assert main(["trend", "crosscheck", "--url", crossable]) == 0
     assert "구성  같은 사전" in capsys.readouterr().out

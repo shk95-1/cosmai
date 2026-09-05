@@ -1,4 +1,5 @@
-"""RuleAggregator 의 수식 — contracts/interfaces.md §수식 과 슬라이스 규칙을 합성 입력으로 고정한다."""
+"""RuleAggregator's formulas — contracts/interfaces.md §Formulas and the slice rules are pinned as a synthetic
+input."""
 
 from __future__ import annotations
 
@@ -313,7 +314,8 @@ def test_a_product_row_measures_the_low_band_against_that_products_own_denominat
     per = products(rows, "밀림")
     assert (per["oy:a"].low_mentioning, per["oy:a"].denom_low, per["oy:a"].denom_site) == (1, 10, 1000)
     assert (per["oy:a"].low_share, per["oy:b"].low_share) == (0.1, 0.2)
-    # interfaces.md §수식: 제품 하나짜리 집합에서 그 식은 제품 단위 정의로 그대로 되돌아간다.
+    # interfaces.md §Formulas: over a one-product set that expression collapses back to the per-product
+    # definition.
     assert (per["oy:a"].population_share_pct, per["oy:b"].population_share_pct) == (1.0, 2.0)
 
 

@@ -6,12 +6,14 @@
 가 미리 적은 것 그대로), 이 파일은 그 세 갈래가 코드에서 같은 뜻인지를 본다. 결과를 보고 기준을 만드는
 것이 이 측정이 막으려는 일이라, 기준이 조용히 움직이면 판정도 조용히 움직인다.
 
-**② 하한선이 없다는 것은 결정이지 미구현이 아니다.** `vectors.search` 는 코사인이 얼마든 상위 k 를
-채운다. 그 성질이 바뀌는 날 계약 §벡터 하한선 이 함께 바뀌어야 하므로 여기서 잡는다.
+**(2) The absence of a floor is a decision, not something unimplemented.** `vectors.search` fills the top k
+whatever the cosine is. The day that property changes the contract's §Vector floor has to change with it, so
+it is caught here.
 
-**③ 그 결정이 인용한 수가 아직 참인가.** 재는 길은 `tool/measure-vector-floor` 다 -- 다만 그 도구는
-1.2GB 행렬과 `embed` extra 를 열어야 해서 이 스위트가 부르지 않는다(§검색 실측 여섯 줄과 같은 자리다).
-그래서 여기서 붙드는 것은 **표의 모양과 상수**이고, 수 자체의 거처는 계약이다.
+**(3) Is the number that decision quoted still true.** The way to measure it is `tool/measure-vector-floor`
+-- but that tool needs the 1.2GB matrix and the `embed` extra, so this suite does not call it (the same place
+as the six lines of §Retrieval measurements). So what is held here is **the table's shape and the constants**,
+and the numbers themselves live in the contract.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 TOOL = ROOT / "tool" / "measure-vector-floor"
-HEADER = "## 벡터 하한선"
+HEADER = "## Vector floor"
 
 
 def loaded() -> ModuleType:
@@ -139,8 +141,8 @@ def test_the_fake_names_are_evidence_only_while_the_corpus_lacks_them():
 
 
 def test_search_fills_top_k_however_far_the_query_is():
-    """하한선이 없다는 것이 결정이라는 것을 성질로 잡는다 -- 넣는 날 이 줄이 빨개지고, 그때 계약
-    §벡터 하한선 을 함께 고쳐야 한다."""
+    """Catches as a property that the absence of a floor is a decision -- the day one is added this line goes
+    red, and then the contract's §Vector floor has to be fixed with it."""
     numpy = pytest.importorskip("numpy")
     from analysis.retrieval import vectors
 
@@ -190,16 +192,16 @@ def test_the_decision_and_the_size_of_the_overlap_are_still_written_down():
     # threshold a little" gets said.
     assert "사분위 구간" in body
     assert "**73.8%**" in body, "ydc 임시값이 우리 코퍼스에서 무엇을 버리는지가 이 절의 절반이다"
-    assert "§검색 실측" in body, "같은 질의 목록으로 잰 것이라 그쪽과 이어져 있어야 한다"
+    assert "§Retrieval measurements" in body, "measured over the same query list, so it joins up with that"
 
 
 def test_the_search_section_says_the_floor_is_absent_on_purpose():
     """Absent from the front of the contract, a person using `--engine vector` never meets this decision."""
     body = ENTRYPOINTS.read_text(encoding="utf-8")
-    start = body.index("## 검색 (")
+    start = body.index("## Search (")
     search = body[start : body.index("\n## ", start)]
-    assert "유사도 하한선을 두지 않는다" in search
-    assert "§벡터 하한선" in search
+    assert "No similarity floor on vector search" in search
+    assert "§Vector floor" in search
 
 
 def test_the_lexicon_axis_carries_a_stamp_like_the_store_axis(monkeypatch: pytest.MonkeyPatch):

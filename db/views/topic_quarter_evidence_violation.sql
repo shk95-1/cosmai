@@ -1,12 +1,13 @@
--- 근거 표의 두 불변식을 저장된 행에 대고 되묻는다. 비어 있으면 참이다 (contracts/interfaces.md §근거).
--- 자리(rank)의 문법·source 일치·중복 문서는 025 의 CHECK 과 유일키가 행 하나 안에서 지키므로 여기 없다.
--- 여기 있는 것은 행 하나로는 볼 수 없는 둘이다.
--- db/migrate.sh 가 배포마다 다시 적용한다.
+-- Asks the two invariants of the evidence table back against the stored rows. Empty means true (contracts/interfaces.md §Evidence).
+-- rank's grammar, the source match and duplicate documents are already kept inside one row by 025's
+-- CHECK and unique key, so they are not here. What is here is the two things a single row cannot show.
+-- db/migrate.sh re-applies this on every deploy.
 
 DROP VIEW IF EXISTS needs.topic_quarter_evidence_violation;
 CREATE VIEW needs.topic_quarter_evidence_violation AS
--- ① 자리는 1 부터 빈칸 없이 이어진다. 2·3위만 남으면 "이 셀의 1위 근거"가 표에서 조용히 사라지고,
--- 카드는 남은 것을 상위로 읽는다. 유일키는 자리의 중복만 막지 그 사다리의 구멍은 못 막는다.
+-- (1) rank runs from 1 with no gap. If only 2nd and 3rd place are left, "this cell's rank-1 evidence"
+-- quietly vanishes from the table and the card reads what's left as the top. A unique key only stops a
+-- duplicate rank, not a hole in that ladder.
 SELECT 'rank_not_dense'::text                                            AS violation,
        run_id, scope, source, content_type, panel_version, panel_role, quarter,
        format('topic=%s ranks=%s max=%s', topic_key, count(*), max(rank)) AS detail
@@ -14,10 +15,12 @@ SELECT 'rank_not_dense'::text                                            AS viol
  GROUP BY run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role
 HAVING max(rank) <> count(*) OR min(rank) <> 1
 UNION ALL
--- ② 근거가 정말 그 셀의 것인가. FK 는 "그 판본에 그런 문서가 있다"까지만 지킨다 -- 그 문서가 이 주제를
--- 말했는지도, 그 분기 영상에 달렸는지도 묻지 않는다. 두 조건 다 그 셀의 지표를 만든 바로 그 술어이고
--- (analysis/trend/pipeline.py 의 모집단), 어긋나면 카드가 다른 셀의 발화를 근거로 싣는다.
--- 분기식은 그 파이프라인의 QUARTER 와 같은 식이다 -- 갈리면 여기가 말한다.
+-- (2) Is the evidence really that cell's? An FK only keeps "that version has such a document" -- it
+-- never asks whether that document actually spoke to this topic, or whether it was posted under that
+-- quarter's video. Both conditions are the exact predicate that built that cell's metric
+-- (the population in analysis/trend/pipeline.py's), and if they disagree the card carries another
+-- cell's speech as its evidence. The quarter expression is the same expression as that pipeline's
+-- QUARTER -- if they diverge, this is where it shows.
 SELECT 'quote_outside_the_cell'::text,
        e.run_id, e.scope, e.source, e.content_type, e.panel_version, e.panel_role, e.quarter,
        format('topic=%s doc=%s parent=%s parent_quarter=%s mentions_topic=%s',

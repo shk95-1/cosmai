@@ -296,7 +296,7 @@ def test_a_comment_whose_parent_video_is_absent_is_not_refused_by_the_database(s
 
 
 def test_the_contract_does_not_claim_a_foreign_key_for_orphan_comments():
-    assert "`orphan_comments` 는 DB 가 지지 않는다" in FORMATS.read_text(encoding="utf-8")
+    assert "`orphan_comments` is not carried by the DB" in FORMATS.read_text(encoding="utf-8")
 
 
 def test_the_count_rule_is_a_sentence_in_the_formats_contract():

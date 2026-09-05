@@ -6,9 +6,10 @@
 -- needs.topic_quarter_judgement's primary key as they stand, so an evidence row cannot stand
 -- without the verdict cell it supports, and the path from cell to evidence is one FK.
 --
--- 024 와 같은 이유로 이름이 metrics_ 로 시작하지 않고 contracts/formats.md §시간 의 "집계 그레인의
--- 정본" 표에 줄을 갖지 않는다 -- 세는 칸이 하나도 없다. 다만 024 와 다른 점이 하나 있다: 판정은 지표
--- 행 하나에서 행 하나를 내는 파생이고, 근거는 그 셀을 만든 **문서를 도로 가리키는 포인터**다.
+-- For the same reason as 024 its name does not start with metrics_ and it has no line in the
+-- "canonical table per aggregate grain" table of contracts/formats.md §Time -- it has not one counting
+-- column. One thing does differ from 024: a verdict is a derivation that emits one row from one metric
+-- row, while evidence is a **pointer back at the documents that made that cell**.
 CREATE TABLE needs.topic_quarter_evidence (
   -- The eight columns are topic_quarter_judgement's primary key as it stands. Pointing at the
   -- verdict table rather than metrics_topic_quarter is meaning -- evidence is asked for by whoever
@@ -21,8 +22,9 @@ CREATE TABLE needs.topic_quarter_evidence (
   content_type  text NOT NULL,
   panel_version int  NOT NULL,
   panel_role    text NOT NULL,
-  -- 그 셀 안에서 좋아요 내림차순 자리. 상한(셀당 몇 건)은 여기 적지 않는다 -- 그 수는 보고서의 손잡이라
-  -- 바뀌고, DDL 은 추가만이라 CHECK 을 되돌릴 수 없다 (contracts/interfaces.md §근거 가 그 자리다).
+  -- The like-count descending slot inside that cell. The ceiling (how many per cell) is not written
+  -- here -- that number is a handle of the report and moves, and the DDL is additive only so a CHECK
+  -- cannot be taken back (contracts/interfaces.md §Evidence is that place).
   rank          int  NOT NULL CHECK (rank >= 1),
   -- The evidence body is not copied here. The corpus is canonical, and a copy makes it unknowable
   -- which side is the original (the same sentence as analysis/retrieval/corpus.py keeping no second
@@ -34,8 +36,9 @@ CREATE TABLE needs.topic_quarter_evidence (
   -- source || ':' || source_item_id (023's generated column), the rule stands inside a single row --
   -- attaching a comment as evidence for a video cell is blocked here.
   CHECK (split_part(doc_id, ':', 1) = source),
-  -- 고른 이유를 행에 남긴다. 좋아요는 collected_at 시점의 스냅샷이라(interfaces.md §모집단의 한계)
-  -- 나중에 세어 보면 다른 수가 나온다 -- 그때 이 정렬을 설명할 수 있는 것은 저장된 이 값뿐이다.
+  -- Why it was chosen stays on the row. A like count is a snapshot as of collected_at
+  -- (interfaces.md §Limitations of the population), so counting later gives a different number -- and
+  -- then this stored value is the only thing that can explain this ordering.
   like_count    int  NOT NULL CHECK (like_count >= 0),
   -- The expression by which this document matched that topic. corpus_mention already recorded it
   -- and nothing is matched again here.

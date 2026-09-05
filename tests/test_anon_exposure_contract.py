@@ -1,13 +1,15 @@
-"""#168: contracts/anon_exposure.md 가 실제와 어긋나면 실패한다.
+"""#168: fails when contracts/anon_exposure.md disagrees with reality.
 
-이 레포가 오늘 세 번 데인 자리가 전부 "계약이 실제와 다른데 아무도 안 운다"였다(#170 이 일반형).
-`postgrest_anon_needs.sql:3` 의 "Whitelist" 주석이 #168 을 만든 것도 같은 종류다. 그래서 계약의
-`needs` 절은 **실제 DB 의 `has_table_privilege`** 와 대조한다 -- 파일끼리 맞춰 보면 둘이 함께
-틀렸을 때 조용하다.
+Every one of the three spots this repo has been bitten so far was "the contract says something
+different from reality and no one cries" (#170's general shape). The "Whitelist" comment at
+`postgrest_anon_needs.sql:3` that created #168 is the same kind of thing. So the contract's `needs`
+section is checked against **the real DB's `has_table_privilege`** -- comparing two files against each
+other stays quiet when both are wrong the same way.
 
-구 스택 두 스키마는 이 하네스가 재지 못한다: `trend_radar_reader` 도 tubedepth 전체 덤프도
-tool/checks/test 의 throwaway Postgres 에 없다. 그 절은 좁히기 SQL 과 대조하고(파일끼리지만
-GRANT 문이 정본이다), 운영 실측은 db/grants/postgrest_anon_check.sql 이 맡는다.
+This harness cannot measure the old stack's two schemas: neither `trend_radar_reader` nor a full
+tubedepth dump exists on tool/checks/test's throwaway Postgres. That section is instead checked against
+the narrowing SQL (file against file, but the GRANT statement is the source of truth there), and
+db/grants/postgrest_anon_check.sql owns the measurement in production.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ NARROWING = ROOT / "db" / "grants" / "postgrest_anon_old_stack.sql"
 CHECK_QUERY = ROOT / "db" / "grants" / "postgrest_anon_check.sql"
 
 QUALIFIED = re.compile(r"`(needs|trend_radar|tubedepth)\.([a-z_]+)`")
-# GRANT SELECT ON a, b, c TO postgrest_anon -- 목록이 여러 줄에 걸친다.
+# GRANT SELECT ON a, b, c TO postgrest_anon -- the list spans several lines.
 GRANTED = re.compile(r"GRANT\s+SELECT\s+ON\s+(.*?)\s+TO\s+postgrest_anon", re.DOTALL | re.IGNORECASE)
 
 
@@ -43,7 +45,8 @@ def _listed(heading: str, schema: str) -> set[str]:
 
 
 def _granted_by_narrowing(schema: str) -> set[str]:
-    # 주석을 지우고 읽는다: 되돌리기 블록도 파일 이름도 GRANT 로 읽히면 안 된다.
+    # Read with comments stripped out: neither the rollback block nor a file name may ever read as a
+    # GRANT.
     body = re.sub(r"--[^\n]*", "", NARROWING.read_text(encoding="utf-8"))
     names: set[str] = set()
     for target in GRANTED.findall(body):
@@ -79,9 +82,10 @@ def _anon_can_read(conn: Connection, schema: str) -> set[str]:
 
 
 def test_anon_can_use_the_schema_it_is_granted_tables_in(conn: Connection) -> None:
-    """SELECT 만 재면 이 구멍이 안 보인다: has_table_privilege 는 스키마 권한과 무관하게 t 를 내는데,
-    USAGE 가 없으면 PostgREST 는 401 이고 그 스키마는 0개와 같다. 2026-08-27 적용 직후 trend_radar
-    9개가 전부 401 이었던 자리다 -- anon 이 USAGE 도 trend_radar_reader 멤버십으로 물려받고 있었다."""
+    """Measuring SELECT alone hides this hole: has_table_privilege returns t regardless of schema
+    privilege, but without USAGE PostgREST returns 401 and that schema is the same as zero. This is the
+    spot where trend_radar's 9 tables were all returning 401 right after applying on 2026-08-27 -- anon
+    had also inherited USAGE through trend_radar_reader membership."""
     usable = conn.execute(
         text("SELECT has_schema_privilege('postgrest_anon', 'needs', 'USAGE')")
     ).scalar_one()
@@ -89,9 +93,10 @@ def test_anon_can_use_the_schema_it_is_granted_tables_in(conn: Connection) -> No
 
 
 def test_the_narrowing_regrants_schema_usage_where_membership_carried_it() -> None:
-    """trend_radar 의 nspacl 은 trend_radar_reader=U 이고 postgrest_anon 항목이 없다(운영 실측
-    2026-08-27). 멤버십 REVOKE 가 USAGE 를 함께 가져가므로 좁히기가 그것을 다시 줘야 한다.
-    tubedepth 는 nspacl 에 postgrest_anon=U 가 직접 있어 필요 없다 -- 주면 오늘 없던 부여가 는다."""
+    """trend_radar's nspacl reads trend_radar_reader=U with no postgrest_anon entry (measured in
+    production 2026-08-27). Revoking the membership takes USAGE along with it, so the narrowing has to
+    grant it back. tubedepth needs no such line -- it already has postgrest_anon=U directly in nspacl,
+    and granting it again would add a grant that does not exist today."""
     body = re.sub(r"--[^\n]*", "", NARROWING.read_text(encoding="utf-8"))
     granted = {
         m.group(1).lower()
@@ -116,7 +121,8 @@ def test_the_current_sections_match_the_narrowing_sql(schema: str) -> None:
 
 @pytest.mark.parametrize("schema", ["trend_radar", "tubedepth"])
 def test_the_narrowing_never_regrants_what_the_current_section_calls_removed(schema: str) -> None:
-    # 현행 절이 닫았다고 이름 붙인 관계가 GRANT 줄에 다시 나오면 좁히기가 좁히지 않는다.
+    # If a relation the current section names as closed shows up again in a GRANT line, the narrowing
+    # is not narrowing.
     removed = _removed_by_narrowing(schema)
     assert removed, "좁히기가 닫은 관계를 하나도 못 읽었다 -- 계약의 모양이 바뀌었다"
     assert not (removed & _granted_by_narrowing(schema)), sorted(removed & _granted_by_narrowing(schema))
@@ -130,10 +136,11 @@ DEFAULT_PRIVILEGES = re.compile(
 
 
 def test_the_narrowing_only_removes_default_privileges_that_name_anon() -> None:
-    """trend_radar 의 기본권한 수혜자는 trend_radar_reader 이고 그 롤로 trend-radar-dashboard 가
-    직접 로그인한다(service/stack/docker-compose.yml:172). 지우면 앞으로 이 스키마에 생기는 표를
-    그 화면이 못 읽는다 -- 그리고 멤버십 해제만으로 anon 표류는 이미 멈추므로 지울 이유도 없다.
-    한 번 잘못 넣었던 줄이라(#168 확정 라운드) 다시 들어오면 여기서 운다."""
+    """trend_radar's default privilege benefits trend_radar_reader, the role trend-radar-dashboard logs
+    into directly (service/stack/docker-compose.yml:172). Erasing it would keep that screen from ever
+    reading a table that appears in this schema later -- and cutting the membership alone already stops
+    anon's drift, so there is no reason to erase it either. This is a line that was wrongly added once
+    before (#168's confirmation round), and this cries out if it comes back."""
     body = re.sub(r"--[^\n]*", "", NARROWING.read_text(encoding="utf-8"))
     targets = {(schema, grantee) for _, schema, grantee in DEFAULT_PRIVILEGES.findall(body)}
     assert ("tubedepth", "postgrest_anon") in targets, (
@@ -146,18 +153,21 @@ def test_the_narrowing_only_removes_default_privileges_that_name_anon() -> None:
 
 
 def test_the_contract_names_the_two_paths_that_open_the_old_stack() -> None:
-    # 계약이 "화이트리스트"만 적고 멤버십·직접 GRANT 를 빠뜨리면 #168 이 다시 생긴다.
+    # If the contract only wrote down "whitelist" and left out membership and direct GRANTs, #168
+    # happens again.
     body = CONTRACT.read_text(encoding="utf-8")
     assert "trend_radar_reader" in body
     assert "40-postgrest-tubedepth-grants.sh" in body
-    # 비대칭을 적지 않으면 다음 사람이 trend_radar 쪽 기본권한도 지운다.
+    # If the asymmetry is not written down, the next person erases trend_radar's default privilege too.
     assert "rolcanlogin=t" in body
-    # 표만 세고 USAGE 를 빠뜨린 것이 적용을 한 번 깨뜨렸다 -- 계약이 그 둘을 함께 적어야 한다.
+    # Counting tables alone and leaving out USAGE broke applying this once already -- the contract has
+    # to write down both together.
     assert "USAGE" in body
 
 
 def test_the_check_query_stays_read_only() -> None:
-    # 읽기 전용 세션에서 도는 것이 이 파일의 안전장치다. 쓰는 문장이 섞이면 그 성질이 조용히 깨진다.
+    # Running inside a read-only session is this file's own safeguard. If a write statement ever got
+    # mixed in, that property would quietly break.
     body = re.sub(r"--[^\n]*", "", CHECK_QUERY.read_text(encoding="utf-8"))
     forbidden = re.compile(
         r"\b(GRANT|REVOKE|ALTER|CREATE|DROP|INSERT|UPDATE|DELETE|TRUNCATE|COPY|SET\s+ROLE|NOTIFY|REASSIGN)\b",
@@ -168,8 +178,9 @@ def test_the_check_query_stays_read_only() -> None:
 
 
 def test_the_check_query_covers_column_grants_and_public() -> None:
-    """표 권한만 세면 컬럼 GRANT 와 PUBLIC 이 여는 두 문은 보이지 않는다. #168 적용 뒤 실측에서
-    둘 다 0 이었고, 그 불변식을 재는 절 자체가 사라져도 단순 read-only 검사는 초록이라 따로 붙든다."""
+    """Counting table privilege alone hides the two doors a column GRANT or PUBLIC could open. Both
+    measured 0 after #168 was applied, and a plain read-only check stays green even if the section that
+    measures that invariant vanishes entirely, so this holds it separately."""
     body = CHECK_QUERY.read_text(encoding="utf-8")
     assert "information_schema.column_privileges" in body
     assert "NOT has_table_privilege" in body

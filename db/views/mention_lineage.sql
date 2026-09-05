@@ -1,32 +1,40 @@
--- 지표 한 칸을 만든 언급들과 그 언급의 원문 발췌 (#144 경로 4 · 5a · 5b).
+-- The mentions that made one metrics cell, and the original excerpt of each one (#144 paths 4, 5a, 5b).
 --
--- A19 는 뒤집지 않는다. `need_mention`·`wish_mention` 은 `run_id` 를 갖지 않고(versioning.md), 집계가
--- 모집단을 고르는 술어는 `extractor_version = ANY(...)` 하나다(analysis/aggregate/pipeline.py 의
--- load_needs). "이 run 이 센 언급" 과 "같은 판본의 다른 언급" 은 정의상 같은 집합이라, run 별 부분집합을
--- 만들어 낼 자리가 애초에 없다. 그래서 이 뷰는 run 을 모른다 -- 칸의 축을 필터 가능한 컬럼으로 내놓고,
--- 어느 판본을 고를지는 화면이 `analysis_run.versions->>'extractor'` 에서 읽어 건다.
+-- This does not reverse A19. `need_mention`/`wish_mention` carry no `run_id` (versioning.md), and the
+-- one predicate aggregation uses to pick its population is `extractor_version = ANY(...)`
+-- (load_needs in analysis/aggregate/pipeline.py). "The mentions this run counted" and "other mentions of
+-- the same version" are the same set by definition, so there was never a place a per-run subset could
+-- come from. So this view knows nothing of run -- it puts the cell's axes out as filterable columns,
+-- and which version to pick is something the screen reads off
+-- `analysis_run.versions->>'extractor'` and filters by itself.
 --
--- 걸지 말아야 할 것: `versions.polarity`. 한 extractor_version 이 polarity 두 판본을 담는다 -- run 26 에
--- 같이 걸면 neg 15,452 -> 8,685 (44 퍼센트 감소) 다(#144 판단 절 실측). `versions.polarity` 는 그 run 의
--- polarity 단계가 쓴 판본이지 집계 모집단이 아니다.
+-- What must never be filtered on: `versions.polarity`. One extractor_version carries two polarity
+-- versions -- filtering on both together for run 26 turns neg 15,452 into 8,685 (a 44 percent drop)
+-- (measured in #144's judgment section). `versions.polarity` is the version the polarity stage of that
+-- run wrote, not the aggregation's population.
 --
--- 문장은 **발췌만** 나간다: 120자에서 자르고 전문 길이를 나란히 둔다 -- 근거로 쓰기엔 충분하고
--- 전문 재구성은 안 된다(사용자 결정 2026-08-27). 원문 컬럼은 이름조차 나가지 않는다.
+-- Only an **excerpt** of the sentence goes out: cut at 120 characters, with the full length placed next
+-- to it -- enough to use as evidence, not enough to reconstruct the full text (user decision
+-- 2026-08-27). The original-text column does not even go out by name.
 --
--- 이유를 정확히 적는다. anon 이 리뷰 본문을 못 본다는 것이 이유가 **아니다** -- 운영에서 그 선은
--- 이미 없다: postgrest_anon 이 trend_radar_reader 의 멤버라 `trend_radar.review.body` 를 그대로
--- 읽는다(코디네이터 실측 2026-08-27). db/grants/postgrest_anon_needs.sql 은 needs 스키마만 다스린다.
--- 이 뷰가 자르는 이유는 **이 뷰가 원문 전달 경로가 되지 않게** 하려는 것이다: 지표 한 칸에서
--- 언급 수천 건이 딸려 나오는 자리라, 발췌가 아니면 여기가 사실상의 원문 덤프 출구가 된다.
--- 그 별건 노출(anon 이 trend_radar 를 읽는 것 자체)은 이 이슈의 몫이 아니다.
+-- The reason is written exactly. It is **not** that anon cannot see the review body -- that line is
+-- already gone in production: postgrest_anon is a member of trend_radar_reader and reads
+-- `trend_radar.review.body` straight through (coordinator measured this 2026-08-27).
+-- db/grants/postgrest_anon_needs.sql only governs the needs schema. The reason this view truncates is
+-- **to keep this view from becoming a channel for the original text**: this is a spot where thousands
+-- of mentions ride out of one metrics cell, and without an excerpt this would effectively become an
+-- exit for dumping the original text. That separate exposure (anon reading trend_radar at all) is not
+-- this issue's business.
 --
--- 필터 없이 부르면 need_mention 전부(운영 183,571행)를 훑는다. 화면은 언제나 칸의 축으로 좁혀
--- 부르고(PGRST_DB_MAX_ROWS=1000, mention_id 정렬로 이어 읽는다), 이 뷰는 그 쓰임에 맞춰져 있다.
+-- Called with no filter, this scans every need_mention row (183,571 in production). The screen always
+-- calls it narrowed to the cell's axes (PGRST_DB_MAX_ROWS=1000, paging on through a mention_id order),
+-- and this view is built for that use.
 --
--- LIKE 를 쓰지 않는다: 그 와일드카드 문자를 이 파일을 드라이버로 실행하는 쪽(psycopg)이 플레이스홀더로
--- 읽어 죽는다 -- 주석에 한 글자만 있어도 그렇다(db/views/pipeline_health.sql 이 데인 자리).
+-- LIKE is not used: the driver running this file (psycopg) reads that wildcard character as a
+-- placeholder and dies on it -- even a single one sitting inside a comment does it (the spot that bit
+-- db/views/pipeline_health.sql).
 --
--- db/migrate.sh (f) 가 배포마다 DROP + CREATE 한다.
+-- db/migrate.sh (f) does DROP + CREATE on every deploy.
 
 DROP VIEW IF EXISTS needs.mention_lineage;
 CREATE VIEW needs.mention_lineage AS
@@ -41,12 +49,13 @@ WITH mention AS (
         NULL::text                              AS parent_hint,
         coalesce(m.category, '')                AS category,
         m.need_key,
-        -- A17: scope='all' 롤업만 needs.need_key.canonical 로 동의어를 접는다. 두 값을 나란히 두어야
-        -- 카테고리 칸(raw)과 롤업 칸(canonical)이 같은 뷰에서 갈린다.
+        -- A17: only a scope='all' rollup folds synonyms through needs.need_key.canonical. Both values
+        -- have to sit side by side for the raw category column and the rollup column to split apart in
+        -- the same view.
         coalesce(k.canonical, m.need_key)       AS need_key_rollup,
         m.month,
-        -- 제품 축의 값 (analysis/aggregate/__init__.py 의 _product): product_ref 가 없으면
-        -- source_product_key, 그것도 없으면 '' -- 그 '' 가 카테고리 합 행이다.
+        -- The value of the product axis (_product in analysis/aggregate/__init__.py): product_ref if
+        -- present, else source_product_key, else '' -- that '' is the category-total row.
         coalesce(nullif(m.product_ref, ''), nullif(m.source_product_key, ''), '') AS product_axis,
         NULL::text                              AS wish_class,
         ''::text                                AS format_first,
@@ -65,8 +74,9 @@ WITH mention AS (
         w.mention_id,
         w.extractor_version,
         w.src,
-        -- wish_mention 에는 site 컬럼이 없다. 댓글은 유튜브 하나뿐이라 여기서 정해지지만, 리뷰
-        -- 갈래는 어느 사이트인지 말할 값이 없어 NULL 이고 그래서 원문에도 닿지 못한다(아래 doc_kind).
+        -- wish_mention has no site column. Comments are decided here since youtube is the only source,
+        -- but the review branch has no value to say which site it is, so it is NULL and, because of
+        -- that, never reaches the original text either (doc_kind below).
         CASE WHEN w.src = 'yt_comment' THEN 'youtube' END,
         w.ref,
         w.video_id,
@@ -76,7 +86,8 @@ WITH mention AS (
         w.month,
         coalesce(w.product_ref, ''),
         w.wish_class,
-        -- format 은 ';' 로 최대 3개가 들어오고 첫 번째가 주 값이다 (A12, aggregate/__init__.py 의 _first).
+        -- format arrives as up to 3 values joined by ';' and the first is the primary value (A12,
+        -- _first in aggregate/__init__.py).
         coalesce(split_part(w.format, ';', 1), ''),
         coalesce(split_part(w.attribute, ';', 1), ''),
         coalesce(w.brand, ''),
@@ -91,9 +102,10 @@ WITH mention AS (
 located AS (
     SELECT
         m.*,
-        -- ref 는 리뷰가 product_key/review_key, 댓글이 video_id/comment_id 다 (001_needs.sql 의 주석).
-        -- 원문 표가 없는 갈래(yt_transcript·naver_blog)와 사이트를 모르는 wish 리뷰는 여기서 NULL 이
-        -- 되고, 아래 두 조인이 아예 걸리지 않는다 -- 행은 남고 doc_found 만 거짓이다.
+        -- ref is product_key/review_key for a review and video_id/comment_id for a comment (the
+        -- comment in 001_needs.sql). A branch with no original-text table (yt_transcript, naver_blog)
+        -- and a wish review whose site is unknown come out NULL here, and the two joins below never
+        -- fire at all for them -- the row still stands and only doc_found is false.
         CASE WHEN m.src = 'review' AND m.site IS NOT NULL THEN 'review'
              WHEN m.src = 'yt_comment' THEN 'yt_comment' END               AS doc_kind,
         CASE WHEN strpos(m.ref, '/') > 0 THEN split_part(m.ref, '/', 1)
@@ -123,7 +135,8 @@ SELECT
     l.observed_at,
     l.observed_at_resolution,
     left(l.sentence, 120)                       AS sentence_excerpt,
-    -- 잘렸다는 사실은 숨기지 않는다 -- 전문 길이가 나란히 있어야 발췌인 줄 안다.
+    -- The fact that it was cut is never hidden -- the full length has to sit next to it for a reader to
+    -- know it's an excerpt.
     length(l.sentence)                          AS sentence_chars,
     l.doc_kind,
     l.doc_parent,
@@ -135,17 +148,19 @@ SELECT
     r.rating                                    AS doc_rating,
     c.like_count                                AS doc_like_count
 FROM located l
--- review 의 PK 는 (source, review_key) 다. site 를 같이 걸지 않으면 다른 사이트의 같은 review_key 가
--- 붙어 한 언급이 여러 행이 된다.
+-- review's PK is (source, review_key). Without also filtering on site, the same review_key from a
+-- different site attaches too and one mention turns into several rows.
 LEFT JOIN trend_radar.review r
        ON l.doc_kind = 'review' AND r.source = l.site AND r.review_key = l.doc_key
 LEFT JOIN tubedepth.comments c
        ON l.doc_kind = 'yt_comment' AND c.video_id = l.doc_parent AND c.comment_id = l.doc_key;
 
 GRANT SELECT ON needs.mention_lineage TO needs_runtime;
--- 화면은 PostgREST 에 anon 으로 묻는다. 이 GRANT 가 db/grants/postgrest_anon_needs.sql 에 있으면
--- 살아남지 못한다: 그 파일은 migrate 단계 (d) 이고 뷰를 DROP 하고 다시 만드는 것은 (f) 라, 새 객체에
--- 옛 GRANT 가 따라오지 않는다. 뷰의 권한은 뷰가 소유한다(#158 -- 화면이 401 이었다).
+-- The screen asks PostgREST as anon. This GRANT would not survive sitting in
+-- db/grants/postgrest_anon_needs.sql: that file is migrate stage (d), while dropping and recreating the
+-- view is stage (f), so the new object does not carry the old GRANT along with it. The view owns its
+-- own grants (#158 -- the screen was returning 401).
 GRANT SELECT ON needs.mention_lineage TO postgrest_anon;
--- 권한이 바뀌었으니 PostgREST 의 스키마 캐시를 깨운다. (d) 의 NOTIFY 는 이 뷰가 만들어지기 전에 돈다.
+-- Grants changed, so this wakes up PostgREST's schema cache. Stage (d)'s NOTIFY runs before this view
+-- even exists.
 NOTIFY pgrst, 'reload schema';

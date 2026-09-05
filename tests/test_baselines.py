@@ -124,7 +124,8 @@ def test_the_rule_that_set_the_baselines_passes_them():
 
 
 def test_the_rule_measured_bar_is_met_by_the_raw_numbers_it_was_rounded_from():
-    """§규칙 실측 표는 규칙 자신의 점수다 — 그 원값이 표에 지면 어떤 구현도 교체 판정을 받을 수 없다."""
+    """The §Rule measurement table is the rules' own score — with its raw value lost from the table, no
+    implementation could ever be judged a replacement."""
     scores = {
         name: {metric: RULE_RAW[(name, metric)] for metric in wants}
         for name, wants in RULE_MEASURED["polarity"].items()

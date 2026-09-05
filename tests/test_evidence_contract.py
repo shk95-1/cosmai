@@ -26,7 +26,7 @@ VIOLATION_VIEW = ROOT / "db" / "views" / "topic_quarter_evidence_violation.sql"
 
 TABLE = "topic_quarter_evidence"
 JUDGEMENT = "topic_quarter_judgement"
-GRAIN_HEADER = "| 그레인 | 정본 표 | 행의 시간 칸 |"
+GRAIN_HEADER = "| grain | canonical table | the row's time slot |"
 # 본문·제목처럼 문서의 내용을 베낀 칸. 하나라도 서면 코퍼스가 정본이라는 문장이 그 자리에서 거짓이 된다.
 COPIED = ("text", "title", "body", "url", "published_at", "quality_flags", "source_metadata")
 
@@ -112,8 +112,8 @@ def test_the_grain_table_does_not_list_it_and_says_why():
 
 
 def test_the_contract_calls_the_evidence_a_pointer():
-    assert "포인터" in INTERFACES.read_text(encoding="utf-8")
-    assert "포인터" in DDL.read_text(encoding="utf-8")
+    assert "pointer" in INTERFACES.read_text(encoding="utf-8")
+    assert "pointer" in DDL.read_text(encoding="utf-8")
 
 
 def test_the_reach_from_a_cell_to_the_quote_is_one_view():
@@ -123,8 +123,8 @@ def test_the_reach_from_a_cell_to_the_quote_is_one_view():
     assert f"GRANT SELECT ON needs.{TABLE}_quote TO needs_runtime" in body
     for table in (f"needs.{JUDGEMENT}", f"needs.{TABLE}", "needs.corpus_document"):
         assert table in body, table
-    # 댓글의 url 은 그 댓글이 아니라 부모 영상이다. 이름이 그것을 말하지 않으면 클릭해서 그 발화를
-    # 찾을 수 있다고 읽힌다 (계약 §근거).
+    # A comment's url is the parent video's rather than the comment's. If the name does not say so, it reads
+    # as though clicking it would find that speech (the contract's §Evidence).
     assert "AS parent_video_url" in body
 
 
@@ -145,4 +145,4 @@ def test_the_contracts_name_the_new_migration_and_both_commands():
 def test_the_version_key_of_the_run_carries_the_evidence_definition():
     body = VERSIONING.read_text(encoding="utf-8")
     assert "metric, judgement, evidence}" in body
-    assert "`evidence` 는" in body
+    assert "`evidence` is **the definition version of evidence selection**" in body

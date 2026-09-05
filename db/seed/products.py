@@ -30,7 +30,8 @@ TABLES = (
 )
 
 SOURCE = "oliveyoung"
-# 슬라이스 이름 = 그 행을 만든 실행. run 을 거치지 않는 테이블은 이 값만이 출처다 (A19).
+# Slice name = the run that made that row. For a table that never goes through a run, this value is
+# the only provenance it has (A19).
 P1_VERSION = "slice-p1"
 P2_VERSION = "slice-p2"
 

@@ -21,7 +21,7 @@ from db.seed._common import EVAL_DIR, REPO_ROOT, connect, read_csv
 SEED_CSV = EVAL_DIR / "panel" / "channels_v1.csv"
 SLICE_CSV = REPO_ROOT / "analysis" / "slices" / "ydc" / "seeds" / "channels_v1.csv"
 EXPECTED = {"panel_roster": 1, "panel_channel": 43}
-ROLES = {"product": 34, "expert": 9}  # contracts/formats.md §패널 명부 CSV 의 v1 패널 열
+ROLES = {"product": 34, "expert": 9}  # the v1 panel column of contracts/formats.md §Panel roster CSV
 CSV_COLUMNS = 11  # the file has 11 columns and 6 go into the table (the same contract)
 
 SNAPSHOT = (

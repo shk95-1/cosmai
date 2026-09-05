@@ -2,9 +2,10 @@
 """Re-runs the full comparison: ydc's three script outputs against `cosmai trend sensitivity` (fork #41).
 
 CI keeps the sample golden (`tests/test_sensitivity_golden.py`) on `tests/fixtures/trend_sample/` every time.
-**전량은 CI 가 지킬 수 없다** -- 261,317문서 174MB 는 `archive/` 에 있고 그 자리는 읽기 전용이며 레포에
-넣을 것도 아니다(`contracts/formats.md` §코퍼스 스냅샷). 그래서 전량 대조는 사람이 한 번 돌리는 일이고,
-"어떻게 돌렸나" 가 커밋 메시지에만 남아 아무도 다시 맞대 볼 수 없게 되는 것을 막는 것이 이 파일이다.
+**CI cannot hold the full set** -- 261,317 documents and 174MB live in `archive/`, that place is read-only,
+and it is not a thing to put into the repo (`contracts/formats.md` §Corpus snapshot). So the full comparison
+is something a person runs once, and this file exists to stop "how it was run" from living only in a commit
+message where nobody can compare it again.
 
 How to run it (every argument is given on the spot -- another machine's layout is not written into the repo):
 

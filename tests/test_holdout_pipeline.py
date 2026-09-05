@@ -1,8 +1,9 @@
 """홀드아웃의 읽기: 청크 색인이 두 팔을 가르고, 아무것도 쓰지 않는다 (포크 #51).
 
-§대조(#7)·§민감도(#41)와 같은 자리다 -- 답이 표가 아니라 stdout 이라, 이 파일이 지는 것은 값이 아니라
-**두 팔의 가름**과 **한 시점**과 **막힘·종료 코드**, 그리고 "정말 아무것도 안 썼는가" 다. 값은 규칙
-테스트(`tests/test_holdout_rules.py`)가 진다.
+The same place as §Crosscheck (#7) and §Sensitivity (#41) -- the answer is stdout rather than a table, so
+what this file carries is not the values but **the split of the two arms**, **the single point in time**,
+**the blocks and exit codes**, and "did it really write nothing". The values are carried by the rules test
+(`tests/test_holdout_rules.py`).
 
 커머스 원천은 소유 롤이 넣고 `needs_runtime` 은 SELECT 로만 읽는다 (`tests/test_crosscheck_pipeline.py`
 와 같은 방식이고 같은 이유다 -- 운영에서 `trend_radar` 는 collectors/commerce 의 것이다).
@@ -25,8 +26,8 @@ pytestmark = pytest.mark.postgres
 
 EARLY = datetime(2026, 8, 18, tzinfo=UTC)
 LATE = datetime(2026, 8, 26, tzinfo=UTC)
-# 선케어 보드에 오른 제품 하나와 카테고리 이름으로만 걸리는 제품 하나. 밖의 제품(`amp`)이 새어 들어오면
-# 이 픽스처가 먼저 말한다 -- 모집단은 §대조 의 술어 그대로다.
+# One product on the suncare board and one caught by the category name alone. If a product outside
+# (`amp`) leaks in, this fixture says so first -- the population is the predicate of §Crosscheck as it is.
 RANKED = [
     ("oliveyoung", "suncare", "c1", "sun", EARLY, "01 > 스킨케어 > 기타", 1, "톤업 선크림", 12000),
     ("glowpick", "category", "c9", "sun2", EARLY, "선크림", 1, "선크림 2호", 15000),
@@ -102,8 +103,8 @@ def _arms(url: str) -> tuple[list[str], list[str]]:
 
 
 def test_the_chunk_index_splits_the_arms_not_the_capture_date(holdable: str):
-    """**컷오프는 날짜가 아니라 청크 색인이다** (계약 §홀드아웃). 픽스처는 둘을 어긋나게 놓았으므로,
-    날짜로 가르는 구현은 여기서 두 팔이 통째로 뒤바뀐다."""
+    """**The cutoff is not a date but the chunk index** (the contract's §Holdout). The fixture puts the two
+    out of step, so an implementation that splits by date swaps the two arms wholesale here."""
     with connect(holdable) as conn:
         read = load(conn, commerce_schema="")
     seen = {review.captured_at for review in read.seen}
@@ -114,8 +115,9 @@ def test_the_chunk_index_splits_the_arms_not_the_capture_date(holdable: str):
 
 
 def test_a_review_with_an_empty_body_sits_in_neither_arm_and_is_counted(holdable: str):
-    """빈 본문은 청크를 만들지 않는다. 남기면 "안 본 리뷰" 가 아니라 "볼 것이 없는 리뷰" 가 홀드아웃을
-    채운다 -- 그리고 그 순간 홀드아웃의 언급률이 조용히 내려간다 (계약 §홀드아웃)."""
+    """An empty body makes no chunk. Leave it in and the holdout is filled with "reviews with nothing to see"
+    rather than "reviews never seen" -- and at that moment the holdout's mention rate quietly falls (the
+    contract's §Holdout)."""
     with connect(holdable) as conn:
         read = load(conn, commerce_schema="")
         built = build(conn, commerce_schema="")
@@ -125,7 +127,8 @@ def test_a_review_with_an_empty_body_sits_in_neither_arm_and_is_counted(holdable
 
 
 def test_the_ranking_decides_the_population_for_both_arms(holdable: str):
-    """두 팔이 같은 술어 위에 서야 차이가 표본의 것이지 필터의 것이 아니다 (계약 §홀드아웃)."""
+    """The two arms have to stand on the same predicate for the difference to be the sample's rather than the
+    filter's (the contract's §Holdout)."""
     seen, unseen = _arms(holdable)
     assert "amp" not in seen and "amp" not in unseen
     assert set(seen) == {"sun"} and set(unseen) == {"sun", "sun2"}
@@ -143,8 +146,9 @@ def test_the_answer_reaches_the_rules_with_the_topics_already_matched(holdable: 
 def test_a_review_committed_between_two_reads_lands_in_no_arm_at_all(
     holdable: str, database_url_for_tests: str, monkeypatch: pytest.MonkeyPatch
 ):
-    """**네 읽기가 한 시점을 본다** (계약 §홀드아웃). 격리 수준을 `READ COMMITTED` 로 낮추면 이 리뷰가
-    홀드아웃 팔에 나타나 `seen + holdout + empty` 가 어떤 모집단의 크기도 아니게 된다."""
+    """**The four reads see one point in time** (the contract's §Holdout). Lower the isolation level to
+    `READ COMMITTED` and this review appears in the holdout arm, and `seen + holdout + empty` is the size of
+    no population at all."""
     real = pipeline.commerce_sql
 
     def spy(schema: str, statement: str):
@@ -192,7 +196,8 @@ def test_a_commerce_chunk_without_a_review_row_makes_the_answer_partial(holdable
 
 
 def test_a_holdout_that_does_not_reproduce_is_not_a_partial_outcome(holdable: str):
-    """**재현 실패는 발견이지 실패가 아니다** -- #41 이 §민감도 에서, #7 이 §대조 에서 못 박은 자리와 같다."""
+    """**A failure to reproduce is a finding, not a failure** -- the same place #41 pinned in §Sensitivity and
+    #7 in §Crosscheck."""
     with connect(holdable) as conn:
         outcome = run(conn, commerce_schema="")
     assert outcome.status == "ok" and outcome.violations == ()
@@ -210,7 +215,8 @@ def test_the_answer_writes_nothing(holdable: str):
 
 
 def _fingerprint(conn) -> list[tuple]:
-    """이 스키마의 모든 표의 행수. 읽을 수 있는 것만 센다 (§대조 의 같은 함수와 같은 이유)."""
+    """The row count of every table in this schema. Only what can be read is counted (the same function and
+    the same reason as §Crosscheck)."""
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, (xpath('/row/c/text()', "
@@ -262,7 +268,8 @@ def test_no_unseen_review_is_blocked_not_failed(holdable: str, database_url_for_
 def test_no_suncare_product_in_the_ranking_is_blocked_not_failed(
     needs_schema: str, trend_radar_schema: str, needs_runtime_url: str, database_url_for_tests: str
 ):  # fmt: skip
-    """되물을 커머스 소스가 아직 없다는 뜻이다 (§대조 와 같은 자리, 같은 메시지)."""
+    """It means there is no commerce source to ask again with yet (the same place and the same message as
+    §Crosscheck)."""
     _dictionary(needs_runtime_url)
     with connect(database_url_for_tests) as source, source.cursor() as cur:
         cur.execute("GRANT SELECT ON rank_snapshot, review, review_topic, product TO needs_runtime")
@@ -273,8 +280,8 @@ def test_no_suncare_product_in_the_ranking_is_blocked_not_failed(
 
 
 def test_the_cli_calls_blocked_blocked(holdable: str, capsys: pytest.CaptureFixture[str]):
-    """**성공 경로를 CLI 로 몰지 않는 이유**는 §대조 와 같다: 검사용 스키마 하나가 needs 와 trend_radar 를
-    함께 담는데 CLI 는 운영의 `trend_radar` 를 이름으로 부른다."""
+    """**Why the success path is not driven through the CLI** is the same as §Crosscheck: one test schema
+    holds needs and trend_radar together while the CLI names production's `trend_radar`."""
     assert main(["trend", "holdout", "--url", holdable]) == 2
     assert "collect commerce" in capsys.readouterr().out
 
@@ -291,7 +298,7 @@ def test_the_cli_gives_zero_when_the_holdout_merely_fails_to_reproduce(
 def test_the_cli_turns_a_violation_into_exit_one(
     holdable: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ):
-    """계약 §종료 코드 의 1 이 실제로 CLI 에서 나오는가."""
+    """Does the 1 of the contract's §exit codes actually come out of the CLI?"""
     monkeypatch.setattr(pipeline, "COMMERCE_SCHEMA", "")
     with connect(holdable) as conn:
         _chunk(conn, "commerce_review:oliveyoung:r-gone", "사라진 리뷰의 청크")

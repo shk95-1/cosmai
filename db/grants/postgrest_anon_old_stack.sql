@@ -1,104 +1,119 @@
--- 사용자 결정 2026-08-27 (#168 안 B): anon 에서 **수집 원문과 수집기 내부 상태**를 뺀다.
--- 집계된 사실은 남긴다 -- 구 스택 설계가 원래 "로컬 네트워크에 익명 읽기"였고
--- data-portal 의 존재 이유가 그것이다(service/data-portal/README.md:3).
+-- User decision 2026-08-27 (#168 proposal B): removes **collected original text and the collector's
+-- internal state** from anon. Aggregated facts stay -- the old stack's design was originally "anonymous
+-- read on the local network", and that is the reason data-portal exists (service/data-portal/README.md:3).
 --
--- **아직 실행하지 않았다.** db/migrate.sh 는 이름으로 두 파일만 집으므로(migrate.sh:100,105)
--- 이 파일은 실행 경로 밖이고, 여기 두는 것만으로는 아무 일도 일어나지 않는다. 적용은
--- 코디네이터 세션이 한 명령씩 한다 -- 구 스택 권한이라 STATE.md §3 의 매번 승인이다.
+-- **Not run yet.** db/migrate.sh only picks up two files by name (migrate.sh:100,105), so this file
+-- sits outside the run path, and merely having it here does nothing on its own. Applying it happens one
+-- command at a time from the coordinator session -- since this is old-stack privilege, it is under
+-- STATE.md §3's every-time approval.
 --
--- 적용 전후 대조: db/grants/postgrest_anon_check.sql (읽기 전용). 적용 후 anon 이 보는 것은
--- needs 11 + trend_radar 9 + tubedepth 3 = 23 개여야 한다 (needs 는 이 파일이 건드리지 않는다).
+-- Compare before and after applying with: db/grants/postgrest_anon_check.sql (read-only). After
+-- applying, what anon sees must be needs 11 + trend_radar 9 + tubedepth 3 = 23 (needs is untouched by
+-- this file).
 --
--- 슈퍼유저(platform)가 실행한다: REVOKE 대상 권한을 준 것이 trend_radar_owner 와
--- tubedepth_owner 이고, 지우는 DEFAULT PRIVILEGES 는 tubedepth_owner 소유다.
--- 두 스키마를 다르게 다룬다 -- trend_radar 는 멤버십만 끊고 기본권한은 남긴다(1절 주석).
+-- Run by the superuser (platform): trend_radar_owner and tubedepth_owner are the ones that granted the
+-- privileges being revoked here, and the DEFAULT PRIVILEGES being erased belong to tubedepth_owner.
+-- The two schemas are treated differently -- trend_radar only has its membership cut, and its default
+-- privileges are left alone (see section 1's comment).
 
 -- ---------------------------------------------------------------------------
--- 1. trend_radar -- 롤 멤버십 하나가 13개를 전부 열고 있었다. 직접 GRANT 는 없었다.
+-- 1. trend_radar -- a single role membership had all 13 open. There was no direct GRANT.
 -- ---------------------------------------------------------------------------
 REVOKE trend_radar_reader FROM postgrest_anon;
 
--- 이 스키마의 DEFAULT PRIVILEGES 는 **일부러 건드리지 않는다.** 빠진 것이 아니다.
---   pg_default_acl 의 trend_radar 행은 trend_radar_owner -> `trend_radar_reader=r` 이지
---   postgrest_anon 이 아니다. 위 한 줄로 anon 이 그 롤의 멤버가 아니게 되면 기본권한도
---   물려받지 않으므로, anon 쪽 표류는 그 한 줄로 이미 멈춘다.
---   반대로 지우면 대시보드가 깨진다: trend_radar_reader 는 anon 의 통로이기 이전에
---   trend-radar-dashboard 가 **직접 로그인하는 롤**이고(service/stack/docker-compose.yml:172
---   의 TREND_RADAR_READONLY_DATABASE_URL, rolcanlogin=t), 기본권한을 없애면 앞으로
---   trend_radar 에 생기는 표를 그 화면이 못 읽는다. 사용자 결정 2 는 "지금 열려 있는 것을
---   바꾸지 않으면서 표류만 멈춘다"였지 미래의 대시보드 접근을 좁히는 것이 아니었다.
---   tubedepth 쪽(아래 2절)은 기본권한이 postgrest_anon 에게 **직접** 걸려 있어 사정이 다르다.
+-- This schema's DEFAULT PRIVILEGES are **deliberately left untouched.** This is not an omission.
+--   pg_default_acl's trend_radar row reads trend_radar_owner -> `trend_radar_reader=r`, not
+--   postgrest_anon. Once the one line above makes anon no longer a member of that role, it stops
+--   inheriting the default privileges too, so anon's drift is already stopped by that one line alone.
+--   Erasing it instead would break the dashboard: before trend_radar_reader is anon's channel, it is
+--   the role trend-radar-dashboard **logs into directly**
+--   (service/stack/docker-compose.yml:172's TREND_RADAR_READONLY_DATABASE_URL, rolcanlogin=t), and
+--   removing the default privileges would keep that screen from ever reading a table that later
+--   appears in trend_radar. User decision 2 was "stop the drift without changing what is open right
+--   now", not narrowing the dashboard's future access.
+--   The tubedepth side (section 2 below) is a different case: its default privileges are granted to
+--   postgrest_anon **directly**.
 
--- 스키마 USAGE 를 **여기서 다시 준다.** anon 은 이것도 멤버십으로 물려받고 있었다:
--- trend_radar 의 nspacl 은 `trend_radar_reader=U/trend_radar_owner` 이고 postgrest_anon 항목이
--- 없다. 그래서 위 REVOKE 한 줄이 SELECT 와 함께 USAGE 도 가져간다 -- 표를 이름으로 되돌려 줘도
--- PostgREST 는 401 을 낸다(운영 실측 2026-08-27, 적용 직후 trend_radar 9개 전부 401).
--- tubedepth·needs 는 필요 없다: 둘 다 nspacl 에 `postgrest_anon=U` 가 직접 있어 아래 2절의
--- REVOKE 가 USAGE 를 건드리지 않는다. DEFAULT PRIVILEGES 와 **같은 비대칭**이다 -- 이 파일이
--- trend_radar 에서만 무언가를 되돌려 주는 이유가 매번 그것 하나다.
--- 이미 있어도 무해하다(GRANT 는 멱등).
+-- Schema USAGE is **granted back here.** anon had also inherited this through membership:
+-- trend_radar's nspacl reads `trend_radar_reader=U/trend_radar_owner` with no postgrest_anon entry.
+-- So the REVOKE line above takes USAGE along with SELECT -- even after tables are handed back by
+-- name, PostgREST still returns 401 (measured in production 2026-08-27, all 9 of trend_radar's tables
+-- returning 401 right after applying).
+-- tubedepth and needs need no such line: both already have `postgrest_anon=U` directly in nspacl, so
+-- section 2's REVOKE below never touches their USAGE. This is the **same asymmetry** as DEFAULT
+-- PRIVILEGES -- the one reason this file ever grants something back on trend_radar alone.
+-- Harmless even if already present (GRANT is idempotent).
 GRANT USAGE ON SCHEMA trend_radar TO postgrest_anon;
 
--- 멤버십 대신 표를 이름으로 준다. 앞으로 이 스키마에서 anon 이 보는 것은 이 아홉 줄뿐이고,
--- 새 표를 열려면 여기 한 줄을 더해야 한다.
+-- Tables are granted by name in place of membership. From here on, these nine lines are all anon sees
+-- in this schema, and opening a new table means adding one more line here.
 GRANT SELECT ON
-    trend_radar.product,             -- 제품 축(source, product_key, name, brand, volume)
-    trend_radar.rank_snapshot,       -- 시간별 랭킹
-    trend_radar.price_point,         -- 가격·할인율
-    trend_radar.new_product,         -- 신제품 등재
-    trend_radar.new_products_view,   -- 위의 뷰. data-portal 이 표와 구분 없이 그린다
-    trend_radar.review_stats,        -- 리뷰 개수·별점 분포 (집계, 원문 아님)
-    trend_radar.review_topic,        -- 사이트가 낸 토픽·비율 (집계)
-    trend_radar.review_answer,       -- 다이소 설문 답 (선택지, 자유 서술 아님)
-    trend_radar.review_summary       -- 사이트가 낸 요약 (원문 아님)
+    trend_radar.product,             -- the product axis (source, product_key, name, brand, volume)
+    trend_radar.rank_snapshot,       -- ranking over time
+    trend_radar.price_point,         -- price and discount rate
+    trend_radar.new_product,         -- newly listed products
+    trend_radar.new_products_view,   -- the view over the above. data-portal renders it no differently
+                                      -- from a table
+    trend_radar.review_stats,        -- review count and rating distribution (aggregated, not the
+                                      -- original text)
+    trend_radar.review_topic,        -- topics and shares the site itself published (aggregated)
+    trend_radar.review_answer,       -- daisomall's survey answers (a choice, not free-form text)
+    trend_radar.review_summary       -- a summary the site itself published (not the original text)
     TO postgrest_anon;
 
--- 뺀 것: review 는 리뷰 **전문**(body) 30,044행이고 #144·#168 이 겨눈 노출 그 자체다.
--- run · run_source · fetch_log 는 수집 운영 기록이지 데이터가 아니다.
--- alembic_version 은 애초에 닫혀 있었다(DEFAULT PRIVILEGES 보다 먼저 생겨서다, 정책이 아니라 순서).
+-- Left out: review is the review's **full body** (body), 30,044 rows, and is exactly the exposure
+-- #144/#168 targeted.
+-- run, run_source and fetch_log are collection operations records, not data.
+-- alembic_version was already closed from the start (it predates DEFAULT PRIVILEGES, an accident of
+-- order rather than policy).
 
 -- ---------------------------------------------------------------------------
--- 2. tubedepth -- reader 롤이 없어 anon 에 직접 GRANT 되어 있다(구조가 trend_radar 와 다르다).
---    api_keys 만 빼고 12개가 열려 있었다.
+-- 2. tubedepth -- there is no reader role, so this is granted to anon directly (a different shape
+--    from trend_radar). All 12 tables but api_keys were open.
 -- ---------------------------------------------------------------------------
 REVOKE SELECT ON ALL TABLES IN SCHEMA tubedepth FROM postgrest_anon;
 
--- 여기서는 DEFAULT PRIVILEGES 를 **반드시** 지운다 -- 1절과 정반대인 이유가 이것 하나다:
--- pg_default_acl 의 tubedepth 행이 postgrest_anon=r/tubedepth_owner 로 anon 에게 직접 걸려
--- 있어서, 남겨 두면 다음 마이그레이션이 만드는 표가 그대로 anon 에 붙는다. 이 스키마가
--- 2026-08-21 6개에서 지금 12개가 된 경로가 정확히 이것이다
--- (service/data-portal/docs/postgrest-observed.md:60). 지워도 잃는 롤은 없다: 이 기본권한의
--- 수혜자는 anon 뿐이고 tubedepth_runtime 은 자기 몫을 따로 갖는다.
+-- DEFAULT PRIVILEGES **must** be erased here -- this alone is the reason it is the exact opposite of
+-- section 1: pg_default_acl's tubedepth row is postgrest_anon=r/tubedepth_owner, granted directly to
+-- anon, so leaving it in place would attach any table the next migration creates straight to anon.
+-- This is exactly the path that took this schema from 6 tables on 2026-08-21 to 12 today
+-- (service/data-portal/docs/postgrest-observed.md:60). No role loses anything by erasing it: anon is
+-- the only beneficiary of this default privilege, and tubedepth_runtime holds its own share separately.
 ALTER DEFAULT PRIVILEGES FOR ROLE tubedepth_owner IN SCHEMA tubedepth
     REVOKE SELECT ON TABLES FROM postgrest_anon;
 
 GRANT SELECT ON
-    tubedepth.video_snapshots,       -- 영상 메타(title, channel_id, view_count)
-    tubedepth.channel_snapshots,     -- 채널 메타
-    tubedepth.listing_entries        -- 목록(kind, target, video_id, title)
+    tubedepth.video_snapshots,       -- video metadata (title, channel_id, view_count)
+    tubedepth.channel_snapshots,     -- channel metadata
+    tubedepth.listing_entries        -- listings (kind, target, video_id, title)
     TO postgrest_anon;
 
--- 뺀 것: comments 285,749행 · transcripts 5,303행은 수집 원문이다.
--- jobs(337,201행) · artifacts · worker_control · lane_health · source_health ·
--- flatten_progress 는 수집기 내부 상태, alembic_version 은 마이그레이션 원장이다.
--- api_keys 는 전부터 REVOKE 되어 있었고 여기서도 열지 않는다.
+-- Left out: comments (285,749 rows) and transcripts (5,303 rows) are collected original text.
+-- jobs (337,201 rows), artifacts, worker_control, lane_health, source_health and flatten_progress are
+-- the collector's internal state; alembic_version is the migration ledger.
+-- api_keys has been revoked all along and is not opened here either.
 
--- USAGE 는 세 스키마 모두 anon 에게 남는다 -- 다만 얻는 경로가 다르다: needs·tubedepth 는
--- 원래부터 nspacl 에 직접 있고, trend_radar 만 1절이 다시 준다(멤버십과 함께 사라지므로).
--- "무엇이 보이는가"는 SELECT 와 USAGE 가 **둘 다** 있어야 성립한다: 표를 아무리 GRANT 해도
--- USAGE 가 없으면 그 스키마는 0개와 같다. postgrest_anon_check.sql 절 6 이 그것을 따로 잰다.
--- 0.0.0.0 바인드는 이 파일이 다루지 않는다 -- 사용자 결정 3(2026-08-27)으로 따로 다룬다.
+-- USAGE stays with anon on all three schemas -- only the path it arrives by differs: needs and
+-- tubedepth have always had it directly in nspacl, and trend_radar is the only one section 1 grants
+-- back (since it vanishes along with membership).
+-- "What is visible" only holds when SELECT and USAGE **both** exist: no matter how many tables are
+-- granted, a schema without USAGE is the same as zero. postgrest_anon_check.sql's section 6 measures
+-- that separately.
+-- The 0.0.0.0 bind is not this file's concern -- it is handled separately by user decision 3
+-- (2026-08-27).
 
 NOTIFY pgrst, 'reload schema';
 
 -- ---------------------------------------------------------------------------
--- 되돌리기 -- 2026-08-27 실측 상태를 그대로 복원한다. 슈퍼유저로 위에서 아래로.
--- 일곱 줄이다. 규칙은 relacl·nspacl 을 오늘과 **같은 모양**으로 되돌리는 것이지 유효 권한만
--- 맞추는 것이 아니다 -- 그래서 안 B 가 새로 만든 직접 부여(표 아홉 + 스키마 USAGE 하나)는
--- 멤버십을 되붙이기 전에 걷는다. 멤버십이 그 둘을 다시 물려주기 때문이다.
--- trend_radar 의 DEFAULT PRIVILEGES 는 애초에 건드리지 않으므로 되돌릴 줄도 없다(1절 주석).
--- tubedepth 쪽은 ON ALL TABLES 가 12개를 다시 덮으므로 별도 REVOKE 가 필요 없고, USAGE 는
--- 이 파일이 준 적이 없어 되돌릴 것도 없다.
+-- Rollback -- restores exactly the state measured on 2026-08-27. As superuser, top to bottom.
+-- Seven lines. The rule is to restore relacl/nspacl to **the same shape** as today, not merely to
+-- match effective privileges -- which is why the direct grants proposal B newly made (nine tables plus
+-- one schema USAGE) are withdrawn before membership is reattached: membership would hand both of them
+-- back again on its own.
+-- trend_radar's DEFAULT PRIVILEGES were never touched in the first place, so there is no line to
+-- restore for them either (section 1's comment).
+-- On the tubedepth side, ON ALL TABLES re-covers all 12 so no separate REVOKE is needed, and USAGE was
+-- never granted by this file, so there is nothing to restore for it.
 -- ---------------------------------------------------------------------------
 --   REVOKE SELECT ON trend_radar.product, trend_radar.rank_snapshot, trend_radar.price_point,
 --       trend_radar.new_product, trend_radar.new_products_view, trend_radar.review_stats,
@@ -112,6 +127,6 @@ NOTIFY pgrst, 'reload schema';
 --       GRANT SELECT ON TABLES TO postgrest_anon;
 --   NOTIFY pgrst, 'reload schema';
 --
--- 원본은 구 스택 init(service/stack/init/20-postgrest-roles.sh:34 ·
--- 40-postgrest-tubedepth-grants.sh:12-16)이며, 그 둘은 빈 db-store 첫 기동에만 돌기 때문에
--- 여기서 끊어도 재실행이 되돌려 놓지 않는다.
+-- The original source is the old stack's init (service/stack/init/20-postgrest-roles.sh:34 --
+-- 40-postgrest-tubedepth-grants.sh:12-16), and since both of those only ever run on a db-store's first,
+-- empty boot, cutting it off here is not something a re-run would undo.

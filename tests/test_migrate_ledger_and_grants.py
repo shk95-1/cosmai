@@ -22,8 +22,9 @@ WHITELIST = [
     "product_ref",
     "analysis_run",
 ]
-# metrics_topic_quarter 는 metrics_* 인데도 화이트리스트 밖이다 (포크 #3): 아직 행이 없고, 이 표를
-# 화면에 여는 판단은 그것을 서빙하는 쪽(#5)의 것이다. GRANT 는 나중에 더해도 추가만이다.
+# metrics_topic_quarter is a metrics_* table, yet it sits outside the whitelist (fork #3): it has no
+# rows yet, and the call on whether to open it to the screen belongs to whatever serves it (#5). A GRANT
+# added later is only ever additive.
 NOT_WHITELISTED = [
     "need_mention", "labeled_set", "wish_mention", "brand_mention", "product_member",
     "panel_roster", "panel_channel", "metrics_topic_quarter",
@@ -67,9 +68,10 @@ def test_postgrest_anon_cannot_select_the_remaining_tables(conn: Connection, tab
     assert allowed is False
 
 
-# 화면이 읽는 뷰. 표가 아니라 뷰라서 자리가 다르다 -- migrate 는 배포마다 뷰를 DROP 하고 다시
-# 만들고(단계 f), 그것은 이 파일이 도는 단계(d)보다 *뒤*다. 그래서 이 GRANT 가 여기 있으면
-# 주자마자 지워진다. 뷰의 권한은 뷰 파일이 진다(#158).
+# The view the screen reads. Being a view rather than a table puts it in a different spot -- migrate
+# drops and recreates every view on each deploy (stage f), and that runs *after* the stage this file
+# runs in (d). So a GRANT given here would be erased the moment it was made. A view's own file carries
+# its grants (#158).
 @pytest.mark.parametrize("view", ["pipeline_health"])
 def test_postgrest_anon_can_select_the_view_the_ops_page_reads(conn: Connection, view: str):
     granted = conn.execute(
@@ -78,7 +80,8 @@ def test_postgrest_anon_can_select_the_view_the_ops_page_reads(conn: Connection,
     assert granted, f"needs.{view} 가 anon 에 안 열려 있다 -- 화면은 PostgREST 에 anon 으로 묻는다"
 
 
-# 판정이 끝난 뷰 하나만 연다. 원본 로그까지 여는 것은 필요 없는 노출이다(#138).
+# Only the one view with the finished judgment is opened. Opening the raw logs too would be exposure
+# with no need for it (#138).
 @pytest.mark.parametrize("view", ["collector_health", "analysis_health"])
 def test_postgrest_anon_cannot_select_the_upstream_views(conn: Connection, view: str):
     granted = conn.execute(

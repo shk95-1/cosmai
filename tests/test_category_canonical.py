@@ -92,7 +92,8 @@ def test_the_latest_snapshot_names_the_category():
 
 
 def test_the_contract_and_the_module_name_the_same_canonical_places():
-    """contracts/formats.md §카테고리 표기 가 정본이고, 코드가 그 값을 상수로 들고 있어야 대조가 된다."""
+    """contracts/formats.md §Category notation is canonical, and the code has to hold that value as a constant
+    for the comparison to be possible."""
     declared: dict[str, object] = {}
     for block in CODE_BLOCK.findall(FORMATS.read_text(encoding="utf-8")):
         for node in ast.parse(block).body:

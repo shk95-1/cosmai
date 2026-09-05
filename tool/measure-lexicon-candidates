@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""ydc `lexicon.json` 의 별칭 5종과 사전 후보 7종(+ #37 이 기각한 3종)을 코퍼스 위에서 다시 재고
-`contracts/formats.md` §주제 사전 v3 의 판정 원장과 맞댄다 (포크 #56).
+"""Re-measures ydc `lexicon.json`'s 5 aliases and the 7 dictionary candidates (+ the 3 fork #37 rejected) over
+the corpus and compares them against the judgment ledger of `contracts/formats.md` §Topic lexicon v3 (fork
+#56).
 
 Writing df into the ledger without leaving the way to measure it makes that number quietly false the
 moment the corpus grows (the same place as `tool/measure-evidence-fixture` in #6 and

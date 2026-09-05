@@ -1,4 +1,5 @@
-"""사전 적재의 한 자리. 시드(v1)와 `cosmai lexicon load --version n` 이 같은 SQL 로 쓴다."""
+"""The one place lexicon loading happens. The seed (v1) and `cosmai lexicon load --version n` write
+through the same SQL."""
 
 from __future__ import annotations
 
@@ -27,8 +28,9 @@ INSERT INTO entity_lexicon (kind, canonical, surface, tier, source, note, versio
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (kind, surface, version) DO NOTHING
 """
-# ruleset/priority 는 002 로 왔고 v1 은 그전에 적재됐다. WHERE 가 이것을 1회 백필로 묶는다: 값이 한 번 들어간
-# 행은 다시 쓰이지 않으므로 사전 내용은 여전히 버전으로만 바뀐다 (formats.md).
+# ruleset/priority arrived with 002, and v1 was loaded before that. The WHERE ties this to a one-time
+# backfill: a row that already has a value never gets rewritten, so the dictionary's content still only
+# changes by version (formats.md).
 ASPECT_SQL: LiteralString = """
 INSERT INTO aspect_lexicon
   (aspect, scope, category, pattern, is_neutral_noun, ruleset, priority, extra, version, active)
@@ -37,8 +39,9 @@ ON CONFLICT (aspect, scope, category, pattern, version) DO UPDATE
 SET ruleset = EXCLUDED.ruleset, priority = EXCLUDED.priority
 WHERE aspect_lexicon.ruleset = ''
 """
-# 키와 값을 만드는 식은 **한 벌뿐이다**. 적재 원본 CSV 쪽을 파이썬으로 다시 렌더하면 jsonb 의 키 순서
-# 하나로 전 행이 "바뀜"이 되므로, CSV 도 같은 식을 태우려고 VALUES 로 DB 에 넣어 읽는다 (포크 #62).
+# There is **only one** expression that builds a key and a value. Re-rendering the source CSV side in
+# Python would turn every row into a "changed" one over nothing more than jsonb's key order, so the CSV
+# is also pushed through DB VALUES and read back so it runs the same expression (fork #62).
 ENTITY_KEY: LiteralString = "surface"
 ENTITY_VALUE: LiteralString = "canonical || '|' || coalesce(tier, '') || '|' || coalesce(source, '')"
 # UNIQUE 는 (aspect, scope, category, pattern, version) 이라 pattern 없이는 한 버전 안에서 키가 겹친다
@@ -53,11 +56,12 @@ SELECT {ENTITY_KEY}, {ENTITY_VALUE} FROM entity_lexicon WHERE kind = %s AND vers
 ASPECT_READ: LiteralString = f"""
 SELECT {ASPECT_KEY}, {ASPECT_VALUE} FROM aspect_lexicon WHERE version = %s
 """
-# 한 aspect 버전에는 룰셋이 여럿 산다(formats.md B4). CSV 는 그중 하나의 적재 원본이라, 안 좁히면
-# 다른 룰셋 전부가 "지워짐"으로 나와 정작 맞대려던 사전이 그 목록에 묻힌다.
+# One aspect version holds several rulesets (formats.md B4). A CSV is the loading source for just one of
+# them, so without narrowing, every other ruleset comes back as "removed" and buries the very dictionary
+# this was meant to compare against.
 ASPECT_READ_RULESETS: LiteralString = f"{ASPECT_READ} AND ruleset = ANY(%s)"
-# VALUES 는 열 타입을 첫 행에서 추론한다 -- 캐스트를 붙여 두면 어느 어댑터가 무엇을 보냈든 위 식이
-# DB 열과 같은 타입 위에서 돈다.
+# VALUES infers column types from the first row -- attaching a cast keeps the expression above running
+# on the same type as the DB column no matter what any given adapter sent.
 ENTITY_VALUES: LiteralString = """
 SELECT v.column2::text AS canonical, v.column3::text AS surface,
        v.column4::text AS tier, v.column5::text AS source
@@ -82,7 +86,8 @@ ASPECT_KIND = "aspect"
 @dataclass(frozen=True)
 class Diff:
     kind: str
-    # 양쪽은 **이름표**다 -- 한쪽이 DB 버전이 아니라 적재 원본 CSV 일 수 있다 (포크 #62).
+    # Both sides are **labels** -- one side can be the loading source CSV rather than a DB version
+    # (fork #62).
     version: str
     against: str
     added: tuple[str, ...]
@@ -100,15 +105,17 @@ def _write(cur: psycopg.Cursor[Any], statement: LiteralString, rows: Sequence[Se
 def insert_entities(
     cur: psycopg.Cursor[Any], rows: Sequence[Sequence[Any]], version: int, active: bool = True
 ) -> int:
-    """rows 는 ENTITY_COLUMNS 순서. 같은 (kind, surface, version) 재적재는 아무것도 바꾸지 않는다."""
+    """rows follows ENTITY_COLUMNS order. Re-loading the same (kind, surface, version) changes
+    nothing."""
     return _write(cur, ENTITY_SQL, [(*row, version, active) for row in rows])
 
 
 def insert_aspects(
     cur: psycopg.Cursor[Any], rows: Sequence[Sequence[Any]], version: int, active: bool = True
 ) -> int:
-    """rows 는 ASPECT_COLUMNS 순서. 마지막 칸(`extra`)은 psycopg 가 dict 를 jsonb 로 바꾸지 않으므로
-    여기서 감싼다 -- 부르는 쪽이 감싸면 CSV 로더와 테스트가 각자 다른 모양을 넘긴다."""
+    """rows follows ASPECT_COLUMNS order. The last field (`extra`) is wrapped here because psycopg does
+    not turn a dict into jsonb on its own -- if the caller had to wrap it instead, the CSV loader and
+    the tests would each pass a different shape."""
     return _write(cur, ASPECT_SQL, [(*row[:-1], Json(row[-1] or {}), version, active) for row in rows])
 
 
@@ -122,7 +129,8 @@ def version_rows(cur: psycopg.Cursor[Any], kind: str, version: int) -> int:
 
 
 def activate(cur: psycopg.Cursor[Any], kind: str, version: int) -> int:
-    """빈 버전을 켜면 SET active = (version = n) 이 그 kind 를 통째로 끄고 아무 오류도 남기지 않는다."""
+    """Activating an empty version has SET active = (version = n) turn that whole kind off, with no
+    error raised."""
     if not version_rows(cur, kind, version):
         raise LookupError(f"{kind} has no rows at version {version}; nothing to activate")
     if kind == ASPECT_KIND:
@@ -154,8 +162,9 @@ def _read(
 
 
 def _read_csv(cur: psycopg.Cursor[Any], kind: str, rows: Sequence[Sequence[Any]]) -> dict[str, str]:
-    """CSV 행들을 **DB 와 같은 식**으로 렌더한다. 빈 CSV 는 SQL 이 아니라 빈 사전이다 --
-    `VALUES` 에 행이 없으면 문법 오류이고, 그 오류는 "CSV 가 비었다"보다 나쁜 말이다."""
+    """Renders CSV rows through **the same expression as the DB**. An empty CSV is an empty dict, not
+    SQL -- `VALUES` with no rows is a syntax error, and that error says something worse than "the CSV
+    was empty"."""
     if not rows:
         return {}
     if kind == ASPECT_KIND:
@@ -192,7 +201,8 @@ def diff(cur: psycopg.Cursor[Any], kind: str, version: int, against: int) -> Dif
 
 
 def csv_rulesets(kind: str, rows: Sequence[Sequence[Any]]) -> list[str]:
-    """CSV 가 말하는 룰셋. aspect 가 아니면 좁힐 축이 없어 빈 목록이다."""
+    """The rulesets a CSV names. If it is not aspect, there is no axis to narrow by, so this is
+    empty."""
     if kind != ASPECT_KIND:
         return []
     at = ASPECT_COLUMNS.index("ruleset")
@@ -200,8 +210,9 @@ def csv_rulesets(kind: str, rows: Sequence[Sequence[Any]]) -> list[str]:
 
 
 def diff_csv(cur: psycopg.Cursor[Any], kind: str, rows: Sequence[Sequence[Any]], against: int) -> Diff:
-    """적재 원본 CSV 한 벌을 DB 의 한 버전과 맞댄다 (포크 #62). `rows` 는 `insert_*` 가 받는 그 순서다 --
-    적재와 대조가 같은 변환을 타야 "이 CSV 가 그 버전인가"의 답이 적재의 답과 같다."""
+    """Compares one loading-source CSV against a DB version (fork #62). `rows` is the same order
+    `insert_*` takes -- loading and comparing must go through the same transform for the answer to "is
+    this CSV that version" to agree with what loading itself would answer."""
     rulesets = csv_rulesets(kind, rows)
     label = f"v{against}" + (f" (ruleset={','.join(rulesets)})" if rulesets else "")
     return _compare(kind, "csv", label, _read_csv(cur, kind, rows), _read(cur, kind, against, rulesets))

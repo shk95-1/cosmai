@@ -47,7 +47,12 @@ def git(*args: str, cwd: Path) -> subprocess.CompletedProcess:
 
 @pytest.fixture
 def gitrepo(tmp_path: Path) -> Path:
-    """A repo with a `remote/main` branch and both an ancestor and a non-ancestor commit."""
+    """A repo with `main` and `remote/main` diverging from a shared commit.
+
+    `remote/main` carries one commit only it has (the truly foreign one); `main` carries one
+    commit only it has. The shared commit before the fork (#203's divergence point) is an
+    ancestor of both and must never itself be reported as a foreign close.
+    """
     repo = tmp_path / "repo"
     repo.mkdir()
     git("init", "-q", "-b", "main", ".", cwd=repo)
@@ -56,8 +61,13 @@ def gitrepo(tmp_path: Path) -> Path:
     git("commit", "-qm", "chore: seed", cwd=repo)
     (repo / "a.txt").write_text("b\n", encoding="utf-8")
     git("add", "-A", cwd=repo)
-    git("commit", "-qm", "feat: upstream change", cwd=repo)
-    git("branch", "remote/main", cwd=repo)  # remote/main includes the foreign commit
+    git("commit", "-qm", "feat: shared history", cwd=repo)  # the divergence point
+    git("branch", "remote/main", cwd=repo)
+    git("checkout", "-q", "remote/main", cwd=repo)
+    (repo / "a.txt").write_text("d\n", encoding="utf-8")
+    git("add", "-A", cwd=repo)
+    git("commit", "-qm", "feat: genuinely foreign change", cwd=repo)  # only remote/main has this
+    git("checkout", "-q", "main", cwd=repo)
     (repo / "a.txt").write_text("c\n", encoding="utf-8")
     git("add", "-A", cwd=repo)
     git("commit", "-qm", "fix: local change", cwd=repo)
@@ -102,7 +112,7 @@ def run(tmp_path: Path, gitrepo: Path):
 
 
 def test_an_issue_closed_by_a_foreign_commit_is_reported(run, gitrepo: Path):
-    foreign_commit = git("rev-parse", "main~1", cwd=gitrepo).stdout.strip()
+    foreign_commit = git("rev-parse", "remote/main", cwd=gitrepo).stdout.strip()
     done = run(
         issues=[{"number": 38, "title": "패널 43채널 재수집"}],
         timelines={38: [{"event": "closed", "commit_id": foreign_commit}]},
@@ -126,11 +136,45 @@ def test_an_issue_closed_by_our_own_commit_is_not_reported(run, gitrepo: Path):
     assert done.stdout == ""
 
 
+def test_a_close_by_the_shared_pre_divergence_commit_is_not_reported(run, gitrepo: Path):
+    # #203: the commit both mains share from before they diverged reached remote/main through
+    # no foreign close at all -- it must not be flagged just because it is also an ancestor of
+    # remote/main.
+    shared_commit = git("rev-parse", "remote/main~1", cwd=gitrepo).stdout.strip()
+    done = run(
+        issues=[{"number": 41, "title": "shared pre-divergence commit"}],
+        timelines={41: [{"event": "closed", "commit_id": shared_commit}]},
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == ""
+
+
+def test_mains_converged_prints_the_guard_line_and_exits_0(run, gitrepo: Path):
+    # #203: once this repo's main is fully contained in remote/main, every commit is trivially
+    # "reachable from remote/main" and the check has nothing left to distinguish.
+    git("checkout", "-q", "remote/main", cwd=gitrepo)
+    git("merge", "-q", "--no-ff", "-X", "ours", "-m", "merge: converge", "main", cwd=gitrepo)
+    git("checkout", "-q", "main", cwd=gitrepo)
+    git("merge", "-q", "--ff-only", "remote/main", cwd=gitrepo)
+    main_sha = git("rev-parse", "main", cwd=gitrepo).stdout.strip()
+    converged_sha = git("rev-parse", "--short", "main", cwd=gitrepo).stdout.strip()
+    done = run(
+        issues=[{"number": 38, "title": "should not be listed"}],
+        timelines={38: [{"event": "closed", "commit_id": main_sha}]},
+    )
+    assert done.returncode == 0, done.stdout
+    expected = (
+        f"mains converged at {converged_sha} — post-merge check has nothing to "
+        "distinguish; use --predict before the next merge\n"
+    )
+    assert done.stdout == expected, done.stdout
+
+
 def test_a_second_page_of_closed_issues_is_read(run, gitrepo: Path):
     # `gh api --paginate` concatenates each page's array back to back on stdout; a script that
     # reads only the first page would silently miss whatever a repo's second page holds
     # (#175 review, should-fix 3).
-    foreign_commit = git("rev-parse", "main~1", cwd=gitrepo).stdout.strip()
+    foreign_commit = git("rev-parse", "remote/main", cwd=gitrepo).stdout.strip()
     page1 = json.dumps([{"number": 38, "title": "1페이지"}])
     page2 = json.dumps([{"number": 58, "title": "2페이지"}])
     done = run(

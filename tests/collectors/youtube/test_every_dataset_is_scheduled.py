@@ -2,7 +2,7 @@
 
 Same recorded failure, other collector: a dataset with a collector and no cron line runs zero times
 and says nothing (playbook 02-test-discipline.md T10 -- three commerce walks stopped for two days in
-2026-08 exactly that way). contracts/entrypoints.md §스케줄 named youtube's periods while
+2026-08 exactly that way). contracts/entrypoints.md §Schedule named youtube's periods while
 stack/crontab held none of them, so all four were in that state at once.
 
 The contract states youtube as periods (`watch 1h`), not as cron lines the way it states commerce --
@@ -30,13 +30,13 @@ _PERIOD = re.compile(r"(?P<dataset>[a-z_]+)\s+(?P<count>\d+)(?P<unit>[mhd])\b")
 
 def _schedule_block() -> str:
     text = ENTRYPOINTS_MD.read_text(encoding="utf-8")
-    start = text.index("## 스케줄")
+    start = text.index("## Schedule")
     fence_start = text.index("```", start) + 3
     return text[fence_start : text.index("```", fence_start)]
 
 
 def contract_periods() -> dict[str, int]:
-    """`{dataset: seconds}` from the §스케줄 block's `youtube: watch 1h · flatten 15m · ...` line."""
+    """`{dataset: seconds}` from the §Schedule block's `youtube: watch 1h · flatten 15m · ...` line."""
     for raw in _schedule_block().splitlines():
         head, sep, rest = raw.partition("youtube:")
         if not sep or head.strip():
@@ -91,9 +91,9 @@ CRON_PERIODS = cron_periods()
 
 def test_the_contract_names_a_period_for_every_youtube_dataset():
     # Without this, dropping a dataset from the contract line would quietly shrink the comparison
-    # below instead of failing -- the same guard the commerce file keeps over its §스케줄 times.
+    # below instead of failing -- the same guard the commerce file keeps over its §Schedule times.
     assert set(CONTRACT_PERIODS) == {d.value for d in Dataset}, (
-        f"contracts/entrypoints.md §스케줄 names periods for {sorted(CONTRACT_PERIODS)}, "
+        f"contracts/entrypoints.md §Schedule names periods for {sorted(CONTRACT_PERIODS)}, "
         f"but every youtube dataset is {sorted(d.value for d in Dataset)}"
     )
 
@@ -112,5 +112,5 @@ def test_the_cron_line_repeats_at_the_contracted_period(dataset: str):
     assert dataset in CRON_PERIODS, f"{dataset} has a period in the contract but no line in crontab.d"
     assert CRON_PERIODS[dataset] == [CONTRACT_PERIODS[dataset]], (
         f"stack/crontab.d repeats youtube {dataset} every {CRON_PERIODS[dataset]}s, "
-        f"contracts/entrypoints.md §스케줄 says every {CONTRACT_PERIODS[dataset]}s"
+        f"contracts/entrypoints.md §Schedule says every {CONTRACT_PERIODS[dataset]}s"
     )
