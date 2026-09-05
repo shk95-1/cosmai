@@ -13,6 +13,7 @@ git history, and this checkout's history is not a fixture anybody can pin.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -499,3 +500,67 @@ def test_a_comment_only_trigger_file_next_to_a_real_trigger_change_is_class_a(re
     scope = classify(repo, base)
     assert scope.klass == "A", scope.raw
     assert "002.sql" in scope.reason, scope.reason
+
+
+# ---------------------------------------------------------------------------------------------
+# Review 2026-09-05 fix round: the none list must not preempt the readers map, and one-sided
+# merges are trigger candidates too.
+# ---------------------------------------------------------------------------------------------
+
+
+def _load_real_module():
+    """The module under test, loaded from THIS checkout's own tool/change_scope.py -- blocker 1
+    asks for verification against the real repo, not only a fixture, because the real readers map
+    is what has to actually name tests/test_corpus_import.py.
+    """
+    spec = importlib.util.spec_from_file_location("change_scope_real", CLASSIFIER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_nested_readme_is_selected_by_the_real_repos_readers_map():
+    # Review 2026-09-05 blocker 1: contracts/README.md is read by name (Path("contracts") /
+    # "README.md") in tests/test_corpus_import.py -- the none list's bare "README" entry must not
+    # swallow it before the readers map gets a look.
+    module = _load_real_module()
+    test_files = module.all_test_files(REPO_ROOT)
+    found = module.readers_of(REPO_ROOT, "contracts/README.md", test_files, {})
+    assert "tests/test_corpus_import.py" in found, found
+
+
+def test_a_root_readme_only_change_is_class_c_with_no_tests(repo: Path):
+    # A repository-root README has no test of its own and nothing nests inside it, unlike
+    # contracts/README.md -- the bare "README" none-list entry is scoped to exactly this.
+    scope = change(repo, "README.md", "# Old\n", "# New\n")
+    assert scope.klass == "C", scope.raw
+    assert scope.tests == [], scope.tests
+
+
+def test_unreachable_does_not_flag_a_tool_star_reader_or_a_docs_test():
+    # Review 2026-09-05 blocker 3 and 4: tests/test_ruff_extend_include.py is now pinned under
+    # "tool/*" in [readers], and tests/test_agents_md.py is named by AGENTS.md and sits in `docs` --
+    # `--unreachable`'s model has to see both, not just the map/readers-table/closure/smoke union.
+    module = _load_real_module()
+    unreachable = set(module.unreachable_tests(REPO_ROOT))
+    assert "tests/test_ruff_extend_include.py" not in unreachable, unreachable
+    assert "tests/test_agents_md.py" not in unreachable, unreachable
+
+
+def test_an_ordinary_merge_into_an_unmoved_main_is_still_a_joining_merge(repo: Path):
+    # Review 2026-09-05 blocker 2: the shape almost every wave merge and fork PR actually has --
+    # main has not moved since the branch forked, so the first side of the merge is empty. The old
+    # "both sides must be non-empty" rule let exactly this shape through as small.
+    write(repo, "root.py", "x = 1\n")
+    base = commit(repo, "root")
+    subprocess.run(["git", "-C", str(repo), "branch", "feature"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "feature"], check=True)
+    write(repo, "tool/thing.py", "y = 1\n")
+    write(repo, "tests/test_thing.py", "def test_a():\n    assert 1\n")
+    commit(repo, "feature change")
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(repo), "merge", "--no-ff", "-m", "merge feature", "feature"], check=True)
+    scope = classify(repo, base)
+    assert scope.klass == "A", scope.raw
+    assert "merge" in scope.reason.lower(), scope.reason

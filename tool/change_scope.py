@@ -13,9 +13,12 @@ identical to the base -- format and lint, and nothing recorded.
 The questions are asked in that order of authority: the gate list first (unconditional -- no proof
 talks it down), a dynamic-import root next (also unconditional -- nothing traces those imports),
 a joining merge next, then the trigger list (#230: A unless tool/checks/invariants proves every
-changed trigger-list file moved no code), then the no-answer paths (#231 item 3), then the computed
-set, and only then the cheap class for what is left -- so a path whose blast radius is the
-repository can never be talked down by a guess about what its diff happens to look like (#215
+changed trigger-list file moved no code). Everything left goes through the map, the readers map
+and the import closure together, per file; only a file none of those three claim falls back to the
+no-answer paths (#231 item 3) -- checked last, not first, so a none-list path a test still reads by
+name (`contracts/README.md`) is never preempted by the fact that it is also, say, a README (review
+2026-09-05 blocker 1). Only then the cheap class for what is left -- so a path whose blast radius is
+the repository can never be talked down by a guess about what its diff happens to look like (#215
 review C1). Class C is not a guess either -- it is what tool/checks/invariants proved, file by
 file, with every string constant compared as code.
 
@@ -69,16 +72,23 @@ def exists_at_head(path: str) -> bool:
 
 
 def is_none_path(path: str, none_list: list[str]) -> bool:
-    """#231 item 3: a path nothing at runtime reads -- class C, no tests, comment-only or not."""
+    """#231 item 3: a path nothing at runtime reads -- class C, no tests, comment-only or not.
+
+    This is consulted only as the last resort, after the map, the readers map and the closure have
+    all had a chance to claim the path (review 2026-09-05 blocker 1): `contracts/README.md` is read
+    by name by several tests, and the none verdict must never preempt that.
+    """
     name = path.rsplit("/", 1)[-1]
     for entry in none_list:
         if entry.endswith("/"):
             if path.startswith(entry):
                 return True
         elif "." not in entry:
-            # A bare name like "README" or "LICENSE" matches the file and its variants
-            # (README.md, README.ko.md, LICENSE.txt), never an unrelated file that merely
-            # contains the word.
+            # A bare name like "README" or "LICENSE" names the repository's own file, never a
+            # same-named file nested somewhere else (contracts/README.md is not this) -- no "/"
+            # in the path at all (review 2026-09-05 blocker 1).
+            if "/" in path:
+                continue
             if name == entry or name.startswith(entry + "."):
                 return True
         elif name == entry:
@@ -114,7 +124,13 @@ def scope_of(path: str, entries: dict[str, list[str]]) -> tuple[str, list[str]] 
 
 
 def all_test_files(root: Path) -> list[str]:
-    """Every `tests/**/test_*.py` tracked at HEAD -- what the readers map and the closure search."""
+    """Every `tests/**/test_*.py` tracked at HEAD -- what the readers map and the closure search.
+
+    Fix-when-touched (review 2026-09-05): a reader that lives inside a `tests/conftest.py` fixture
+    rather than a `test_*.py` file is invisible to both this scan and the readers map it feeds --
+    `tests/conftest.py` is on the gate list, so a change to the fixture itself is already class A,
+    but a change to whatever non-code file the fixture globs would slip past the readers map today.
+    """
     out = git("ls-tree", "-r", "--name-only", "HEAD", "--", "tests").split("\n")
     return sorted(p for p in out if p.rsplit("/", 1)[-1].startswith("test_") and p.endswith(".py"))
 
@@ -246,8 +262,13 @@ def merge_trigger(root: Path, base: str) -> str | None:
     """A merge at HEAD whose two sides touch different top-level areas is a wave or a fork PR
     joining several channels, and earns class A the same as a trigger-list file (#231 Work 2). A
     merge whose second parent only brings in main is not: when the second parent IS the commit
-    `base` resolves to, the merge is a branch catching itself up, not two channels meeting, and
-    when the second parent brings in nothing new at all there is simply nothing to compare.
+    `base` resolves to, the merge is a branch catching itself up, not two channels meeting.
+
+    Bailing only requires BOTH sides to be empty (review 2026-09-05 blocker 2): the ordinary shape
+    -- branch off an unmoved main, merge straight back -- has an empty first side (main moved
+    nothing of its own) and a real second side, and is exactly the wave/fork join this rule exists
+    to catch, not the exception. An empty side differs from any non-empty one by definition, so it
+    is treated as a trigger candidate the same as two non-empty, disjoint sides.
     """
     parents = [p for p in git("rev-parse", "HEAD^@", check=False).split("\n") if p]
     if len(parents) != 2:
@@ -261,8 +282,10 @@ def merge_trigger(root: Path, base: str) -> str | None:
         return None
     side1 = [f for f in git("diff", "--name-only", "--no-renames", merge_base, p1).split("\n") if f]
     side2 = [f for f in git("diff", "--name-only", "--no-renames", merge_base, p2).split("\n") if f]
-    if not side1 or not side2:
+    if not side1 and not side2:
         return None
+    if not side1 or not side2:
+        return "a merge joins several channels"
     keys1 = {f.split("/", 1)[0] for f in side1}
     keys2 = {f.split("/", 1)[0] for f in side2}
     if keys1 - keys2 and keys2 - keys1:
@@ -270,12 +293,41 @@ def merge_trigger(root: Path, base: str) -> str | None:
     return None
 
 
+# Directories readers_of's basename/path scan is meant for -- data a test reads by name rather
+# than code it imports (#231 Work 1b, review 2026-09-05 blocker 4). Not playbook/: it is entirely
+# on the `none` list already (nothing imports it, tests/scope.toml says so), and its snippets/
+# subdirectory carries copies of tool/checks/{test,format,lint,prerequisite} named with exactly
+# those four generic basenames -- a naive basename scan over them matches nearly every test file in
+# the tree (the word "test" alone) and would make the audit blind to real gaps, not accurate.
+READER_SCAN_DIRS = ("contracts/", "db/", "stack/", "eval/")
+
+
+def non_code_reader_candidates(root: Path, trigger: list[str]) -> list[str]:
+    """Every tracked non-`.py` file the readers scan could ever be asked about for a real change --
+    the same universe `readers_of` is consulted over in `classify()`, minus whatever the trigger
+    list would intercept first: a real change under `contracts/ddl/` never reaches the readers map
+    at all (it is class A on its own), and a comment-only one short-circuits to class C before the
+    readers map is consulted either, so a reader of such a file is not reachable through this path.
+    """
+    tracked = [p for p in git("ls-tree", "-r", "--name-only", "HEAD").split("\n") if p]
+    out = []
+    for path in tracked:
+        if path.endswith(".py") or any(path.startswith(prefix) for prefix in trigger):
+            continue
+        if any(path.startswith(d) for d in READER_SCAN_DIRS) or "/fixtures/" in path:
+            out.append(path)
+    return out
+
+
 def unreachable_tests(root: Path) -> list[str]:
     config = load(root)
     entries: dict[str, list[str]] = config["map"]  # type: ignore[assignment]
-    readers: dict[str, list[str]] = config.get("readers", {})  # type: ignore[assignment]
+    glob_readers: dict[str, list[str]] = config.get("readers", {})  # type: ignore[assignment]
+    docs: list[str] = config.get("docs", [])  # type: ignore[assignment]
     smoke: list[str] = config.get("smoke", [])  # type: ignore[assignment]
-    test_files = all_test_files(root)
+    trigger: list[str] = config.get("trigger", [])  # type: ignore[assignment]
+    test_files_list = all_test_files(root)
+    test_files = set(test_files_list)
 
     def mark(reachable: set[str], targets: list[str]) -> None:
         for target in targets:
@@ -284,14 +336,22 @@ def unreachable_tests(root: Path) -> list[str]:
             else:
                 # A directory entry (e.g. "tests/tool") selects everything under it, the same as
                 # handing it to pytest -- not just a path equal to the string itself.
-                reachable.update(f for f in test_files if f.startswith(target))
+                reachable.update(f for f in test_files_list if f.startswith(target))
 
     reachable: set[str] = set()
     mark(reachable, smoke)
+    mark(reachable, docs)
     for tests in entries.values():
         mark(reachable, tests)
-    for tests in readers.values():
+    for tests in glob_readers.values():
         mark(reachable, tests)
+    # The readers map's basename/path scan: the same rule readers_of applies per changed file,
+    # run here over every candidate that could ever be the changed file (review blocker 4).
+    for resource in non_code_reader_candidates(root, trigger):
+        reachable.update(readers_of(root, resource, test_files_list, {}))
+    # The import closure: a test reachable by SOME change needs only one resolvable first-party
+    # import of its own -- a deeper (transitive) path always starts with a direct one, so a test
+    # that is nobody's direct importer is nobody's indirect importer either.
     dependents = build_dependents(root)
     for deps in dependents.values():
         reachable.update(d for d in deps if is_test_file(d))
@@ -341,13 +401,6 @@ def classify(base: str) -> tuple[str, str, list[str]]:
         return FULL, f"{failing[0]} is on the trigger list in tests/scope.toml", []
     rest = [p for p in files if p not in trigger_files]
 
-    # No-answer paths (#231 item 3): a real .gitignore/README/.github edit is class C, no tests --
-    # nothing at runtime reads any of these, so there is nothing a test could catch either way.
-    none_files = [p for p in rest if is_none_path(p, none_list)]
-    rest = [p for p in rest if p not in none_files]
-    if none_files and not rest:
-        return DOCS, f"{len(files)} file(s): none of them are read by any test", []
-
     test_files_list = all_test_files(root)
     test_files = set(test_files_list)
     dependents = build_dependents(root) if any(p.endswith(".py") for p in rest) else {}
@@ -356,6 +409,8 @@ def classify(base: str) -> tuple[str, str, list[str]]:
     closure: set[str] = set()
     keys: list[str] = []
     prose_tests: set[str] = set()
+    code: list[str] = []
+    none_only: list[str] = []
     for path in rest:
         if is_test_file(path):
             if not exists_at_head(path):
@@ -365,16 +420,22 @@ def classify(base: str) -> tuple[str, str, list[str]]:
                     [],
                 )
             mapped.add(path)
+            code.append(path)
             continue
         found = False
         covered = scope_of(path, entries)
         if covered is not None:
             key, covers = covered
-            mapped.update(covers)
             keys.append(key)
-            found = True
-            if path.endswith(".md"):
-                prose_tests.update(covers)
+            if covers:
+                # An entry that maps to no tests at all (e.g. "playbook/" = []) has not really
+                # been claimed by anything -- leave `found` for the readers map, the closure, or
+                # the none list to decide, so a solo playbook/ edit still gets the zero-test verdict
+                # rather than the general docs bundle.
+                mapped.update(covers)
+                found = True
+                if path.endswith(".md"):
+                    prose_tests.update(covers)
         found_readers = readers_of(root, path, test_files_list, glob_readers)
         if found_readers:
             readers.update(found_readers)
@@ -385,18 +446,33 @@ def classify(base: str) -> tuple[str, str, list[str]]:
                 closure.update(found_closure)
                 found = True
         if found:
+            if not path.endswith(".md"):
+                code.append(path)
+            continue
+        # No-answer paths (#231 item 3), consulted only now that the map, the readers map and the
+        # closure have all had their say (review 2026-09-05 blocker 1) -- a real .gitignore/README/
+        # .github/playbook edit that nothing else claims is class C, no tests, comment-only or not.
+        # Checked before the generic Markdown skip below: playbook/ is prose too, and it must reach
+        # the zero-test verdict the same as a non-Markdown none path, not the general docs bundle.
+        if is_none_path(path, none_list):
+            none_only.append(path)
             continue
         if path.endswith(".md"):
             continue  # prose with no test behind it costs nothing to verify
         subdir_target = tests_subdir_target(path)
         if subdir_target is not None:
             mapped.update(subdir_target)
+            code.append(path)
             continue
         return FULL, f"{path} maps to no entry in tests/scope.toml", []
 
+    # Nothing else in the change contributed a single test: whatever it touched, none of it is read
+    # by anything (#231 item 3's "none" class carries no tests at all, not even the docs bundle).
+    if none_only and not mapped and not readers and not closure and not code:
+        return DOCS, f"{len(files)} file(s): none of them are read by any test", []
+
     # Only now the cheap class, and only for what is left: Markdown, plus code that tool/checks/
     # invariants proves moved nothing -- comments and docstrings, with every string constant compared.
-    code = [f for f in rest if not f.endswith(".md")]
     if not invariant_failures(root, base, code):
         return (
             DOCS,

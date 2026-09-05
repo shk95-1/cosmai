@@ -30,6 +30,9 @@ trigger = [
     "db/views/",
     "db/migrate.sh",
     "db/bootstrap",
+    # A deploy artifact, the same as db/views/ and db/migrate.sh: the role grants a deploy applies,
+    # not a one-off backfill (review 2026-09-05, the issue's open question).
+    "db/grants/",
     "tests/conftest.py",
     "tests/scope.toml",
     "tool/checks/",
@@ -257,3 +260,6 @@ none = [
     "tests/collectors/commerce/test_every_dataset_is_collected_and_scheduled.py",
     "tests/collectors/youtube/test_every_dataset_is_scheduled.py",
 ]
+# tests/test_ruff_extend_include.py rglobs the whole tool/ tree for python-shebang scripts (#202,
+# #220) rather than naming any one of them, so the readers map's basename scan can never find it.
+"tool/*" = ["tests/test_ruff_extend_include.py"]
