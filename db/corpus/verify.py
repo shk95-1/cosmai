@@ -1,8 +1,9 @@
-"""매니페스트의 `reproduces` 세 숫자를 반입분 위에서 다시 센다 (포크 #4 의 2번).
+"""Recounts the manifest's three `reproduces` numbers on top of what was imported (fork #4, item 2).
 
-이 세 숫자는 EPIC 이 "cosmai 위에서 같은 뜻의 숫자가 나오는가"를 묻는 대조군이다. 여기서 하는 일은
-**같은 정의를 SQL 로 다시 쓰는 것**이지 숫자를 맞추는 것이 아니다 -- 어긋나면 반입이 틀렸거나 계약
-해석이 틀린 것이고, 둘 다 고칠 곳은 이 함수가 아니다.
+These three numbers are the control the EPIC uses to ask "does cosmai produce the same numbers with the
+same meaning". What happens here is **rewriting the same definition in SQL**, not making the numbers
+match -- if they disagree, either the import is wrong or the contract's reading of it is wrong, and
+neither is something this function should be fixing.
 
 정의(manifest.reproduces.재현_방법):
   document 에서 content_type=video_long 이고 channel.panel_role=product 이며 mention 에
@@ -23,8 +24,9 @@ TOPIC_ID = "선크림"
 PANEL_ROLE = "product"
 LONG_FORM = "video_long"
 
-# 패널은 언제나 `panel_channel` 의 활성 판본을 거쳐 읽는다 -- 맨 `WHERE active` 는 활성 판본이 둘일 때
-# 분모를 조용히 두 배로 만든다(포크 #4 본문, #31 리뷰). 판본 번호는 `panel.active_version` 이 고른다.
+# The panel is always read through `panel_channel`'s active version -- a bare `WHERE active` quietly
+# doubles the denominator if there are ever two active versions (fork #4's body, #31 review). The
+# version number is chosen by `panel.active_version`.
 REPRODUCE_SQL: LiteralString = """
 WITH videos AS (
   SELECT d.source_item_id
@@ -58,7 +60,7 @@ def reproduce(
     panel_version: int | None = None,
     topic_id: str = TOPIC_ID,
 ) -> dict[str, int]:
-    """세 숫자를 `manifest.reproduces` 와 같은 이름으로 돌려준다."""
+    """Returns the three numbers under the same names as `manifest.reproduces`."""
     with conn.cursor() as cur:
         snapshot = snapshot_id if snapshot_id is not None else active_snapshot(cur)
         if snapshot is None:

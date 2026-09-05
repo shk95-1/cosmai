@@ -1,26 +1,29 @@
-# stack/Dockerfile 의 이미지 + supercronic. 한 장이 아니라 두 장인 이유:
-#   - stack/Dockerfile 은 배포가 검사하는 이미지다. 마지막 RUN 이 `cosmai --help`·`db/migrate.sh
-#     --help`·`ls contracts/ddl/needs/*.sql`·site-packages 임포트를 이미지 안에서 실행하고,
-#     tests/test_image_payload.py 가 그 COPY 범위를 붙들고 있다. 스케줄러를 넣겠다고 그 장을 건드리면
-#     조건 2 의 근거가 되는 파일이 같이 움직인다.
-#   - 한 번만 도는 실행(`docker compose run --rm collector-commerce cosmai analyze all`, db/migrate.sh)
-#     에는 스케줄러가 필요 없다.
+# stack/Dockerfile's image + supercronic. Why two stages rather than one:
+#   - stack/Dockerfile is the image a deploy checks. Its last RUN executes `cosmai --help`,
+#     `db/migrate.sh --help`, `ls contracts/ddl/needs/*.sql`, and a site-packages import inside the
+#     image, and tests/test_image_payload.py holds that COPY scope to account. Touching that stage just
+#     to add a scheduler would move the file that #2's reasoning rests on, along with it.
+#   - A one-shot run (`docker compose run --rm collector-commerce cosmai analyze all`, db/migrate.sh)
+#     needs no scheduler.
 #
-# 빌드 순서는 두 단계다 — 아래 FROM 이 그 결과를 집는다. 둘을 한 번에 도는 것이 tool/stack-build 이고,
-# `compose build` 만 따로 돌리면 안 되는 이유가 그 아래 태그다:
-#   docker build -f stack/Dockerfile -t cosmai-needs:local .   (레포 루트에서)
+# The build happens in two stages -- the FROM below picks up the first stage's result. Running both at
+# once is tool/stack-build's job, and the reason `compose build` alone must never be run is the tag
+# right below this:
+#   docker build -f stack/Dockerfile -t cosmai-needs:local .   (from the repo root)
 #   docker compose -f stack/docker-compose.yml build
 #
-# 기본값이 `cosmai` 가 아닌 이유: 배포 호스트에서 그 이름은 이미 구 fleet 의 아카이브된 앱 이미지이고
-# shared-db 컨테이너 셋이 그것을 돌고 있다. 첫 줄을 건너뛰어도 FROM 은 실패하지 않고 그 이미지를
-# 집는다 — WORKDIR 이 달라서 crontab.d/* 가 없고, 실패가 빌드가 아니라 런타임으로 밀린다.
+# Why the default is not `cosmai`: on the deploy host that name already belongs to the old fleet's
+# archived app image, and the shared-db container set is running it. Skipping the first line does not
+# fail FROM -- it picks up that image instead, which has no crontab.d/* because its WORKDIR differs, so
+# the failure is pushed from build time to runtime.
 ARG COSMAI_IMAGE=cosmai-needs:local
 FROM ${COSMAI_IMAGE}
 
-# supercronic: root 데몬 없는 cron 의미론 — 컨테이너 사용자로 포그라운드에서 돌고 각 작업의 종료 상태를
-# 로그로 남긴다. 그래서 실패한 한 시간이 아무도 안 읽는 메일 스풀이 아니라 `docker logs` 에 남는다.
-# 버전·체크섬은 service/trend-radar/Dockerfile 이 운영에서 쓰고 있는 것과 같은 값이다. linux-amd64
-# 전용이고, 체크섬이 아키텍처가 틀렸거나 변조된 다운로드를 기동 실패가 아니라 빌드 실패로 만든다.
+# supercronic: cron semantics with no root daemon -- runs in the foreground as the container's user and
+# leaves each job's exit status in the log. So a failed hour lands in `docker logs`, not a mail spool no
+# one reads. The version and checksum are the same values service/trend-radar/Dockerfile already runs in
+# production. linux-amd64 only, and the checksum turns a wrong-architecture or tampered download into a
+# build failure instead of a startup failure.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && curl -fsSLo /usr/local/bin/supercronic \
@@ -31,5 +34,6 @@ RUN apt-get update \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
-# 기본 크론탭은 없다: 어느 줄을 도는지는 컨테이너마다 다르고, 그 선택은 compose 의 command 가 한다.
+# No default crontab: which lines run differs per container, and that choice is made by compose's
+# command.
 CMD ["supercronic", "-h"]

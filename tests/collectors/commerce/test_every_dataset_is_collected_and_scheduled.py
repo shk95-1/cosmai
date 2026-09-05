@@ -1,7 +1,7 @@
 """origin: playbook/snippets/test_every_enum_member_is_collected.py (service/trend-radar
 tests/test_every_dataset_has_a_collector.py). A member with a collector and no schedule is a real
 recorded outage (playbook 02-test-discipline.md T10), so every commerce Dataset gets both -- and where
-contracts/entrypoints.md §스케줄 names a time, stack/crontab.d has to actually run at it (review round 1,
+contracts/entrypoints.md §Schedule names a time, stack/crontab.d has to actually run at it (review round 1,
 #7: review_stats drifted to 04:45 with nothing checking it)."""
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def crontab_text() -> str:
 
 def _cron_times_by_dataset(text: str) -> dict[str, tuple[str, ...]]:
     """`{dataset: (minute, hour, dom, month, dow)}` for every `cosmai collect commerce --dataset X`
-    line in `text` -- works on both a stack/crontab.d file and the fenced block in entrypoints.md's §스케줄,
+    line in `text` -- works on both a stack/crontab.d file and the fenced block in entrypoints.md's §Schedule,
     since both spell a cron line the same way."""
     out: dict[str, tuple[str, ...]] = {}
     for raw in text.splitlines():
@@ -47,7 +47,7 @@ def _cron_times_by_dataset(text: str) -> dict[str, tuple[str, ...]]:
 
 def _entrypoints_schedule_block() -> str:
     text = ENTRYPOINTS_MD.read_text(encoding="utf-8")
-    start = text.index("## 스케줄")
+    start = text.index("## Schedule")
     fence_start = text.index("```", start) + 3
     fence_end = text.index("```", fence_start)
     return text[fence_start:fence_end]
@@ -82,12 +82,12 @@ def test_every_dataset_is_scheduled_in_the_commerce_crontab(dataset: Dataset):
 
 
 def test_the_contract_names_a_time_for_every_dataset():
-    # If entrypoints.md §스케줄 stops naming a dataset's time, this fails loudly instead of letting
+    # If entrypoints.md §Schedule stops naming a dataset's time, this fails loudly instead of letting
     # the crontab-time check below silently start covering fewer datasets than it should.
     named = set(CONTRACT_TIMES)
     all_commerce = {d.value for d in Dataset}
     assert named == all_commerce, (
-        f"contracts/entrypoints.md §스케줄 names times for {sorted(named)}, "
+        f"contracts/entrypoints.md §Schedule names times for {sorted(named)}, "
         f"but every commerce dataset is {sorted(all_commerce)}"
     )
 
@@ -97,7 +97,7 @@ def test_crontab_time_matches_the_contract(dataset: str):
     assert dataset in CRONTAB_TIMES, f"{dataset} is scheduled in the contract but not in stack/crontab.d"
     assert CRONTAB_TIMES[dataset] == CONTRACT_TIMES[dataset], (
         f"stack/crontab.d schedules {dataset} at {' '.join(CRONTAB_TIMES[dataset])}, "
-        f"contracts/entrypoints.md §스케줄 says {' '.join(CONTRACT_TIMES[dataset])}"
+        f"contracts/entrypoints.md §Schedule says {' '.join(CONTRACT_TIMES[dataset])}"
     )
 
 

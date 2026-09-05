@@ -1,4 +1,5 @@
-"""판정 상수는 민담이 아니라 계약이다 — `contracts/interfaces.md` §판정 의 표와 `analysis/judge` 대조 (#40).
+"""The verdict constants are contract rather than folklore — the table of `contracts/interfaces.md` §Verdict
+against `analysis/judge` (#40).
 
 #3 등급 A 리뷰가 넘긴 문장: `TAU` · `DIFFUSION_TAU` · `EVIDENCE_FLOOR` · `W_EVIDENCE` · `W_SCORE` 는
 저장된 값 위에서 맞춰진 산물이라 물려받으면 나중에 아무도 왜 그 값인지 모른다. 그래서 계약 표가 값
@@ -105,7 +106,9 @@ def test_the_document_gate_is_the_number_the_quarter_table_already_checks():
 
 def test_the_stored_digits_are_the_digits_the_contract_pins():
     pinned = next(
-        line for line in INTERFACES.read_text(encoding="utf-8").splitlines() if "판정 자리수:" in line
+        line
+        for line in INTERFACES.read_text(encoding="utf-8").splitlines()
+        if "Verdict decimal places:" in line
     )
     assert dict(DIGITS) == {name: int(digits) for name, digits in re.findall(r"`(\w+)` (\d+)", pinned)}
 

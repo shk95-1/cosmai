@@ -38,7 +38,7 @@ def test_month_and_comment_resolution_follow_formats_md():
     assert comment_resolution(date(2025, 8, 31)) == "year"
 
 
-# 시드가 실제로 여는 슬라이스 CSV 전량 (db/seed/{products,mentions,metrics}.py 의 read_csv 호출).
+# Every slice CSV the seed actually opens (the read_csv calls in db/seed/{products,mentions,metrics}.py).
 SEED_INPUTS = {
     "slice-suncare": ("product_ref.csv", "need_mention.csv", "metrics.csv", "metrics_population.csv"),
     "slice-p1-category-gap": ("product_denominator.csv", "need_mention.csv", "metrics_by_category.csv"),
@@ -55,7 +55,8 @@ SEED_INPUTS = {
 
 
 def test_the_seed_inputs_live_inside_the_repository():
-    """레포 밖을 읽으면 워크트리마다 경로가 달라져 시드 테스트가 조용히 skip 된다 (#79)."""
+    """Reading outside the repo makes the path differ per worktree, and the seed tests quietly skip
+    (#79)."""
     assert DEFAULT_SLICES == REPO_ROOT / "db" / "seed" / "data"
     missing = [
         f"{d}/{name}"
@@ -67,8 +68,9 @@ def test_the_seed_inputs_live_inside_the_repository():
 
 
 def test_no_seed_or_test_module_builds_a_path_out_of_the_repository():
-    """#79 완료 기준: db/ 와 tests/ 어디에도 레포 밖 슬라이스 트리를 가리키는 경로 조각이 없다.
-    산문 인용(`architect/slice-suncare/README.md`)이 아니라 경로 조각만 잡도록 따옴표째 찾는다."""
+    """#79's completion bar: neither db/ nor tests/ has a path fragment pointing at the out-of-repo
+    slice tree anywhere. This searches quote-and-all so it catches only a path fragment, not prose
+    quoting one (`architect/slice-suncare/README.md`)."""
     here = Path(__file__).resolve()
     named = [
         str(p.relative_to(REPO_ROOT))

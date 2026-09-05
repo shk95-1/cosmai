@@ -94,6 +94,7 @@ STATE.md
 contracts/ddl/needs/0[01]*.sql
 contracts/ownership.md
 db/bootstrap.sql
+db/bootstrap_source.sql
 db/grants/
 db/migrate.sh
 tests/tool/

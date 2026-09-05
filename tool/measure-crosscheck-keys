@@ -5,11 +5,12 @@ confirmed list (fork #7).
 Ingredient keys and polarity hints are both substrings over vendor strings, so they suffer the same
 illness -- which is why one tool measures both together.
 
-계약 §성분 이 지는 문장이 이것이다: *키가 무엇을 잡는지는 사람이 한 번 읽어 확인했고, 코퍼스가 자라
-새 물질이 어떤 키에 들어오면 그 사실이 드러나야 한다.* **CI 는 그 일을 할 수 없다** -- 운영 표에 닿지
-못하고, 픽스처에 고정한 문자열 몇 개는 코퍼스가 자라도 절대 깨지지 않는다. 그래서 이 스크립트가 그
-길이고(#6 의 `tool/measure-evidence-fixture` 와 같은 자리), `tests/test_crosscheck_keys.py` 는 목록
-자체의 자기 정합만 진다.
+The sentence the contract's §Ingredients carries is this: *what a key catches was read and confirmed once by
+a person, and when the corpus grows and a new substance enters some key, that fact has to show.* **CI cannot
+do that job** -- it cannot reach the production tables, and a few strings pinned in a fixture never break
+however much the corpus grows. So this script is that path (the same place as #6's
+`tool/measure-evidence-fixture`), and `tests/test_crosscheck_keys.py` carries only the list's own
+self-consistency.
 
 What is red.
 

@@ -1,4 +1,4 @@
-"""민감도·후향 검증 셋 — `contracts/interfaces.md` §민감도 가 정본이다 (포크 #41).
+"""The sensitivity and backtest trio — `contracts/interfaces.md` §Sensitivity is canonical (fork #41).
 
 The rules come from ydc `panel_sensitivity.py` · `backtest.py` · `spam_ad_flags.py`
 (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`, the TEAM_DECISIONS v0.2 definition; unchanged through the import
@@ -44,7 +44,8 @@ from analysis.types import (
     PanelSensitivityRow,
 )
 
-# 뒤집힘으로 셀 최소 폭(%p). 부호만 보면 0 근처를 오가는 셀이 전부 뒤집힘으로 잡힌다 (계약 §민감도).
+# The minimum cell width (%p) for a flip. Go by sign alone and every cell hovering around 0 is caught as a
+# flip (the contract's §Sensitivity).
 MATERIAL_PP = 0.5
 # The panel vocabulary. 022 knows only the two, and the name of the counterfactual population that joins them
 # is not stored, so it lives here.
@@ -71,7 +72,8 @@ PEAK_GONE = "피크 소멸"
 ROSE = "상승"
 FELL = "하락"
 
-# 표시하는 것 셋. ydc 는 사람이 읽는 한국어 라벨로 적고, 여기서는 그 셋을 이름으로 든다 (계약 §민감도).
+# The three things marked. ydc writes them as human-readable Korean labels; here the three are held by name
+# (the contract's §Sensitivity).
 AD_VIDEO = "ad_video"
 CREATOR_COMMENT = "creator_comment"
 PROMO_COMMENT = "promo_comment"
@@ -375,8 +377,9 @@ def panel_sensitivity(population: Population, topics: Sequence[str]) -> list[Pan
     """Does the panel composition change the conclusion -- the product-only output and the all-43-channel
     output are run side by side.
 
-    개별 채널을 옮기는 대신 선택 자체의 영향을 재는 것은, ydc 가 재분류를 시도해 **텍스트 지표로는 두
-    집단이 구분되지 않는다**는 것을 실측했기 때문이다 (계약 §민감도).
+    Measuring the effect of the choice itself rather than moving individual channels is because ydc tried the
+    reclassification and measured that **the two groups are not told apart by text metrics** (the contract's
+    §Sensitivity).
     """
     base_counts, _panel, base_quarters = counts(population, roles=(PRODUCT,))
     all_counts, _all_panel, all_quarters = counts(population, roles=ALL_ROLES)
@@ -464,7 +467,8 @@ def backtest(
     hits = level = cells = 0
     for cutoff, target in cutoffs:
         before_window = prior_quarters(quarters, target, LOOKBACK)
-        # 급상승한 분기 T 자체를 뺀 직전 구간. 두 기준을 다 내는 이유는 계약 §민감도.
+        # The previous window with the surging quarter T itself removed. Why both bases are emitted is the
+        # contract's §Sensitivity.
         excl_window = [q for q in prior_quarters(quarters, target, LOOKBACK + 1) if q != target]
         after_window = next_quarters(quarters, cutoff, HORIZON)
         as_of = metrics(population, topics, frame, cutoff=cutoff)

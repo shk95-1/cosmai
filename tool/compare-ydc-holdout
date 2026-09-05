@@ -97,8 +97,8 @@ def _constants(source: Any) -> int:
     body = inspect.getsource(source.report)
     differ = _same("MATERIAL_PP (report literal)", "abs(d) <= 1.5" in body, holdout.MATERIAL_PP == 1.5)
     differ += _same("RANK_TOP (report literal)", "ra[:2] == rb[:2]" in body, holdout.RANK_TOP == 2)
-    # 옮기지 **않은** 규칙이라, 원본에 그것이 아직 있는지를 확인한다. 사라지면 우리 계약의 근거 문장이
-    # 원본을 잘못 인용하고 있다는 뜻이다 (계약 §홀드아웃 상수).
+    # a rule we did **not** carry over, so this checks the original still has it. If it disappears, the
+    # grounds sentence of our contract is misquoting the original (the contract's §Holdout constants).
     differ += _same(
         "the source has the lowest-rank match rule (we did not port it)", "ra[-1] == rb[-1]" in body, True
     )

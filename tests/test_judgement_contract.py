@@ -1,9 +1,10 @@
 """Contract test: 판정 표는 집계가 아니라 파생이다 — 024 와 계약 문장이 같은 것을 말한다 (포크 #40).
 
-이 이슈에서 가장 조용히 틀릴 수 있는 자리가 **산출을 어디에 두나**였다. 이름을 `metrics_*` 로 두면
-`formats.md` §시간 의 "집계 그레인의 정본" 표에 줄을 더해야 하고, 그러면 분기 그레인의 정본이 둘이
-된다. 판정 표가 거기 없어도 되는 이유는 취향이 아니라 성질이다 — 세는 칸이 하나도 없고, 지표 행의
-기본키 여덟 칸이 그대로 이 표의 키이자 FK 다. 이 파일이 그 성질을 기계로 붙든다.
+The place this issue could most quietly get wrong was **where to put the output**. Name it `metrics_*` and a
+line has to be added to the "canonical table per aggregate grain" table of `formats.md` §Time, and then the
+quarterly grain has two canonical tables. Why the verdict table need not be there is a property rather than a
+taste — it has not one counting column, and the metric row's eight primary-key columns are this table's key
+and FK as they are. This file holds that property by machine.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ VIEW = ROOT / "db" / "views" / "topic_quarter_judgement_violation.sql"
 
 TABLE = "topic_quarter_judgement"
 QUARTER = "metrics_topic_quarter"
-GRAIN_HEADER = "| 그레인 | 정본 표 | 행의 시간 칸 |"
+GRAIN_HEADER = "| grain | canonical table | the row's time slot |"
 # 세는 칸들. 이 중 하나라도 판정 표에 서면 그 순간 이 표는 집계이고, 그레인 표가 답해야 할 질문이 둘이 된다.
 COUNTING = ("mentions", "documents", "quarter_mentions", "denom_channels", "channel_count", "persistence")
 
@@ -90,8 +91,8 @@ def test_the_grain_table_does_not_list_it_and_says_why():
 
 def test_the_contract_calls_the_judgement_a_derivation_not_an_aggregate():
     """문장이 없으면 다음 사람이 같은 질문을 처음부터 다시 연다."""
-    assert "집계가 아니라 파생" in INTERFACES.read_text(encoding="utf-8")
-    assert "집계가 아니라 파생" in DDL.read_text(encoding="utf-8")
+    assert "a derivation, not an aggregate" in INTERFACES.read_text(encoding="utf-8")
+    assert "a derivation rather than an aggregate" in DDL.read_text(encoding="utf-8")
 
 
 def test_the_index_of_contracts_names_the_new_migration():

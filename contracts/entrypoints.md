@@ -1,6 +1,6 @@
-# 엔트리 규약
+# Entrypoint contract
 
-## 수집기
+## Collectors
 ```
 cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>]
   collector ∈ {commerce, youtube, naver}
@@ -33,7 +33,7 @@ cosmai login --source <source>
   run as it is (every write is a natural-key upsert). commerce implements it as a per-source session-scoped
   advisory lock (`collectors/commerce/storage/locks.py`).
 
-## DB 접속 노브 (secret 아님)
+## DB connection knobs (not secrets)
 ```
 COSMAI_DB_HOST   default 127.0.0.1
 COSMAI_DB_PORT   default 5434
@@ -53,7 +53,7 @@ COSMAI_DB_PORT   default 5434
   (`SQUEEZED_TIMEOUTS`) · `tests/test_ollama_predictor_connection.py` (the same name) reproduce the
   three limits in compressed form. A review of new DB code uses this bullet as its checklist.
 
-## 공통 운영 뷰 (각 수집기가 제공해야 하는 최소 형태)
+## Common operations view (the minimum shape every collector must provide)
 ```sql
 -- db/views/collector_health.sql UNIONs three arms: commerce (trend_radar.run+fetch_log),
 -- naver (needs.naver_run+naver_fetch_log) and youtube (tubedepth.jobs)
@@ -119,7 +119,7 @@ started/finished/status/versions and that run's `metrics_need`·`metrics_wish` r
 are carried by `analysis_run.note` as name=value pairs. `db/migrate.sh` reapplies it on every deploy
 (CREATE OR REPLACE).
 
-### 단계의 지금 상태 — `needs.pipeline_health`
+### What a stage is doing right now — `needs.pipeline_health`
 
 The two above are **a log with one line per run** and cannot answer "what is stuck right now". That
 answer is carried by `needs.pipeline_health` in `db/views/pipeline_health.sql`, and the expected period
@@ -160,7 +160,7 @@ implementation version and cannot be used as it stands, and a cron line does not
 either. `eval:*`·`trend-quarter:*` are not cron stages and never reach this view. The analysis arm has
 no external fetch, so `requests`·`ok`·`blocked`·`failed`·`p90_ms` are NULL.
 
-### 무엇이 무엇을 먹이는가 — `needs.pipeline_edge`
+### What feeds what — `needs.pipeline_edge`
 
 `pipeline_stage` is a *list* of stages and carries no relations. The relations are carried by
 `needs.pipeline_edge` (DDL 008) — the diagram (#142), state propagation (#143) and lineage tracing
@@ -190,7 +190,7 @@ Two roles read it: `needs_runtime` (the GRANT in the view file) and `postgrest_a
 with nothing. The two upstream views are not opened to anon: what the screen reads is this one view,
 after the verdict.
 
-## 분석
+## Analysis
 ```
 cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
   stage ∈ {link, polarity, aggregate, all}
@@ -198,15 +198,18 @@ cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_ma
 cosmai lexicon {load, activate} --kind <kind> --version <n>
 cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--against <n>]
 ```
-- **`lexicon diff` 는 적재 원본 CSV 를 DB 버전과 맞댈 수 있다**(포크 #62, `--csv`). 그전까지 이 명령은
-  **DB 버전끼리만** 비교했고 `--version` 이 필수였다 — 그래서 "레포의 CSV 가 지금 켜져 있는 사전인가"를
-  물을 길이 레포 안에 없었다(그 물음이 실제로 필요해진 자리는 `interfaces.md` §검색 실측 의 판본 되짚기다).
-  CSV 쪽은 `lexicon load` 가 타는 **그 변환**(`cosmai.cli._csv_rows`)을 그대로 타고, 양쪽 키·값은 **같은 SQL
-  식**으로 만든다 — 한쪽을 파이썬으로 다시 렌더하면 `extra` jsonb 의 키 순서 하나로 전 행이 "바뀜"이 된다.
-  `--against` 없으면 활성 버전이 상대다. **aspect 는 CSV 가 말하는 룰셋으로 좁혀 맞댄다**: 한 aspect 버전에는
-  룰셋이 여럿 살고(`formats.md` §aspect 사전의 ruleset) CSV 는 그중 하나의 적재 원본이라, 안 좁히면 다른
-  룰셋 전부가 "지워짐"으로 나온다. `--version` 과 `--csv` 를 함께 주면 blocked(2) — 어느 쪽이 그 판본인지
-  둘이 말하면 답이 둘이다. 종료 코드는 **갈렸다고 바뀌지 않는다**(0 = 답이 계산됐다).
+- **`lexicon diff` can compare the loaded source CSV against a DB version** (fork #62, `--csv`). Until
+  then this command compared **DB versions only** and `--version` was required — so there was no way inside
+  the repository to ask "is the repository's CSV the dictionary that is switched on now" (the place that
+  question actually became necessary is the version retracing in `interfaces.md` §Retrieval measurements).
+  The CSV side rides **the very conversion** `lexicon load` rides (`cosmai.cli._csv_rows`), and both sides'
+  keys and values are made by the **same SQL expression** — re-render one side in Python and one key order
+  of the `extra` jsonb turns every row into a "change". Without `--against` the active version is the
+  partner. **aspect is narrowed to the ruleset the CSV names before comparing**: several rulesets live in
+  one aspect version (`formats.md` §ruleset) and a CSV is the loaded source of one of them, so without the
+  narrowing every other ruleset comes out as "deleted". Giving `--version` and `--csv` together is
+  blocked (2) — when two things say which version it is, there are two answers. The exit code **does not
+  change because they differ** (0 = an answer was computed).
 - T14: `extract` is not a stage of its own — it only makes candidates and writes no row, so idempotence cannot be observed. Extraction runs inside `polarity` (the `Extractor` protocol is unchanged).
 - B11: `eval aspect` was dropped because both the evaluation set and the baseline are 0 rows. Reviving it means the evaluation set and a row in `interfaces.md`'s baseline table arriving in the same PR.
 - Every step is idempotent by **natural-key upsert**. A re-run produces the same result.
@@ -251,10 +254,11 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   refusal of someone else's scope (before the run opens, `status='failed'` + exit code 1).
   That run's `note` carries `missing=1` and so parts from a full pass (an incremental always reports
   `replaced=0`).
-- `--since <date>` 와는 축이 다르다: `--since` 는 `coalesce(written_at, captured_at)` 로 **읽기와
-  삭제를 함께** 자르고, `--missing` 은 **이미 한 일**을 자른다. 수집이 늦게 오므로(`formats.md` §시간)
-  그 둘은 겹치지 않는다 — 어제 긁힌 옛 리뷰는 롤링 `--since` 가 놓치고, 고정 컷은 컷 이후 전부를 매일
-  다시 판정한다. 크론이 도는 것은 `--missing` 쪽이다.
+- **The axis differs from `--since <date>`**: `--since` cuts **reading and deleting together** on
+  `coalesce(written_at, captured_at)`, while `--missing` cuts **what has already been done**. Collection
+  arrives late (`formats.md` §Time), so the two do not overlap — a rolling `--since` misses an old review
+  scraped yesterday, and a fixed cut re-judges everything after the cut every day. What cron runs is the
+  `--missing` side.
 - **`--since D` narrows the delete too**: only rows with `observed_at >= D` in D's month are deleted
   (`need_mention` and `wish_mention` both). Without the narrowing, that month's rows before D are
   deleted and never rewritten, so every run digs the same hole. The `observed_at` in the delete
@@ -339,7 +343,7 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   그 달을 되찾는 길은 사람이 주인의 패스를 그 달에 다시 돌리는 것 하나뿐이고, 그때까지 남는 증거는 죽은
   run 의 note 에 계속 붙어 있는 `rewriting=` 표식이다.
 
-## 검색 (#28 → 포크 cosmai-import-ydc, upstream PR #59)
+## Search (#28 → fork cosmai-import-ydc, upstream PR #59)
 ```
 cosmai retrieval chunk  [--since <date>] [--source <s>]...
 cosmai retrieval search --query <q> [--engine <e>] [--source <s>]... [--top <n>] [--vectors <path>]
@@ -420,38 +424,45 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   `search` says one stderr line only when tokens were removed, and does not change the exit code (the same
   place as the coverage warning below). **v1 has not been loaded yet** (2026-08-26) — until then the list
   `search` sees is empty and the three rules above are observable only after a load and an activate.
-- **질의마다 엔진을 고르는 라우터는 두지 않는다**(포크 #47). `--engine` 은 사람이 준 값 그대로 간다.
-  ydc `v0.3.0` 의 규칙 라우터(`rag/router.py`)를 승격하지 않았고 그 근거 — 신호 넷 중 둘의 원천이 없어 갈래 둘이 막힌다 ·
-  **성분명 판정의 정본이 토크나이저 사전이 아니다** · 우리 사전 위의 오라우팅 실측 — 은 `interfaces.md`
-  §질의 라우팅 이 진다. 새 하위명령도 새 종료 코드도 늘지 않는다.
-- **벡터 검색에 유사도 하한선을 두지 않는다**(포크 #48). `--engine vector`·`hybrid` 는 코사인이 얼마든
-  상위 `--top` 을 채운다 — 넣지 **않기로 한** 것이고, 진짜 질의(주제 별칭 **61개** — 그 실측이 선 활성
-  사전 v2 의 표본이다. 오늘 활성인 v3 는 63개이고, 다시 재기 전까지 그 표는 v2 판본의 기록이다)와 코퍼스에
-  없는 성분명의 최고 코사인 분포가 갈리지 않는다는 실측이 그 근거다(`interfaces.md` §벡터 하한선). ydc `v0.3.0` 의
-  `vector_threshold.py` 를 승격하지 않았고, 새 옵션도 새 종료 코드도 늘지 않는다.
-- **대신 근거 없는 질의를 청크빈도로 막는다 — `vector`·`hybrid` 에만**(포크 #48,
-  `analysis/retrieval/grounding.py`). 길이 4 이상인 질의 토큰 중 빈도가 0 인 것이 있으면 `search` 는 순위를
-  매기지 않고 stderr 한 줄 + 결과 0건으로 답한다 — 코퍼스가 그 이름을 한 번도 말한 적이 없다는 뜻이라,
-  결과가 나와도 그 이름과 무관한 문서다.
-  **종료 코드는 이미 있는 `1`(결과 없음)이고 새 코드가 늘지 않는다.**
+- **No router that picks an engine per query** (fork #47). `--engine` goes through as the person gave it.
+  ydc `v0.3.0`'s rule router (`rag/router.py`) was not promoted, and the grounds — two of the four signals
+  have no source so two branches are blocked · **the canonical decision on an ingredient name is not the
+  tokeniser dictionary** · the misrouting measurement on our own dictionary — are carried by
+  `interfaces.md` §Query routing. Neither a new subcommand nor a new exit code is added.
+- **No similarity floor on vector search** (fork #48). `--engine vector`·`hybrid` fill the top `--top`
+  whatever the cosine is — it is a thing **decided not** to add, and the ground is the measurement that the
+  top-cosine distributions of real queries (topic aliases, **61 of them** — that measurement stands on the
+  sample of the then-active dictionary v2. Today's active v3 has 63, and until it is measured again that
+  table is a record of the v2 version) and of ingredient names absent from the corpus do not part
+  (`interfaces.md` §Vector floor). ydc `v0.3.0`'s `vector_threshold.py` was not promoted, and neither a new
+  option nor a new exit code is added.
+- **Instead a query with no grounding is stopped by chunk frequency — on `vector`·`hybrid` alone** (fork #48,
+  `analysis/retrieval/grounding.py`). If any query token of length 4 or more has frequency 0, `search` does
+  not rank at all and answers with one stderr line and 0 results — it means the corpus has never once said
+  that name, so even a result that did come out would be a document unrelated to it.
+  **The exit code is the `1` (no results) that already exists and no new code is added.**
   토큰이 0개인 질의(`톤 업`·키릴 표기)는 빈도로 판정하지 않고 통과시킨다 — 막으면 벡터가 유일하게
   답하는 자리를 막는다.
-- **`bm25` 의 동작은 이 이슈 전과 같다.** 어휘 검색은 빈도 0 인 낱말을 idf 0 으로 무시하고 **남은 낱말로
-  답하므로**, 게이트를 걸면 "진짜 주제 + 코퍼스에 아직 없는 신제품 이름" 질의에서 예전에 나오던 부분 답이
-  0건이 된다. 그 손해는 아무도 재지 않았고(질의 로그가 없다), 재지 않은 손해를 감수할 이유가 없다.
-- 그래서 **`--engine vector` 도 BM25 색인을 연다**(게이트가 보는 빈도가 거기 있다). `bm25`·`hybrid` 가
-  이미 내던 비용을 vector 쪽도 내게 된 것이고, 그 대가로 코퍼스에 없는 이름이 상위 k 를 채워 근거로
-  인쇄되는 일이 없어진다. 캐시가 있으면 피클 한 벌, 없으면 38만 청크를 형태소 분석하는 십수 분인데 —
-  **캐시는 `--source` 조합마다 따로다**(`pipeline.index_signature` 가 `sources` 를 문다). 좁혀 쓰는 vector
-  검색은 지금까지 색인을 연 적이 없으므로 그 조합의 캐시가 존재한 적이 없고, **첫 호출이 무조건 십수
-  분**이다. 벡터 파일이 없는 호스트는 그 비용을 치른 **뒤에야** blocked(2)를 본다 — 게이트가 저장소보다
-  앞이다. `retrieval eval` 은 이 게이트를 타지 않는다 — 타더라도 주제 별칭 61개 중 막히는 것이 0개다
-  (`interfaces.md` §벡터 하한선. 위와 같은 v2 판본의 표본이고, v3 가 더한 두 별칭은 아직 이 축으로 재지 않았다).
-- **`--source` 는 후보를 좁힐 뿐 소스별 몫을 주지 않는다**(포크 #54). 좁힌 뒤에도 답은 남은 것 중 전역
-  상위 k 다. ydc 는 소스마다 따로 뽑아 합치지만(색인의 92%가 짧은 댓글이라 `mfds` 가 293위로 밀렸다) 우리
-  코퍼스에는 그 쏠림이 없다 — 지배 소스는 색인의 75.64% 인데 상위 10 은 71.11% 만 가져가고, 색인 6.06% 인
-  `commerce_review` 가 상위 10 의 21.03% 다. 실측과 판정 기준은 `interfaces.md` §소스별 분배, 재는 길은
-  `tool/measure-source-mix` 다.
+- **`bm25` behaves as it did before this issue.** Lexical search ignores a word of frequency 0 as idf 0 and
+  **answers with the words that are left**, so putting the gate on it would turn the partial answer that used
+  to come out of a "a real topic + a new product name not yet in the corpus" query into 0 results. Nobody
+  measured that loss (there is no query log), and there is no reason to accept an unmeasured loss.
+- So **`--engine vector` opens the BM25 index too** (the frequency the gate looks at is there). The cost
+  `bm25`·`hybrid` were already paying is now paid by the vector side as well, and in exchange a name absent
+  from the corpus no longer fills the top k and gets printed as evidence. With a cache it is one pickle,
+  without one it is the ten-odd minutes of morphologically analysing 380,000 chunks — and **the cache is
+  separate per `--source` combination** (`pipeline.index_signature` bites on `sources`). A narrowed vector
+  search has never opened the index until now, so a cache for that combination has never existed, and **the
+  first call is unconditionally those ten-odd minutes**. A host with no vector file sees blocked (2) only
+  **after** paying that cost — the gate comes before the store. `retrieval eval` does not ride this gate —
+  and even if it did, 0 of the 61 topic aliases are stopped (`interfaces.md` §Vector floor. The same v2
+  version's sample as above, and the two aliases v3 added have not been measured on this axis yet).
+- **`--source` only narrows the candidates; it does not give a per-source share** (fork #54). Even after the
+  narrowing the answer is the global top k of what is left. ydc draws per source and merges (92% of its index
+  is short comments, so `mfds` was pushed down to rank 293) but our corpus has no such skew — the dominant
+  source is 75.64% of the index while the top 10 takes only 71.11% of it, and `commerce_review`, 6.06% of the
+  index, is 21.03% of the top 10. The measurement and the criterion are
+  `interfaces.md` §Per-source allocation, and the way to measure it is `tool/measure-source-mix`.
 - `terms` emits, as two stdout tables, the high-frequency nouns that dictionary **misses** and the
   document counts of the dictionary's own surfaces — material for a person to read and fix the CSV above.
   It is not dropped to a file: it is a snapshot of a corpus that grows daily, so keeping it in the repo
@@ -467,9 +478,10 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   reason ("they all disappeared" looks the same as "it could not be read"). What was skipped is said by
   the run's note.
 - **`--vectors` means the same thing in all three subcommands** (the vector store path). `--out` is used by `eval` alone and means the score CSV.
-- **기본 `--engine bm25` 는 literal 용도 기준이다** — heldout 에서 bm25 는 P@10 0.000·Hit 0%, vector 는
-  0.062·25% 인데 literal 에서는 bm25 가 P@10 0.864 로 가장 높다(여섯 줄 전부는 `contracts/interfaces.md`
-  §검색 실측). 탐색 용도의 기본값은 포크 이슈 #11 에서 정한다.
+- **The default `--engine bm25` is the criterion for the literal purpose** — in heldout, bm25 is P@10 0.000
+  and Hit 0% while vector is 0.062 and 25%, but in literal bm25 is the highest at P@10 0.864 (all six lines
+  are `contracts/interfaces.md` §Retrieval measurements). The default for the exploratory purpose is decided
+  in fork issue #11.
 - **`ask` summarizes retrieval results; it is not a verdict** (fork #73, ydc `rag/generate.py`). The same
   evidence a person gets from `search` — gate included — is folded to one item per document (chunks of a
   document concatenated in rank order) and an LLM writes three fixed sections, `## Core` · `## Evidence
@@ -481,11 +493,13 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   it goes out and settled after (`purpose='retrieval_ask'`, the $10 hard stop of `analysis/polarity/pricing`),
   and leaves one row in `needs.retrieval_ask_log` (DDL 026) written after the round trip; the prompt rules,
   the note and the log columns are `interfaces.md` §Answer layer.
-- 종료 코드: 0 ok · 1 partial(`chunk` 의 계약 위반, `search` 의 결과 없음 — 근거 없는 질의가 막힌 것도 여기다, `eval` 의 채점된 질의 0개와
-  `terms` 의 훑은 문서 0건 — 둘 다 청크가 비었다는 뜻이다) · 2 blocked(연결 거절, 벡터 저장소를 읽을 수
-  없음 — 파일이 없는 것과, 매니페스트에 `model`·`query_prefix`·`l2_normalized`·`dim` 이 빠졌거나 그것이
-  행렬과 어긋난 것이 같은 자리다, **활성 주제 사전 없음** — `cosmai lexicon load/activate` 를 아직 안
-  돌렸다는 뜻이라 실패가 아니라 막힘이다). `embed` 에는 partial 이 없다 — 전량 재인코딩이라 반쯤 된 저장소를 남기지 않고, 끝나면 0 이다.
+- exit codes: 0 ok · 1 partial (`chunk`'s contract violation, `search`'s no results — a query stopped for
+  having no grounding is here too, `eval`'s 0 scored queries and `terms`'s 0 documents walked — both mean the
+  chunks were empty) · 2 blocked (connection refused, the vector store unreadable — the file being absent, and
+  the manifest missing `model`·`query_prefix`·`l2_normalized`·`dim` or having them disagree with the matrix,
+  are the same place, **no active topic dictionary** — it means `cosmai lexicon load/activate` has not been
+  run yet, so it is blocked rather than a failure). `embed` has no partial — it is a full re-encode, so it
+  leaves no half-finished store, and when it finishes it is 0.
   `ask`: 0 an answer (or a dry run that had evidence) · 1 no evidence — the gate blocked the query or it had
   0 hits, and the fixed refusal still goes to stdout — and an answer the model cut off at `max_tokens` or
   left empty, which is settled and logged but never passed off as complete · 2 blocked — no active topic
@@ -506,18 +520,22 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   커버리지 경고와 **축이 다르다**: 그쪽은 어긋날 때만 말하므로 정상일 때는 판본이 아무 데도 안 남고, 그
   자리가 ydc 에서 "1차 → 2차" 로 라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 사고다(`v0.3.0` 은
   산출 파일명에 판본을 붙여 고쳤다 — 우리는 파일이 아니라 행으로 내므로 같은 자리가 행이다).
-  **판본 없는 행은 나올 수 없다**: 저장소를 못 열면 그 실행이 통째로 blocked(2)이고, `model` 이 빈
-  저장소는 `load` 가 거절한다(위 blocked 항목). bm25 행은 비어 있다 — 저장소를 열지 않으니 지어낼 판본이
-  없다. 이 열은 종료 코드를 바꾸지 않는다.
-- **평가 행은 주제 사전 판본도 스스로 적는다** (포크 #62). `eval` 은 그 실행이 실제로 읽은 활성 사전의
-  `ruleset`·`version`·주제 수·별칭 수·**내용 지문**을 CSV `dictionary` 열과 stdout 요약 한 줄에 싣는다.
-  바로 위 저장소 판본과 **축이 다르고, 채우는 행의 집합도 다르다**: `store` 는 저장소를 여는 vector·hybrid
-  에만 있지만 `dictionary` 는 **세 엔진 전부**에 있다 — 정답(`match_topics`)도 질의(주제 별칭)도 사전이
-  만들므로 저장소를 안 여는 bm25 행도 사전 위에 서 있다. 번호표만 싣지 않는 이유는 **켜져 있는 버전에 행을
-  더할 수 있어서**다(같은 이유로 `pipeline.index_signature` 도 번호와 지문을 함께 문다). 별칭 수는 `ko`+`latin`
-  만 센다 — `mfds_inci` 는 매칭에도 질의에도 쓰이지 않아 함께 세면 한 낱말이 두 축을 말한다.
-  **판본 없는 행은 나올 수 없다**: 활성 사전이 없으면 그 실행이 통째로 blocked(2)다(위 blocked 항목).
-  이 열은 종료 코드를 바꾸지 않는다. 판본을 다시 찍는 길은 `tool/show-lexicon-stamp` 다.
+  **A row with no version cannot come out**: if the store cannot be opened that whole run is blocked (2), and
+  a store whose `model` is empty is refused by `load` (the blocked item above). The bm25 rows are empty — no
+  store is opened, so there is no version to invent. This column does not change the exit code.
+- **An evaluation row writes down the topic dictionary version itself too** (fork #62). `eval` puts the
+  `ruleset`·`version`·topic count·alias count·**content fingerprint** of the active dictionary that run
+  actually read into the CSV `dictionary` column and one line of the stdout summary. It is **a different axis
+  from** the store version just above, **and the set of rows it fills differs too**: `store` is on vector and
+  hybrid alone, which open the store, while `dictionary` is on **all three engines** — the gold
+  (`match_topics`) and the queries (the topic aliases) are both made by the dictionary, so even a bm25 row,
+  which opens no store, stands on the dictionary. The reason it does not carry the number tag alone is that
+  **rows can be added to the version that is switched on** (for the same reason `pipeline.index_signature`
+  bites on the number and the fingerprint together). The alias count counts `ko`+`latin` only — `mfds_inci`
+  is used neither for matching nor for querying, so counting it in would make one word speak for two axes.
+  **A row with no version cannot come out**: with no active dictionary that whole run is blocked (2) (the
+  blocked item above). This column does not change the exit code. The way to print the version again is
+  `tool/show-lexicon-stamp`.
 - **Vectors are files** — `var/retrieval/vectors/e5base.{npy,ids.csv,manifest.json}`. pgvector is deferred
   to #28 step 4b. The BM25 index is cached as `var/retrieval/bm25/index-<sha16>.pkl` too (key = the chunk
   count + the newest `chunked_at` + the hash of the two Kiwi dictionaries + **the active topic
@@ -532,7 +550,7 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   `uv sync --extra embed` gets removed by the next `tool/checks/test` (which is the right behaviour).
 - For the same reason as `analyze all` it is exempt from the cron-interval rule — it is a DB-and-file job with no external fetch.
 
-## 분기 시계열 (포크 #5, ydc `trend.py` 승격)
+## Quarterly time series (fork #5, ydc `trend.py` promoted)
 ```
 cosmai trend quarter [--url <url>]
 ```
@@ -549,12 +567,12 @@ cosmai trend quarter [--url <url>]
 - After writing it asks `needs.metrics_topic_quarter_violation` back about that run. If the view says
   anything, the exit code is **1** (partial) and stdout carries that line — the table stands, but what the
   table means differs from the contract.
-- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, **활성 명부 없음**·**활성 스냅샷
-  없음**, 모집단이 비어 산출할 행이 없음 — 셋 다 `db/seed --only panel`·`db/corpus load` 를 아직 안
-  돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- exit codes: 0 ok · 1 partial (the invariant violation above) · 2 blocked (connection refused, **no active
+  roster**·**no active snapshot**, the population being empty so there is no row to produce — all three mean
+  `db/seed --only panel`·`db/corpus load` has not been run yet, so it is blocked rather than a failure).
 - `analysis_run.versions.metric` carries the definition version of those rows (`versioning.md`).
 
-## 판정 (포크 #40, ydc `judge.py` 승격)
+## Verdict (fork #40, ydc `judge.py` promoted)
 ```
 cosmai trend judge [--url <url>]
 ```
@@ -569,11 +587,12 @@ cosmai trend judge [--url <url>]
   the 1:1 with the metric rows is kept.
 - After writing it asks `needs.topic_quarter_judgement_violation` back about that run. If the view says
   anything, the exit code is **1** (partial) and stdout carries that line.
-- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
-  지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- exit codes: 0 ok · 1 partial (the invariant violation above) · 2 blocked (connection refused, no active
+  roster or snapshot, **that run has no metric rows** — it means `cosmai trend quarter` has not been run yet,
+  so it is blocked rather than a failure).
 - `analysis_run.versions.judgement` carries the definition version of those rows (`versioning.md`).
 
-## 민감도·후향 검증 (포크 #41, ydc `panel_sensitivity.py`·`backtest.py`·`spam_ad_flags.py` 승격)
+## Sensitivity and backtest (fork #41, ydc `panel_sensitivity.py`·`backtest.py`·`spam_ad_flags.py` promoted)
 ```
 cosmai trend sensitivity [--url <url>]
 ```
@@ -582,15 +601,18 @@ cosmai trend sensitivity [--url <url>]
   past quarters were known) · ad and sponsorship marking (recounted with them removed). The run is found
   by **the same path** as `quarter` and `judge` (the note made from the active snapshot and the active
   roster) — the same reason there are no arguments.
-- **아무것도 쓰지 않는다.** 세 측정이 만드는 행은 반사실 모집단의 것이고 022 의 `panel_role` 어휘에도
-  `analysis_run` 에도 자리가 없다(`interfaces.md` §민감도). 답은 표가 아니라 stdout 이고, 읽기 전용이라 운영 DB 에
-  그대로 돌린다. 저장된 표가 그대로인 것은 `tests/test_sensitivity_pipeline.py` 가 지문으로 붙든다.
+- **It writes nothing.** The rows the three measurements make belong to a counterfactual population and have
+  no place either in 022's `panel_role` vocabulary or in `analysis_run` (`interfaces.md` §Sensitivity). The
+  answer is stdout rather than a table, and being read-only it is run against the production DB as it is.
+  That the stored tables are untouched is held by a fingerprint in `tests/test_sensitivity_pipeline.py`.
 - The baseline is recounted, and if that baseline differs from the stored `metrics_topic_quarter` rows
   that fact (`baseline_drift`) comes first — every difference this command reports is meaningless then.
-- 종료 코드: **0 ok — 답이 계산됐다** · 1 partial(**이 산출을 믿지 마라** — `baseline_drift`, 또는 방향성 판정
-  사례가 둘 미만이라 후향 검증이라 부를 것이 없다(`thin_backtest`)) · 2 blocked(연결 거절, 활성 명부·스냅샷·주제
-  사전 없음, **그 run 에 지표 행이 없음** — `cosmai trend quarter` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
-  막힘이다. 코퍼스가 비었는데 지표 행만 남아 창이 설 분기가 없는 것(`ShortHistory`)도 같은 자리다).
+- exit codes: **0 ok — an answer was computed** · 1 partial (**do not trust this output** — `baseline_drift`,
+  or fewer than two directional verdict cases so there is nothing to call a backtest (`thin_backtest`)) ·
+  2 blocked (connection refused, no active roster, snapshot or topic dictionary, **that run has no metric
+  rows** — it means `cosmai trend quarter` has not been run yet, so it is blocked rather than a failure. The
+  corpus being empty while only metric rows remain, so there is no quarter for the window to stand on
+  (`ShortHistory`), is the same place).
 - **"The conclusion wobbles" is not a 1.** That is the **finding** this command exists to give, not a
   failure of the run, and in the shared convention at the top of this file
   (`0 ok · 1 partial (some failed or were truncated) · 2 blocked`) a 1 means "the output is not intact".
@@ -601,9 +623,9 @@ cosmai trend sensitivity [--url <url>]
   and only `backtest.py` uses 1 for fewer than 2 cases.
 - It is safe on cron (read-only, and 0 is the normal state). But the answer changes only when the corpus
   or the roster changes, so for now a person asks it once and records it on the issue.
-- **아래 §근거·카드 의 `cards` 도 같은 자리다** — "규칙에 걸린 셀이 없다"는 발견이지 실패가 아니다.
+- **`cards` in §Evidence and cards below is the same place** — "no cell was caught by the rules" is a finding, not a failure.
 
-## 근거·카드 (포크 #6, ydc `evidence_comments.py`·`cards.py` 승격)
+## Evidence and cards (fork #6, ydc `evidence_comments.py`·`cards.py` promoted)
 ```
 cosmai trend evidence [--url <url>]
 cosmai trend cards --quarter <q> [--url <url>]
@@ -614,16 +636,19 @@ cosmai trend cards --quarter <q> [--url <url>]
 - **The population is the very predicate that built the metrics** — it takes the `POPULATION` CTE in
   `analysis/trend/pipeline.py` as it stands. Pick the evidence from a different population and a card's
   quotes and a card's numbers stand on different denominators.
-- **후보를 읽자마자 커밋하고 그 뒤로는 DB 를 보지 않는다.** 근거는 판정과 달리 코퍼스를 훑는 단계라
-  `needs_runtime` 의 `idle_in_transaction_session_timeout`(15초)에 그대로 걸린다 — 커서를 연 채 접으면
-  끊긴다(`analysis/trend/pipeline.py` 와 같은 자리). 읽어 오는 것은 본문이 아니라 포인터와 좋아요뿐이고,
-  전량에서 후보 15,602행 · 0.52s · 73MB 로 실제로 재 봤다 (`interfaces.md` §근거 "전량 실측").
+- **It commits as soon as it has read the candidates and does not look at the DB after that.** Unlike the
+  verdict, evidence is a step that walks the corpus, so it runs straight into `needs_runtime`'s
+  `idle_in_transaction_session_timeout` (15 seconds) — fold with a cursor open and it is cut off (the same
+  place as `analysis/trend/pipeline.py`). What it reads in is not the body but pointers and like counts only,
+  and over everything it was really measured at 15,602 candidate rows · 0.52s · 73MB (`interfaces.md`
+  §Evidence's "full measurement").
 - One run rewrites the evidence rows of that (run, scope, roster) wholesale — with a partial update the
   ladder of slots (rank) would silently develop holes.
 - After writing it asks `needs.topic_quarter_evidence_violation` back about that run. If the view says
   anything, the exit code is **1** (partial) and stdout carries that line.
-- 종료 코드: 0 ok · 1 partial(위 불변식 위반) · 2 blocked(연결 거절, 활성 명부·스냅샷 없음, **그 run 에
-  판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라 막힘이다).
+- exit codes: 0 ok · 1 partial (the invariant violation above) · 2 blocked (connection refused, no active
+  roster or snapshot, **that run has no verdict rows** — it means `cosmai trend judge` has not been run yet,
+  so it is blocked rather than a failure).
 - `cards` **writes nothing.** It reads the three tables above and emits a bundle of markdown cards on
   stdout. It is not dropped to a file for the same reason as `retrieval terms` (a snapshot of a growing
   corpus goes stale in the repo) — redirect it if you want to keep it. `--quarter` is required: a card is
@@ -649,13 +674,14 @@ cosmai trend cards --quarter <q> [--url <url>]
   Cards make no rows and so leave no version — which definition's evidence a card carried is answered by
   this key on the run it read.
 
-## 대조 (포크 #7, ydc `source_composition.py`·`commerce_crosscheck.py`·`cross_source.py` 승격)
+## Crosscheck (fork #7, ydc `source_composition.py`·`commerce_crosscheck.py`·`cross_source.py` promoted)
 ```
 cosmai trend crosscheck [--url <url>]
 ```
-- 네 소스를 나란히 놓고 어긋나는 자리를 찾는다: 구성(같은 사전으로 소스마다 주제 구성비) · 평가(커머스
-  플랫폼의 속성 평가 대 그 run 의 판정) · 성분(성분 담론 셋과 성분 키 감사). 합산하지 않는다 —
-  분모가 소스마다 다르다(`interfaces.md` §대조).
+- It puts four sources side by side and looks for the places they disagree: composition (the topic
+  composition per source under the same dictionary) · rating (the commerce platforms' attribute rating
+  against that run's verdict) · ingredients (three ingredient discourses and an ingredient-key audit). It
+  does not sum them — the denominator differs per source (`interfaces.md` §Crosscheck).
 - **It writes nothing.** A row of the three answers is keyed by one (topic) or one (ingredient), while
   022's quarterly grain is keyed by eight columns and the commerce side has neither the quarter nor the
   roster among them. The answer is stdout rather than a table, and being read-only it is run against the
@@ -688,14 +714,16 @@ cosmai trend crosscheck [--url <url>]
 - It is safe on cron (read-only, and 0 is the normal state). But the answer changes only when the corpus
   or the collection changes, so for now a person asks it once and records it on the issue.
 
-## 홀드아웃 (포크 #51, ydc `holdout_commerce.py` 승격)
+## Holdout (fork #51, ydc `holdout_commerce.py` promoted)
 ```
 cosmai trend holdout [--url <url>]
 ```
-- **새로 쌓인 커머스 리뷰로 기존 결론을 되묻는다 — 숫자를 갈아치우지 않는다.** 같은 모집단(§대조 의
-  선케어 랭킹 술어)의 리뷰를 두 팔로 가르고 같은 코드로 센다: 청크 색인에 있는 리뷰(`seen`, 우리가 본
-  것)와 없는 리뷰(`holdout`, **한 번도 안 본 것**). 갈리면 왜 갈리는지를 창·플랫폼 구성·제품 바스켓
-  셋으로 갈라 잰다(`interfaces.md` §홀드아웃).
+- **It asks the existing conclusion again with newly piled-up commerce reviews — it does not replace the
+  numbers.** It splits the reviews of the same population (the suncare ranking predicate of §Crosscheck) into
+  two arms and counts them with the same code: the reviews in the chunk index (`seen`, what we have seen) and
+  the reviews not in it (`holdout`, **what has never once been seen**). When they part, why they part is
+  measured split three ways — the window, the platform composition and the product basket
+  (`interfaces.md` §Holdout).
 - **Why the only argument is `--url`**: the cutoff is not a date but the roster of commerce `doc_id`
   values in `needs.retrieval_chunk` — two ways of choosing means two denominators (the same convention as
   `quarter`·`judge`·`crosscheck`). ydc took a `--cutoff`, but that repo had no row for "what have we
@@ -705,32 +733,37 @@ cosmai trend holdout [--url <url>]
   The answer is stdout rather than a table, and being read-only it is run against the production DB as
   it is. That the stored tables are untouched is pinned by a fingerprint in
   `tests/test_holdout_pipeline.py`.
-- **네 읽기(커머스 청크 명부 · 리뷰 키 명부 · 빈 본문 수 · 모집단)는 한 트랜잭션 스냅샷
-  (`REPEATABLE READ`) 안에서 한다.** 밖에 두면 수집기가 도는 동안 그 넷이 서로 다른 모집단을 가리켜
-  `seen + holdout + empty` 가 어떤 모집단의 크기도 아니게 된다. ydc 가 손으로 얹은 정지·전순서
-  정렬·행수 대조 셋이 여기서 각각 어디로 가는지는 `interfaces.md` §홀드아웃 의 표가 든다 — 그 셋을
-  그대로 옮기면 이 자리에서는 항등식이라 검사가 아니다.
-- 종료 코드: **0 ok — 답이 계산됐다(재현되지 않아도 그렇다)** · 1 partial(**이 산출을 믿지 마라** —
-  원천 리뷰가 없는 커머스 청크가 있다(`chunk_orphan`). 청크에는 외래키가 없으므로(020) 그때 기존 팔은
-  분석이 실제로 본 그 팔이 아니다) · 2 blocked(연결 거절, 활성 주제 사전 없음, 랭킹에 선케어 제품이
-  없음(`cosmai collect commerce`), 커머스 청크가 하나도 없음 — **기준 시점 자체가 없다는 뜻이라**
-  `cosmai retrieval chunk` 를 돌려라, 선케어 모집단 안에 청크가 있는 리뷰가 하나도 없음 — 비교할 기존
-  팔이 없다, **안 본 리뷰가 하나도 없음** — 되물을 새 표본이 아직 없다). **여섯 갈래 전부** 코드의
-  `NoHoldout`·`NoDictionary` 둘 중 하나이고, 메시지가 어느 것인지 갈라 말한다.
-- **"재현되지 않는다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이고, 이 파일 맨 위의
-  공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 위 §민감도 의 "흔들린다는 1 이 아니다", §대조 의
-  "어긋난다는 1 이 아니다"와 **같은 자리, 같은 문장**이다. 출처인 ydc 의 `report` 도 언제나 0 을 낸다.
+- **The four reads (the commerce chunk roster · the review key roster · the empty-body count · the
+  population) happen inside one transaction snapshot (`REPEATABLE READ`).** Left outside it, the four would
+  point at different populations while a collector runs, and `seen + holdout + empty` would be the size of no
+  population at all. Where each of the three things ydc laid on by hand — the stop, the total-order sort and
+  the row-count comparison — goes here is carried by the table in `interfaces.md` §Holdout; carrying the three
+  over as they are would be an identity in this place rather than a check.
+- exit codes: **0 ok — an answer was computed (that holds even when it does not reproduce)** · 1 partial
+  (**do not trust this output** — there is a commerce chunk with no source review (`chunk_orphan`). Chunks
+  carry no foreign key (020), so the seen arm is then not the arm the analysis actually saw) · 2 blocked
+  (connection refused, no active topic dictionary, no suncare product in the ranking
+  (`cosmai collect commerce`), not one commerce chunk — **it means there is no reference point at all**, so
+  run `cosmai retrieval chunk`, not one review with a chunk inside the suncare population — there is no
+  existing arm to compare against, **not one unseen review** — there is no new sample to ask again with).
+  **All six branches** are one of the code's `NoHoldout`·`NoDictionary`, and the message says which.
+- **"It does not reproduce" is not a 1.** That is the **finding** this command exists to give, and in the
+  common convention at the top of this file a 1 means "the output is not whole" — **the same place and the
+  same sentence** as "shaking is not a 1" in §Sensitivity above and "disagreeing is not a 1" in §Crosscheck.
+  ydc's `report`, the source, always emits 0 too.
   어느 갈래인지(`재현`·`순위 재현`·`순위 변동`·`순위 없음`)는 `note` 와 표가 싣는다.
 - **A thin sample is not a 1 either.** A topic whose seen arm has fewer documents than `MIN_MENTIONS` (5)
   gets no rank (`-`), and `ranked=` in the `note` counts how many topics do have one.
-- **크론에 걸지 않는다. 위 §대조 의 "0 이 평상 상태" 가 이 명령에서는 거짓이다.** 읽기 전용인 것은 같지만
-  평상 상태가 종료 코드 하나로 서지 않는다: `cosmai retrieval chunk` 가 돌면 홀드아웃이 통째로 기존 팔로
-  넘어가 **그 직후의 평상 상태는 `2`(`no unseen sample`)** 이고, 커머스 수집기가 다시 쌓을 때까지 그렇다.
-  종료 코드로 알람을 보는 크론은 그 구간을 실패로 읽는다. `stack/crontab.d/` 에 `retrieval chunk` 를 도는
-  줄은 **없으므로**(2026-08-27 실측) 오늘의 위험은 크론이 아니라 **손 순서**다 — 되묻기 전에 청킹부터
-  돌리면 물음 자체가 사라진다. 이 명령은 사람이 한 번 물어 이슈에 남긴다.
+- **Not put on cron. "0 is the normal state" from §Crosscheck above is false for this command.** Read-only it
+  is, equally, but the normal state does not stand on one exit code: once `cosmai retrieval chunk` runs the
+  holdout moves wholesale into the seen arm, so **the normal state right after that is `2`
+  (`no unseen sample`)**, and it stays so until the commerce collector piles up again. A cron that watches
+  alarms by exit code reads that stretch as a failure. There is **no** line in `stack/crontab.d/` that runs
+  `retrieval chunk` (measured 2026-08-27), so today's risk is not cron but **the order of hands** — chunk
+  before asking again and the question itself disappears. A person asks this command once and leaves the
+  answer on the issue.
 
-## 스케줄 (stack/crontab.d/, UTC)
+## Schedule (stack/crontab.d/, UTC)
 The rule for the commerce lines is not "avoid minute 0" but **the gap between two adjacent lines is wider
 than the earlier line takes**. That duration is not written here as a number — it comes out of the code.
 `engine.collect` runs the sources that declare that dataset (and `--board`) **concurrently, one lane per

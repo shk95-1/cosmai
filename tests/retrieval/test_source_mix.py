@@ -8,12 +8,14 @@ ydc `rag/engine.py` 는 소스마다 따로 뽑아 합친다 -- 색인의 92%가
 (`K`·`BURIED_RANK`)가 숫자를 보기 전에 고정됐다. 결과를 보고 기준을 만드는 것이 이 측정이 막으려는
 일이라, 기준이 조용히 움직이면 판정도 조용히 움직인다 (`test_vector_floor` 와 같은 자리).
 
-**② 분배가 없다는 것은 결정이지 미구현이다가 아니다.** `ranked_chunks` 는 `sources` 로 후보를 좁힐 뿐
-남은 것 중 전역 상위 k 를 낸다. 그 성질이 바뀌는 날 계약 §소스별 분배 가 함께 바뀌어야 하므로 여기서 잡는다.
+**(2) The absence of an allocation is a decision, not something unimplemented.** `ranked_chunks` only
+narrows the candidates by `sources` and emits the global top k of what is left. The day that property changes
+the contract's §Per-source allocation has to change with it, so it is caught here.
 
-**③ 그 결정이 인용한 수가 아직 참인가.** 재는 길은 `tool/measure-source-mix` 이고, 운영 DB 와 38만 청크
-색인을 열어야 해서 이 스위트가 부르지 않는다(§검색 실측 여섯 줄과 같은 자리다). 여기서 붙드는 것은
-**표의 모양과 상수**이고, 수 자체의 거처는 계약이다.
+**(3) Is the number that decision quoted still true.** The way to measure it is `tool/measure-source-mix`,
+and it needs the production DB and the 380,000-chunk index, so this suite does not call it (the same place as
+the six lines of §Retrieval measurements). What is held here is **the table's shape and the constants**, and
+the numbers themselves live in the contract.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 TOOL = ROOT / "tool" / "measure-source-mix"
-HEADER = "## 소스별 분배"
+HEADER = "## Per-source allocation"
 
 
 def loaded() -> ModuleType:
@@ -113,8 +115,9 @@ def test_the_composition_is_counted_in_one_scan():
     assert round(rows[0].chunk_share, 4) == round(288914 / (288914 + 23156), 4)
 
 
-# 지배 소스 아홉이 같은 낱말을 밀도 높게 말하고, 소수 소스 하나는 같은 낱말을 길게 한 번 말한다 --
-# 전역 순위에서는 마지막이다. §소스별 분배 가 잰 그 모양을 열 행으로 줄인 것뿐이다.
+# Nine dominant-source chunks say the same word densely, and one minority-source chunk says the same word
+# once at length -- last in the global ranking. It is only the shape §Per-source allocation measured, cut
+# down to ten rows.
 CHUNKS = [(f"youtube_comment:c{i}#0", "youtube_comment", "백탁 백탁 백탁") for i in range(9)] + [
     ("commerce_review:r0#0", "commerce_review", "백탁 " + "끈적임 " * 60)
 ]
@@ -167,10 +170,11 @@ def test_sources_narrows_the_pool(conn):
 
 @pytest.mark.postgres
 def test_the_narrowed_pool_is_still_ranked_globally_not_by_share(conn):
-    """계약의 성질을 코드에서 잡는다 -- 분배를 넣는 날 이 줄이 빨개지고, 그때 §소스별 분배 를 함께 고친다.
+    """Catches the contract's property in code -- the day an allocation is added this line goes red, and then
+    §Per-source allocation is fixed with it.
 
-    좁히지 않으면 소수 소스는 상위 k 에 자리를 못 받는다. 몫이 있었다면 열 자리 중 얼마는 그 소스의
-    것이어야 하는데, 여기서는 관련도만 자리를 정한다."""
+    Without the narrowing the minority source gets no slot in the top k. Had there been a share, some of the
+    ten slots would have to be that source's; here relevance alone decides the slots."""
     pytest.importorskip("kiwipiepy")
     from analysis.retrieval import pipeline
 
@@ -206,15 +210,15 @@ def test_the_contract_carries_the_verdict_and_the_numbers_it_was_measured_with()
 def test_the_decision_says_what_would_have_been_built_and_why_it_was_not():
     """With only the numbers left and the decision gone, the next person just puts RRF in."""
     body = section()
-    assert "더하지 않는다" in body
+    assert "is not added to `ranked_chunks`" in body
     assert "RRF" in body
-    assert "§검색 실측" in body, "같은 질의 목록으로 잰 것이라 그쪽과 이어져 있어야 한다"
+    assert "§Retrieval measurements" in body, "measured over the same query list, so it joins up with that"
 
 
 def test_the_search_section_says_the_allocation_is_absent_on_purpose():
     """Absent from the front of the contract, a person using `--source` never meets this decision."""
     body = ENTRYPOINTS.read_text(encoding="utf-8")
-    start = body.index("## 검색 (")
+    start = body.index("## Search (")
     search = body[start : body.index("\n## ", start)]
-    assert "소스별 몫을 주지 않는다" in search
-    assert "§소스별 분배" in search
+    assert "it does not give a per-source share" in search
+    assert "§Per-source allocation" in search

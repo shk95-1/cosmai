@@ -3,7 +3,7 @@
 `#54` left a shape rather than a cause: the source is 16.75% of the index, takes 5.47% of the global
 top 10, and splits 47 buried / 11 in the top 10. `tool/measure-transcript-bimodal` measures the two
 candidate causes -- chunk length and term competition -- and prices a `bm25.B` move on the
-§Retrieval-measurements baseline. What this file holds is the **method**, not the numbers: the
+§Retrieval measurements baseline. What this file holds is the **method**, not the numbers: the
 numbers need the production DB and a 380k-chunk index, so their home is the contract and the issue
 (the same place `tests/retrieval/test_source_mix.py` leaves them).
 

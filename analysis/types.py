@@ -318,7 +318,7 @@ class PanelRosterRow:  # -> needs.panel_roster (fork #3). One roster revision --
 @dataclass(frozen=True)
 class PanelChannelRow:  # -> needs.panel_channel (fork #3). The 43-channel roster; the seed fills it (#31)
     channel_id: str
-    version: int  # 명부 판본. 사전과 같은 모양이다 (formats.md §패널 명부 CSV)
+    version: int  # the roster version. The same shape as a dictionary (formats.md §Panel roster CSV)
     panel_role: str  # product | expert -- a channel outside the roster is outside the denominator too
     handle: str | None = None
     channel_title: str | None = None
@@ -328,20 +328,20 @@ class PanelChannelRow:  # -> needs.panel_channel (fork #3). The 43-channel roste
 
 
 @dataclass(frozen=True)
-class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자의 정본, formats.md §시간)
+class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (canonical for the quarter, formats.md §Time)
     run_id: int
     scope: str  # a category name | 'all' (the same vocabulary as metrics_need.scope)
     # The registry of the topic axis is aspect_lexicon(ruleset='retrieval-topic').aspect, not needs.need_key
     topic_key: str  # 두 축은 `백탁` 하나만 겹친다 (tests/test_panel_quarter_contract.py)
     quarter: str  # 'YYYYQn'
     source: str  # youtube_video | youtube_comment -- descriptions and comments go side by side, not merged
-    content_type: str  # long_form | short_form — 분모는 장문만이다 (§수식)
+    content_type: str  # long_form | short_form — the denominator is long-form only (§Formulas)
     panel_version: int  # the population of this ratio: panel_channel.version
     panel_role: str  # which population of that roster. product | expert
     mentions: int  # numerator: documents this topic matched
     documents: int  # documents of that population in that quarter
     quarter_mentions: int  # denominator of the share: the mentions of that quarter's trend_use topics
-    denom_channels: int  # 그 분기에 산출에 든 패널 채널 수. 두 source 가 같은 값을 쓴다 (§수식)
+    denom_channels: int  # panel channels in that quarter's output. Both sources use one value (§Formulas)
     composition: float | None = None
     velocity_yoy: float | None = None
     persistence: float | None = None
@@ -354,7 +354,7 @@ class MetricsTopicQuarterRow:  # → needs.metrics_topic_quarter (분기 입자�
 
 
 @dataclass(frozen=True)
-class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. 집계가 아니라 파생 — §판정)
+class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (a derivation, not an aggregate — §Verdict)
     # The first eight columns are the primary key of metrics_topic_quarter as it is. A judgement takes one row
     # of that table and emits one row, so those eight are the FK, and a judgement row cannot exist without the
     # metric row that grounds it.
@@ -368,7 +368,7 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
     panel_role: str
     trend_type: str  # 유형 7종 + 판정 보류 + 미확정(진행 중) — 어휘는 §판정 이 닫는다
     judged: bool  # 유형 7종에서 `근거 부족` 을 뺀 여섯에 들었는가. 셋(근거 부족·보류·미확정)이면 false
-    evidence_strength: float  # 0~100 (§판정)
+    evidence_strength: float  # 0~100 (§Verdict)
     single_source: bool  # was this judged looking at one source only. v1 (YouTube alone) is always true
     opportunity_score: float | None = None  # 0-100 normalized in the family. NULL for an unscored cell
     gap_pp: float | None = None  # 댓글 구성비 - 영상 구성비 (%p). (주제, 분기) 사실이라 두 행이 같은 값
@@ -376,7 +376,7 @@ class TopicQuarterJudgementRow:  # → needs.topic_quarter_judgement (판정. �
 
 
 @dataclass(frozen=True)
-class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀을 받치는 소비자 발화 — §근거)
+class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (the speech under a verdict cell — §Evidence)
     # The first eight columns are the primary key of topic_quarter_judgement as it is. That the evidence
     # points at the judged cell rather than the metric row is the point -- whoever asks for evidence is
     # whoever read the type.
@@ -388,14 +388,14 @@ class TopicQuarterEvidenceRow:  # → needs.topic_quarter_evidence (판정 셀�
     content_type: str
     panel_version: int
     panel_role: str
-    rank: int  # 그 셀 안 좋아요 내림차순 자리. 1 부터 빈칸 없이 (§근거)
+    rank: int  # the like-count descending slot inside that cell. From 1 with no gaps (§Evidence)
     snapshot_id: int  # the observation revision the evidence lives in. doc_id alone cannot part a recollect
     doc_id: str  # the body is not here -- the corpus is canonical and topic_quarter_evidence_quote joins it
     like_count: int  # why it was picked. A snapshot as of collected_at, so counted later it is another number
     matched_term: str | None = None  # the expression corpus_mention already attached. Not matched again here
 
 
-# ---------- 민감도 (반사실 산출. 어느 표에도 저장되지 않는다 — §민감도) ----------
+# ---------- sensitivity (a counterfactual output. Stored in no table — §Sensitivity) ----------
 @dataclass(frozen=True)
 class PanelSensitivityRow:  # does the panel composition change the conclusion (ydc panel_sensitivity.py)
     source: str

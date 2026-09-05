@@ -1,10 +1,11 @@
 """반입하는 스냅샷이 계약이 설명하는 그 스냅샷인지 되묻는다 (포크 #4).
 
-`manifest.json` 의 `rules`·`limitations`·`text_rule` 은 숫자가 무엇을 센 것인지를 말하는 문장이다.
-그 문장이 파일 안에만 있으면 나중에 숫자만 남고 뜻이 사라지므로, 여기 상수로 옮겨 계약
-(`contracts/formats.md` §코퍼스 스냅샷 · `contracts/interfaces.md` §모집단의 한계)이 같은 문장을
-지고, 적재기는 읽어 들인 매니페스트가 이 문장들과 다르면 거절한다 -- 다른 규칙으로 만들어진 코퍼스가
-같은 표에 조용히 섞이면 그 표의 모든 비율이 오류 없이 달라진다.
+`rules`, `limitations` and `text_rule` in `manifest.json` are the sentences that say what the numbers
+counted. With those sentences only inside the file, the numbers would be left later with their meaning gone,
+so they are moved here as constants for the contract (`contracts/formats.md` §Corpus snapshot ·
+`contracts/interfaces.md` §Limitations of the population) to carry the same sentences, and the loader refuses
+when the manifest it read in differs from them -- a corpus made under different rules quietly mixed into the
+same table changes every ratio of that table with no error.
 """
 
 from __future__ import annotations
@@ -12,7 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-# manifest.json 의 rules 11줄 그대로. 계약 문장의 자리는 contracts/formats.md §코퍼스 스냅샷.
+# The 11 rules lines of manifest.json, verbatim. The contract sentence's place is
+# contracts/formats.md §Corpus snapshot.
 RULES: tuple[str, ...] = (
     "유일키는 source + source_item_id 다. doc_id 는 그 둘을 콜론으로 이은 값이다.",
     "분기는 저장하지 않는다. published_at 의 연·월로 달력 분기를 만든다"
@@ -32,8 +34,8 @@ RULES: tuple[str, ...] = (
     "포함하면 선크림 장문이 962 → 1,019편이 되고 모든 composition 이 움직인다.",
 )
 
-# source_run_manifests[*].limitations 8줄. 두 런이 같은 목록을 싣는다.
-# 계약 문장의 자리는 contracts/interfaces.md §모집단의 한계.
+# The 8 lines of source_run_manifests[*].limitations. Both runs carry the same list.
+# The contract sentence's place is contracts/interfaces.md §Limitations of the population.
 LIMITATIONS: tuple[str, ...] = (
     "모집단은 시드 채널 집합이며 전체 YouTube가 아니다(고정 패널).",
     "패널 밖 신규 채널·신규 브랜드의 등장은 관측되지 않는다.",
@@ -51,17 +53,19 @@ TEXT_RULE = (
     "그대로 쓴다. 태그는 text 에 넣지 않고 source_metadata.tags 로 보낸다. 자막·음성은 PoC 제외."
 )
 
-# 매니페스트가 선언한 행수를 담는 두 칸. 문장이 아니라 수라 상수로 옮기지 않고 대조만 한다 --
-# 판본마다 다른 값이고, 계약이 지는 것은 "대조한다"는 규칙 쪽이다(contracts/formats.md §코퍼스 스냅샷).
+# The two slots holding the row counts the manifest declared. They are numbers rather than sentences, so
+# they are compared rather than moved into constants -- the value differs per version, and what the contract
+# carries is the rule that they are compared (contracts/formats.md §Corpus snapshot).
 COUNT_KEYS = ("table_counts", "documents_by_content_type")
 
-# 적재기가 아는 어휘. DDL 의 CHECK 와 같은 목록이어야 한다 (023).
+# The vocabulary the loader knows. Must be the same list as the DDL's CHECK (023).
 SOURCES = ("youtube_video", "youtube_comment")
 CONTENT_TYPES = ("video_long", "video_short", "video_unknown", "comment")
 
 
 class ManifestMismatch(ValueError):
-    """매니페스트가 계약과 다른 규칙을 선언했다. 다른 뜻의 행이므로 같은 표에 넣지 않는다."""
+    """The manifest declared rules that differ from the contract. A row with a different meaning does
+    not go into the same table."""
 
 
 def _limitations(manifest: Mapping[str, Any]) -> list[tuple[str, ...]]:
@@ -69,13 +73,15 @@ def _limitations(manifest: Mapping[str, Any]) -> list[tuple[str, ...]]:
 
 
 def check(manifest: Mapping[str, Any]) -> None:
-    """매니페스트의 규칙·한계·텍스트 규칙이 계약이 진 문장과 같은지. 다르면 무엇이 다른지 말한다."""
+    """Whether the manifest's rules, limitations and text rule match the sentences the contract
+    carries. If not, says what differs."""
     problems: list[str] = []
     if tuple(manifest.get("rules", ())) != RULES:
         problems.append("rules")
     if manifest.get("text_rule") != TEXT_RULE:
         problems.append("text_rule")
-    # 런이 여럿이면 전부 같은 한계 목록이어야 한다 -- 한 런만 다른 규칙으로 걷혔다면 그 사실이 여기서 걸린다.
+    # With several runs, all of them must carry the same limitations list -- if just one run was
+    # gathered under different rules, that fact is caught right here.
     for index, found in enumerate(_limitations(manifest)):
         if found != LIMITATIONS:
             problems.append(f"source_run_manifests[{index}].limitations")
@@ -83,16 +89,16 @@ def check(manifest: Mapping[str, Any]) -> None:
         raise ManifestMismatch(
             "manifest declares rules the contract does not carry: "
             + ", ".join(problems)
-            + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            + " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )
 
 
 def check_counts(manifest: Mapping[str, Any], measured: Mapping[str, Mapping[str, int]]) -> None:
-    """매니페스트가 선언한 행수와 반입이 실제로 읽은 행수가 같은가.
+    """Whether the row count the manifest declared matches the row count the import actually read.
 
-    잘려 들어온 CSV 는 행이 **적을 뿐** 오류가 없다 -- 그러면 이 스냅샷의 모든 비율이 조용히 달라지고,
-    그 사실은 어떤 숫자에도 나타나지 않는다. 판본마다 값이 다르므로 계약이 지는 것은 수가 아니라
-    대조한다는 규칙이다.
+    A CSV that arrived truncated **is only short of rows**, with no error raised -- then every ratio in
+    this snapshot quietly changes and that fact shows up in no number at all. The value differs per
+    version, so what the contract carries is not a number but the rule that says to compare it.
     """
     problems: list[str] = []
     for key in COUNT_KEYS:
@@ -109,17 +115,18 @@ def check_counts(manifest: Mapping[str, Any], measured: Mapping[str, Mapping[str
             + "; ".join(problems)
             + " -- the rows stay under this snapshot_id and are never activated; fix the source and"
             " re-run the same snapshot_id, ON CONFLICT DO NOTHING fills the gaps"
-            " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )
 
 
 def check_unique(read: Mapping[str, int], inserted: Mapping[str, int]) -> None:
-    """새 판본에서 **읽은 행수와 들어간 행수가 같은가** = 파일 안에 같은 유일키가 두 번 없는가.
+    """For a new version, **does the row count read equal the row count inserted** = is there no unique
+    key repeated twice inside the file.
 
-    매니페스트의 `input_counts.duplicate_docs = 0` 이 여기서 선다 -- 모든 INSERT 가
-    `ON CONFLICT DO NOTHING` 이라 중복은 조용히 버려지고, 세지 않으면 잘려 들어온 파일과 구분되지
-    않는다. 이미 행이 있는 판본에 다시 부르면 들어가는 행이 0 이라 뜻이 없으므로 부르는 쪽이 새
-    판본일 때만 부른다.
+    This is where the manifest's `input_counts.duplicate_docs = 0` gets checked -- every INSERT is
+    `ON CONFLICT DO NOTHING`, so a duplicate is silently dropped, and without counting there is no way
+    to tell that apart from a file that arrived truncated. Calling this again on a version that already
+    has rows inserts 0 rows and is meaningless, so the caller only calls it for a genuinely new version.
     """
     off = {
         name: (count, inserted[name]) for name, count in read.items() if inserted.get(name, count) != count
@@ -128,5 +135,5 @@ def check_unique(read: Mapping[str, int], inserted: Mapping[str, int]) -> None:
         raise ManifestMismatch(
             "duplicate unique keys in the source: "
             + "; ".join(f"{n} has {c} rows but {i} arrived" for n, (c, i) in off.items())
-            + " (db/corpus/contract.py, contracts/formats.md §코퍼스 스냅샷)"
+            + " (db/corpus/contract.py, contracts/formats.md §Corpus snapshot)"
         )

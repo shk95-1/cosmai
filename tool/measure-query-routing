@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""계약 §질의 라우팅 이 인용하는 수를 우리 사전 위에서 다시 잰다 (포크 #47).
+"""Re-measures the numbers the contract's §Query routing quotes, over our own dictionary (fork #47).
 
 What ydc `v0.3.0` measured -- the first router used the **Kiwi tokenizer dictionary** as its ingredient
 list, and 7 of 10 natural-language queries went to BM25 -- is reproduced here on our dictionary. We keep
@@ -158,7 +158,7 @@ def brand_only(dictionary: topics.Topics) -> dict:
     """**What a router without the ingredient-name axis actually does.** A router that looks only at the
     two open signals (brand surfaces · the SPF/PA regex) is run over our only measured query workload --
     the `ko` aliases of the active topic dictionary.
-    `interfaces.md` §검색 실측 의 literal 모드가 재는 질의가 그 별칭들이다.
+    The queries the literal mode of `interfaces.md` §Retrieval measurements measures are those aliases.
 
     This number stops the objection that a partial router is **merely incomplete, not harmful**: with 0
     queries sent correctly and nothing but misroutes left, that router is worse than the default. Many

@@ -433,8 +433,9 @@ def test_analyze_all_with_a_lexicon_scope_aggregates_what_it_labelled(
     assert found.status == "ok", found.detail
     assert found.counts["attempted_need"] > 0, "polarity must have actually run for this scope"
     assert found.counts["metrics_need"] > 0
-    # metrics_need.scope 축은 그대로 원천 카테고리다 (contracts/entrypoints.md §분석) — 펼치는 것은
-    # 어느 scope 를 쓸지이지, scope 컬럼이 무엇을 뜻하는지가 아니다. 화면(#11)·골든이 그 축을 읽는다.
+    # The metrics_need.scope axis stays the source category (contracts/entrypoints.md §Analysis) — what the
+    # fan-out chooses is which scope to write, not what the scope column means. The screen (#11) and the
+    # goldens read that axis.
     assert _scopes_of(analysis_url, found.run_id) == [CATEGORY]
 
 
@@ -625,9 +626,10 @@ def test_stale_and_scope_silence_both_land_in_one_note(analysis_url: str, source
 def test_the_cli_exits_one_when_a_stage_fails_and_two_when_it_cannot_connect(
     analysis_url: str, capsys: pytest.CaptureFixture[str]
 ):
-    # This container holds only what the production views bind (tool/checks/test): all of trend_radar is empty
-    # and tubedepth has the single jobs table -- the four tubedepth tables link reads are absent, so it fails
-    # there.
+    # The harness container holds all three schemas and no rows (db/migrate.sh step (0) builds the two
+    # source schemas whole since #178), so link now runs and finds nothing and it is aggregate that
+    # refuses -- "no mentions with extractor_version". The exit code this test is about is the same;
+    # the stage that produces it is not the one that did while tubedepth was three tables.
     assert main(["analyze", "all", "--url", analysis_url]) == 1
     assert "failed" in capsys.readouterr().out
     # A refusal before reaching a stage is blocked -- apart from the exit 1 that leaves a failed run.
@@ -665,7 +667,7 @@ def test_the_crontab_schedules_analyze_all_at_the_time_the_contract_names():
         return ()
 
     contract = _time(ENTRYPOINTS_MD.read_text(encoding="utf-8"))
-    assert contract, "contracts/entrypoints.md §스케줄 names no time for `analyze all`"
+    assert contract, "contracts/entrypoints.md §Schedule names no time for `analyze all`"
     # The whole directory, not one file: which supercronic container carries this line is a wiring
     # decision (stack/docker-compose.yml), and it must not decide whether this check sees the line.
     scheduled = "\n".join(p.read_text(encoding="utf-8") for p in sorted(CRONTAB_D.iterdir()) if p.is_file())
@@ -676,8 +678,9 @@ ANALYZE_LINE = re.compile(r"^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(cosmai analyze .+)
 
 
 def test_the_contract_and_the_crontab_agree_on_every_analyze_line():
-    """`analyze all` 하나만 대조하던 검사를 넓힌다 (#32): gemma4 줄이 크론에만 있고 계약에 없으면
-    §스케줄 은 "매일 밤 무엇이 도는가"에 거짓을 답한다 — 간격 규칙이 서는 표가 바로 그 표다."""
+    """Widens a check that compared `analyze all` alone (#32): with the gemma4 line in cron but not in the
+    contract, §Schedule answers "what runs every night" falsely — and the interval rule stands on that very
+    table."""
 
     def _times(text: str) -> dict[str, str]:
         found = {}

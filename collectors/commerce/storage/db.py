@@ -48,7 +48,7 @@ def runtime_url(host: str | None = None, port: int | str | None = None, database
 
     Only the host and the port move, and they move through `db.runtime`'s COSMAI_DB_HOST/COSMAI_DB_PORT
     -- the role, the database and the secret key stay this schema's own (contracts/entrypoints.md
-    §DB 접속 노브)."""
+    §DB connection knobs)."""
     password = secrets.require([RUNTIME_SECRET_KEY])[RUNTIME_SECRET_KEY]
     host, port = host_and_port(host, port)
     url = make_url(f"postgresql+psycopg://{SERVICE_SCHEMA}_runtime:{password}@{host}:{port}/{database}")
@@ -68,7 +68,7 @@ def runtime_url(host: str | None = None, port: int | str | None = None, database
 # created and nothing here alters, and its CONNECTION LIMIT is 8 -- read out of production on
 # 2026-08-24 with `pg_db_role_setting` (storage/locks.py records that reading).
 ROLE_CONNECTION_LIMIT = 8
-# And that 8 belongs to more than one run at a time. contracts/entrypoints.md §스케줄 records the
+# And that 8 belongs to more than one run at a time. contracts/entrypoints.md §Schedule records the
 # hourly ranking walk still running when 02:10 product and 04:15 review start -- the overlap the
 # per-source advisory lock exists to make harmless. A per-process ceiling is therefore half a budget.
 OVERLAPPING_RUNS = 2

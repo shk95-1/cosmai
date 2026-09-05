@@ -1,9 +1,9 @@
 """민감도 세 측정의 규칙을 DB 없이 묻는다 (포크 #41).
 
-`tests/test_sensitivity_golden.py` 가 표본 위에서 ydc 와 1:1 을 지킨다면, 여기는 **그 표본이 못 밟는
-갈래**를 진다: 뒤집힘 판정(표본은 `sample_ok` 가 한 셀도 서지 않는다) · 후향 검증의 세 적중 기준 ·
-버린 정규식 규칙의 오검출 · 제외가 묶음 단위라는 것. 계약 문장의 자리는 `contracts/interfaces.md`
-§민감도 다.
+If `tests/test_sensitivity_golden.py` keeps 1:1 with ydc over the sample, this file carries **the branches
+that sample cannot step on**: the flip verdict (not one cell of the sample has `sample_ok` standing) · the
+backtest's three hit bases · the false positives of the discarded regex rules · that exclusion is at bundle
+grain. The contract sentence's place is `contracts/interfaces.md` §Sensitivity.
 """
 
 from __future__ import annotations

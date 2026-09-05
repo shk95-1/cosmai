@@ -11,7 +11,7 @@
 `entity_lexicon` 의 activate 는 `WHERE kind = %s` 라(`db/lexicon.py`) 주제 사전 개정(#56 의 v3)과 이
 목록의 개정이 서로를 끄지 않는다. 다만 버전 **번호표**는 그 표 전역이라 이 목록을 v2 로 올리면 brand 가
 그대로여도 run 의 `versions.lexicon` 이 2 가 된다 -- 물려받은 성질이고 포크 #58 이 진다
-(`contracts/formats.md` §entity 사전의 `kind='stopword'`).
+(`contracts/formats.md` §Query stopwords).
 
 **A missing active list is not a blocker.** Without the topic dictionary the answer set is 0 and the score
 becomes a lie (`topics.NoDictionary`), but a search without query stopwords is the search as it was before
@@ -26,8 +26,9 @@ from pathlib import Path
 from typing import Any, LiteralString
 
 KIND = "stopword"
-# `canonical` 은 정본 표기가 아니라 이 표기가 걸리는 **축**이다. 축을 kind 로 가르면 축마다 버전 축이
-# 새로 생기고, tier 로 가르면 brand 전용 어휘와 한 칸을 나눠 쓰게 된다 (formats.md §사전 CSV).
+# `canonical` is not the canonical surface but **the axis** this surface is caught on. Split the axis by kind
+# and every axis gets a new version axis; split it by tier and it shares a slot with the brand-only
+# vocabulary (formats.md §Lexicon CSV).
 AXIS = "query"
 DICTIONARY_CSV = Path(__file__).resolve().parent / "dict" / "query_stopwords_v1.csv"
 # There is no "how to fix it" string like `topics.FIX` here because there is no place to emit one -- a

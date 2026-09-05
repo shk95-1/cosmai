@@ -1,4 +1,4 @@
-"""성분 키가 실제로 무엇을 잡는가 (포크 #7, 계약 `contracts/interfaces.md` §성분).
+"""What an ingredient key actually catches (fork #7, the contract `contracts/interfaces.md` §Ingredients).
 
 **이 파일이 이 이슈의 가장 큰 위험을 진다.** ydc 는 `시카` 263행이 전부 트라이에톡시카프릴릴실레인
 (실리콘 분산제)인 것을 모르고 채택률 41.1%를 발표할 뻔했다. 우리 성분 원천은 다르므로 키 목록을
@@ -184,8 +184,9 @@ def test_talk_is_matched_on_the_raw_text_not_on_folded_words():
 
 
 def test_the_audited_catch_list_is_self_consistent():
-    """**CI 가 지는 것은 목록의 자기 정합뿐이다.** 목록과 실제 표를 맞대는 일은 CI 가 할 수 없다 --
-    운영 표에 닿지 못한다. 그 길은 `tool/measure-crosscheck-keys` 이고, 계약 §성분 이 그렇게 적는다."""
+    """**What CI carries is the list's own self-consistency alone.** Comparing the list against the real
+    tables is something CI cannot do -- it cannot reach the production tables. That path is
+    `tool/measure-crosscheck-keys`, and the contract's §Ingredients says so."""
     known = crosscheck.known_names()
     assert set(known) == set(crosscheck.INGREDIENT_KEYS), "목록에 없는 키가 있으면 그 키는 감사되지 않았다"
     for key, names in known.items():

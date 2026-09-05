@@ -52,7 +52,7 @@ def measured() -> dict:
 @lru_cache(maxsize=1)
 def contract() -> str:
     body = INTERFACES.read_text(encoding="utf-8")
-    start = body.index("## 질의 라우팅 (라우터를 붙이지 않는다")
+    start = body.index("## Query routing (no router is attached")
     return body[start : body.index("\n## ", start)]
 
 
@@ -133,7 +133,7 @@ def test_the_tokenizer_dictionary_overlaps_the_words_people_ask_with():
     now."""
     people = {alias for entry in topics.active().entries for alias in entry["ko"]}
     caught = people & surfaces()
-    assert caught, "겹침이 0 이면 §질의 라우팅 의 근거가 바뀐 것이다"
+    assert caught, "an overlap of 0 would mean the grounds of §Query routing have changed"
     assert len(caught) == measured()["dictionary"]["ko_in_dictionary"]
     for word in ("선크림", "백탁", "톤업", "무기자차"):
         assert word in caught
@@ -161,7 +161,7 @@ def test_no_list_in_this_repo_can_decide_that_a_word_is_an_ingredient():
     inci = {alias for entry in topics.active().entries for alias in entry["mfds_inci"]}
     people = {alias for entry in topics.active().entries for alias in entry["ko"]}
     assert "자외선차단제" in inci, "제품 범주가 성분 표기 축에 섞여 있다"
-    assert inci & people, "두 축이 갈렸다면 §질의 라우팅 의 근거가 바뀐 것이다"
+    assert inci & people, "if the two axes had parted, the grounds of §Query routing would have changed"
 
 
 def test_the_frames_carry_no_exact_signal_of_their_own():
@@ -221,13 +221,13 @@ def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
 def test_the_decision_and_its_blockers_are_still_written_down():
     """With only the numbers left and the decision gone, the next person just attaches the router."""
     table = contract()
-    assert "성분명 판정의 정본은 토크나이저 사전이 아니다" in table
+    assert "The canonical decision on an ingredient name is not the tokeniser dictionary" in table
     assert "slopindustries/cosmai#73" in table
     assert "§검색 실측 과 **같은 자가 아니다**" in table
     assert "라우터는 #11 을 대체하지 못한다" in table
     # The misread number (`4/10`) is nailed down as a literal, and without the sentence that defuses it nailed
     # down too it is asymmetric.
     assert "**그래서 이 절의 답은 첫 줄이 아니라 넷째 줄과 마지막 줄이다**" in table
-    assert "어느 것도 #11 의 입력이 아니다" in table
+    assert "Not one of the seven lines of the table above is an input to #11" in table
     assert "**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.**" in table
     assert "이득 0 · 손해 2" in table

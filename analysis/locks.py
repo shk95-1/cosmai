@@ -12,15 +12,17 @@
     `polarity --scope 선블록` 과 `aggregate` 는 서로 다른 단계다. 어느 쪽으로 좁혀도 리뷰가 찾은 그
     끼어들기가 그대로 남는다. 비용은 유계다: analyze 는 외부 fetch 가 없는 DB 전용 작업이고 크론은
     하루 한 줄이다 (contracts/entrypoints.md §스케줄).
-  - **작업 커넥션이 락을 쥔다.** 수집기는 워커 스레드마다 커넥션을 빌리므로 락 전용 커넥션을 따로
-    열어야 했고, 그래서 그 커넥션이 walk 내내 idle 로 앉아 있는 문제를 AUTOCOMMIT 으로 피해야 했다.
-    analyze 는 처음부터 커넥션 하나로 도는 배치라 그 커넥션이 곧 세션이다 — 세션 스코프 락은 커밋을
-    넘어 살아남으므로 배치 커밋마다 다시 잡을 필요가 없고, idle_in_transaction 도 닿지 않는다
-    (락을 잡은 트랜잭션을 바로 닫는다). needs_runtime 의 CONNECTION LIMIT 도 더 먹지 않는다.
-  - **기다리지 않는 이유가 하나 더 있다.** 사람이 손으로 도는 gemma4 패스는 2.5~4시간이다. 그 뒤에
-    줄 선 05:00 은 다음 05:00 이 와도 줄에 있고, 하필 사람이 다음 패스를 시작하려는 순간에 락을
-    받는다. 못 잡으면 건너뛰고 사유를 남기고 partial(종료 코드 1)로 끝난다 — 모든 단계가 자연키
-    upsert 라 건너뛴 밤은 다음 실행이 그대로 가져간다 (contracts/entrypoints.md §분석).
+  - **The working connection holds the lock.** A collector borrows a connection per worker thread, so it had
+    to open a dedicated lock connection, and then had to keep that connection from sitting idle for the whole
+    walk by using AUTOCOMMIT. analyze is a batch that runs on one connection from the start, so that
+    connection is the session — a session-scoped lock survives a commit, so it need not be retaken on every
+    batch commit, and idle_in_transaction does not reach it either (the transaction that took the lock is
+    closed right away). It does not eat further into needs_runtime's CONNECTION LIMIT.
+  - **There is one more reason not to wait.** A gemma4 pass a person runs by hand takes 2.5 to 4 hours. The
+    05:00 queued behind it is still in the queue when the next 05:00 comes, and it takes the lock at exactly
+    the moment a person is about to start the next pass. If it cannot take it, it skips, leaves a reason and
+    ends partial (exit code 1) — every step is a natural-key upsert, so the night it skipped is taken as it is
+    by the next run (contracts/entrypoints.md §Analysis).
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# 버전 규칙
+# Version rules
 
 - `linker_version`, `extractor_version`, `polarity_version` and `aggregate` are package constant strings. Format `rule-vX.Y` or `llm-<model>-<yyyymmdd>`.
 - A change to what an output row means (a dictionary version bump included) raises the version and, for the same input, **adds a new-version row** (tables carrying the version in the natural key) or recomputes (for tables without it in the key, `analyze` regenerates that src range).
@@ -7,14 +7,28 @@
 - `needs.analysis_run.versions` records every version of that run. The screen looks at the latest run alone.
 - The keys of `needs.analysis_run.versions` are `{linker, extractor, polarity, aggregate, lexicon, metric, judgement, evidence}`. `metric` is **the definition version of the quarterly grain** and its value is `v0.2`, carried over as it stands from `METRIC_VERSION` in ydc `trend.py` — it is an exception to the two formats above (`rule-vX.Y`, `llm-…`) because it is not an implementation's version but the name of the agreement document the five formulas came from (TEAM_DECISIONS_v0.2). Under A19 `metrics_topic_quarter` has no `*_version` column, so the only place that answers which definition made a row is this one key, the one `run_id` points at. 001's comment predates this list and names five alone; the DDL is additive only, so it is not edited — `versions` is jsonb, so adding a key needs no migration (fork #5).
 - `judgement` is **the definition version of the verdict** and its value is `v0.2` for the same reason as `metric` — it is the name of the agreement document (TEAM_DECISIONS_v0.2 §3) the seven type names, the verdict order and the five constants (`TAU`·`DIFFUSION_TAU`·`EVIDENCE_FLOOR`·`W_EVIDENCE`·`W_SCORE`) came from, so it is an exception to the two formats. Standing **apart** from `metric` is meaning: changing the verdict criteria without recomputing the metrics is why this step was split off, and this one key is what moves then. A verdict row uses the same `run_id` as its metric row, so one run's `versions` carries both keys. ydc `judge.py` writes the same fact per row in `tau`, `diffusion_tau` and `metric_version` columns; under A19 that place is the run (fork #40).
-- `evidence` 는 **근거 선별의 정의 판본**이고 값은 `rule-v0.1` 이다 — `metric`·`judgement` 와 달리 두 형식의
-  예외가 아닌 것이 뜻이다: 저 둘은 합의 문서(TEAM_DECISIONS_v0.2)의 이름이고 이것은 코드가 정한 규칙 넷
-  (품질 플래그·제작자 제외·주제 출처·동점 2차 키, `interfaces.md` §근거)의 판본이라 팀 합의가 아니라 구현이
-  진다. 근거 행은 판정 행과 같은 `run_id` 를 쓰므로 한 run 의 `versions` 가 세 키를 든다. 카드는 행을 만들지
-  않아 키가 없다 (포크 #6).
+- `evidence` is **the definition version of evidence selection** and its value is `rule-v0.1` — that it is
+  not an exception to the two formats, unlike `metric` and `judgement`, is the meaning: those two are the
+  name of an agreement document (TEAM_DECISIONS_v0.2) while this is the version of four rules the code fixed
+  (quality flags · creator exclusion · the topic's origin · the tie-breaking second key,
+  `interfaces.md` §Evidence), so it is carried by the implementation rather than by team agreement. An
+  evidence row uses the same `run_id` as its verdict row, so one run's `versions` carries three keys. Cards
+  make no rows and so have no key (fork #6).
 - Exception (A19): `metrics_need`·`metrics_wish`·`metrics_topic_quarter` carry no `*_version` column — the `run_id` in the natural key points at `analysis_run.versions`, and that is every version that made the row. `product_denominator`·`rank_daily`·`price_event`, which never go through a run, do carry `aggregate_version` (002).
 - Reproduction (a corollary of A19, #144): the mention set that made one `metrics_*` row is retraced from the version list in `analysis_run.versions.extractor` (`;`-separated) and that row's axes (`scope`·`need_key`·`month`·`product_ref`) alone — except that a `scope='all'` rollup row's `need_key` is already the name folded through `needs.need_key.canonical` (A17), so that one column has to be matched on the canonical rather than on the raw `need_mention.need_key`, or the folded synonym mentions drop out wholesale — and `versions.polarity` is not matched alongside, because one `extractor_version` can hold two polarity versions and it is the version that run's polarity step used rather than a population. The retrace holds **only while no `analyze` run has finished after that one**: `analyze polarity` deletes and re-inserts per `(src, month)` (`analysis/polarity/pipeline.py`) and leaves neither a time window nor a watermark, so a metrics run after it cannot restore the population. In such a cell the screen writes "a run rewrote the mentions after this run" instead of a mention list — it does not show a quietly wrong list.
 - `needs.panel_roster.version` (one row per version) and the `panel_channel.version`·`metrics_topic_quarter.panel_version` that point at it by FK are **integers** — an exception to the string rule above (`rule-vX.Y`), and the shape of `version`·`active` on the dictionaries (`entity_lexicon`·`aspect_lexicon`). A panel changes by seed rather than by code, so its version attaches per load (fork #3, values in #31).
 - The evaluation sets (`labeled_set`) have no version. When a label changes it is replaced by a new row with a new `labeled_at` and `labeler`.
+- `trend_radar` and `tubedepth` have **no version of their own**. Their canonical form is
+  `contracts/ddl/current/app.<schema>.sql` (a `pg_dump --schema-only` baseline) plus every
+  `contracts/ddl/<schema>/NNN_*.sql` applied in filename order — that composition is the schema, and
+  the two dumps are never re-dumped to fold a change back in, or applying the additive file again
+  would fail on a column that already exists. Their `alembic_version` table is part of the baseline
+  and holds no row: the old repos that ran alembic against these schemas are archived, nothing in
+  this repo writes that table, and a rebuilt database is therefore not a database alembic could
+  resume. There is no ledger either (`needs.schema_migration` is the needs schema's alone), because
+  `db/migrate.sh` step (0) is all-or-nothing: it composes the two schemas on a database that has
+  neither and skips a database that has them (#178). That question is asked of `alembic_version`
+  rather than of the schema name -- the table is the baseline's own marker, so a schema standing
+  without it is a build that died part-way and not a schema to leave alone.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
 - The ydc import pin is **`v0.4.0` `76db718`** of `shk95-1/cosmai-ydc-old` (formerly `slopindustries/youtube-data-collector`), the last commit of that repository — the marker for "seen up to here": every commit up to that tag carries a disposition in the ledger on goal `shk95/cosmai-import-ydc#1` (fork #52). The pin is not the promotion source. Each promoted module's header names the ydc tag its rules were copied from — `v0.1.0` `02440ab` for the v0.1.0 lineage, `v0.3.0` `e5a1b00` for `cross_source.py` · `holdout_commerce.py` · `vector_threshold.py` — and `tests/test_ydc_pin.py` checks that this line names one pin, that every header tag is one of the four ydc tags, and that none is newer than the pin. Nothing in this checkout compares the code against the ydc repository itself: `tool/compare-ydc-*` read the ydc checkout `--ydc` points at, on demand, and a change to the original after the pin is caught only by the next disposition pass.

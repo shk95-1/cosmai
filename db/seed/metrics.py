@@ -52,7 +52,8 @@ SET neg = EXCLUDED.neg, pos = EXCLUDED.pos, yt_neg = EXCLUDED.yt_neg, yt_pos = E
     persist_products = EXCLUDED.persist_products,
     persist_products_total = EXCLUDED.persist_products_total, aspect_scope = EXCLUDED.aspect_scope
 """
-# like_cap_sum 은 비운다: 상한 규칙(interfaces.md LIKE_CAP=100)은 계약에만 있고 슬라이스 집계에는 없다.
+# like_cap_sum is left empty: the cap rule (interfaces.md LIKE_CAP=100) lives only in the contract, not
+# in the slice's own aggregation.
 WISH_SQL: LiteralString = """
 INSERT INTO metrics_wish
   (run_id, scope, format, attribute, brand, mentions, channels, videos, months_present,
@@ -183,7 +184,7 @@ def _p1_need_rows(slices: Path, run_id: int) -> list[tuple[Any, ...]]:
                 _total(r["months_neg"]),
                 _ratio(r["products_neg"]),
                 _total(r["products_neg"]),
-                # need_mention.aspect_scope 와 같은 어휘를 쓴다 (A5).
+                # Uses the same vocabulary as need_mention.aspect_scope (A5).
                 "category" if r["scope"] == "specific" else opt(r["scope"]),
             )
         )

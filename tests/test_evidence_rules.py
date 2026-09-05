@@ -1,4 +1,4 @@
-"""근거 선별 규칙 넷이 계약 §근거 가 적은 그대로인가 (포크 #6).
+"""Are the four evidence selection rules exactly what the contract's §Evidence writes (fork #6).
 
 DB 없이 도는 자리다 — 규칙은 후보 목록에서 근거 행을 만드는 순수 함수이고, 그래서 저장된 표에서도
 ydc 의 원 수집 CSV 에서도 같은 코드가 돈다(`analysis/judge` 가 쓴 방식). 골든이 성립하는 자리가 그것이다.
@@ -141,6 +141,7 @@ def test_the_rows_come_out_in_a_stable_order():
 
 @pytest.mark.parametrize("flags", ["", "duplicate_in_parent"])
 def test_the_quality_gate_is_the_empty_string_not_a_list_of_known_flags(flags: str):
-    """`counted` 와 다른 게이트다 — 지표는 복붙을 세지만 근거는 인용하지 않는다 (계약 §근거 규칙 1)."""
+    """A different gate from `counted` — the metrics count copy-paste but the evidence does not quote it (the
+    contract's §Evidence, rule 1)."""
     rows = picked([candidate("a", likes=1, quality_flags=flags)])
     assert bool(rows) == (flags == "")

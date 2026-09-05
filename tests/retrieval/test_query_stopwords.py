@@ -235,8 +235,9 @@ def test_without_an_active_list_the_query_tokenizer_is_the_index_tokenizer():
 
 
 def test_no_alias_and_no_eval_query_meets_the_list(installed):
-    """`contracts/interfaces.md` §검색 실측 여섯 줄이 안 움직이는 근거. 겹침이 0 이면
-    `tokenize_query` 가 `tokenize` 와 같은 토큰을 내므로 재실행 없이 성립한다."""
+    """The ground on which the six lines of `contracts/interfaces.md` §Retrieval measurements do not move.
+    With the overlap at 0, `tokenize_query` emits the same tokens as `tokenize`, so it holds without a
+    rerun."""
     aliases = sorted({a for e in topics_module.active().entries for a in e["ko"] + e["latin"]})
     assert len(aliases) == 80  # v1 의 73 + 포크 #56 의 일곱
     assert not [a for a in aliases if set(bm25.tokenize(a)) & stopwords.active().words]

@@ -1,4 +1,5 @@
-"""판정 셀을 받치는 소비자 발화의 선별 — `contracts/interfaces.md` §근거 가 정본이다 (포크 #6).
+"""The selection of the consumer speech that holds up a verdict cell — `contracts/interfaces.md` §Evidence is
+canonical (fork #6).
 
 The rules come from ydc `evidence_comments.py` (shk95-1/cosmai-ydc-old `v0.1.0` `02440ab`; unchanged through
 the import pin `v0.4.0`, `contracts/versioning.md`) and were written over rather than imported from the
@@ -7,9 +8,10 @@ This module knows no DB: it takes a
 candidate list, so the same rules run on the stored corpus and on ydc's raw collection CSV, and that is where
 the golden comparison stands.
 
-**근거는 검색이 아니다.** 이 파일에 순위 모델이 없는 것이 그 문장이다 — 어느 문서가 이 주제를 말했는지는
-`corpus_mention` 이 이미 답했고, 여기 남은 일은 그중 무엇을 인용할지를 좋아요로 정하는 것뿐이다. 왜
-`cosmai retrieval search` 로 대체하지 않는지와 그 실측은 계약 §근거 가 든다.
+**Evidence is not search.** That sentence is why there is no ranking model in this file — which documents
+spoke of this topic has already been answered by `corpus_mention`, and all that is left here is deciding by
+like count which of them to quote. Why it is not replaced by `cosmai retrieval search`, and the measurement
+behind that, are carried by the contract's §Evidence.
 """
 
 from __future__ import annotations
@@ -25,11 +27,13 @@ from analysis.types import TopicQuarterEvidenceRow
 # (`contracts/versioning.md`).
 EVIDENCE_VERSION = "rule-v0.1"
 
-# 셀당 몇 건을 남기는가. 카드 한 장에 들어가는 수이고, 025 의 CHECK 이 아니라 여기가 그 수의 자리다 --
-# DDL 은 추가만이라 한번 적은 상한을 되돌릴 수 없다 (계약 §근거).
+# How many are kept per cell. It is the number that goes into one card, and this rather than 025's CHECK is
+# that number's place -- the DDL is additive only, so a ceiling once written cannot be taken back
+# (the contract's §Evidence).
 TOP_PER_CELL = 3
 
-# 인용하지 않는 문서. 지표는 복붙을 `unique_ratio` 의 분모에 세지만(§수식) 세는 일과 인용은 다른 일이다.
+# Documents that are not quoted. The metrics count copy-paste in `unique_ratio`'s denominator (§Formulas), but
+# counting and quoting are different jobs.
 QUOTABLE_FLAGS = ""
 
 
@@ -70,8 +74,9 @@ def quotable(candidate: Candidate) -> bool:
 
 
 def _ladder(candidate: Candidate) -> tuple[int, str]:
-    """좋아요 내림차순, 동점은 doc_id. 2차 키가 없으면 동점의 승자를 읽기 순서가 정하고, 저장되는 표는
-    재실행이 같은 행을 내지 않는다 (계약 §근거: 픽스처 46셀 중 32셀에 동점이 있다)."""
+    """Like count descending, ties by doc_id. Without the second key the read order decides the winner of a
+    tie, and a stored table does not yield the same rows on a rerun (the contract's §Evidence: 32 of the
+    fixture's 46 cells have a tie)."""
     return (-candidate.like_count, candidate.doc_id)
 
 

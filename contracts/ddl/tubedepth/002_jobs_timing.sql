@@ -1,7 +1,10 @@
 -- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
--- Applied to the throwaway test schema only by tests/conftest.py's tubedepth_schema fixture --
--- production tubedepth is untouched until the coordinator session applies this file directly (issue #8
--- approval boundary, contracts/entrypoints.md).
+-- Part of this schema's canonical form since #178: the baseline dump
+-- contracts/ddl/current/app.tubedepth.sql plus every file in this directory, applied in filename
+-- order. db/migrate.sh step (0) composes that on a database where tubedepth is absent,
+-- tests/conftest.py composes it into a throwaway schema, and tool/checks/ddl-drift calls it
+-- production's expected state. Production already carries this file (issue #8 approval boundary,
+-- contracts/entrypoints.md); step (0) skips a schema that is there, so nothing re-applies it.
 --
 -- #101, judged on #10 §A-2 rationale 2: `created_at` is enqueue time, not start time -- the gap between the
 -- two is queue wait, so collector_health's youtube arm needs a separate `started_at` to ever compute

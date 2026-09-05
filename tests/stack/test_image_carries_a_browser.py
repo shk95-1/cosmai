@@ -65,8 +65,8 @@ def test_the_base_image_installs_the_browser_binary_and_its_os_packages():
 
 
 def test_the_build_fails_rather_than_the_first_run_if_the_browser_is_missing():
-    """The last RUN in stack/Dockerfile is the evidence for #10 컷오버 조건 2 ("it works inside the
-    image"). A browser that is only exercised at 03:00 is not covered by that evidence."""
+    """The last RUN in stack/Dockerfile is the evidence for #10 cutover condition 2 ("it works inside
+    the image"). A browser that is only exercised at 03:00 is not covered by that evidence."""
     if not _needs_a_browser():
         pytest.skip("no source needs a browser")
     text = _dockerfile()

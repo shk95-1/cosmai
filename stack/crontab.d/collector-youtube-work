@@ -1,4 +1,4 @@
-# UTC. work 5m, from contracts/entrypoints.md §스케줄. Cron and not a resident daemon because
+# UTC. work 5m, from contracts/entrypoints.md §Schedule. Cron and not a resident daemon because
 # `collectors/youtube/cli.py:_run_work` is a batch: it claims up to DEFAULT_WORK_BATCH (50) queued
 # jobs, works them, and returns -- there is no poll loop and no --poll flag to give it one, so the
 # repetition has to come from outside the process. (The archived tubedepth worker was a daemon with

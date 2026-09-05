@@ -1,11 +1,13 @@
-"""컨테이너 → 호스트 ollama 배선 (#32).
+"""The container -> host ollama wiring (#32).
 
-`analyze` 컨테이너에는 이 주소가 없었고, 그래서 gemma4 를 돌리는 크론 줄도 넣을 수 없었다. 주소는
-secret 이 아니라 노브다 — 값은 `stack/env.example` → `stack/.env` 에 있고 `contracts/secrets.md` 는
-그것을 자기 키 목록에서 뺀다(그 목록에 있으면 값을 적는 순간 test_stack_wiring 의 secret 검사에 걸린다).
+The `analyze` container had no such address, so there was no way to add the cron line that runs gemma4
+either. The address is a knob, not a secret -- the value lives in `stack/env.example` ->
+`stack/.env`, and `contracts/secrets.md` leaves it off its own key list (being on that list would trip
+test_stack_wiring's secret check the moment a value got written there).
 
-이 파일이 붙드는 것은 `<<:` 의 함정이기도 하다: `analyze` 가 자기 `environment:` 를 선언하는 순간
-앵커의 다섯 키는 상속이 아니라 **삭제**다. 그 다섯은 test_stack_wiring.py 가 서비스마다 검사한다.
+What this file also holds onto is the `<<:` trap: the moment `analyze` declares its own
+`environment:`, the anchor's five keys are not inherited, they are **deleted**. test_stack_wiring.py
+checks those five per service.
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ ENV_EXAMPLE = REPO_ROOT / "stack" / "env.example"
 SECRETS_MD = REPO_ROOT / "contracts" / "secrets.md"
 KNOB = "OLLAMA_URL"
 SERVICE = "analyze"
-# 조정자가 컨테이너 안에서 실제로 왕복시킨 주소 (2026-08-25, WSL2 미러링이 물려받은 Windows Tailscale).
+# The address the coordinator actually measured round-tripping inside a container (2026-08-25, the
+# Windows Tailscale WSL2's mirroring inherits).
 DEFAULT_HOST = "http://100.102.193.98:11434"
 
 
@@ -45,8 +48,9 @@ def test_env_example_documents_the_knob():
 
 
 def test_the_secret_contract_does_not_claim_this_knob_as_a_key():
-    """`contracts/secrets.md` 가 백틱으로 이름 붙인 키에는 이 레포 어디에도 값이 붙을 수 없다
-    (test_stack_wiring.test_no_secret_key_is_given_a_value_in_the_repo). 주소는 값이 있어야 한다."""
+    """A key `contracts/secrets.md` names in backticks may have no value attached anywhere in this repo
+    (test_stack_wiring.test_no_secret_key_is_given_a_value_in_the_repo). The address must have a
+    value."""
     assert f"`{KNOB}`" not in SECRETS_MD.read_text(encoding="utf-8"), (
         f"{KNOB} 은 secret 이 아니라 노브다 — 키 목록에 남기면 기본값을 적을 자리가 사라진다"
     )

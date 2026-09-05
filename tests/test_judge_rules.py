@@ -1,4 +1,4 @@
-"""판정 순서 일곱 갈래와 두 점수 — `contracts/interfaces.md` §판정 (포크 #40).
+"""The seven branches of the verdict order and the two scores — `contracts/interfaces.md` §Verdict (fork #40).
 
 DB 를 타지 않는다. 판정은 지표 행 위의 순수 함수라, 규칙이 갈리는 자리는 픽스처가 아니라 그 행
 하나에서 보여야 한다. 골든(`tests/test_judge_golden.py`)이 값 전체를 지고, 이 파일은 **왜 그 값인지**를
@@ -203,8 +203,9 @@ def test_percentile_rank_gives_the_middle_of_a_tie():
 
 
 def test_the_evidence_channel_term_is_channel_count_over_denom_channels_not_the_diffusion():
-    """§판정 이 갈라 적은 **세 번째** 채널 비율이다. 댓글 행에서만 갈리므로 영상만 보면 안 보인다 --
-    `channel_diffusion` 은 두 소스가 같은 값이고 이 항은 그 행의 `channel_count` 를 쓴다."""
+    """The **third** channel ratio §Verdict writes apart. It parts on comment rows only, so looking at videos
+    alone hides it -- `channel_diffusion` is the same value on both sources while this term uses that row's
+    `channel_count`."""
     video = metric("백탁", "2024Q1", source=VIDEO, channel_count=8, channel_diffusion=0.5)
     comment = metric("백탁", "2024Q1", source=COMMENT, channel_count=2, channel_diffusion=0.5)
     made = decided([video, comment])

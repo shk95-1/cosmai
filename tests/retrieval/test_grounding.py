@@ -1,9 +1,10 @@
 """Does the search block a query holding a name that is not in the corpus (fork #48).
 
-하한선은 못 쓴다(계약 §벡터 하한선). 코사인이 안 갈리는 자리에서 갈리는 것은 **문서빈도**이고, 이
-파일은 그 게이트가 **막아야 하는 것을 막고 막으면 안 되는 것을 통과시키는지**를 본다. 둘 다 실측이
-정한 자리다 -- 특히 통과시켜야 하는 쪽(토큰 0개, 짧은 미등장 토큰)은 막는 순간 벡터가 유일하게 답하는
-질의를 잃으므로, 여기서 매번 확인한다.
+a floor cannot be used (the contract's §Vector floor). What parts where the cosine does not is **document
+frequency**, and this file checks whether that gate **stops what it has to stop and lets through what it must
+not stop**. Both places were fixed by measurement -- the side that has to be let through in particular
+(0 tokens, a short unseen token) loses the queries only vector answers the moment it is stopped, so it is
+confirmed here every time.
 
 색인은 이 파일이 손으로 세운다. 게이트가 보는 것은 `Index.postings` 의 df 하나라, 코퍼스 전체가 아니라
 "그 말이 든 문서가 있는가/없는가" 만 있으면 같은 판정이 선다.
@@ -214,22 +215,22 @@ def test_the_search_section_carries_the_gate_and_what_it_costs():
     """`--engine vector` having come to open the index is a change a person lives through -- not in the
     contract, a host with no cache learns it only after meeting ten-odd minutes of it."""
     body = (ROOT / "contracts" / "entrypoints.md").read_text(encoding="utf-8")
-    start = body.index("## 검색 (")
+    start = body.index("## Search (")
     search = body[start : body.index("\n## ", start)]
-    assert "근거 없는 질의를 청크빈도로 막는다 — `vector`·`hybrid` 에만" in search
-    assert "**`bm25` 의 동작은 이 이슈 전과 같다.**" in search
-    assert "새 코드가 늘지 않는다" in search
-    assert "`--engine vector` 도 BM25 색인을 연다" in search
+    assert "a query with no grounding is stopped by chunk frequency — on `vector`·`hybrid` alone" in search
+    assert "**`bm25` behaves as it did before this issue.**" in search
+    assert "no new code is added" in search
+    assert "`--engine vector` opens the BM25 index too" in search
     # Without writing down that the cache is separate per --source combination, "with a cache it is cheap"
     # covers that case.
-    assert "캐시는 `--source` 조합마다 따로다" in search
-    assert "첫 호출이 무조건 십수" in search
-    assert "`retrieval eval` 은 이 게이트를 타지 않는다" in search
+    assert "separate per `--source` combination" in search
+    assert "first call is unconditionally those ten-odd minutes" in search
+    assert "`retrieval eval` does not ride this gate" in search
 
 
 def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():
     body = INTERFACES.read_text(encoding="utf-8")
-    start = body.index("### 그러면 근거 없는 질의는 무엇이 막는가")
+    start = body.index("### Then what stops a query with no grounding")
     section = body[start : body.index("\n## ", start)]
     assert f"길이 ≥ {grounding.ZERO_DF_MINLEN} (`ZERO_DF_MINLEN`)" in section
     # Half of this section is why the two branches dropped while choosing the rule were dropped.

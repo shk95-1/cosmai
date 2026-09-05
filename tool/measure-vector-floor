@@ -36,9 +36,9 @@ called separately.
 Measuring 73 queries on the CPU takes 11 seconds, so the default device is `cpu` -- no reason to take
 a shared GPU.
 
-종료 코드: 0 답이 계산됐다 · 1 표본이 가짜가 아니다(코퍼스에 실제로 있다 -- 이 산출을 믿지 마라) ·
-2 막힘(벡터 저장소를 못 읽는다 · 인코더가 없다 · 활성 주제 사전이 없다 -- `contracts/entrypoints.md`
-§검색 의 blocked 와 같은 자리다).
+exit codes: 0 an answer was computed · 1 the sample is not fake (it really is in the corpus -- do not trust
+this output) · 2 blocked (the vector store cannot be read · there is no encoder · there is no active topic
+dictionary -- the same place as blocked in `contracts/entrypoints.md` §Search).
 """
 
 from __future__ import annotations
@@ -182,8 +182,9 @@ def literal_queries(dictionary: topics.Topics) -> list[str]:
 
 
 def same_as_csv(queries: list[str]) -> dict:
-    """활성 사전의 질의가 적재 원본 CSV 의 것과 같은가. 계약이 §검색 실측 과 이 표를 잇는 근거이고,
-    사전 판본이 갈린 뒤로는 **이것이 맞댈 수 있는 유일한 짝**이다(옛 버전 행은 DB 에 없다)."""
+    """Are the active dictionary's queries the same as the loaded source CSV's? This is the ground on which
+    the contract joins §Retrieval measurements to this table, and since the dictionary versions parted it is
+    **the only pair that can be compared** (the old version's rows are not in the DB)."""
     from_csv = literal_queries(csv_dictionary())
     return {"same": from_csv == queries, "csv": len(from_csv), "active": len(queries)}
 

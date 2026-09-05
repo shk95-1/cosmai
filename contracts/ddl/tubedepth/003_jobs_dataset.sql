@@ -1,10 +1,14 @@
 -- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
--- Applied to the throwaway test schema only by tests/conftest.py's tubedepth_schema fixture --
--- production tubedepth is untouched until the coordinator session applies this file directly (issue
--- #102 approval boundary, contracts/entrypoints.md).
+-- Part of this schema's canonical form since #178: the baseline dump
+-- contracts/ddl/current/app.tubedepth.sql plus every file in this directory, applied in filename
+-- order. db/migrate.sh step (0) composes that on a database where tubedepth is absent,
+-- tests/conftest.py composes it into a throwaway schema, and tool/checks/ddl-drift calls it
+-- production's expected state. Production already carries this file (issue #102 approval boundary,
+-- contracts/entrypoints.md); step (0) skips a schema that is there, so nothing re-applies it.
 --
--- #102, judged on collector_health's youtube arm being absent (contracts/entrypoints.md §공통 운영
--- 뷰) because `jobs.kind` (`video.metadata` 계열) and the youtube dataset vocabulary
+-- #102, judged on collector_health's youtube arm being absent
+-- (contracts/entrypoints.md §Common operations view) because `jobs.kind` (the `video.metadata` family)
+-- and the youtube dataset vocabulary
 -- (`watch|work|flatten|prune`) are different words in the same-looking column: `kind` says what was
 -- fetched, `dataset` says which `cosmai collect youtube --dataset` verb produced the row. Nullable:
 -- existing rows (created before this migration) have no CLI verb to backfill from.
