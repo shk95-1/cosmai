@@ -199,7 +199,8 @@ def run(
     k: int = K,
 ) -> list[Row]:
     """One row per query. The index is used for the heldout answers too, so it is always built whatever the
-    engine."""
+    engine. On the vector path the index, the gold and the ranking stand on the sources the store carries
+    (`pipeline.index_sources`, #77) -- the same narrowing `ask.run` applies (#82)."""
     if mode not in MODES:
         raise ValueError(f"mode 는 {MODES} 중 하나다: {mode!r}")
     if engine not in ENGINES:
@@ -208,14 +209,18 @@ def run(
     # The index is used for the heldout answers too (taking out the documents holding a query token), so
     # whatever the engine, the answer definition has to be lexical for the three searchers to compete on the
     # same board.
-    from analysis.retrieval.pipeline import coverage_note, load_index, ranked_chunks
+    from analysis.retrieval.pipeline import coverage_note, index_sources, load_index, ranked_chunks
 
-    index, _ = load_index(conn, sources, cache_dir=_cache(cache_dir))
+    # Narrowed once, here, for the three of them: built on the raw source set, a filing enters a gold the
+    # vector store can never return, and the score is wrong rather than low (#82). The lexical engines keep
+    # what the caller asked for.
+    scope = index_sources(engine, sources)
+    index, _ = load_index(conn, scope, cache_dir=_cache(cache_dir))
     # One dictionary is set up here and the answers, the queries and the rows' revision all look at it.
     # Reading the active dictionary separately would leave the three answers standing on different
     # dictionaries the day an activate lands mid-run (#62).
     dictionary = topics.use_active(conn)
-    gold_all = gold_from_chunks(conn, sources, dictionary=dictionary)
+    gold_all = gold_from_chunks(conn, scope, dictionary=dictionary)
 
     # The vector store and the model are opened once here. Opening them per query means opening a 1.2GB
     # matrix and the model 61 times.
@@ -250,7 +255,7 @@ def run(
             query,
             engine=engine,
             top=k * 4,
-            sources=sources,
+            sources=scope,
             store=store,
             cache_dir=_cache(cache_dir),
             index=index,  # hand over what was built above -- rereading per query unpickles it 61 times
