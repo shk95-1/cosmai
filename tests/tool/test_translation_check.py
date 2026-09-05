@@ -20,6 +20,22 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "translation_check"
 
 CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
+ANCHOR_SCRIPT = (
+    "import sys; sys.path.insert(0, {tool!r}); import translation;"
+    "judged, failures = translation.check_anchors({rev!r}, {paths!r});"
+    "print(judged);"
+    "[print(f) for f in failures]"
+)
+
+
+def check_anchors_direct(repo: Path, rev: str, paths: list[str]) -> subprocess.CompletedProcess:
+    """`check_anchors` in isolation -- no invariants/hangul/compose noise from an unrelated content
+    change in the fixture (#234 review round 2: two new out-of-scope rules)."""
+    code = ANCHOR_SCRIPT.format(tool=str(REPO_ROOT / "tool"), rev=rev, paths=paths)
+    return subprocess.run(
+        ["python3", "-c", code], cwd=str(repo), capture_output=True, text=True, env=CLEAN_ENV
+    )
+
 
 def fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
@@ -110,6 +126,34 @@ def test_exit_1_on_invented_anchor(repo: Path) -> None:
     result = translation(repo, "HEAD~1")
     assert result.returncode == 1
     assert "interfaces.md" in result.stdout
+
+
+def test_a_heading_in_another_document_is_out_of_scope(repo: Path) -> None:
+    """`snippets/AGENTS.template.md` §How we work (4c92310) names another file's own heading."""
+    write(
+        repo,
+        "contracts/interfaces.md",
+        "# Interfaces\n\nOne paragraph (`snippets/AGENTS.template.md` §How we work).\n",
+    )
+    commit(repo, "cite another document's own section")
+
+    result = check_anchors_direct(repo, "HEAD", ["contracts/interfaces.md"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[0] == "0"
+
+
+def test_an_issue_anchor_wrapped_onto_the_next_line_is_out_of_scope(repo: Path) -> None:
+    """`#10\\n§A-2` (entrypoints.md, ydc-import wave) still points into issue #10, not this ledger."""
+    write(
+        repo,
+        "contracts/interfaces.md",
+        "# Interfaces\n\nSee fork #10\n§A-2's ruling for the rest of it.\n",
+    )
+    commit(repo, "wrap a GitHub issue anchor across the line break")
+
+    result = check_anchors_direct(repo, "HEAD", ["contracts/interfaces.md"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[0] == "0"
 
 
 def test_exit_0_on_a_single_in_place_translation_and_it_is_counted(repo: Path) -> None:

@@ -68,6 +68,10 @@ EXTERNAL_DOC = re.compile(
     re.IGNORECASE,
 )
 
+# A backtick-quoted filename right before a `§` names the document the heading lives in -- when that
+# file is not one of contracts/*.md, the heading is that other document's own, not this ledger's.
+BACKTICK_MD_REF = re.compile(r"`([^`]+\.md)`\s*$")
+
 
 def git(*args: str) -> str:
     return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
@@ -195,6 +199,22 @@ def prose_lines_for(path: str, kind: str, text: str) -> dict[int, str]:
     return {}
 
 
+def out_of_scope(before: str, prev_line: str) -> bool:
+    """True when this `§` points outside this ledger's territory, not at one of its own headings."""
+    if ISSUE_ANCHOR.search(before) or EXTERNAL_DOC.search(before):
+        return True
+    match = BACKTICK_MD_REF.search(before)
+    if match:
+        stem = match.group(1).rsplit("/", 1)[-1].removesuffix(".md")
+        if stem not in CONTRACTS_BASENAMES:
+            return True
+    # `§` opens the line's real content (only a comment marker precedes it) -- the reference may
+    # continue a wrapped line, so the PREVIOUS line's own ending decides instead ("...#10\n§A-2").
+    if not before.strip(" \t#/*-") and prev_line:
+        return ISSUE_ANCHOR.search(prev_line) is not None or EXTERNAL_DOC.search(prev_line) is not None
+    return False
+
+
 def anchor_tokens(path: str, prose: dict[int, str], all_lines: list[str]) -> list[tuple[int, str, str]]:
     """(line, the raw text right after `§`, the display snippet) for every in-scope token in `prose`."""
     found: list[tuple[int, str, str]] = []
@@ -206,8 +226,8 @@ def anchor_tokens(path: str, prose: dict[int, str], all_lines: list[str]) -> lis
             if not rest or not (rest[0].isalpha() or is_hangul(rest[0])):
                 continue  # not a name token: a bare `§`, or one followed by a digit/punctuation
             before = line[:pos]
-            context = (all_lines[i - 2] if i >= 2 else "") + " " + before
-            if ISSUE_ANCHOR.search(context) or EXTERNAL_DOC.search(context):
+            prev_line = all_lines[i - 2] if i >= 2 else ""
+            if out_of_scope(before, prev_line):
                 continue
             found.append((i, rest, rest[:40].rstrip()))
     return found
