@@ -21,7 +21,7 @@ enforcement sites.
 3. **A shared-surface change goes upstream in the same wave.** A file that exists on both sides is
    not the fork's property. Changing one is allowed, and it obliges the fork to send that change
    upstream in the same wave — never months of them in one PR (#192 methodology row 1, the gap
-   bound). The third list is the record of which surfaces PR #59 already touched.
+   bound). The third list is the record of which surfaces the fork's PRs have already touched.
 
 Before opening a fork → upstream PR the fork runs `tool/checks/ownership upstream/main`, which
 intersects `git diff --name-only upstream/main...HEAD` with the must-not-change list and exits 1 on
@@ -31,7 +31,8 @@ remote.
 ## Paths the fork owns
 
 Everything PR #59 (`3b464fa...5c04ef5`) added that upstream had no file for, grouped by directory,
-plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests).
+plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests; PR #227: the
+ydc import pin test).
 The fork writes these without asking; upstream does not edit them outside a merge.
 
 ```ownership:fork-owned
@@ -70,6 +71,7 @@ tests/test_panel_quarter_contract.py
 tests/test_panel_seed.py
 tests/test_sensitivity_*.py
 tests/test_trend_*.py
+tests/test_ydc_pin.py
 tool/compare-ydc-*
 tool/measure-*
 tool/show-lexicon-stamp
@@ -104,9 +106,11 @@ tool/checks/
 ## Shared surfaces the fork has touched — go upstream in the same wave
 
 These existed on both sides before PR #59 and the fork changed them anyway, which is exactly the case
-rule 3 governs. They are listed so the next fork → upstream PR knows what to diff first.
+rule 3 governs. They are listed so the next fork → upstream PR knows what to diff first. PR #227
+added the last two (the `retrieval_ask` cap lives in the polarity ledger and its tests).
 
 ```ownership:shared-surface
+analysis/polarity/pricing.py
 analysis/types.py
 contracts/README.md
 contracts/entrypoints.md
@@ -124,6 +128,7 @@ tests/snapshots/cosmai_help.txt
 tests/test_cli_help.py
 tests/test_cli_lexicon.py
 tests/test_contract_ddl.py
+tests/test_llm_polarity.py
 tests/test_migrate_ledger_and_grants.py
 tests/test_seed.py
 tool/checks/paths
