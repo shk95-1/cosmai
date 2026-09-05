@@ -8,10 +8,12 @@ Three lines on stdout, for `tool/checks/test --changed <base>` to read:
 
 A is the whole suite, B is those test paths plus the DB-free suite, C is the format/lint/lang checks
 plus those test paths, and N is a tree identical to the base -- format and lint, and nothing recorded.
-The questions are asked in that order of authority: the full-suite list first, then the map, and only
-then the cheap class, so a path whose blast radius is the repository can never be talked down by what
-its diff happens to look like (#215 review C1). Class C is not a guess either -- it is what
-`tool/checks/invariants` proved, file by file, with every string constant compared as code.
+The questions are asked in that order of authority: the gate list first (unconditional -- no proof
+talks it down), then the full-suite list (#230: A unless tool/checks/invariants proves every changed
+full-list file moved no code), then the map, and only then the cheap class for what is left, so a
+path whose blast radius is the repository can never be talked down by a guess about what its diff
+happens to look like (#215 review C1). Class C is not a guess either -- it is what tool/checks/
+invariants proved, file by file, with every string constant compared as code.
 """
 
 from __future__ import annotations
@@ -75,6 +77,7 @@ def invariant(root: Path, base: str, files: list[str]) -> bool:
 def classify(base: str) -> tuple[str, str, list[str]]:
     root = toplevel()
     config = load(root)
+    gate: list[str] = config["gate"]  # type: ignore[assignment]
     full: list[str] = config["full"]  # type: ignore[assignment]
     docs: list[str] = config["docs"]  # type: ignore[assignment]
     entries: dict[str, list[str]] = config["map"]  # type: ignore[assignment]
@@ -87,20 +90,28 @@ def classify(base: str) -> tuple[str, str, list[str]]:
     if not files:
         return NOTHING, f"this tree is {base}'s own: there is no change to verify", []
 
-    # The full-suite list decides before anything else is asked. It is the list of paths whose blast
-    # radius is the whole repository, and a question about their contents cannot narrow that (#215
-    # review C1): a comment-only edit to contracts/ddl/ is still an edit to the database.
+    # The gate's own machinery decides before anything else is asked, and no proof talks it down: a
+    # broken classifier that calls itself class C is the one failure nothing downstream can catch.
     for path in files:
-        for prefix in full:
+        for prefix in gate:
             if path.startswith(prefix):
-                return FULL, f"{path} is on the full-suite list in tests/scope.toml", []
+                return FULL, f"{path} is on the gate list in tests/scope.toml", []
 
-    # Then the map, over every changed file including Markdown: `contracts/ownership.md` is parsed by
-    # tests/test_ownership.py, and prose a test reads is not prose to the gate (#215 review I4).
+    # The full-suite list is next, but #230 lets tool/checks/invariants prove a changed full-list file
+    # moved no code before it forces A -- a comment-only edit to contracts/ddl/ or db/ is not still an
+    # edit to the database (#215 review C1 is why this is proof, not a guess from the diff's shape).
+    full_files = [p for p in files if any(p.startswith(prefix) for prefix in full)]
+    if full_files and not invariant(root, base, full_files):
+        return FULL, f"{full_files[0]} is on the full-suite list in tests/scope.toml", []
+    rest = [p for p in files if p not in full_files]
+
+    # Then the map, over every remaining file including Markdown: `contracts/ownership.md` is parsed
+    # by tests/test_ownership.py, and prose a test reads is not prose to the gate (#215 review I4). A
+    # full-list file already proven unmoved above needs no map entry of its own.
     tests: list[str] = []
     prose_tests: list[str] = []
     keys: list[str] = []
-    for path in files:
+    for path in rest:
         covered = scope_of(path, entries)
         if covered is None:
             if path.endswith(".md"):
@@ -114,7 +125,7 @@ def classify(base: str) -> tuple[str, str, list[str]]:
 
     # Only now the cheap class, and only for what is left: Markdown, plus code that tool/checks/
     # invariants proves moved nothing -- comments and docstrings, with every string constant compared.
-    code = [f for f in files if not f.endswith(".md")]
+    code = [f for f in rest if not f.endswith(".md")]
     if invariant(root, base, code):
         return (
             DOCS,

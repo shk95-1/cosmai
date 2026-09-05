@@ -257,13 +257,62 @@ def test_a_classifier_that_cannot_answer_falls_back_to_the_whole_suite(tmp_path:
     assert done.returncode == 69, done.stdout + done.stderr
 
 
-def test_a_comment_only_ddl_change_is_still_class_a(repo: Path):
-    # #215 review C1: the full-suite list is about blast radius, and no question about a diff's
-    # contents can narrow it. Measured on the old order, this classified C.
+def test_a_comment_only_ddl_change_is_class_c(repo: Path):
+    # #230: the full-suite list no longer forces A once tool/checks/invariants proves the edit moved
+    # no code -- it earns the same class C a comment-only Python edit does.
     before = "-- the old wording\nCREATE TABLE a (id int);\n"
-    scope = change(repo, "contracts/ddl/needs/030_a.sql", before, before.replace("old wording", "why"))
+    scope = change(repo, "contracts/ddl/needs/001_needs.sql", before, before.replace("old wording", "why"))
+    assert scope.klass == "C", scope.raw
+
+
+def test_a_ddl_change_with_a_real_token_moved_is_still_class_a(repo: Path):
+    scope = change(
+        repo,
+        "contracts/ddl/needs/001_needs.sql",
+        "CREATE TABLE a (id int);\n",
+        "CREATE TABLE a (id bigint);\n",
+    )
     assert scope.klass == "A", scope.raw
     assert "contracts/ddl/" in scope.reason, scope.reason
+
+
+def test_a_comment_only_db_backfill_change_is_class_c(repo: Path):
+    before = "-- the old wording\nUPDATE app.need SET body = body;\n"
+    scope = change(repo, "db/backfill/010_fix.sql", before, before.replace("old wording", "why"))
+    assert scope.klass == "C", scope.raw
+
+
+def test_a_comment_only_docker_compose_change_is_class_c(repo: Path):
+    before = "# the old wording\nservices:\n  app:\n    image: cosmai:latest\n"
+    scope = change(
+        repo, "stack/docker-compose.yml", before, before.replace("# the old wording", "# what runs")
+    )
+    assert scope.klass == "C", scope.raw
+
+
+def test_a_docker_compose_value_change_is_class_b(repo: Path):
+    before = "# the old wording\nservices:\n  app:\n    image: cosmai:latest\n"
+    scope = change(repo, "stack/docker-compose.yml", before, before.replace("latest", "v2"))
+    assert scope.klass == "B", scope.raw
+    assert "tests/stack" in scope.tests, scope.tests
+
+
+def test_a_comment_only_gitignore_change_is_class_c(repo: Path):
+    scope = change(repo, ".gitignore", "# the old wording\n*.pyc\n", "# build output\n*.pyc\n")
+    assert scope.klass == "C", scope.raw
+
+
+def test_a_gitignore_pattern_change_is_class_b(repo: Path):
+    scope = change(repo, ".gitignore", "# the old wording\n*.pyc\n", "# the old wording\n*.pyo\n")
+    assert scope.klass == "B", scope.raw
+
+
+def test_every_gate_file_stays_class_a_even_for_a_comment_only_edit(repo: Path):
+    # The gate's own files earn no proof -- #230 split them out of `full` into `gate` for exactly this.
+    before = '# old\n[project]\nname = "a"\n'
+    scope = change(repo, "pyproject.toml", before, before.replace("# old", "# new"))
+    assert scope.klass == "A", scope.raw
+    assert "gate list" in scope.reason, scope.reason
 
 
 def test_a_string_only_change_in_a_package_is_class_b(repo: Path):

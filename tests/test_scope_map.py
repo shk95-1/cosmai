@@ -85,8 +85,14 @@ def test_the_full_suite_list_names_paths_that_are_really_there():
     assert not missing, f"tests/scope.toml `full` names a path that does not exist: {missing}"
 
 
+def test_the_gate_list_names_paths_that_are_really_there():
+    missing = [path for path in scope()["gate"] if not (REPO_ROOT / path).exists()]  # type: ignore[union-attr]
+    assert not missing, f"tests/scope.toml `gate` names a path that does not exist: {missing}"
+
+
 def test_the_gate_itself_is_class_a():
-    # The classifier deciding its own change is small is the failure this list exists to prevent.
-    full = set(scope()["full"])  # type: ignore[arg-type]
+    # The classifier deciding its own change is small is the failure this list exists to prevent
+    # (#230: unconditional -- unlike `full`, no proof talks a gate file down from class A).
+    gate = set(scope()["gate"])  # type: ignore[arg-type]
     for path in ("tests/scope.toml", "tool/change_scope.py", "tool/checks/test", "tests/conftest.py"):
-        assert path in full, f"{path} must force the full suite"
+        assert path in gate, f"{path} must force the full suite unconditionally"

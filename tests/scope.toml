@@ -2,22 +2,30 @@
 # `tool/change_scope.py` turns it into a class: A runs everything, B runs the mapped tests plus the
 # DB-free suite, C runs the format/lint/lang checks and the tests below.
 #
-# `full` is the list of paths whose change can break anything: the database, the packaging or the
-# gate itself. A change touching one of them is class A no matter how small it looks. `tests/scope.toml`
-# is on that list because a wrong entry here is the one error the classifier cannot catch itself.
-full = [
-    "contracts/ddl/",
-    "db/",
+# `gate` is the classifier's own machinery: a wrong entry here is the one error the classifier
+# cannot catch itself, so a change touching one of these is class A no matter how small it looks --
+# no proof talks it down (#230).
+gate = [
     "tests/conftest.py",
     "tests/scope.toml",
+    "tool/change_scope.py",
+    "tool/invariants.py",
     "tool/checks/test",
     "tool/checks/invariants",
     "tool/checks/suite-lock",
     "tool/checks/tested-tree",
-    "tool/change_scope.py",
-    "tool/invariants.py",
     "pyproject.toml",
     "uv.lock",
+]
+
+# `full` is the list of paths whose change CAN break anything: the database or the gate's checkout
+# hooks. A change there is class A unless `tool/checks/invariants` proves every changed full-list
+# file moved no code -- a comment-only edit to `contracts/ddl/needs/001_needs.sql` earns class C, a
+# real schema change still costs the whole suite (#230; #215 review C1 is why this is proof, not a
+# guess about what the diff "looks like").
+full = [
+    "contracts/ddl/",
+    "db/",
     ".githooks/",
 ]
 
@@ -193,6 +201,10 @@ docs = [
 # Reference snippets only: nothing imports playbook/, so a change there has no test of its own and
 # an empty list means "the DB-free suite and nothing more".
 "playbook/" = []
+# Root dotfiles nothing parses as data: an empty list means "the DB-free suite and nothing more".
+# A comment-only edit still earns class C through tool/invariants.py's hash rule (#230).
+".gitignore" = []
+".dockerignore" = []
 "portal/" = ["tests/stack/test_stack_wiring.py"]
 "stack/" = ["tests/stack"]
 "tool/" = ["tests/tool"]
