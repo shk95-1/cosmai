@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Re-runs the holdout: ydc's `holdout_commerce.py` against `cosmai trend holdout` (fork #51).
 
-The promoted source is `holdout_commerce.py` at `v0.3.0`. This script takes that file out of the tag,
-runs it **untouched** (only `--demo`, which takes no network) and then compares the constants and the
+The promoted source is `holdout_commerce.py` at `v0.3.0` `e5a1b00`. This script takes that file out of the
+tag, runs it **untouched** (only `--demo`, which takes no network) and then compares the constants and the
 rules -- what is read is always the ydc checkout `--ydc` points at (the pinned copy
 `analysis/slices/ydc/` was deleted by #9). Same procedure as `tool/compare-ydc-crosscheck`, for the
 same reason.
