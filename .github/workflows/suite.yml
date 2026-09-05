@@ -1,0 +1,58 @@
+# Why CI owns class A (#232, #228 D3'/D4'): nothing in this suite is bound to this host -- a
+# throwaway postgres:18-alpine, dummy secrets tool/checks/test writes for itself, in-repo fixtures
+# and dumps, kiwipiepy's dictionary as an ordinary PyPI wheel -- and the repository is public, so
+# Actions minutes cost nothing running it. Class A here is what lets a worker's own push stay
+# small: the pre-push hook owes CI the whole-suite question instead of paying for it locally
+# (#232 Work 2), and this job's own check run is the commit status a red run shows up as.
+name: suite
+
+on:
+  push:
+  pull_request:
+  schedule:
+    # 17:00 UTC, once a day. tool/issue audit and tool/status read this run's date and conclusion.
+    - cron: "0 17 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: suite-${{ github.ref }}
+  # main and a wave branch are shared history several channels build on -- a later push there must
+  # not cancel a run still proving an earlier one, or a red run in flight goes unreported.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/wave/') }}
+
+jobs:
+  class-a:
+    name: class-a
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The classifier and the #197 origin/main rule need history; this run forces class A
+          # regardless of what they would answer.
+          fetch-depth: 0
+
+      - name: install postgresql-client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: tool/checks/test (class A, the whole suite)
+        env:
+          COSMAI_TEST_PG_PORT: "55432"
+          TERM: dumb
+        run: |
+          set -o pipefail
+          tool/checks/test | tee /tmp/suite-output.log
+
+      - name: pytest summary
+        if: always()
+        run: |
+          {
+            echo '### pytest summary'
+            echo '```'
+            grep -E '^[0-9]+ (passed|failed|error|no tests ran)' /tmp/suite-output.log | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

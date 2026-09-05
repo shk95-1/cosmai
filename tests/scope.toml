@@ -263,3 +263,7 @@ none = [
 # tests/test_ruff_extend_include.py rglobs the whole tool/ tree for python-shebang scripts (#202,
 # #220) rather than naming any one of them, so the readers map's basename scan can never find it.
 "tool/*" = ["tests/test_ruff_extend_include.py"]
+# .github/ is on the `none` list above (nothing at runtime reads it), which would otherwise leave a
+# workflow edit at zero tests -- but .github/workflows/suite.yml is #232's own wiring, and this test
+# is its wiring test (#232 Work 4).
+".github/workflows/*" = ["tests/tool/test_ci_workflow.py"]
