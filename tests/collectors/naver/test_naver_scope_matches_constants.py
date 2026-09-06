@@ -16,6 +16,8 @@ def test_scope_json_matches_the_module_constants():
     assert on_disk["datalab"]["window_start"] == scope.DATALAB_WINDOW_START
     assert on_disk["datalab"]["time_unit"] == scope.DATALAB_TIME_UNIT
     assert on_disk["datalab"]["max_groups_per_request"] == scope.DATALAB_MAX_GROUPS_PER_REQUEST
+    assert on_disk["datalab"]["anchor"] == scope.DATALAB_ANCHOR
+    assert on_disk["datalab"]["category_groups_per_request"] == scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST
     assert on_disk["blog"]["display"] == scope.BLOG_DISPLAY
     assert on_disk["blog"]["pages_max"] == scope.BLOG_PAGES_MAX
     assert on_disk["blog"]["sort"] == scope.BLOG_SORT
@@ -28,3 +30,10 @@ def test_scope_json_matches_the_module_constants():
 def test_scope_json_has_no_stray_top_level_keys():
     on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
     assert set(on_disk) - {"_comment"} == {"datalab", "blog", "http"}
+
+
+def test_the_anchor_leaves_room_for_the_category_groups_beside_it():
+    # The anchor occupies one of the vendor's five group slots (#90), so a request that packed
+    # max_groups_per_request category groups would be refused with the anchor added.
+    assert scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST == scope.DATALAB_MAX_GROUPS_PER_REQUEST - 1
+    assert scope.DATALAB_ANCHOR

@@ -8,6 +8,14 @@ from __future__ import annotations
 DATALAB_WINDOW_START = "2016-01-01"
 DATALAB_TIME_UNIT = "month"
 DATALAB_MAX_GROUPS_PER_REQUEST = 5
+#: The one global anchor keyword (#90, user decision 2026-08-26), sent as its own `keywordGroups`
+#: entry in every DataLab request so that two requests can be put on one scale afterwards
+#: (`db/views/naver_datalab_rescaled.sql`). ydc validated this string; changing it is proposed in a
+#: comment on #90 and confirmed by the user, and old rows keep the ratios they were collected with.
+DATALAB_ANCHOR = "기준_세럼"
+#: How many of a category's own groups ride beside the anchor. The vendor's cap counts the anchor as
+#: one of its 5 groups, so a category with more groups than this takes more than one request.
+DATALAB_CATEGORY_GROUPS_PER_REQUEST = DATALAB_MAX_GROUPS_PER_REQUEST - 1
 
 BLOG_DISPLAY = 100
 BLOG_PAGES_MAX = 3
@@ -33,6 +41,8 @@ __all__ = [
     "DATALAB_WINDOW_START",
     "DATALAB_TIME_UNIT",
     "DATALAB_MAX_GROUPS_PER_REQUEST",
+    "DATALAB_ANCHOR",
+    "DATALAB_CATEGORY_GROUPS_PER_REQUEST",
     "BLOG_DISPLAY",
     "BLOG_PAGES_MAX",
     "BLOG_SORT",
