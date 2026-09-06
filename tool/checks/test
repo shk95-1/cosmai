@@ -119,18 +119,37 @@ uv sync --extra dev --extra retrieval --frozen
 
 if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
-    # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains;
-    # COSMAI_TEST_PG_PORT still overrides it (#60 2.10).
-    port=${COSMAI_TEST_PG_PORT:-$((55000 + $(pwd -P | cksum | cut -d' ' -f1) % 1000))}
+    # port comes from the worktree path (cksum is POSIX) rather than a table nobody maintains, but
+    # two repos hashing the same 1000-port band can collide by construction (#226: a fork worktree
+    # once adopted an upstream suite's live container as its own leaked orphan). A per-repo offset
+    # from `git remote get-url origin` rules that out: upstream cosmai gets 55000-55499, the fork
+    # cosmai-import-ydc gets 55500-55999 -- checked first since "cosmai" is a substring of
+    # "cosmai-import-ydc" -- and each keeps its own 500-slot band from the path hash.
+    # COSMAI_TEST_PG_PORT still overrides both (#60 2.10).
+    repo_url=$(git remote get-url origin 2>/dev/null || echo "")
+    case "$repo_url" in
+        *cosmai-import-ydc*) repo_offset=55500 ;;
+        *) repo_offset=55000 ;;
+    esac
+    port=${COSMAI_TEST_PG_PORT:-$((repo_offset + $(pwd -P | cksum | cut -d' ' -f1) % 500))}
     # Vectors live in a file for now, so no extension is needed. The day this moves to pgvector,
     # change this default to pgvector/pgvector:pg18 (#28 follow-up).
     image=${COSMAI_TEST_PG_IMAGE:-postgres:18-alpine}
     name=cosmai-test-postgres-$port
     # A different container on the same port belongs to another worktree or is a leak: name it and
-    # stop, rather than silently sharing or clobbering someone else's database.
+    # stop, rather than silently sharing or clobbering someone else's database. The label (below,
+    # where this same container is started) tells the two cases apart -- an ad-hoc `pytest` run has
+    # no lock slot and looks exactly like a leak from outside, and that read cost a live suite its
+    # container on 2026-09-05 (#226).
     holder=$(docker ps --filter "publish=$port" --format '{{.Names}}' 2>/dev/null | head -1)
     if [ -n "$holder" ] && [ "$holder" != "$name" ]; then
-        printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
+        holder_path=$(docker inspect -f '{{ index .Config.Labels "cosmai.worktree" }}' "$holder" 2>/dev/null)
+        if [ -n "$holder_path" ]; then
+            printf 'port %s is held by another worktree at %s (container %s)\n' \
+                "$port" "$holder_path" "$holder" >&2
+        else
+            printf 'port %s is held by container %s (another worktree, or a leak to remove)\n' "$port" "$holder" >&2
+        fi
         exit 1
     fi
     # The slot is taken before the container is touched: two overlapping pushes from this same
@@ -143,7 +162,8 @@ if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_
     docker rm -f -v "$name" >/dev/null 2>&1 || true
     secret_file=$(mktemp)
     container_name=$name
-    docker run -d --rm --name "$name" -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
+    docker run -d --rm --name "$name" --label "cosmai.worktree=$(pwd -P)" \
+        -e POSTGRES_PASSWORD=fleet -e POSTGRES_USER=fleet \
         -e POSTGRES_DB=fleet --tmpfs /var/lib/postgresql -p "$port":5432 "$image" >/dev/null
     for _ in $(seq 1 60); do
         pg_isready -h localhost -p "$port" -U fleet -q 2>/dev/null && break

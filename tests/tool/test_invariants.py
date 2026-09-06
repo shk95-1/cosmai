@@ -274,6 +274,51 @@ def test_markdown_that_drops_an_anchor_is_reported(repo: Path):
     assert "AGENTS.md" in done.stdout, done.stdout
 
 
+RENAME_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "section_name_rename"
+
+
+def rename_fixture(name: str) -> str:
+    return (RENAME_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_a_declared_anchor_rename_is_invariant(repo: Path):
+    """A `§` anchor renamed per contracts/section-names.md's ledger is a rename, not a lost literal
+    (#246): the Korean anchor is never even captured as a literal, so only the gained English name
+    needs the ledger's say-so."""
+    write(repo, "contracts/section-names.md", rename_fixture("ledger.md"))
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_before.md"))
+    base = commit(repo, "before")
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_after.md"))
+    commit(repo, "after")
+    done = invariants(repo, base, "contracts/interfaces.md")
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_undeclared_anchor_rename_is_reported(repo: Path):
+    """The same shape of change, but with no ledger row for this pair, still fails (#246)."""
+    write(repo, "contracts/section-names.md", rename_fixture("ledger.md"))
+    write(repo, "contracts/interfaces.md", rename_fixture("undeclared_before.md"))
+    base = commit(repo, "before")
+    write(repo, "contracts/interfaces.md", rename_fixture("undeclared_after.md"))
+    commit(repo, "after")
+    done = invariants(repo, base, "contracts/interfaces.md")
+    assert done.returncode == 1, done.stdout
+    assert "interfaces.md" in done.stdout
+
+
+def test_a_declared_rename_does_not_hide_an_unrelated_dropped_literal(repo: Path):
+    """A ledger-declared rename excuses only the renamed pair -- a literal dropped in the same file
+    in the same change still fails (#246)."""
+    write(repo, "contracts/section-names.md", rename_fixture("ledger.md"))
+    write(repo, "contracts/interfaces.md", rename_fixture("dropped_literal_before.md"))
+    base = commit(repo, "before")
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_after.md"))
+    commit(repo, "after")
+    done = invariants(repo, base, "contracts/interfaces.md")
+    assert done.returncode == 1, done.stdout
+    assert "`foo`" in done.stdout
+
+
 def test_a_new_file_is_not_invariant(repo: Path):
     write(repo, "a.py", "x = 1\n")
     base = commit(repo, "one")

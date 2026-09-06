@@ -18,7 +18,7 @@ from typing import Any
 import httpx
 import pytest
 
-from collectors.naver import parsing, scope
+from collectors.naver import parsing, scope, transport
 from collectors.naver.cli import SECRET_KEYS, FetchSpec
 from collectors.naver.transport import (
     BLOG_PATH,
@@ -41,6 +41,10 @@ FIXTURE = json.loads(
 )
 DATALAB_BODY = FIXTURE["datalab_body"]
 BLOG_BODY = FIXTURE["blog_body"]
+# The two shapes an API Hub error comes in: the gateway nests its code under `error`, the search
+# service puts it at the top level beside an `errorMessage` (both captured 2026-09-06).
+GATEWAY_401_BODY = FIXTURE["gateway_401_body"]
+SERVICE_4XX_BODY = FIXTURE["service_4xx_body"]
 
 DATALAB_SPEC = FetchSpec(kind="datalab", query="suncare", params=FIXTURE["datalab_params"])
 BLOG_SPEC = FetchSpec(kind="blog", query=FIXTURE["blog_params"]["query"], params=FIXTURE["blog_params"])
@@ -68,6 +72,29 @@ def _serving(status: int, body: Any, seen: list[httpx.Request] | None = None):
 # --- what goes out ---------------------------------------------------------------------------
 
 
+def test_the_api_hub_host_the_two_paths_and_the_two_header_names_are_pinned():
+    """The reason this fix round exists: #182 first shipped developers.naver.com's host, paths and
+    header names, and nothing here named them -- so a live 401 was the only thing that could say so.
+    These four literals are the console the credential belongs to (contracts/secrets.md), and moving
+    one of them is a decision, not a refactor."""
+    assert transport.API_HOST == "https://naverapihub.apigw.ntruss.com"
+    assert transport.BLOG_PATH == "/search/v1/blog"
+    assert transport.DATALAB_PATH == "/search-trend/v1/search"
+
+    seen: list[httpx.Request] = []
+    fetcher = _fetcher(_serving(200, BLOG_BODY, seen))
+    fetcher.fetch(BLOG_SPEC)
+    fetcher.fetch(DATALAB_SPEC)
+
+    assert [str(request.url).split("?")[0] for request in seen] == [
+        "https://naverapihub.apigw.ntruss.com/search/v1/blog",
+        "https://naverapihub.apigw.ntruss.com/search-trend/v1/search",
+    ]
+    for request in seen:
+        assert request.headers["X-NCP-APIGW-API-KEY-ID"] == CLIENT_ID
+        assert request.headers["X-NCP-APIGW-API-KEY"] == CLIENT_SECRET
+
+
 def test_a_datalab_fetch_posts_the_request_body_to_the_datalab_endpoint():
     seen: list[httpx.Request] = []
     fetcher = _fetcher(_serving(200, DATALAB_BODY, seen))
@@ -76,7 +103,7 @@ def test_a_datalab_fetch_posts_the_request_body_to_the_datalab_endpoint():
     assert body == DATALAB_BODY
     (request,) = seen
     assert request.method == "POST"
-    assert str(request.url) == f"https://openapi.naver.com{DATALAB_PATH}"
+    assert str(request.url) == f"{transport.API_HOST}{DATALAB_PATH}"
     # The params `datalab_request_key` hashes are the params that go out -- one boundary, not two (#44).
     assert json.loads(request.content) == DATALAB_SPEC.params
     assert request.headers["Content-Type"].startswith("application/json")
@@ -105,8 +132,8 @@ def test_both_endpoints_carry_the_two_credential_headers():
 
     assert len(seen) == 2, "an empty list would make the loop below assert nothing"
     for request in seen:
-        assert request.headers["X-Naver-Client-Id"] == CLIENT_ID
-        assert request.headers["X-Naver-Client-Secret"] == CLIENT_SECRET
+        assert request.headers["X-NCP-APIGW-API-KEY-ID"] == CLIENT_ID
+        assert request.headers["X-NCP-APIGW-API-KEY"] == CLIENT_SECRET
 
 
 def test_a_blog_start_past_the_vendor_ceiling_is_never_requested():
@@ -127,37 +154,56 @@ def test_a_blog_start_past_the_vendor_ceiling_is_never_requested():
 
 
 @pytest.mark.parametrize("status", [401, 403])
-def test_a_refused_credential_blocks_the_run_and_carries_the_vendor_error_code(status: int):
-    error_body = {"errorCode": "024", "errorMessage": "Authentication failed"}
-    fetcher = _fetcher(_serving(status, error_body))
+def test_the_gateways_nested_error_body_blocks_the_run_and_carries_the_vendor_error_code(status: int):
+    """The API Hub gateway nests its code under `error`; a refused key is what it answers with."""
+    fetcher = _fetcher(_serving(status, GATEWAY_401_BODY))
 
     with pytest.raises(AuthBlocked) as raised:
         fetcher.fetch(BLOG_SPEC)
     assert raised.value.status == status
-    assert raised.value.error_code == "024"
-    assert str(status) in str(raised.value) and "024" in str(raised.value)
-    # The note this message becomes is read by whoever is on call; the vendor's message echoes the
-    # request back, so only the code travels.
-    assert "Authentication failed" not in str(raised.value)
+    assert raised.value.error_code == "200"
+    assert str(status) in str(raised.value) and "200" in str(raised.value)
+    # The note this message becomes is read by whoever is on call; the gateway's `message` and
+    # `details` describe the request that was refused, so only the code travels.
+    assert "Authentication Failed" not in str(raised.value)
+    assert "Invalid authentication information." not in str(raised.value)
 
 
 def test_a_429_stops_the_run_rather_than_failing_one_request():
-    fetcher = _fetcher(_serving(429, {"errorCode": "012", "errorMessage": "rate limited"}))
+    # The rate limit is the gateway's, so its body nests. The code here is this test's own -- no live
+    # 429 was captured, and what is under test is the mapping and that a code travels at all.
+    fetcher = _fetcher(_serving(429, {"error": {"errorCode": "RL", "message": "rate limited"}}))
 
     with pytest.raises(RateLimited) as raised:
         fetcher.fetch(BLOG_SPEC)
     assert raised.value.status == 429
-    assert raised.value.error_code == "012"
+    assert raised.value.error_code == "RL"
 
 
-def test_another_4xx_fails_that_one_request_and_is_not_retried():
+def test_the_services_flat_error_body_fails_that_one_request_and_is_not_retried():
+    """The other shape: the search service answers a bad request with the code at the top level,
+    beside an `errorMessage` (the SE01-SE06/SE99 family; this one is a `start` past the ceiling)."""
     seen: list[httpx.Request] = []
-    fetcher = _fetcher(_serving(400, {"errorCode": "101", "errorMessage": "bad request"}, seen))
+    fetcher = _fetcher(_serving(400, SERVICE_4XX_BODY, seen))
 
     with pytest.raises(RequestFailed) as raised:
         fetcher.fetch(BLOG_SPEC)
     assert raised.value.status == 400
+    assert raised.value.error_code == "SE03"
+    assert "SE03" in str(raised.value)
+    assert "Invalid start value" not in str(raised.value)
     assert len(seen) == 1
+
+
+def test_an_error_body_in_neither_shape_carries_no_vendor_code():
+    """`error` holding something other than an object is somebody else's error page, not a vendor
+    code -- the note says so rather than repeating whatever was in the field."""
+    fetcher = _fetcher(_serving(400, {"error": "the gateway's own words"}))
+
+    with pytest.raises(RequestFailed) as raised:
+        fetcher.fetch(BLOG_SPEC)
+    assert raised.value.error_code == "?"
+    assert "the gateway's own words" not in str(raised.value)
 
 
 def test_a_5xx_is_retried_to_the_attempt_cap_and_then_fails():
@@ -212,10 +258,23 @@ def test_a_body_that_is_not_json_fails_that_request():
         _fetcher(handler).fetch(BLOG_SPEC)
 
 
-def test_no_credential_value_reaches_an_error_message():
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"errorCode": "SE01", "errorMessage": CLIENT_SECRET}, id="flat"),
+        pytest.param(
+            {"error": {"errorCode": "200", "message": CLIENT_SECRET, "details": CLIENT_ID}},
+            id="nested",
+        ),
+    ],
+)
+def test_no_credential_value_reaches_an_error_message(body: dict[str, Any]):
+    """Both shapes, because a gateway that echoes a header back would otherwise put the key in a
+    `naver_run` note the moment the nested shape started carrying one."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         del request
-        return httpx.Response(401, json={"errorCode": "024", "errorMessage": CLIENT_SECRET})
+        return httpx.Response(401, json=body)
 
     with pytest.raises(AuthBlocked) as raised:
         _fetcher(handler).fetch(BLOG_SPEC)
@@ -257,8 +316,8 @@ def test_a_spent_budget_refuses_the_next_fetch_without_a_request():
 @pytest.mark.live
 def test_one_live_blog_request_is_accepted_by_the_parser():
     """`-m live`, so it runs only when a person asks for it. What it proves is the join the fixtures
-    cannot: that these headers open the real endpoint and that `parse_blog_response` finds posts in
-    what NAVER actually answers with. One request, ten items."""
+    cannot: that these two headers open the real API Hub endpoint and that `parse_blog_response`
+    finds posts in what NAVER actually answers with. One request, ten items."""
     keys = secrets.load()
     if not all(keys.get(name) for name in SECRET_KEYS):
         pytest.skip("no NAVER credentials on this host")

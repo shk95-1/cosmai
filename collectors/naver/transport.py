@@ -1,20 +1,28 @@
-"""The live transport (#182): the DataLab search trend and blog search endpoints over httpx.
+"""The live transport (#182): the search trend and blog search endpoints of NAVER Cloud Platform's
+**NAVER API Hub** (`naverapihub.apigw.ntruss.com`), over httpx.
+
+The console matters and is named here because it is the one thing this module got wrong once: the
+first #182 transport called developers.naver.com with `X-Naver-Client-Id/Secret`, and the stored pair
+is an API Hub application key, so every live request came back 401. The endpoints are
+`GET /search/v1/blog` and `POST /search-trend/v1/search`, and the two headers are the gateway's.
 
 Shaped after `collectors/commerce/transport/http.py` -- one httpx client, an injectable
 `httpx.BaseTransport` so tests drive whole runs without a socket, and the classification of what
-comes back as the interesting part. What differs is the vocabulary: NAVER's API Hub answers with a
-status and a `errorCode`, so the three things a run has to tell apart are
+comes back as the interesting part. What differs is the vocabulary: API Hub answers with a status and
+an `errorCode`, so the three things a run has to tell apart are
 
   a credential the gateway refuses (401/403)   -- every later request would be refused the same way
   a rate limit (429)                           -- more requests now would only deepen it
   one request that failed (another 4xx, or a 5xx that survived its retries)
 
 which `collectors/naver/cli.py` maps onto the exit codes of contracts/entrypoints.md (0 ok · 1
-partial · 2 blocked). Only the vendor's error *code* ever travels into a message: `errorMessage`
-echoes the request back, and a note ends up in `needs.naver_run` and in an operator's terminal.
+partial · 2 blocked). Only the vendor's error *code* ever travels into a message: `errorMessage`,
+`message` and `details` echo the request back, and a note ends up in `needs.naver_run` and in an
+operator's terminal.
 
-The credentials are the pair `contracts/secrets.md` names, sent as the two headers the API Hub
-documents. They are set on the client once, never logged, and never interpolated into an error.
+The credentials are the pair `contracts/secrets.md` names -- one account-level API Hub key that
+grants both APIs -- sent as the two headers the gateway documents. They are set on the client once,
+never logged, and never interpolated into an error.
 """
 
 from __future__ import annotations
@@ -38,16 +46,20 @@ from collectors.naver.scope import (
 if TYPE_CHECKING:  # cli imports this module; the spec type comes back the other way for typing only.
     from collectors.naver.cli import FetchSpec
 
-API_HOST = "https://openapi.naver.com"
-DATALAB_PATH = "/v1/datalab/search"
-BLOG_PATH = "/v1/search/blog.json"
+API_HOST = "https://naverapihub.apigw.ntruss.com"
+DATALAB_PATH = "/search-trend/v1/search"
+BLOG_PATH = "/search/v1/blog"
+
+#: The gateway's own key headers, not developers.naver.com's `X-Naver-Client-*` (#182's fix round).
+KEY_ID_HEADER = "X-NCP-APIGW-API-KEY-ID"
+KEY_HEADER = "X-NCP-APIGW-API-KEY"
 
 #: We identify ourselves rather than imitate a browser (STATE.md §3, the same rule
 #: `collectors/commerce/contract.py`'s DEFAULT_UA states for the commerce sources).
 USER_AGENT = "cosmai-naver/0.1"
 
-#: A code is `024`-shaped; anything else in that field is somebody else's error page and is not
-#: repeated into a note verbatim.
+#: A code is `SE03`- or `200`-shaped; anything else in that field is somebody else's error page and
+#: is not repeated into a note verbatim.
 _CODE = re.compile(r"[^0-9A-Za-z_-]")
 _UNKNOWN_CODE = "?"
 
@@ -99,8 +111,8 @@ class HttpFetcher:
             timeout=REQUEST_TIMEOUT_S,
             transport=transport,
             headers={
-                "X-Naver-Client-Id": client_id,
-                "X-Naver-Client-Secret": client_secret,
+                KEY_ID_HEADER: client_id,
+                KEY_HEADER: client_secret,
                 "User-Agent": USER_AGENT,
                 "Accept": "application/json",
             },
@@ -197,13 +209,21 @@ def _body_of(response: httpx.Response) -> dict[str, Any]:
 
 
 def _error_code(response: httpx.Response) -> str:
-    """The vendor's `errorCode` alone. `errorMessage` is never read: it repeats the request, and this
-    string ends up in a run note and a fetch_log row."""
+    """The vendor's `errorCode` alone, from either shape an API Hub error comes in: the gateway nests
+    it under `error` (401 `{"error": {"errorCode": "200", ...}}`) and the search service puts it at
+    the top level (400 `{"errorCode": "SE03", ...}`). The messages beside it -- `errorMessage`,
+    `message`, `details` -- are never read: they repeat the request, and this string ends up in a run
+    note and a fetch_log row."""
     try:
         body = response.json()
     except ValueError:
         return _UNKNOWN_CODE
-    code = body.get("errorCode") if isinstance(body, dict) else None
+    if not isinstance(body, dict):
+        return _UNKNOWN_CODE
+    code = body.get("errorCode")
+    if code is None:
+        nested = body.get("error")
+        code = nested.get("errorCode") if isinstance(nested, dict) else None
     if not isinstance(code, str) or not code:
         return _UNKNOWN_CODE
     return _CODE.sub("", code)[:16] or _UNKNOWN_CODE
@@ -213,6 +233,8 @@ __all__ = [
     "API_HOST",
     "DATALAB_PATH",
     "BLOG_PATH",
+    "KEY_ID_HEADER",
+    "KEY_HEADER",
     "USER_AGENT",
     "TransportError",
     "AuthBlocked",

@@ -76,7 +76,14 @@ untested=0
 untested_tree=""
 tested_tree=""
 tested_stamp=""
-while read -r _ local_sha _ _; do
+# #222: $earned above, and the cache/ancestor checks below, all answer for HEAD -- the
+# checked-out tree. A ref that is not the checked-out branch is not guaranteed to BE that tree
+# (a detached HEAD names no branch at all, and counts as "not the checked-out branch" too), so
+# only that ref is exempt from the new refusal below. origin/main's tree is fetched once, not
+# per ref: several refs in one push all ask the same question.
+checked_out_ref=$(git symbolic-ref -q HEAD 2>/dev/null) || checked_out_ref=""
+origin_main_tree=$(git rev-parse origin/main^{tree} 2>/dev/null) || origin_main_tree=""
+while read -r local_ref local_sha _ _; do
   saw_ref=1
   case "$local_sha" in
     *[!0]*) ;;
@@ -85,6 +92,22 @@ while read -r _ local_sha _ _; do
   pushing_content=1
 
   tree=$(git rev-parse "$local_sha^{tree}" 2>/dev/null) || tree=""
+
+  # A branch other than the one checked out is refused rather than verified against the wrong
+  # tree (HEAD's), unless its own tree already equals origin/main's -- the one case (the wave
+  # push, from the coordinator's main checkout) that needs no verification regardless of whose
+  # checkout it came from. A tag is exempt: pushing one at a commit other than HEAD is ordinary
+  # and unrelated to what this hook is verifying.
+  case "$local_ref" in
+    refs/tags/*) ;;
+    "$checked_out_ref") ;;
+    *)
+      if [ -z "$tree" ] || [ "$tree" != "$origin_main_tree" ]; then
+        printf 'push the branch from its own checkout\n' >&2
+        exit 1
+      fi
+      ;;
+  esac
 
   if [ "$forced" -eq 0 ]; then
     if [ "$cache" -eq 1 ] && [ -n "$tree" ]; then
