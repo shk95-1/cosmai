@@ -80,9 +80,9 @@ def test_declared_interval_matches_the_cron_expression():
     assert not mismatched, f"선언과 크론이 어긋난다 (선언, 크론): {mismatched}"
 
 
-def test_the_disabled_stages_are_the_two_a_gate_names():
-    # Two stages are off on purpose: youtube:watch behind a compose profile (STATE.md §2, restored by
-    # #39) and naver:datalab behind a commented-out cron line (#182, restored by #90). A third one
-    # appearing without an issue behind it is met here.
+def test_the_only_disabled_stage_is_the_one_a_gate_names():
+    # One stage is off on purpose: youtube:watch, behind a compose profile (STATE.md §2, restored by
+    # #39). naver:datalab came back with #90's anchor -- its cron line is live again. Another stage
+    # going quiet without an issue behind it is met here.
     off = {s.stage_key for s in STAGES if not s.enabled}
-    assert off == {"youtube:watch", "naver:datalab"}, off
+    assert off == {"youtube:watch"}, off

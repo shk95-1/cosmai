@@ -240,7 +240,7 @@ not an orphan **comment**.
 | yt_comment | `video_id/comment_id` | **both** `need_mention` and `wish_mention` use this grammar. One comment carries the same key in two tables |
 | yt_transcript | `video_id` | |
 | yt_title | `video_id` | `TextUnit` only — it never enters `need_mention` |
-| naver_blog | `post_id` | **reserved (unimplemented, #96)** — the source table `needs.naver_blog_post` (004_naver.sql, #9, T15) exists, but the live transport (`collectors/naver/cli.py:_RaisingFetcher`, #95) and the analysis branch (`analysis/polarity/pipeline.py`) do not, so no `need_mention` row of this src exists yet |
+| naver_blog | `post_id` | **reserved (unimplemented, #96)** — the source table `needs.naver_blog_post` (004_naver.sql, #9, T15) exists, but the live transport landed with #182 (`collectors/naver/transport.py`) but the analysis branch (`analysis/polarity/pipeline.py`) has not, so no `need_mention` row of this src exists yet |
 - The CHECK on `needs.need_mention.src` (001_needs.sql) already accepts `naver_blog` as a value — the DDL is additive only, so booking it ahead does no harm (#96).
 - `brand_mention` uses `ref_id` and a different src vocabulary: `yt_title→title` · `yt_transcript→transcript` · `yt_comment→comment` (B12).
 - `labeled_set.ref` is a separate namespace (`sun:<split>:<i>:<review_ref>` · `p1:<split>:<i>` · wish uses `comment_id` alone · `<sample>:<src>/<ref_id>/<brand>` · `<v1|v2>:<i>`). Joining it to a mention row needs a conversion.
@@ -252,10 +252,9 @@ a ratio of it (vendor documentation). So `needs.naver_datalab_point.ratio` can b
 `category`, or the same category on another run) treats numbers normalised against two different
 100s as if they were one scale, and gives **a plausible wrong number with no error**. Ranking by
 GROUP BY on `category`·`group_key` is safe, but before comparing or summing rows with different
-`request_key` values an **anchor rescale** must come first (put a global anchor keyword into several
-requests and return everything to that ratio — issue #90 decides the anchor and when to rescale).
-This contract is the constraint "do not compare across requests without a rescale"; #90 sets out how
-to rescale.
+`request_key` values an **anchor rescale** must come first. #90 decided both halves of it: the
+anchor is one global keyword (`기준_세럼`, `collectors/naver/scope.py:DATALAB_ANCHOR`) put into every
+request, and the rescale is computed at read time, never stored.
 
 **The request boundary is read off the row as `naver_datalab_point.request_key`**
 (`contracts/ddl/needs/006_naver_request.sql`, decision (a): `terms` only audits one group's search
@@ -265,6 +264,25 @@ from another). `request_key` = the sha256 hex digest of the canonical JSON
 (`keywordGroups`·`startDate`·`endDate`·`timeUnit`) (`collectors/naver/parsing.py:datalab_request_key`)
 — the same parameters give the same key, and moving `endDate` by even a day (that window is rescaled)
 gives a different one. Every row one response made shares one `request_key`.
+
+**The rescaled value is the view `needs.naver_datalab_rescaled`** (`db/views/naver_datalab_rescaled.sql`,
+#90). Its columns are `category` · `group_key` · `month` · `ratio` (the raw one, untouched) ·
+`anchor_ratio` · `ratio_rescaled` · `request_key` · `terms` · `captured_at`, one line per stored
+point, and `ratio_rescaled` = `ratio / anchor_ratio` rounded to 6 decimal places. Two rules hold it:
+- **within one request only** — `anchor_ratio` is the anchor point of the *same* `request_key` and
+  `month`, never "the anchor of that month". Comparing two rows is comparing two `ratio_rescaled`
+  values; the raw `ratio` stays comparable inside its own `request_key` alone.
+- **NULL when the anchor is missing** — no anchor point for that `request_key` and `month`, or an
+  anchor whose ratio is 0, leaves `ratio_rescaled` NULL. A NULL means "not comparable across
+  requests"; a filled-in number would be the plausible wrong one this whole section exists against.
+
+The anchor point is stored like any other group (`group_key` = the anchor), so it shares the source
+table's key `(category, group_key, month)`. **A category whose groups do not all fit beside the
+anchor in one request therefore keeps only its last request's anchor row**, and the rows of the
+earlier requests fall under the NULL rule above — `collectors/naver/cli.py` sends the largest batch
+last so that loss stays at its smallest (today: 4 of `keywords.json`'s 5 groups rescale, the fifth
+does not). Carrying one anchor row per request would need a key this table does not have; #90's
+report leaves that to a follow-up decision.
 
 ## Lists that go into a scalar column (A12)
 `wish_mention.format` · `wish_mention.attribute` are `;`-separated, **at most 3**, and **the first is the main value**. Aggregation uses the first alone.
