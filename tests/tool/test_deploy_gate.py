@@ -113,7 +113,7 @@ def run_gate(repo: Path, path: str, *args: str, **extra_env: str) -> subprocess.
         text=True,
         check=False,
         env={
-            **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+            **{k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "COSMAI_FORCE_"))},
             "PATH": path,
             **extra_env,
         },
@@ -226,7 +226,7 @@ def run_migrate(root: Path, *args: str, gate_exit: str = "0") -> subprocess.Comp
     (bin_dir / "docker").chmod(0o755)
     (root / "secret_file").write_text("", encoding="utf-8")
     env = {
-        **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        **{k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "COSMAI_FORCE_"))},
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "COSMAI_SECRET_FILE": str(root / "secret_file"),
     }

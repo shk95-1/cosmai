@@ -14,6 +14,7 @@ set -e
 . tool/checks/prerequisite
 . tool/checks/suite-lock
 . tool/checks/tested-tree
+. tool/checks/harness-roles
 
 # git exports GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE to hooks. Left in place, a test that runs git in a
 # temporary repository commits into THIS checkout instead (it happened: a "chore: seed" fixture
@@ -173,6 +174,9 @@ if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_
     # Harness only: the per-test schema fixture needs CREATE on the database.
     docker exec "$name" psql -U fleet -d fleet -q -c 'GRANT CREATE ON DATABASE fleet TO needs_migrator'
     COSMAI_SECRET_FILE="$secret_file" db/migrate.sh --container "$name" --db fleet --superuser fleet
+    # Harness only, and after both deploys: class A runs four pytest processes and each one creates
+    # its schema as needs_migrator, whose production limit of 2 is spent by the second of them (#216).
+    harness_roles_widen "$name" fleet
     TEST_POSTGRES_URL="postgresql+psycopg://needs_migrator:check@localhost:$port/fleet"
     TEST_POSTGRES_RUNTIME_URL="postgresql+psycopg://needs_runtime:check-runtime@localhost:$port/fleet"
     # This branch is the only place the container is known to exist, so it is the only place that can
@@ -231,10 +235,28 @@ case "$change_class" in
         fi
         ;;
     *)
-        printf '→ pytest\n'
+        # #216: the whole suite in one process was 15 minutes of a machine using one core. It runs
+        # across processes now -- every worker gets its own pytest session, and per-test schema names
+        # already carry the node id, so two workers never share a schema.
+        #
+        # Four, fixed rather than `-n auto`: CI's runner has 4 vCPU and this host has 8, and a
+        # verification is worth more when the run that proves a tree in CI is the same experiment as
+        # the run a person can repeat locally. COSMAI_TEST_WORKERS moves it for a measurement.
+        workers=${COSMAI_TEST_WORKERS:-4}
+        # -m is spelled out in full because a command-line -m replaces the one in addopts rather
+        # than joining it, and dropping `not live` would dial the real network into the suite.
+        printf '→ pytest -n %s\n' "$workers"
         # The session guards in tests/conftest.py are armed only here: a partial run never registers
         # the default implementations, so outside the full suite they report a failure of their own (#215).
-        COSMAI_FULL_SUITE=1 uv run pytest
+        # Under -n each worker is its own session, and the guard arms itself in each of them.
+        COSMAI_FULL_SUITE=1 uv run pytest -n "$workers" \
+            -m 'not live and not local_llm and not serial'
+        # The serial group runs alone, after them: these deploy with db/migrate.sh, which drops every
+        # view in `needs` and needs a free needs_migrator connection -- neither survives a worker
+        # running beside it, and `--dist loadgroup` would only put them on one worker while the other
+        # three kept going. Not COSMAI_FULL_SUITE: three files are a focused session, not a suite.
+        printf '→ pytest (serial group)\n'
+        uv run pytest -m 'not live and not local_llm and serial'
         ;;
 esac
 suite_green=1

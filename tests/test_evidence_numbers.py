@@ -110,7 +110,7 @@ def test_the_table_says_it_is_not_the_same_ruler_as_the_all_source_measurement()
     table = contract()
     assert "not the same footing as §Retrieval measurements" in table
     assert "ceiling" in table
-    assert "#11 의 기본 엔진 판단에 입력으로 쓰지 않는다" in table
+    assert "not used as an input to #11's default-engine decision" in table
 
 
 @pytest.mark.postgres

@@ -20,6 +20,10 @@ ALLOWED_NON_TEST_MODULES = frozenset(
         # A fixture module analysis.registry's load_implementations() calls register_implementations()
         # on (#2/#3/#4 shape) -- imported by other tests, not collected as one itself, holds no `def test_`.
         "fake_implementation.py",
+        # A one-test session that unregisters and does not restore -- the shape the conftest session
+        # guard exists to catch (#30, #216). tests/test_conftest_guard.py hands it to pytest by path;
+        # collected with the suite it would break the very run it is meant to prove the guard on.
+        "registry_breaker.py",
     }
 )
 

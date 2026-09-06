@@ -1,0 +1,33 @@
+{
+  "_comment": "Request params and response bodies for tests/collectors/naver/test_naver_transport.py (#182). The Korean here is data -- the search terms a run actually sends and a blog title as NAVER returns it -- so it lives under fixtures/ (tool/checks/lang).",
+  "datalab_params": {
+    "keywordGroups": [{"groupName": "백탁", "keywords": ["선크림 백탁"]}],
+    "startDate": "2016-01-01",
+    "endDate": "2026-09-01",
+    "timeUnit": "month"
+  },
+  "blog_params": {"query": "선크림 백탁", "display": 100, "start": 1, "sort": "date"},
+  "datalab_body": {
+    "startDate": "2016-01-01",
+    "endDate": "2026-09-01",
+    "timeUnit": "month",
+    "results": [
+      {"title": "백탁", "keywords": ["선크림 백탁"], "data": [{"period": "2016-01-01", "ratio": 10.4}]}
+    ]
+  },
+  "blog_body": {
+    "total": 1,
+    "start": 1,
+    "display": 1,
+    "items": [
+      {
+        "title": "<b>선크림</b> 백탁 후기",
+        "link": "https://blog.naver.com/x/1",
+        "description": "본문 발췌",
+        "bloggername": "누군가",
+        "postdate": "20260801"
+      }
+    ]
+  },
+  "live_query": "선크림"
+}

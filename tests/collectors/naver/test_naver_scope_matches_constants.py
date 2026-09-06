@@ -19,8 +19,12 @@ def test_scope_json_matches_the_module_constants():
     assert on_disk["blog"]["display"] == scope.BLOG_DISPLAY
     assert on_disk["blog"]["pages_max"] == scope.BLOG_PAGES_MAX
     assert on_disk["blog"]["sort"] == scope.BLOG_SORT
+    assert on_disk["http"]["timeout_s"] == scope.REQUEST_TIMEOUT_S
+    assert on_disk["http"]["retry_max_attempts"] == scope.RETRY_MAX_ATTEMPTS
+    assert on_disk["http"]["retry_backoff_s"] == scope.RETRY_BACKOFF_S
+    assert on_disk["http"]["max_requests_per_run"] == scope.MAX_REQUESTS_PER_RUN
 
 
 def test_scope_json_has_no_stray_top_level_keys():
     on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
-    assert set(on_disk) - {"_comment"} == {"datalab", "blog"}
+    assert set(on_disk) - {"_comment"} == {"datalab", "blog", "http"}

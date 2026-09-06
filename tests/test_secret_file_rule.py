@@ -90,7 +90,10 @@ def test_a_missing_collector_key_is_not_reported_as_a_needs_problem(tmp_path: Pa
     assert "needs:" not in done.stderr
 
 
+# serial: this test deploys with db/migrate.sh, which drops every view in `needs` and wants a
+# needs_migrator connection nothing else is holding -- neither survives a parallel worker (#216).
 @pytest.mark.postgres
+@pytest.mark.serial
 def test_no_secret_value_reaches_the_docker_command_line(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

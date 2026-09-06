@@ -13,12 +13,12 @@ import pytest
 from analysis.baselines import BASELINES, RULE_MEASURED, adoption_misses, for_task, meets
 from analysis.registry import TASKS
 
-TABLE_HEADER = "| task | 평가셋 |"
+TABLE_HEADER = "| task | evaluation set |"
 INTERFACES = Path(__file__).resolve().parents[1] / "contracts" / "interfaces.md"
 # 표의 채택 조건은 하네스가 내는 지표 키를 그대로 쓴다: `acc ≥ .77 그리고 P:불만 ≥ .89`.
 CHECK = re.compile(r"([^\s|]+)\s*≥\s*(\d*\.\d+)")
 # §규칙 실측 표: `acc .870 · P:불만 .915`.
-MEASURED_HEADER = "| 평가셋 | 규칙 실측 |"
+MEASURED_HEADER = "| evaluation set | rule measurement |"
 MEASURED = re.compile(r"([^\s|·]+)\s+(\d*\.\d+)")
 
 
@@ -30,7 +30,7 @@ def _written(number: str) -> str:
 
 def _table_rows() -> list[tuple[str, tuple[tuple[str, str], ...]]]:
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
-    start = lines.index(TABLE_HEADER + " 규칙 기준선 | 채택 조건 (단일 임계값) |") + 2
+    start = lines.index(TABLE_HEADER + " rule baseline | adoption condition (a single threshold) |") + 2
     rows = []
     for line in lines[start:]:
         if not line.startswith("|"):

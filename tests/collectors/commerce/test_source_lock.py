@@ -46,6 +46,11 @@ from collectors.commerce.storage.tables import run as run_table
 from collectors.commerce.storage.tables import run_source as run_source_table
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+# serial: the per-source advisory key (collectors/commerce/storage/locks.py) is database-wide and
+# nothing renames it per test, so two workers walking the same source take one lock away from each
+# other -- the collision this file exists to prove, arriving as a failure of it (#216).
+pytestmark = pytest.mark.serial
+
 AT = datetime(2026, 8, 24, 3, tzinfo=UTC)
 
 # The two transaction timeouts the runtime role carries -- db/bootstrap.sql sets them on needs_runtime

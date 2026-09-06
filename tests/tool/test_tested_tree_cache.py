@@ -37,7 +37,12 @@ def commit(repo: Path, text: str) -> None:
 
 
 def run(repo: Path, script: str, **env: str) -> subprocess.CompletedProcess:
-    """Runs a snippet against the real fragment, in the repo, as tool/checks/test would."""
+    """Runs a snippet against the real fragment, in the repo, as tool/checks/test would.
+
+    COSMAI_FORCE_* is dropped along with GIT_*: the fragment reads COSMAI_FORCE_SUITE, so a run
+    started the one sanctioned way past the cache (`COSMAI_FORCE_SUITE=1 tool/checks/test`) made
+    this file's own tests fail on the flag rather than on the fragment (measured 2026-09-06, #216).
+    """
     return subprocess.run(
         ["sh", "-c", f". {FRAGMENT}\n{script}\n"],
         cwd=str(repo),
@@ -45,7 +50,7 @@ def run(repo: Path, script: str, **env: str) -> subprocess.CompletedProcess:
         text=True,
         check=False,
         env={
-            **{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+            **{k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "COSMAI_FORCE_"))},
             "HOME": str(repo),
             **env,
         },

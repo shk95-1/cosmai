@@ -55,8 +55,10 @@ def _granted_by_narrowing(schema: str) -> set[str]:
 
 
 def _removed_by_narrowing(heading: str) -> set[str]:
-    paragraphs = [p for p in _section(heading).split("\n\n") if "좁히기가 닫은" in p]
-    assert len(paragraphs) == 1, f"계약의 {heading} 절에서 좁히기가 닫은 목록을 하나 찾지 못했다"
+    paragraphs = [p for p in _section(heading).split("\n\n") if "What the narrowing closed" in p]
+    assert len(paragraphs) == 1, (
+        f"{heading} lists what the narrowing closed {len(paragraphs)} times, not once"
+    )
     return set(re.findall(r"`([a-z_]+)`", paragraphs[0]))
 
 
@@ -124,7 +126,7 @@ def test_the_narrowing_never_regrants_what_the_current_section_calls_removed(sch
     # If a relation the current section names as closed shows up again in a GRANT line, the narrowing
     # is not narrowing.
     removed = _removed_by_narrowing(schema)
-    assert removed, "좁히기가 닫은 관계를 하나도 못 읽었다 -- 계약의 모양이 바뀌었다"
+    assert removed, "not one relation the narrowing closed could be read -- the contract changed shape"
     assert not (removed & _granted_by_narrowing(schema)), sorted(removed & _granted_by_narrowing(schema))
 
 

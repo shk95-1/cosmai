@@ -329,7 +329,9 @@ def test_the_closed_vocabularies_in_the_key_are_the_ones_the_contract_explains(c
     """A single typo (`youtube_videos`) quietly opens a separate group inside the key -- exactly the
     thing `formats.md` says is impossible. The type comment and the CHECK must carry the same
     vocabulary."""
-    comment = re.search(rf"^    {column}: str  # ([^—]+)", INTERFACES.read_text(encoding="utf-8"), re.M)
+    # The aside is opened by an em dash or by `--`: the block follows analysis/types.py word for word
+    # (#206 part 3) and that file writes the ASCII form on some lines.
+    comment = re.search(rf"^    {column}: str  # (.+?)(?:—|--)", INTERFACES.read_text(encoding="utf-8"), re.M)
     assert comment, f"interfaces.md 의 dataclass 가 {column} 의 어휘를 말하지 않는다"
     assert _vocabulary_in_ddl(QUARTER, column) == tuple(v.strip() for v in comment.group(1).split("|"))
 

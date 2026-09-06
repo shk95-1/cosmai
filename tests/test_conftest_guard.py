@@ -7,6 +7,10 @@ from pathlib import Path
 import psycopg
 import pytest
 
+# At import time, not inside a test: this module is conftest.py read a second time, and reading it
+# while `_no_network` has psycopg and socket monkeypatched would capture the guard as the original.
+from tests.conftest import _worker_lock_class
+
 
 def test_an_unmarked_test_cannot_open_a_socket():
     with pytest.raises(RuntimeError, match="offline by construction"):
@@ -64,13 +68,15 @@ def test_sqlalchemy_engine_connect_to_a_non_test_port_is_also_refused():
         engine.dispose()
 
 
-def _focused_run(env_value: str | None) -> subprocess.CompletedProcess[str]:
+def _focused_run(
+    env_value: str | None, target: str = "tests/test_agents_md.py"
+) -> subprocess.CompletedProcess[str]:
     """One `pytest <file>` in its own process, the way a worker runs a targeted test."""
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST_", "COSMAI_FULL_SUITE"))}
     if env_value is not None:
         env["COSMAI_FULL_SUITE"] = env_value
     return subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/test_agents_md.py", "-p", "no:cacheprovider"],
+        [sys.executable, "-m", "pytest", target, "-p", "no:cacheprovider"],
         cwd=str(Path(__file__).resolve().parents[1]),
         capture_output=True,
         text=True,
@@ -89,8 +95,42 @@ def test_a_focused_run_ends_without_a_teardown_error():
 
 
 def test_the_guard_is_still_armed_for_the_whole_suite():
-    # Opt-in has to mean opt-in: with the flag tool/checks/test sets, the guard that caught #30 twice
-    # must still fire on a session that never registered the defaults.
-    done = _focused_run("1")
+    """Opt-in has to mean opt-in: with the flag tool/checks/test sets, the guard that caught #30
+    twice must still fire on a session that ends with the defaults taken away.
+
+    The session it is shown against is a file that unregisters and does not restore, not a file that
+    merely never registered: since #216 the guard registers the defaults itself at session start, so
+    that every one of the four workers asks the same question about its own slice."""
+    done = _focused_run("1", "tests/registry_breaker.py")
     assert done.returncode != 0, done.stdout
     assert "default registrations not restored" in done.stdout, done.stdout
+
+
+def test_the_armed_guard_leaves_a_worker_that_registered_nothing_alone():
+    """The other half of the same change: a slice with no test that touches the registry is not a
+    defect, and under -n that slice is an ordinary worker rather than a hypothetical."""
+    done = _focused_run("1")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "default registrations not restored" not in done.stdout, done.stdout
+
+
+# --- the analyze lock's namespace, one per worker (#216) -----------------------------------------
+
+
+def test_the_analyze_lock_namespace_is_productions_when_there_is_one_process():
+    assert _worker_lock_class(None, 16) == 16
+    assert _worker_lock_class("", 16) == 16
+
+
+def test_two_workers_never_share_the_analyze_lock_namespace():
+    keys = {_worker_lock_class(f"gw{n}", 16) for n in range(8)}
+    assert len(keys) == 8, keys
+    assert 16 not in keys, "a worker sharing production's namespace is the collision this prevents"
+    # pg_try_advisory_lock takes int4 for both halves of the key.
+    assert all(-(2**31) <= key < 2**31 for key in keys), keys
+
+
+def test_this_process_took_the_namespace_its_worker_id_asks_for():
+    from analysis import locks
+
+    assert locks.LOCK_CLASS == _worker_lock_class(os.environ.get("PYTEST_XDIST_WORKER"), 16)

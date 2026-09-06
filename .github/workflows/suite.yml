@@ -24,7 +24,10 @@ jobs:
   class-a:
     name: class-a
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 30, down from 60: the suite runs its tests across four processes since #216 (7:29 on an idle
+    # 8-core host, from 15:24), and the runner has 4 vCPU to give it. Still several times the
+    # measured run -- a timeout is a stuck job's bound, not a target.
+    timeout-minutes: 30
     steps:
       # Plain checkout: `tool/checks/test` with no `--changed` never calls the classifier or the
       # #197 origin/main rule (both are pre-push-hook concerns), so this run needs no more history

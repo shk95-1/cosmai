@@ -81,7 +81,7 @@ def verdict(rows: list[MetricsTopicQuarterRow], quarter: str = "2024Q4") -> str:
 def test_the_seven_types_are_the_seven_the_contract_names():
     """유형이 하나 늘거나 이름이 바뀌면 그것은 계약 변경이지 구현 변경이 아니다."""
     lines = INTERFACES.read_text(encoding="utf-8").splitlines()
-    line = next(text for text in lines if text.strip().startswith("유형 일곱:"))
+    line = next(text for text in lines if text.strip().startswith("Seven types:"))
     assert set(TREND_TYPES) == set(re.findall(r"`([^`]+)`", line))
     assert len(TREND_TYPES) == 7
 

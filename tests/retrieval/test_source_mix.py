@@ -195,8 +195,8 @@ def test_the_contract_carries_the_verdict_and_the_numbers_it_was_measured_with()
     assert f"**{mix.NO_SKEW}**" in body
     for kind in (mix.NO_SKEW, mix.NOT_BURIED, mix.DOMINATED):
         assert f"| {kind} |" in body, kind
-    assert f"{mix.BURIED_RANK}위" in body
-    assert "결과를 보고 기준을 만들지 않는다" in body
+    assert f"rank {mix.BURIED_RANK}" in body
+    assert "The criteria are not made after looking at the results" in body
     # The composition and the top-k share have to be there **together** for the judgement to be read. With
     # only one, the other is imagined.
     assert "75.64%" in body and "71.11%" in body

@@ -1,4 +1,4 @@
-# anon 노출 — PostgREST `postgrest_anon` 이 읽는 관계
+# anon exposure — the relations PostgREST's `postgrest_anon` reads
 
 A single `shared-db-postgrest-1` serves three schemas of database `app` on `0.0.0.0:3000`
 (`PGRST_DB_SCHEMAS=trend_radar,tubedepth,needs`, `PGRST_DB_ANON_ROLE=postgrest_anon`,
@@ -16,7 +16,7 @@ that was blocked answers 401 (`trend_radar` `review`·`run`·`fetch_log`·`run_s
 `comments`·`transcripts`·`jobs`·`worker_control`). The seven lines that undo it sit at the tail of
 that file -- they restore `relacl` and `nspacl` exactly as they were before.
 
-## 좁히기 전 문이 셋이었다
+## Before the narrowing there were three doors
 
 | schema | the path it opened before the narrowing | where |
 |---|---|---|
@@ -34,7 +34,7 @@ included, and takes tables by name in all three schemas. Adding a table means ad
 `db/grants/postgrest_anon_needs.sql` for `needs` and to `postgrest_anon_old_stack.sql` for the other
 two -- no migration can open one quietly.
 
-### 보이려면 둘이 다 있어야 한다: SELECT 와 USAGE
+### Both have to be there to be visible: SELECT and USAGE
 
 "What anon sees" does not follow from a table's `SELECT` alone. Without schema `USAGE` PostgREST
 answers **401**, and that schema is worth zero tables however many were GRANTed. `has_table_privilege`
@@ -58,7 +58,7 @@ The reason only `trend_radar` needs something given back is the **same asymmetry
 PRIVILEGES section below: this schema's privileges hang on a role, `trend_radar_reader`, and anon was
 that role's guest. `tubedepth` was addressed to anon from the start.
 
-### DEFAULT PRIVILEGES 는 두 스키마를 다르게 다룬다 (사용자 결정 2)
+### DEFAULT PRIVILEGES treats the two schemas differently (user decision 2)
 
 The same drift, but the prescription is opposite **because the beneficiary differs**. Measured on `pg_default_acl`:
 
@@ -113,9 +113,10 @@ cutting the membership takes USAGE with it (the section above).
 `trend_radar.new_product` · `trend_radar.new_products_view` · `trend_radar.review_stats` ·
 `trend_radar.review_topic` · `trend_radar.review_answer` · `trend_radar.review_summary`
 
-좁히기가 닫은 넷: `review`(리뷰 **전문** body, 30,044행 — `#144`·`#168` 이 겨눈 노출 그 자체) ·
-`run` · `run_source` · `fetch_log`(수집 운영 기록이지 데이터가 아니다). `alembic_version` 은
-전부터 닫혀 있었는데 정책이 아니라 순서였다 — DEFAULT PRIVILEGES 보다 먼저 만들어졌다.
+What the narrowing closed, four: `review` (a review's **full** body, 30,044 rows — the exposure
+`#144`·`#168` were aimed at, itself) · `run` · `run_source` · `fetch_log` (collection operating
+records, not data). `alembic_version` was closed before all this, not by policy but by order — it
+was made before the DEFAULT PRIVILEGES.
 
 No screen ever called this schema through PostgREST. `trend-radar-dashboard` becomes
 `trend_radar_reader` via `TREND_RADAR_READONLY_DATABASE_URL` and attaches to the DB **directly**
@@ -129,9 +130,10 @@ Three. Only video, channel and listing metadata remain.
 
 `tubedepth.video_snapshots` · `tubedepth.channel_snapshots` · `tubedepth.listing_entries`
 
-좁히기가 닫은 아홉: `comments`(댓글 원문 285,749행) · `transcripts`(자막 전문 5,303행) ·
-`jobs`(337,201행) · `artifacts` · `worker_control` · `lane_health` · `source_health` ·
-`flatten_progress`(수집기 내부 상태) · `alembic_version`(마이그레이션 원장).
+What the narrowing closed, nine: `comments` (comment bodies, 285,749 rows) · `transcripts`
+(full transcripts, 5,303 rows) · `jobs` (337,201 rows) · `artifacts` · `worker_control` ·
+`lane_health` · `source_health` · `flatten_progress` (the collector's internal state) ·
+`alembic_version` (the migration ledger).
 
 `api_keys` was closed before and the narrowing does not open it either.
 
@@ -142,7 +144,7 @@ opened that way. The narrowing deleted those default privileges, so it cannot ha
 `tubedepth-api` attaches as `tubedepth_runtime`, so it has nothing to do with anon, and it lives on
 `127.0.0.1:8080` alone.
 
-## 유일한 소비자
+## The only consumer
 
 `data-portal` (`0.0.0.0:3001`) has no fixed table list. It picks a schema with `Accept-Profile`,
 draws the `definitions` key of the OpenAPI document as the table list as it stands

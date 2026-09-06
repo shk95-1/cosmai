@@ -34,6 +34,11 @@ import sys
 
 JS_SUFFIXES = (".js", ".mjs", ".cjs")
 
+# `<!-- -->` and `/* */` nest a block across lines with no per-line marker of their own -- unlike
+# shell's `#` or JS's `* ` convention, a continuation line here carries none of the pair, so its
+# comment-ness can only be read off the block's open/close state (#241).
+BLOCK_MARKERS = {"html": ("<!--", "-->"), "css": ("/*", "*/")}
+
 # What a translation must carry across a Markdown file unchanged: section anchors, issue numbers and
 # anything in backticks (a path, a command, a column name).
 MARKDOWN_LITERAL = re.compile(r"§\s?[0-9A-Za-z.\-]+|#\d+|`[^`\n]+`")
@@ -70,9 +75,16 @@ def kind_of(path: str, text: str) -> str:
         return "markdown"
     if name.endswith(JS_SUFFIXES):
         return "js"
+    if name.endswith(".html"):
+        return "html"
+    if name.endswith(".css"):
+        return "css"
     if name.endswith(".sh"):
         return "shell"
     if name.endswith((".yml", ".yaml", ".toml")):
+        return "hash"
+    # `stack/env.example` has no leading dot, so the `.env*` rule below never reaches it (#241).
+    if name == "env.example" or name.endswith(".env.example"):
         return "hash"
     # Any basename starting with "Dockerfile" -- "Dockerfile", "Dockerfile.cron", and a
     # "*.Dockerfile" suffix all name the same kind of file (#231 Work 7c).
@@ -223,6 +235,65 @@ def comment_only(base: str, head: str, path: str, kind: str) -> bool:
     return all(is_comment_line(line, kind) for line in changed_lines(base, head, path))
 
 
+def block_comment_line_flags(text: str, kind: str) -> list[bool]:
+    """Per line (index 0 = line 1): True when everything outside the block markers is blank.
+
+    Scanned char by char rather than line by line, because the state (inside/outside the block)
+    crosses line boundaries -- a continuation line of a `<!-- -->` or `/* */` comment carries no
+    marker of its own, so only the running state says whether it is prose.
+    """
+    open_m, close_m = BLOCK_MARKERS[kind]
+    flags: list[bool] = []
+    in_comment = False
+    for line in text.split("\n"):
+        outside: list[str] = []
+        i, n = 0, len(line)
+        while i < n:
+            if not in_comment and line.startswith(open_m, i):
+                in_comment = True
+                i += len(open_m)
+            elif in_comment and line.startswith(close_m, i):
+                in_comment = False
+                i += len(close_m)
+            elif in_comment:
+                i += 1
+            else:
+                outside.append(line[i])
+                i += 1
+        flags.append(not "".join(outside).strip())
+    return flags
+
+
+def numbered_changed_lines(base: str, head: str, path: str) -> tuple[list[int], list[int]]:
+    """1-indexed line numbers the diff touched, on the base side and on the head side."""
+    diff = git("diff", "-U0", "--no-color", base, head, "--", path)
+    old_lines: list[int] = []
+    new_lines: list[int] = []
+    old_at = new_at = 0
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            match = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
+            if match:
+                old_at, new_at = int(match.group(1)), int(match.group(2))
+            continue
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith("-"):
+            old_lines.append(old_at)
+            old_at += 1
+        elif line.startswith("+"):
+            new_lines.append(new_at)
+            new_at += 1
+    return old_lines, new_lines
+
+
+def block_comment_only(before: str, after: str, base: str, head: str, path: str, kind: str) -> bool:
+    old_nums, new_nums = numbered_changed_lines(base, head, path)
+    before_flags = block_comment_line_flags(before, kind)
+    after_flags = block_comment_line_flags(after, kind)
+    return all(before_flags[n - 1] for n in old_nums) and all(after_flags[n - 1] for n in new_nums)
+
+
 def differs(base: str, head: str, path: str, blank_strings: bool = False) -> str | None:
     """The reason this file is not provably unchanged, or None when it is."""
     before = blob(base, path)
@@ -248,6 +319,9 @@ def differs(base: str, head: str, path: str, blank_strings: bool = False) -> str
         if lost or gained:
             return f"anchors and literals changed (lost {lost}, gained {gained})"
         return None
+    if kind in BLOCK_MARKERS:
+        ok = block_comment_only(before, after, base, head, path, kind)
+        return None if ok else "a line that is not a comment changed"
     return None if comment_only(base, head, path, kind) else "a line that is not a comment changed"
 
 

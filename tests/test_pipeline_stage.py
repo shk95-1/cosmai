@@ -61,7 +61,11 @@ def interval_of(expr: str) -> str:
 
 def test_every_cron_line_is_declared():
     declared = {s.stage_key for s in STAGES}
-    from_cron = {stage_key_of(cmd) for _, cmd in cron_lines()}
+    # `enabled=False` is a stage gated on purpose, so the crontab need not schedule it at all:
+    # naver:datalab's line is commented out until #90, while youtube:watch keeps its line and is held
+    # by a compose profile. Both are accounted for here so a missing line is still caught below.
+    gated = {s.stage_key for s in STAGES if not s.enabled}
+    from_cron = {stage_key_of(cmd) for _, cmd in cron_lines()} | gated
     assert from_cron - declared == set(), "크론에 있는데 선언되지 않은 단계"
     assert declared - from_cron == set(), "선언됐는데 크론에 없는 단계"
 
@@ -76,7 +80,9 @@ def test_declared_interval_matches_the_cron_expression():
     assert not mismatched, f"선언과 크론이 어긋난다 (선언, 크론): {mismatched}"
 
 
-def test_only_youtube_watch_is_disabled():
-    # Only one thing sits behind a profile today (STATE.md §2). If more appear, that fact is met here.
+def test_the_disabled_stages_are_the_two_a_gate_names():
+    # Two stages are off on purpose: youtube:watch behind a compose profile (STATE.md §2, restored by
+    # #39) and naver:datalab behind a commented-out cron line (#182, restored by #90). A third one
+    # appearing without an issue behind it is met here.
     off = {s.stage_key for s in STAGES if not s.enabled}
-    assert off == {"youtube:watch"}, off
+    assert off == {"youtube:watch", "naver:datalab"}, off

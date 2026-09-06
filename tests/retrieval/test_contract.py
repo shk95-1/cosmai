@@ -19,7 +19,7 @@ DDL = ROOT / "contracts" / "ddl" / "needs" / "020_retrieval_chunk.sql"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 INTERFACES = ROOT / "contracts" / "interfaces.md"
 INDEX = ROOT / "contracts" / "README.md"
-SEARCH_HEADER = "| mode | engine | 질의 | P@10 | MRR@10 | Hit@10 |"
+SEARCH_HEADER = "| mode | engine | queries | P@10 | MRR@10 | Hit@10 |"
 
 
 def _search_baseline_rows() -> dict[tuple[str, str], dict[str, str]]:
@@ -175,7 +175,7 @@ def test_the_scorecard_column_the_contract_names_is_a_column():
     from analysis.retrieval import eval as retrieval_eval
 
     section = "\n".join(_search_section())
-    assert "CSV `store` 열" in section
+    assert "CSV `store` column" in section
     # The revision and the warning are two columns on different axes -- merged into one, the revision
     # disappears when everything is normal.
     assert {"store", "note"} <= set(retrieval_eval.FIELDS)
@@ -203,10 +203,10 @@ def test_the_baseline_splits_what_it_could_retrace_from_what_it_could_not():
     assert (
         "version=1 · topics=15 · aliases=73 · fingerprint=5a0cae76311e1408" in flat
     )  # 옛 적재 원본과 남아 있는 DB v2 가 함께 대는 값
-    assert "**되짚은 것 — 사전의 내용과 지문.**" in flat
-    assert "**되짚을 수 없는 것 — 번호표.**" in flat
+    assert "**What could be traced back — the dictionary's content and its fingerprint.**" in flat
+    assert "**What could not be traced back — the number tag.**" in flat
     # Erase the fact that there is no v1 row and that number reads as ground again.
-    assert "v1 행이 없다" in flat
+    assert "has **no v1 row**" in flat
 
 
 def test_the_baseline_names_the_store_the_vector_lines_stand_on():
@@ -220,7 +220,7 @@ def test_the_baseline_names_the_store_the_vector_lines_stand_on():
     assert chunks and stamped, "표 머리의 청크 수와 저장소 판본 줄 중 하나가 없다"
     # A table measured with a store whose vectors do not cover the corpus has to say so inside the table.
     assert int(stamped.group(1)) == int(chunks.group(1).replace(",", ""))
-    assert "bm25 두 줄은 그 판본 위의 값이 아니다" in text
+    assert "The two bm25 rows are not values on that version" in text
 
 
 def test_the_ledger_is_a_searched_source_but_never_an_encoded_one():

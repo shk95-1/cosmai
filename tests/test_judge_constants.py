@@ -37,7 +37,7 @@ VERSIONING = ROOT / "contracts" / "versioning.md"
 ENTRYPOINTS = ROOT / "contracts" / "entrypoints.md"
 DDL = ROOT / "contracts" / "ddl" / "needs" / "024_topic_quarter_judgement.sql"
 QUARTER_DDL = ROOT / "contracts" / "ddl" / "needs" / "022_panel_and_quarter.sql"
-CONSTANTS_HEADER = "| 상수 | 값 | 무엇 위에서 나왔나 (재현 결과) | 판단 |"
+CONSTANTS_HEADER = "| constant | value | what it came out of (the reproduction) | verdict |"
 
 
 def _constant_rows() -> list[list[str]]:

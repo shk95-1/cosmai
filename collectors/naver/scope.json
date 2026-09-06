@@ -9,5 +9,12 @@
     "display": 100,
     "pages_max": 3,
     "sort": "date"
+  },
+  "http": {
+    "_comment": "The live transport (#182). Every attempt is charged to max_requests_per_run, retries included: a retry is another request NAVER serves. retry_backoff_s doubles at each step (2s, then 4s), and retry_max_attempts counts the first attempt.",
+    "timeout_s": 20.0,
+    "retry_max_attempts": 3,
+    "retry_backoff_s": 2.0,
+    "max_requests_per_run": 200
   }
 }

@@ -162,12 +162,12 @@ def test_the_criteria_were_written_into_the_contract_before_the_numbers():
     body = section()
     for kind in (floor.SEPARATED, floor.USABLE, floor.UNUSABLE):
         assert f"| {kind} |" in body, kind
-    assert f"{int(floor.KEEP * 100)}% 이상을 남기는 문턱" in body
-    assert "절반 이상 자른다" in body and floor.CUT == 0.50
-    assert "결과를 보고 기준을 만들지 않는다" in body
+    assert f"keeps {int(floor.KEEP * 100)}% or more of the true positives" in body
+    assert "cuts at least half of the false positives" in body and floor.CUT == 0.50
+    assert "The criteria are not made after looking at the results" in body
     # The properties of the sample are part of the criteria too -- if a fake is in the corpus, that number is
     # not the number of this table.
-    assert "종료 코드 1" in body
+    assert "the tool's exit code 1" in body
 
 
 def test_the_contract_carries_the_verdict_and_the_constants_it_was_measured_with():
@@ -176,8 +176,8 @@ def test_the_contract_carries_the_verdict_and_the_constants_it_was_measured_with
     floor = loaded()
     body = section()
     assert f"**{floor.UNUSABLE}**" in body
-    assert f"| 가짜 질의 (코퍼스에 없는 성분명) | {len(floor.FAKE)} |" in body
-    assert f"ydc 임시값 .{str(floor.YDC_TRIAL).split('.')[1]}" in body
+    assert f"| fake queries (ingredient-like names absent from the corpus) | {len(floor.FAKE)} |" in body
+    assert f"ydc's provisional value .{str(floor.YDC_TRIAL).split('.')[1]}" in body
     # Which store the judgement stood on (#49). Without it the next remeasurement cannot say what the delta
     # is against.
     assert "vectors=381950" in body
@@ -186,11 +186,11 @@ def test_the_contract_carries_the_verdict_and_the_constants_it_was_measured_with
 def test_the_decision_and_the_size_of_the_overlap_are_still_written_down():
     """With only the numbers left and the decision gone, the next person just puts a floor in."""
     body = section()
-    assert "하한선을 두지 않는다" in body
-    assert "결과를 보고 기준을 만들지 않는다" in body
+    assert "no floor is put on `vectors.search`" in body
+    assert "The criteria are not made after looking at the results" in body
     # Without the size of the overlap written down it reads as "they barely graze", and then "let us raise the
     # threshold a little" gets said.
-    assert "사분위 구간" in body
+    assert "interquartile range" in body
     assert "**73.8%**" in body, "ydc 임시값이 우리 코퍼스에서 무엇을 버리는지가 이 절의 절반이다"
     assert "§Retrieval measurements" in body, "measured over the same query list, so it joins up with that"
 
