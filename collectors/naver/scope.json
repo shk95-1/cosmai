@@ -1,10 +1,11 @@
 {
-  "_comment": "How much of each naver dataset a run walks (contracts/entrypoints.md: 'scope.lock의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사', #7의 collectors/commerce/scope.json과 같은 형태). datalab.window_start is Search Trend's earliest useful year (architect/slice-suncare's 10-year pull starts 2016); datalab puts the one global anchor keyword (anchor, #90) into every request and packs category_groups_per_request of that category's own groups beside it, so a request holds max_groups_per_request groups in all -- the vendor's documented cap -- and a category with more groups than that takes one request per full batch. blog.pages_max keeps one run's request spend bounded per query term -- natural-key upsert on post_id makes a shorter walk safe to widen later without a migration.",
+  "_comment": "How much of each naver dataset a run walks (contracts/entrypoints.md: 'scope.lock의 변형: 파일 하나, CHANGELOG 의무 없음, 테스트는 상수=파일 일치만 검사', #7의 collectors/commerce/scope.json과 같은 형태). datalab.window_start is Search Trend's earliest useful year (architect/slice-suncare's 10-year pull starts 2016); datalab puts the one global anchor group (anchor, the groupName the vendor echoes back; anchor_terms is what it actually searches, #90/#250) into every request and packs category_groups_per_request of that category's own groups beside it, so a request holds max_groups_per_request groups in all -- the vendor's documented cap -- and a category with more groups than that takes one request per full batch. blog.pages_max keeps one run's request spend bounded per query term -- natural-key upsert on post_id makes a shorter walk safe to widen later without a migration.",
   "datalab": {
     "window_start": "2016-01-01",
     "time_unit": "month",
     "max_groups_per_request": 5,
     "anchor": "기준_세럼",
+    "anchor_terms": ["세럼"],
     "category_groups_per_request": 4
   },
   "blog": {

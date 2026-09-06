@@ -8,11 +8,20 @@ from __future__ import annotations
 DATALAB_WINDOW_START = "2016-01-01"
 DATALAB_TIME_UNIT = "month"
 DATALAB_MAX_GROUPS_PER_REQUEST = 5
-#: The one global anchor keyword (#90, user decision 2026-08-26), sent as its own `keywordGroups`
+#: The one global anchor group (#90, user decision 2026-08-26), sent as its own `keywordGroups`
 #: entry in every DataLab request so that two requests can be put on one scale afterwards
-#: (`db/views/naver_datalab_rescaled.sql`). ydc validated this string; changing it is proposed in a
-#: comment on #90 and confirmed by the user, and old rows keep the ratios they were collected with.
+#: (`db/views/naver_datalab_rescaled.sql`). This is the `groupName` alone -- a label the vendor
+#: echoes back as `results[].title`, which is what the point's `group_key` and the rescale view's
+#: SQL literal key off. It is never searched: sending it as its own keyword searched a token with no
+#: volume, so the anchor series came back with an empty `data` array and nothing rescaled (#250).
 DATALAB_ANCHOR = "기준_세럼"
+#: What the anchor group actually searches (#250, user decision 2026-09-06), a tuple like a
+#: category group's terms. Measured live over the collector's own window (2016-01-01 -> today,
+#: monthly): a point in all 129 months, no zero, and beside the four real groups of a request its
+#: own series runs 5.19970..100 -- high enough that the view never divides by zero, low enough that
+#: the observed groups keep their scale. Changing it changes `datalab_request_key`, which is
+#: correct: it is a different request. Old rows keep the ratios they were collected with.
+DATALAB_ANCHOR_TERMS = ("세럼",)
 #: How many of a category's own groups ride beside the anchor. The vendor's cap counts the anchor as
 #: one of its 5 groups, so a category with more groups than this takes more than one request.
 DATALAB_CATEGORY_GROUPS_PER_REQUEST = DATALAB_MAX_GROUPS_PER_REQUEST - 1
@@ -42,6 +51,7 @@ __all__ = [
     "DATALAB_TIME_UNIT",
     "DATALAB_MAX_GROUPS_PER_REQUEST",
     "DATALAB_ANCHOR",
+    "DATALAB_ANCHOR_TERMS",
     "DATALAB_CATEGORY_GROUPS_PER_REQUEST",
     "BLOG_DISPLAY",
     "BLOG_PAGES_MAX",

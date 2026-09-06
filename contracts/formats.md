@@ -252,9 +252,23 @@ a ratio of it (vendor documentation). So `needs.naver_datalab_point.ratio` can b
 `category`, or the same category on another run) treats numbers normalised against two different
 100s as if they were one scale, and gives **a plausible wrong number with no error**. Ranking by
 GROUP BY on `category`·`group_key` is safe, but before comparing or summing rows with different
-`request_key` values an **anchor rescale** must come first. #90 decided both halves of it: the
-anchor is one global keyword (`기준_세럼`, `collectors/naver/scope.py:DATALAB_ANCHOR`) put into every
-request, and the rescale is computed at read time, never stored.
+`request_key` values an **anchor rescale** must come first. #90 decided both halves of it: one
+global anchor group goes into every request, and the rescale is computed at read time, never stored.
+
+**The anchor is a label over a real search term (#250).** Its `groupName` is `기준_세럼`
+(`collectors/naver/scope.py:DATALAB_ANCHOR`) — the vendor echoes that back as `results[].title`, so
+it is the value stored in `naver_datalab_point.group_key` and the literal
+`db/views/naver_datalab_rescaled.sql` divides by. What the group actually searches is a separate
+constant, `DATALAB_ANCHOR_TERMS` = (`세럼`) (user decision 2026-09-06), and it is the terms, never
+the label, that reach the vendor as `keywords` and are stored in the row's `terms`. Until #250 the
+label was sent as its own keyword: nobody searches that token, DataLab returned the series with an
+empty `data` array, no anchor row existed at all and `ratio_rescaled` was NULL on **every** row.
+Because the terms are part of the request body they are part of `request_key`, so rows collected
+before and after this change never share a boundary — which is right, they are different requests.
+**A DataLab request whose response carried no anchor point leaves the run partial (1)** with a note
+naming the anchor (`collectors/naver/cli.py`, `contracts/entrypoints.md`): the rows are written and
+stay comparable inside their own `request_key`, but nothing of that request can cross a boundary,
+and an `ok` run whose rescale is entirely NULL is the state this rule exists to make visible.
 
 **The request boundary is read off the row as `naver_datalab_point.request_key`**
 (`contracts/ddl/needs/006_naver_request.sql`, decision (a): `terms` only audits one group's search

@@ -16,11 +16,14 @@ A blog `start` past scope.BLOG_START_MAX is never requested (#110): the ceiling 
 and independent of `total`, so the walk stops there rather than spending budget on an error.
 
 Two datasets, matching contracts/entrypoints.md's `naver datasets: datalab | blog`. `datalab` sends
-one request per batch of a category's groups: every request carries the global anchor
-(`scope.DATALAB_ANCHOR`, #90) as one `keywordGroups` entry, so at most
-`scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST` of the category's own groups ride beside it and a
-category of N groups costs ceil(N / 4) requests. The anchor is what puts two requests on one scale
-afterwards (`db/views/naver_datalab_rescaled.sql`); the ratios stored here stay raw (#44). `blog`
+one request per batch of a category's groups: every request carries the global anchor group
+(`scope.DATALAB_ANCHOR` as the `groupName`, `scope.DATALAB_ANCHOR_TERMS` as what it searches, #90 /
+#250) as one `keywordGroups` entry, so at most `scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST` of the
+category's own groups ride beside it and a category of N groups costs ceil(N / 4) requests. The
+anchor is what puts two requests on one scale afterwards
+(`db/views/naver_datalab_rescaled.sql`); the ratios stored here stay raw (#44). A request whose
+response carried no anchor point leaves the run partial (1), naming the anchor: its groups can only
+rescale to NULL, and an ok run that rescales to nothing is what #250 exists to prevent. `blog`
 pages through every keyword-group term, one query at a time (the blog search endpoint takes a single
 `query` string, unlike DataLab's grouped keywords). Exit codes follow contracts/entrypoints.md's
 exit codes: 0 ok, 1 partial, 2 blocked.
@@ -42,6 +45,7 @@ from collectors.naver.scope import (
     BLOG_SORT,
     BLOG_START_MAX,
     DATALAB_ANCHOR,
+    DATALAB_ANCHOR_TERMS,
     DATALAB_CATEGORY_GROUPS_PER_REQUEST,
     DATALAB_TIME_UNIT,
     DATALAB_WINDOW_START,
@@ -168,6 +172,7 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
 
     total_points = 0
     blocked: list[str] = []
+    anchorless: list[str] = []
     stopped: TransportError | None = None
     for category, groups in categories.items():
         batches = datalab_request_batches(groups)
@@ -184,8 +189,11 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
                 params={
                     "keywordGroups": [
                         # The anchor first, in every request (#90): it is the one series two
-                        # requests share, so the rescale view has something to divide by.
-                        {"groupName": DATALAB_ANCHOR, "keywords": [DATALAB_ANCHOR]},
+                        # requests share, so the rescale view has something to divide by. The group
+                        # name is a label the vendor echoes back as `title`; the keywords are what
+                        # is searched, and sending the label as its own keyword searched a token
+                        # with no volume, so the series came back empty (#250).
+                        {"groupName": DATALAB_ANCHOR, "keywords": list(DATALAB_ANCHOR_TERMS)},
                         *({"groupName": g, "keywords": list(t)} for g, t in batch.items()),
                     ],
                     "startDate": DATALAB_WINDOW_START,
@@ -220,6 +228,11 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
             if not points:
                 blocked.append(label)
                 continue
+            # Per request, not once at the end: the anchor is the divisor of *this* request_key
+            # alone (db/views/naver_datalab_rescaled.sql), so a request that got no anchor point
+            # back leaves exactly its own groups un-rescalable even when another request got one.
+            if not any(point.group_key == DATALAB_ANCHOR for point in points):
+                anchorless.append(label)
             with engine.begin() as connection:
                 storage_db.write_datalab_points(connection, points)
             total_points += len(points)
@@ -236,8 +249,16 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
     if blocked and total_points == 0:
         return _Outcome("blocked", 2, f"no points from: {', '.join(blocked)}")
     print(f"datalab: {total_points} point(s) across {len(categories)} categor(y/ies)")
+    notes = []
     if blocked:
-        return _Outcome("partial", 1, f"no points from: {', '.join(blocked)}")
+        notes.append(f"no points from: {', '.join(blocked)}")
+    if anchorless:
+        # Rows were written, so this is partial and never blocked: the raw ratio of those rows is
+        # still comparable inside its own request_key -- what is missing is the cross-request scale.
+        # An ok run whose rescale is entirely NULL is the state #250 exists to prevent.
+        notes.append(f"no {DATALAB_ANCHOR} point from: {', '.join(anchorless)}")
+    if notes:
+        return _Outcome("partial", 1, "; ".join(notes))
     return _Outcome("ok", 0, None)
 
 
