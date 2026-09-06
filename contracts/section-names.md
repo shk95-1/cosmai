@@ -43,6 +43,9 @@ resolves the old name here; a reference in the tree names only the English one.
 | `§모집단의 한계` | `§Limitations of the population` | `interfaces.md` |
 | `§평가 하네스가 대조하는 기준선`, `§기준선` | `§Baselines` | `interfaces.md` (one section had two names) |
 | `§규칙 실측` | `§Rule measurement` | `interfaces.md` |
+| `§LLM 실측` | `§LLM measurement` | `interfaces.md` (renamed in #206 part 3) |
+| `§창` | `§Window` | `interfaces.md`, a bullet of `§Holdout` (renamed in #206 part 3) |
+| `§플랫폼 구성` | `§Platform composition` | `interfaces.md`, a bullet of `§Holdout` (renamed in #206 part 3) |
 | `§검색 실측`, `§Retrieval-measurements` | `§Retrieval measurements` | `interfaces.md` (one section had three names) |
 | `§벡터 하한선` | `§Vector floor` | `interfaces.md` |
 | `§소스별 분배` | `§Per-source allocation` | `interfaces.md` |
@@ -56,16 +59,19 @@ Unchanged because they were already English and already single-named: `§Answer 
 (`tool/measure-transcript-bimodal`) from earlier waves now resolve to the sections above. `§low_complete` is
 not in this ledger at all — it names a column of `product_denominator`, not a section.
 
-Still Korean, and unchanged on purpose, because the line that carries the heading holds a Korean data value
-or an anchor into a Korean issue heading and `tool/checks/lang` refuses a rewritten line: `§LLM 실측`
-(`interfaces.md`, whose heading cites issue #6 `§산출물 6`) and `§확인할 것` (the `commerce_ranking.py`
-heading of `interfaces.md`, which cites issue #7). `§라벨 기준(polarity)` names a bullet of
+#206 part 3 translated the two headings that part 2 had left Korean, because the `tool/checks/lang`
+allowlist now admits these files: `§LLM 실측` is the row above, and the `commerce_ranking.py` heading of
+`interfaces.md` never was a `§` target — only the `#7 §확인할 것` it cites, an issue anchor, stays. One
+citation still names the old Korean form and resolves through this ledger alone until the W2/W4 residue
+moves: `analysis/polarity/ownership.py:61` (`§LLM 실측`, on a Korean line the lang check forbids rewriting).
+`§라벨 기준(polarity)` names a bullet of
 `formats.md` §Evaluation set CSV whose text is the polarity labels themselves. Every `§` that points into a
 GitHub issue rather than into this directory also stays (`#8 §산출물`, `#16 §1단계 판정 4`,
 `#48 §범위 확장`, `#7 §확인할 것`).
 
-Two bullet labels inside `§Holdout` are cited as `§창` (`interfaces.md`'s `**창**` bullet, `window_reading`)
-and `§플랫폼 구성` (its `**플랫폼 구성**` bullet). Neither was declared anywhere before this branch. They stay
-Korean: the first bullet is the `window_reading` output labels (`새 기간이다` · `같은 창이 길어졌다`) and a
-verbatim ydc quote, the second sits in the same pinned paragraph.
+Two bullet labels inside `§Holdout` were cited as `§창` and `§플랫폼 구성` until #206 part 3 renamed them to
+`§Window` and `§Platform composition` (`interfaces.md`'s `**Window**` and `**Platform composition**`
+bullets); both citations are inside that same file and moved with them. The `window_reading` output labels
+those bullets carry (`새 기간이다` · `같은 창이 길어졌다`) and the verbatim ydc quote beside them stay Korean,
+being data values.
 

@@ -110,7 +110,7 @@ def test_the_two_constants_are_the_ydc_values_and_the_contract_says_they_are_not
     assert (cards.GAP_PRODUCT_GAP, cards.SATURATED_COMPOSITION) == (2.0, 15.0)
     body = INTERFACES.read_text(encoding="utf-8")
     assert "`GAP_PRODUCT_GAP = 2.0`" in body and "`SATURATED_COMPOSITION = 15.0`" in body
-    assert "적합된 값이 아니다" in body
+    assert "not fitted values" in body
 
 
 def test_the_strength_of_a_product_gap_card_is_the_gap_not_the_score():

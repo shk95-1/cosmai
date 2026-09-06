@@ -420,7 +420,7 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   an **active version of its own**, separate from the topic dictionary's — `entity_lexicon`'s `activate`
   turns one kind on and off (`db/lexicon.py` `ENTITY_ACTIVATE`), so a query-stopword revision and an aspect
   dictionary revision do not turn each other off. The version **number tag** is not like that —
-  `formats.md` §Query stopwords writes down that limit and fork #58.
+  `formats.md` §entity 사전의 `kind='stopword'` writes down that limit and fork #58.
 - Three rules hang on that list. (1) **A query that is entirely stopwords is not stripped** — 0 tokens
   means 0 results, which is worse than a ranking with filler in it. (2) **It does not invalidate the index
   cache**: `pipeline.index_signature` does not bite on this list and must not — the index is `tokenize` as

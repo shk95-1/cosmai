@@ -232,17 +232,19 @@ def test_the_contract_carries_the_rule_and_the_numbers_it_was_chosen_by():
     body = INTERFACES.read_text(encoding="utf-8")
     start = body.index("### Then what stops a query with no grounding")
     section = body[start : body.index("\n## ", start)]
-    assert f"길이 ≥ {grounding.ZERO_DF_MINLEN} (`ZERO_DF_MINLEN`)" in section
+    assert f"length ≥ {grounding.ZERO_DF_MINLEN} (`ZERO_DF_MINLEN`)" in section
     # Half of this section is why the two branches dropped while choosing the rule were dropped.
-    assert "이득 0 · 손해 2" in section
-    assert '"전부 0" 갈래는 두지 않는다' in section
-    assert "토큰이 0개인 질의는 빈도로 판정하지 않는다" in section
-    assert "키릴 표기 하나다" in section, "못 막는 자리를 안 적으면 이 게이트가 다 막는 것으로 읽힌다"
+    assert "a gain of 0 and a loss of 2" in section
+    assert 'The "every 0" branch is not kept' in section
+    assert "A query with 0 tokens is not judged by frequency" in section
+    assert "The one place it cannot stop is a Cyrillic notation" in section, (
+        "leave out the place it cannot stop and this gate reads as stopping everything"
+    )
     # 범위 한정과 그 근거(이슈 #48 §범위 확장). 빠지면 다음 사람이 bm25 에도 건다.
-    assert "`bm25` 의 동작은 **이 이슈 전과\n같다**" in section
-    assert "남은 낱말로 답하므로" in section
+    assert "`bm25` behaves **as it did\nbefore this issue**" in section
+    assert "answers with the words that\nare left" in section
     # Without writing down the unit counted, it reads as the same thing as `docs_with_tokens`.
-    assert '**"df" 라 부르지만 세는 단위는 청크다.**' in section
+    assert '**It is called "df" but the unit counted is the chunk.**' in section
     # That the suite cannot measure this table again has to sit next to the table.
-    assert "이 표는 스위트가 다시 재지 못한다" in section
-    assert "공유DB\n와 세워진 BM25 색인" in section
+    assert "The suite cannot measure this table\nagain" in section
+    assert "a shared DB and a standing\nBM25 index" in section
