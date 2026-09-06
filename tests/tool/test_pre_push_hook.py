@@ -105,6 +105,23 @@ def run_hook(
     repo: Path, *shas: str, fails: bool = False, force: bool = False, klass: str = "A"
 ) -> subprocess.CompletedProcess:
     stdin = "".join(f"refs/heads/main {sha} refs/heads/main {ZERO}\n" for sha in shas)
+    return run_hook_stdin(repo, stdin, fails=fails, force=force, klass=klass)
+
+
+def run_hook_refs(
+    repo: Path, *lines: tuple[str, str], fails: bool = False, force: bool = False, klass: str = "A"
+) -> subprocess.CompletedProcess:
+    """Like `run_hook`, but each line names its own local ref -- for a push of a branch other than
+    the checked-out one (#222), where `refs/heads/main {sha}` (what `run_hook` always sends) cannot
+    tell the difference.
+    """
+    stdin = "".join(f"{ref} {sha} {ref} {ZERO}\n" for ref, sha in lines)
+    return run_hook_stdin(repo, stdin, fails=fails, force=force, klass=klass)
+
+
+def run_hook_stdin(
+    repo: Path, stdin: str, *, fails: bool = False, force: bool = False, klass: str = "A"
+) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["sh", str(HOOK)],
         cwd=str(repo),
@@ -518,3 +535,80 @@ def test_a_forced_push_still_runs_over_a_tree_recorded_as_b_with_owed(repo: Path
     forced = run_hook(repo, sha, force=True)
     assert suite_runs(repo) == 2, "COSMAI_FORCE_SUITE=1 did not re-run a B-recorded tree"
     assert "forced by COSMAI_FORCE_SUITE=1" in forced.stdout, forced.stdout
+
+
+# ---------------------------------------------------------------------------------------------
+# #222: the hook verified HEAD, not the ref being pushed -- a `wave/tool` push from a `main`
+# checkout equal to origin/main was let through as class N even though wave/tool's own tree was
+# untested and different. These push a local ref other than the checked-out one; `run_hook`
+# cannot express that (it always names refs/heads/main), so they use `run_hook_refs`.
+# ---------------------------------------------------------------------------------------------
+
+
+def branch_at_new_commit(repo: Path, branch: str, text: str) -> str:
+    """A commit on `branch`, leaving whatever is currently checked out (main) untouched."""
+    subprocess.run(["git", "-C", str(repo), "branch", branch], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", branch], check=True)
+    (repo / "file.txt").write_text(text, encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--no-verify", "-m", f"chore: {text}"], check=True
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    return sha
+
+
+def test_pushing_a_non_head_branch_whose_tree_differs_is_refused(repo: Path):
+    base = commit(repo, "one")  # HEAD stays on main == this commit == origin/main.
+    origin_main(repo, base)
+    other = branch_at_new_commit(repo, "other", "two")  # a different tree, not what HEAD names
+    done = run_hook_refs(repo, ("refs/heads/other", other))
+    assert done.returncode == 1, done.stdout
+    assert "push the branch from its own checkout" in done.stderr, done.stderr
+    assert suite_runs(repo) == 0, "a refused push must not run the suite"
+
+
+def test_pushing_a_non_head_branch_whose_tree_equals_origin_main_is_allowed(repo: Path):
+    base = commit(repo, "one")  # HEAD == this commit == origin/main
+    origin_main(repo, base)
+    # An empty commit keeps its parent's tree, so `other`'s sha differs from HEAD's while its tree
+    # is identical to origin/main's -- exactly the shortcut #222 says to keep.
+    subprocess.run(["git", "-C", str(repo), "branch", "other"], check=True)
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "other"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--no-verify", "--allow-empty", "-m", "chore: other"],
+        check=True,
+    )
+    other = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+    assert other != base
+    assert tree_of(repo, other) == tree_of(repo, base)
+    done = run_hook_refs(repo, ("refs/heads/other", other))
+    assert done.returncode == 0, done.stderr
+    # Not refused; HEAD (main@base) happens to equal origin/main here too, so the existing
+    # HEAD-based classifier still lands on class N for it -- cheap (format+lint), not skipped.
+    assert suite_runs(repo) == 1
+    assert "push the branch from its own checkout" not in done.stdout + done.stderr
+
+
+def test_pushing_a_tag_at_a_non_head_sha_is_not_refused(repo: Path):
+    base = commit(repo, "one")
+    origin_main(repo, base)
+    other = branch_at_new_commit(repo, "other", "two")  # a real, different tree
+    done = run_hook_refs(repo, ("refs/tags/v1", other))
+    assert "push the branch from its own checkout" not in done.stderr, done.stderr
+    assert "untested for class" in done.stdout, done.stdout
+    assert suite_runs(repo) == 1
+
+
+def test_pushing_the_checked_out_branch_itself_is_never_refused(repo: Path):
+    # The everyday push: HEAD's own sha under HEAD's own ref name must never trip the new refusal.
+    sha = commit(repo, "one")
+    done = run_hook_refs(repo, ("refs/heads/main", sha))
+    assert "push the branch from its own checkout" not in done.stderr, done.stderr
+    assert done.returncode == 0, done.stderr
