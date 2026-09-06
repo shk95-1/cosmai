@@ -1984,7 +1984,7 @@ numbers below against the tool's output every time.
 
 | what is measured | value |
 |---|---|
-| a sample of 10 natural-language queries — the first 10 topics in the topic dictionary's order × each topic's first `ko` alias × 10 fixed sentence patterns | 오라우팅 **4/10** |
+| a sample of 10 natural-language queries — the first 10 topics in the topic dictionary's order × each topic's first `ko` alias × 10 fixed sentence patterns | misrouted **4/10** |
 | the same rule over all 15 topics | **7/15** |
 | ydc's three published queries, on our dictionary | **3/3** |
 | of the active topic dictionary's 73 `ko` aliases, those in the tokeniser dictionary | **11** |

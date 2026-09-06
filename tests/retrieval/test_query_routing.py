@@ -185,7 +185,7 @@ def test_ydc_published_queries_route_the_same_way_on_our_dictionary():
 @pytest.mark.parametrize(
     ("sentence", "section", "key"),
     [
-        ("오라우팅 **4/10**", "sample", "misrouted"),
+        ("misrouted **4/10**", "sample", "misrouted"),
         ("| **7/15** |", "sample", "topic_misrouted"),
         ("| **3/3** |", "ydc_published", "misrouted"),
         ("73 `ko` aliases, those in the tokeniser dictionary | **11** |", "dictionary", "ko_in_dictionary"),
@@ -206,7 +206,7 @@ def test_the_contract_still_says_what_the_tool_measures(sentence: str, section: 
 def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
     table = contract()
     found = measured()
-    assert f"오라우팅 **{found['sample']['misrouted']}/{found['sample']['size']}**" in table
+    assert f"misrouted **{found['sample']['misrouted']}/{found['sample']['size']}**" in table
     assert f"| **{found['sample']['topic_misrouted']}/{found['sample']['topics']}** |" in table
     assert f"{found['dictionary']['ko_aliases']} `ko` aliases" in table
     assert f"{found['dictionary']['inci_surfaces']} `mfds_inci` surface forms" in table
