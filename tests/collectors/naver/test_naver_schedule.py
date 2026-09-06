@@ -134,16 +134,14 @@ def test_every_naver_dataset_has_a_cron_line(dataset: Dataset):
     assert dataset.value in times, f"{dataset.value} has a collector (#9) and no cron line"
 
 
-def test_only_datalab_is_gated_and_it_names_the_issue_that_un_gates_it():
-    """#182: the DataLab line is commented out until #90's global anchor exists -- a pull taken now
-    is scraped again later, and an unattended monthly run would overwrite a deliberate pull's ratios
-    under a new endDate basis. Blog is unaffected (its upsert key is post_id) and stays live."""
+def test_no_naver_line_is_gated_now_that_the_anchor_is_in():
+    """#182 commented the DataLab line out while there was no anchor to make a pull comparable;
+    #90 put the anchor in every request, so both naver lines run. A line commented out again needs
+    a reason above it naming the issue that restores it -- what `_gate_reason` reads."""
     gated = _gated_times_by_dataset()
-    assert set(gated) == {"datalab"}, f"gated naver datasets: {sorted(gated)}"
-    assert "blog" in _times_by_dataset(), "the blog line is the one that must keep running"
-    assert "#90" in _gate_reason("datalab"), (
-        "a gated line whose comment names no issue is one nobody restores"
-    )
+    assert gated == {}, f"gated naver datasets: {sorted(gated)}"
+    assert set(_times_by_dataset()) == {"datalab", "blog"}, sorted(_times_by_dataset())
+    assert _gate_reason("datalab") == "", "a live line must not be read as a gated one"
 
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)

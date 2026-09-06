@@ -47,8 +47,9 @@ name: cosmai
 # API Hub from the first month after the image is rebuilt. It is not behind a profile: STATE.md §2 has
 # this container running, and one run's spend is bounded by collectors/naver/scope.json's
 # http.max_requests_per_run against a vendor quota three orders of magnitude larger (#110). What that
-# costs to know: after a rebuild the next 1st collects on its own, so the deliberate first run and the
-# global anchor of #90 belong before that date.
+# costs to know: after a rebuild the next 1st collects on its own. #90 put the global anchor into every
+# DataLab request and uncommented that line, so what is still owed before that date is the deliberate
+# first run.
 #
 # **collector-commerce is no longer part of that set.** #10 attached a live transport
 # (`fetcher or live_fetchers()` in collectors/commerce/cli.py), so this container sends real requests to
