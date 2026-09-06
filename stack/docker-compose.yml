@@ -35,13 +35,20 @@
 # condition's evidence.
 name: cosmai
 
-# **Running `up -d` today makes two collectors fail on every run.** collectors/{naver,youtube}/cli.py's
-# default fetcher is still `_RaisingFetcher`, so collector-youtube-work ends with NotImplementedError
-# 288 times a day and collector-naver twice a month, and not a single outside request ever leaves either
-# of them. Still not hidden behind a profile, because: what procedure 1 checks is the wiring, and gating
-# it would keep `up -d` from ever raising that wiring, leaving nothing to check against. The cost is only
-# log noise too -- supercronic keeps running after a job fails, so the container never enters a restart
-# loop.
+# **Running `up -d` today makes one collector fail on every run.** collectors/youtube/cli.py's default
+# fetcher is still `_RaisingFetcher`, so collector-youtube-work ends with NotImplementedError 288 times
+# a day and not a single outside request ever leaves it. Still not hidden behind a profile, because:
+# what procedure 1 checks is the wiring, and gating it would keep `up -d` from ever raising that wiring,
+# leaving nothing to check against. The cost is only log noise too -- supercronic keeps running after a
+# job fails, so the container never enters a restart loop.
+#
+# **collector-naver left that set with #182.** collectors/naver/cli.py now defaults to a live httpx
+# transport, so the two monthly cron lines (the 1st, 06:10 datalab · 06:40 blog) really call the NAVER
+# API Hub from the first month after the image is rebuilt. It is not behind a profile: STATE.md §2 has
+# this container running, and one run's spend is bounded by collectors/naver/scope.json's
+# http.max_requests_per_run against a vendor quota three orders of magnitude larger (#110). What that
+# costs to know: after a rebuild the next 1st collects on its own, so the deliberate first run and the
+# global anchor of #90 belong before that date.
 #
 # **collector-commerce is no longer part of that set.** #10 attached a live transport
 # (`fetcher or live_fetchers()` in collectors/commerce/cli.py), so this container sends real requests to

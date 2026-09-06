@@ -40,6 +40,37 @@ def _times_by_dataset() -> dict[str, tuple[str, ...]]:
     return out
 
 
+def _gated_times_by_dataset() -> dict[str, tuple[str, ...]]:
+    """The same, for a `cosmai collect naver` line that is commented out -- a line gated on purpose,
+    kept in the file so un-gating it is one character and the reason above it stays readable."""
+    out: dict[str, tuple[str, ...]] = {}
+    for path in sorted(p for p in CRONTAB_D.iterdir() if p.is_file()):
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            body = raw.strip().lstrip("#").strip()
+            if not raw.strip().startswith("#") or "cosmai collect naver" not in body:
+                continue
+            parts = body.split()
+            # A prose comment mentioning the command starts with a word; a cron line starts with its
+            # minute field.
+            if "--dataset" not in parts or not parts[0][0].isdigit():
+                continue
+            out[parts[parts.index("--dataset") + 1]] = tuple(parts[:5])
+    return out
+
+
+def _gate_reason(dataset: str) -> str:
+    """The comment lines directly above a gated dataset's line -- why it is off, in the file that
+    turns it off."""
+    reason: list[str] = []
+    for path in sorted(p for p in CRONTAB_D.iterdir() if p.is_file()):
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            body = raw.strip().lstrip("#").strip()
+            if raw.strip().startswith("#") and f"--dataset {dataset}" in body:
+                return "\n".join(reason)
+            reason = [*reason, body] if raw.strip().startswith("#") else []
+    return ""
+
+
 def _all_collector_times() -> list[tuple[str, tuple[str, ...]]]:
     """`(label, (minute, hour, dom, month, dow))` for every `cosmai collect <x> --dataset <y>` line
     in the file, naver included -- what naver's own times must not collide with."""
@@ -96,15 +127,31 @@ def test_there_is_something_to_check():
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)
 def test_every_naver_dataset_has_a_cron_line(dataset: Dataset):
-    times = _times_by_dataset()
+    # A gated line still counts as a line: it is present, it carries its time, and the reason it is
+    # off is the comment right above it (#182 -- datalab waits on #90). A dataset with no line at all
+    # is the recorded outage this test exists for.
+    times = {**_times_by_dataset(), **_gated_times_by_dataset()}
     assert dataset.value in times, f"{dataset.value} has a collector (#9) and no cron line"
+
+
+def test_only_datalab_is_gated_and_it_names_the_issue_that_un_gates_it():
+    """#182: the DataLab line is commented out until #90's global anchor exists -- a pull taken now
+    is scraped again later, and an unattended monthly run would overwrite a deliberate pull's ratios
+    under a new endDate basis. Blog is unaffected (its upsert key is post_id) and stays live."""
+    gated = _gated_times_by_dataset()
+    assert set(gated) == {"datalab"}, f"gated naver datasets: {sorted(gated)}"
+    assert "blog" in _times_by_dataset(), "the blog line is the one that must keep running"
+    assert "#90" in _gate_reason("datalab"), (
+        "a gated line whose comment names no issue is one nobody restores"
+    )
 
 
 @pytest.mark.parametrize("dataset", list(Dataset), ids=lambda d: d.value)
 def test_no_naver_line_starts_on_minute_zero(dataset: Dataset):
     # Same rule commerce's daily lines follow (contracts/entrypoints.md §Schedule): minute 0 is the
-    # hourly ranking walk's own start.
-    minute = _times_by_dataset()[dataset.value][0]
+    # hourly ranking walk's own start. A gated line is checked too -- un-gating must not need this
+    # question asked again.
+    minute = {**_times_by_dataset(), **_gated_times_by_dataset()}[dataset.value][0]
     assert minute != "0", f"naver {dataset.value} starts on minute 0, the hourly ranking walk's minute"
 
 
