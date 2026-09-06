@@ -1526,6 +1526,94 @@ def test_the_primary_repo_is_matched_by_name_not_owner(run, monkeypatch, checkou
     assert "cosmai-import-ydc#43" not in missing, done.stdout
 
 
+def _checkout_with_markers(tmp_path: Path, name: str, files: dict[str, str]) -> Path:
+    """A checkout on `main` carrying the given marker lines, one file per entry."""
+    repo = tmp_path / name
+    repo.mkdir()
+    git = ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(repo)]
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(
+        [*git[:-2], "init", "-q", "-b", "main", str(repo)], check=True, capture_output=True, env=clean
+    )
+    for path, text in files.items():
+        (repo / path).write_text(text, encoding="utf-8")
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=clean)
+    subprocess.run([*git, "commit", "-qm", "chore: seed"], check=True, capture_output=True, env=clean)
+    return repo
+
+
+def test_a_qualified_marker_resolves_against_the_open_when_touched_issue_in_the_named_repo(
+    run, monkeypatch, tmp_path: Path
+):
+    # #238: a marker naming the other repo is not stray just because the primary repo has no such
+    # issue -- it is checked against the repo it names, "slopindustries/cosmai-import-ydc" here.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    checkout = _checkout_with_markers(
+        tmp_path, "checkout-qualified-ok", {"pipeline.py": "# TO" + f"DO({FORK}#43) leave it\n"}
+    )
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=())],
+        fork=[
+            epic(20, "population", subs=(43,)),
+            issue(43, "the fork's marker", labels=("ch:tool", "when-touched"), parent=20),
+        ],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    stray = done.stdout.split("TO" + "DO(#n) marker with no open when-touched issue")[1].split("\n\n")[0]
+    assert "43" not in stray, done.stdout
+
+
+def test_a_qualified_marker_with_no_such_issue_in_the_named_repo_names_it(run, monkeypatch, tmp_path: Path):
+    # The mirror image: the named repo has no open when-touched #99, so the line is reported --
+    # naming the repo it was checked against, not the primary.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    checkout = _checkout_with_markers(
+        tmp_path, "checkout-qualified-stray", {"pipeline.py": "# TO" + f"DO({FORK}#99) leave it\n"}
+    )
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=())],
+        fork=[epic(20, "population", subs=())],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    stray = done.stdout.split("TO" + "DO(#n) marker with no open when-touched issue")[1].split("\n\n")[0]
+    assert f"{FORK}#99" in stray, done.stdout
+
+
+def test_a_bare_marker_still_resolves_against_the_primary_next_to_a_qualified_one(
+    run, monkeypatch, tmp_path: Path
+):
+    # Adding repo-qualification must not disturb the bare form's existing meaning: it still names
+    # an issue in whichever repo this checkout is primary for.
+    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", UPSTREAM)
+    checkout = _checkout_with_markers(
+        tmp_path,
+        "checkout-mixed-markers",
+        {
+            "kept.py": "# TO" + "DO(#7) fix it while you are in here\n",
+            "other.py": "# TO" + f"DO({FORK}#43) leave it\n",
+        },
+    )
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(7,)),
+            issue(7, "has a marker", labels=("ch:tool", "when-touched"), parent=10),
+        ],
+        fork=[
+            epic(20, "population", subs=(43,)),
+            issue(43, "the fork's marker", labels=("ch:tool", "when-touched"), parent=20),
+        ],
+        cwd=checkout,
+    )
+    assert done.returncode == 0, done.stderr
+    stray = done.stdout.split("TO" + "DO(#n) marker with no open when-touched issue")[1].split("\n\n")[0]
+    assert "7" not in stray and "43" not in stray, done.stdout
+
+
 @pytest.fixture
 def checkout_with_upstream_remote(tmp_path: Path) -> Path:
     """A fork-shaped checkout: a plain git repo with an `upstream` remote configured."""

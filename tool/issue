@@ -320,6 +320,16 @@ def tagged($name): (.labels | index($name)) != null;
 def channel_labels: [.labels[] | select(startswith("ch:"))];
 def channel: (channel_labels | first // null);
 def open_blockers: [.blockers[] | select(.state == "OPEN") | .key];
+# A marker payload is either bare, TODO(#n), naming the primary repo own issue, or qualified,
+# TODO(owner/repo#n) (#238) -- pulled apart here once so both audit items read it the same way.
+# Built with the marker word split across a concatenation, not spelled out whole, so this line
+# itself is not read as an unlinked marker by tool/checks/todo.
+def todo_ref($line):
+  ("TOD" + "O\\((?<ref>[A-Za-z0-9_./-]*#[0-9]+)\\)") as $pattern
+  | ($line | capture($pattern)).ref as $ref
+  | if ($ref | test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+$"))
+    then {repo: ($ref | split("#")[0]), number: ($ref | split("#")[1] | tonumber)}
+    else {repo: null, number: ($ref | ltrimstr("#") | tonumber)} end;
 def section($name): (.body | test("(^|\n)#{1,6}[ \t]*" + $name));
 def DONE_WHEN: "Done when";
 def RELEASE_CONDITION: "Release condition";
@@ -591,11 +601,29 @@ AUDIT='
   stale_open: [$all[] | select(.short == $primary) | . as $i
     | ($merged | map(select(test("/" + ($i.number | tostring) + "-")))) as $branches
     | select(($branches | length) > 0) | {key: $i.key, branches: $branches}],
-  todo_without_issue: [$todos[] | . as $line | ($line | capture("TODO\\(#(?<n>[0-9]+)\\)").n | tonumber) as $n
-    | select([$all[] | select(.short == $primary and .number == $n and tagged("when-touched"))] | length == 0)
-    | $line],
+  # A bare marker still resolves against the primary repo; a qualified one (owner/repo#n, #238)
+  # resolves against the repo it names, whether or not that is the primary. A repo neither fetch
+  # read is not something this checkout can judge, so it is flagged as such rather than folded
+  # into the same "stray" bucket a real miss gets.
+  todo_without_issue: [$todos[] | . as $line | todo_ref($line) as $ref
+    | if $ref.repo == null then
+        (select([$all[] | select(.short == $primary and .number == $ref.number and tagged("when-touched"))]
+                | length == 0) | $line)
+      elif ([$repos[] | select(.repo == $ref.repo)] | length) == 0 then
+        ($line + "  (repo " + $ref.repo + " not read by this checkout)")
+      else
+        (select([$all[] | select(.repo == $ref.repo and .number == $ref.number and tagged("when-touched"))]
+                | length == 0) | $line)
+      end],
+  # Restricted to the primary repo own when-touched issues, as before (#174) -- an issue whose
+  # marker lives only in the other repo checkout is a gap this checkout cannot see, and #238 keeps
+  # it that way on purpose (per-checkout, not cross-repo grep). A primary-repo issue marker may now
+  # be qualified with its own repo too, and that still counts.
   when_touched_without_todo: [$all[] | select(.short == $primary and tagged("when-touched"))
-    | . as $i | select([$todos[] | select(test("TODO\\(#" + ($i.number | tostring) + "\\)"))] | length == 0) | .key],
+    | . as $i
+    | select([$todos[] | todo_ref(.) | select((.repo == null or .repo == $i.repo) and .number == $i.number)]
+             | length == 0)
+    | .key],
   unreachable_tests: $unreachable,
   merged_worktrees: [$worktrees[] | split("\t") | {path: .[0], branch: .[1]}
     | .branch as $b | select($b != "main" and ($merged | index($b)) != null)],
@@ -740,8 +768,10 @@ case "$cmd" in
         worktrees=$(git worktree list --porcelain \
             | awk '/^worktree /{p=$2} /^branch /{b=$2; sub("refs/heads/", "", b); print p"\t"b}')
         # main, not the working tree: every worktree shares the ref but has its own edits, so a
-        # worktree scan gives a different answer per checkout.
-        todos=$(git grep -nE 'TODO\(#[0-9]+\)' main -- :/ 2>/dev/null || true)
+        # worktree scan gives a different answer per checkout. Matches the bare and the
+        # repo-qualified marker shape alike (#238) -- which repo a qualified one resolves against
+        # is the jq below's job, not this grep's.
+        todos=$(git grep -nE 'TODO\(#[0-9]+\)|TODO\([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+\)' main -- :/ 2>/dev/null || true)
         # #231 Work 6: a test file no map entry, reader entry, closure root or the smoke set could
         # ever select is a blind spot -- nothing but changing it directly ever runs it again.
         unreachable=$(python3 "$issue_tool_dir/change_scope.py" --unreachable 2>/dev/null || true)

@@ -15,7 +15,7 @@ from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
-from analysis.polarity.ownership import OWNERS
+from analysis.polarity.ownership import _GEMMA4_2026_08_24, OWNERS
 
 # versioning.md: `rule-vX.Y` or `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
@@ -27,8 +27,9 @@ VERSIONS = (
     ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
     ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
     # OllamaPolarity(...).version is an instance attribute, so the constant cannot be imported
-    # (analysis/polarity/ollama.py) -- the value production really stamps is the one registered in OWNERS.
-    ("analysis.polarity.ownership.OWNERS['선블록'].version", OWNERS["선블록"].version),
+    # (analysis/polarity/ollama.py) -- the value production stamps is _GEMMA4_2026_08_24, the
+    # re-registration constant OWNERS is suspended empty from as of #242.
+    ("analysis.polarity.ownership._GEMMA4_2026_08_24", _GEMMA4_2026_08_24),
 )
 
 
@@ -45,6 +46,7 @@ def test_the_guard_refuses_the_shapes_the_contract_does_not_have():
 
 
 def test_every_operational_owner_version_is_registered_in_versions():
+    """Vacuous while OWNERS is suspended empty (#242) -- it re-arms the moment an entry comes back."""
     registered = {version for _, version in VERSIONS}
     for scope, owner in OWNERS.items():
         assert FORMAT.match(owner.version), f"{scope} = {owner.version!r}"

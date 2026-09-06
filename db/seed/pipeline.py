@@ -52,14 +52,10 @@ STAGES: tuple[Stage, ...] = (
     Stage("naver:datalab", "naver", "datalab", "1 mon", True, "검색어 트렌드 — 아직 0행"),
     Stage("naver:blog", "naver", "blog", "1 mon", True, "블로그 — 아직 0행"),
     Stage("analyze:all", "analyze", "all", "1 day", True, "규칙 전량 패스 05:00 UTC"),
-    Stage(
-        "analyze:polarity_missing",
-        "analyze",
-        "polarity_missing",
-        "1 day",
-        True,
-        "gemma4 증분 패스 08:00 UTC (#32)",
-    ),
+    # analyze:polarity_missing (the gemma4 incremental pass) is gone rather than disabled: the crontab
+    # carries no line for it at all now, unlike youtube:watch's profile gate above, which still has a
+    # cron line to compare against. Suspended 2026-09-06 (#242) -- add it back in the same PR that
+    # restores the `0 8` line in stack/crontab.d/analyze.
 )
 
 
@@ -142,7 +138,7 @@ EDGES: tuple[Edge, ...] = (
     _writes("analyze:all", "needs.wish_mention", "추출"),
     _writes("analyze:all", "needs.metrics_need", "집계 -- 화면 1·3·4·5"),
     _writes("analyze:all", "needs.metrics_wish", "집계 -- 화면 2"),
-    _writes("analyze:polarity_missing", "needs.need_mention", "극성만 채운다(증분)"),
+    # analyze:polarity_missing wrote needs.need_mention here -- gone with the stage (#242).
     # -- Reads. The reasoning on the source side is the per-line comment in
     # db/grants/needs_runtime_reader.sql.
     _reads("tubedepth.jobs", "youtube:work", "큐에서 집는다"),
@@ -156,7 +152,7 @@ EDGES: tuple[Edge, ...] = (
     _reads("trend_radar.new_product", "analyze:all", ""),
     _reads("tubedepth.comments", "analyze:all", "유튜브 언급의 원천"),
     _reads("needs.need_mention", "analyze:all", "집계가 자기 추출분을 다시 읽는다"),
-    _reads("needs.need_mention", "analyze:polarity_missing", "극성이 빈 행을 고른다"),
+    # analyze:polarity_missing read needs.need_mention here -- gone with the stage (#242).
     _reads("needs.wish_mention", "analyze:all", ""),
 )
 
