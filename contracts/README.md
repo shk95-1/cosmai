@@ -32,6 +32,7 @@ This directory is not a design document. Everything here has to be in **a shape 
 | `secrets.md` | the secret file's path and the key names (no values) | key-existence check at start-up |
 | `versioning.md` | the `*_version` column rules and the keys of `analysis_run.versions` | `tests/test_version_strings.py` (the two formats) + `tests/test_trend_quarter.py` (the `metric` key) + code review |
 | `../db/grants/needs_runtime_reader.sql` | SELECT on the 12 source tables the analysis reads | `tests/test_grants_reader.py` compares against `ddl/current` |
+| `../db/views/naver_datalab_rescaled.sql` | the DataLab anchor rescale (#90): one line per `needs.naver_datalab_point` row with `ratio_rescaled` = the raw ratio over the anchor point of the **same** `request_key` and `month`, NULL when that anchor is missing or 0. The rules and the columns are `formats.md`, NAVER DataLab section; the anchor keyword itself is `collectors/naver/scope.py:DATALAB_ANCHOR`, sent in every request | `tests/test_naver_datalab_rescaled_view.py` (two requests on one scale · the two NULL rules · the anchor literal against the collector's constant · the view's GRANT) + `tests/test_migrate_view_sweep.py` (the deploy applies it) |
 
 Principle: an interface is fixed here first, and the behaviour is implemented and verified step by step inside the package. A contract change arrives as one PR carrying contract, implementation and tests together.
 

@@ -33,6 +33,36 @@ cosmai login --source <source>
   run as it is (every write is a natural-key upsert). commerce implements it as a per-source session-scoped
   advisory lock (`collectors/commerce/storage/locks.py`).
 
+**naver over HTTP (#182).** One run may send `collectors/naver/scope.json`'s
+`http.max_requests_per_run` (200) requests, and **every attempt is charged, a retry included** — a
+retry is another request NAVER serves. A 5xx or a timeout is retried `retry_max_attempts` (3) times
+with `retry_backoff_s` (2.0) doubling (2s, then 4s), under a `timeout_s` of 20.0. What a response
+does to the run, in the exit codes above:
+- **401 / 403** — the credential is refused: the run stops **blocked (2)**, the note carrying the
+  status and the vendor's `errorCode` alone (never its `errorMessage`, which echoes the request).
+- **429, or a spent budget** — the run stops with what it has: **partial (1)** when it wrote rows,
+  **blocked (2)** when it wrote none. Partial means we yielded, blocked means we were refused, and
+  `needs.pipeline_health` reads partial as "it ran".
+- **any other 4xx** — that one request failed and the run goes on, ending partial if anything failed.
+- **a blog `start` past 1000** — never requested (#110): the ceiling is the vendor's own and
+  independent of `total`, so the walk stops there rather than spending budget on an error.
+
+Two gaps this transport still has, recorded here because a reader of `collector_health` would
+otherwise mis-read the numbers: a **charged retry writes no `naver_fetch_log` row** today (one row
+per request, with a hard-coded 200 and no `elapsed_ms`), so `requests` under-reports and `p90_ms`
+stays NULL (#182 M1); and `collector_health` buckets **403 and 429** as blocked, so NAVER's **401**
+for a refused key lands in `failed` beside `naver_run.status = blocked` (#182 M2 — the view is a
+production object, so the exception is written here rather than silently widened).
+
+**The DataLab anchor (#90).** Every DataLab request carries the one global anchor keyword
+`collectors/naver/scope.py:DATALAB_ANCHOR` (`기준_세럼`) as its own `keywordGroups` entry, so at most
+`DATALAB_CATEGORY_GROUPS_PER_REQUEST` (4) of a category's own groups ride beside it — the vendor's
+cap counts the anchor as one of its five groups. A category of N groups therefore costs `ceil(N / 4)`
+requests where it cost `ceil(N / 5)` before (today's `keywords.json`: 2 requests a run, against a
+vendor ceiling of 50,000 calls a day per API). The collector stores the raw `ratio` and the request
+boundary only; the value relative to the anchor is the view `db/views/naver_datalab_rescaled.sql`
+(`contracts/formats.md`, NAVER DataLab section), so changing the anchor never means collecting again.
+
 ## DB connection knobs (not secrets)
 ```
 COSMAI_DB_HOST   default 127.0.0.1
@@ -830,6 +860,11 @@ cannot run the model, so `OWNERS` in `analysis/polarity/ownership.py` holds no g
 schedule below carries no `--impl` line either — the two only ever move together. The paragraph above (T,
 the interval choice, the GPU window) is historical, kept in `stack/crontab.d/analyze` for the day the line
 returns.
+
+naver's DataLab line was commented out from #182 until #90: with no anchor in the requests, a
+monthly pull could not be compared with the one before it. #90 put the anchor in every request, so
+the line runs again and `db/seed/pipeline.py` declares `naver:datalab` enabled to match — the
+crontab and that declaration only ever move together (`tests/test_pipeline_stage.py`).
 
 youtube's `work` was added to this table on 2026-08-24 (before that there were three, and no line
 drained the queue). It is cron rather than a resident daemon because
