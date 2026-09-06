@@ -66,6 +66,9 @@ smoke = [
     "tests/test_registry_loading.py",
     "tests/test_scope_map.py",
     "tests/stack/test_stack_wiring.py",
+    # test_no_orphaned_test_files.py walks the whole tests/ tree by name, not by importing any one
+    # resource, so no map or readers entry could ever select it for a real change (#241).
+    "tests/test_no_orphaned_test_files.py",
 ]
 
 # No-answer paths (#231 item 3): none of these carry a test of their own, and a real edit to any of
@@ -277,3 +280,10 @@ none = [
 # cosmai_help.txt snapshot was recorded under (review 2026-09-05: a mismatch here is exactly what
 # broke run 33954240253); no basename scan finds it by prefix, so it is a reader like the two above.
 ".python-version" = ["tests/tool/test_ci_workflow.py"]
+# test_conftest_guard.py tests behaviour of tests/conftest.py's own socket guard rather than naming
+# a resource it imports, so it needs a reader entry the same way the two above do (#241).
+"tests/conftest.py" = ["tests/test_conftest_guard.py"]
+# test_lineage_reader_grants.py checks that db/migrate.sh's grants stage actually leaves the two
+# lineage views able to read their source tables -- it names db/grants/needs_runtime_reader.sql and
+# db/migrate.sh by content, not by import, so it is a reader of the grants directory (#241).
+"db/grants/*" = ["tests/test_lineage_reader_grants.py"]
