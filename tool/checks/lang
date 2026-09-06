@@ -35,6 +35,11 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 # #192 removes its reason, so the list is here rather than spread across the tree.
 # contracts/section-names.md is the whole of its entry's reason: it is the rename ledger of the `§`
 # anchors (#206), so every Korean string in it is a historical name, which AGENTS.md exempts.
+# The four contract documents below carry Korean data values -- the nine trend types, the hold
+# reasons, the verdict labels, the card types, topic keys such as the ones the lexicon registers, the
+# category names the sites publish -- so a translated line in them still holds Hangul (#206 part 3,
+# user decision 2026-09-05 on #74); contracts/ stays reviewed, which is what keeps Korean prose from
+# slipping back in.
 # A fixture directory is named twice because git's default pathspec matching gives `**` no empty
 # match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
 # Unquoted on purpose: one word, either --cached or a revision range.
@@ -42,6 +47,10 @@ hits=$(git diff $lang_range -U0 --no-color -- . \
     ':!tool/checks/lang' \
     ':!README.ko.md' \
     ':!contracts/section-names.md' \
+    ':!contracts/interfaces.md' \
+    ':!contracts/entrypoints.md' \
+    ':!contracts/formats.md' \
+    ':!contracts/anon_exposure.md' \
     ':!eval/' \
     ':!db/seed/data/**' \
     ':!db/seed/mentions.py' \

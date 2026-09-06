@@ -67,13 +67,18 @@ def test_an_english_line_passes(repo: Path):
 
 def test_an_allowlisted_path_passes(repo: Path):
     # Korean that is content rather than operating surface stays: seed rows, evaluation sets, the
-    # Korean README, the portal's UI strings, and the section-name ledger's old Korean names.
+    # Korean README, the portal's UI strings, the section-name ledger's old Korean names, and the four
+    # contract documents whose prose is pinned line by line by Korean data values (#206 part 3).
     for path in (
         "eval/polarity/set.csv",
         "db/seed/data/slice/x.csv",
         "README.ko.md",
         "portal/public/app.js",
         "contracts/section-names.md",
+        "contracts/interfaces.md",
+        "contracts/entrypoints.md",
+        "contracts/formats.md",
+        "contracts/anon_exposure.md",
     ):
         stage(repo, path, KOREAN)
     done = run_check(repo)
