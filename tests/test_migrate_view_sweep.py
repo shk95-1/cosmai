@@ -21,7 +21,9 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 
-pytestmark = pytest.mark.postgres
+# serial: this file deploys with db/migrate.sh, which drops every view in `needs` and wants a
+# needs_migrator connection nothing else is holding -- neither survives a parallel worker (#216).
+pytestmark = [pytest.mark.postgres, pytest.mark.serial]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PROBE = "zz_foreign_view_probe"

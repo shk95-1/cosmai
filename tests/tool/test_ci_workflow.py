@@ -45,8 +45,18 @@ def test_the_class_a_job_runs_the_whole_suite():
     assert "tool/checks/test --changed" not in body, body
 
 
-def test_the_job_has_an_hour_timeout():
-    assert "timeout-minutes: 60" in text(), text()
+def test_the_job_has_a_timeout_a_stuck_run_hits_and_a_real_one_does_not():
+    # 60 until #216 made the suite parallel; a bound on a stuck job, never on a working one.
+    assert "timeout-minutes: 30" in text(), text()
+
+
+def test_the_class_a_job_needs_no_parallel_flag_of_its_own():
+    """#216 Work 6: how many workers the suite runs is decided inside tool/checks/test, so the run
+    that proves a tree in CI and the run a person repeats locally are the same experiment. A `-n`
+    or a bare `pytest` here would be a second answer to that question, free to drift from the first."""
+    body = text()
+    assert "-n " not in body, body
+    assert "uv run pytest" not in body, body
 
 
 def test_concurrency_never_cancels_main_or_a_wave_branch():

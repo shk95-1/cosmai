@@ -1,0 +1,23 @@
+# origin: this repository (#216).
+# reuse: source it from a check and call `harness_roles_widen <container> <database>` once the
+#        deploy has run; it speaks only to a throwaway container.
+#
+# db/bootstrap.sql is the file production applies, and it caps needs_migrator at 2 connections and
+# needs_runtime at 12 -- one deploy, one collector fleet. The harness stopped being one process when
+# class A went parallel: every pytest worker's schema fixture creates and drops its schema as
+# needs_migrator, so two slots are gone before the second worker has started
+# (`FATAL: too many connections for role "needs_migrator"`, suite3.log in #228).
+#
+# Widening happens here rather than in the DDL, for the same reason the GRANT CREATE beside this
+# call does: contracts/ddl and db/bootstrap.sql are what production runs, and the harness's need for
+# room is not production's. Nothing outside a container tool/checks/test started ever sees these.
+
+harness_roles_widen() {
+    harness_roles_container=$1
+    harness_roles_database=${2:-fleet}
+    # 8 = two slots per worker at four workers (#228 option 6); 48 = the production budget of 12,
+    # once per worker. Both are dials rather than constants so a run at another -n can say so.
+    docker exec "$harness_roles_container" psql -U fleet -d "$harness_roles_database" -q \
+        -c "ALTER ROLE needs_migrator CONNECTION LIMIT ${COSMAI_HARNESS_MIGRATOR_LIMIT:-8}" \
+        -c "ALTER ROLE needs_runtime CONNECTION LIMIT ${COSMAI_HARNESS_RUNTIME_LIMIT:-48}"
+}

@@ -52,12 +52,45 @@ def _default_registrations_survive_the_suite() -> Iterator[None]:
         return
     from analysis import registry
 
+    # The baseline is made here rather than waited for. In one process some early file called
+    # load_implementations() and every file after it inherited the registrations, so "nothing is
+    # registered at the end" could only mean a test took them away. Under -n (#216) a worker's slice
+    # may contain no such file at all, and the same reading would fail a worker that did nothing
+    # wrong. Registering first asks the same question in every worker: they were there, are they still?
+    registry.load_implementations()
     yield
     # Measuring comes first: load_implementations() really does register again (#99), so calling it
     # before the count would measure the repair rather than what the suite left behind.
     missing = [task for task in registry.TASKS if registry.get(task) is None]
     registry.load_implementations()
     assert not missing, f"default registrations not restored by suite end: {missing}"
+
+
+XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
+# The issue that made the suite parallel, as a namespace -- the same convention analysis/locks.py's
+# own 16 and the collectors' 10 follow.
+WORKER_LOCK_CLASS_BASE = 216_000
+
+
+def _worker_lock_class(worker: str | None, production: int) -> int:
+    """The advisory-lock classid this pytest process takes analyze locks in.
+
+    A Postgres advisory lock is database-wide, and the analyze lock is one key for the whole database
+    (analysis/locks.py): two workers calling `run_stage` at once are precisely the two overlapping
+    runs that lock exists to refuse, so the loser skips its stage and its test fails on a defect that
+    is not there. The per-test schema keeps rows apart and nothing keeps this key apart, so each
+    worker gets a namespace of its own. One process -- every run outside `-n` -- keeps production's.
+    """
+    if not worker:
+        return production
+    return WORKER_LOCK_CLASS_BASE + int(re.sub(r"\D", "", worker) or 0)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _the_analyze_lock_is_this_workers_own() -> None:
+    from analysis import locks
+
+    locks.LOCK_CLASS = _worker_lock_class(os.environ.get(XDIST_WORKER_ENV), locks.LOCK_CLASS)
 
 
 @pytest.fixture

@@ -287,3 +287,7 @@ none = [
 # lineage views able to read their source tables -- it names db/grants/needs_runtime_reader.sql and
 # db/migrate.sh by content, not by import, so it is a reader of the grants directory (#241).
 "db/grants/*" = ["tests/test_lineage_reader_grants.py"]
+# registry_breaker.py holds no test pytest would collect by walking the tree and nothing imports it:
+# test_conftest_guard.py hands it to pytest by path, so this line is the only thing connecting a
+# change there to the test that runs it (#216).
+"tests/registry_breaker.py" = ["tests/test_conftest_guard.py"]
