@@ -369,11 +369,12 @@ def test_a_stopped_blog_run_is_partial_and_keeps_what_it_collected(
     assert row["status"] == "partial"
 
 
-def test_a_rate_limited_datalab_run_is_partial_even_with_nothing_collected(
+def test_a_rate_limited_datalab_run_with_nothing_collected_is_blocked(
     needs_runtime_url: str, secret_file: Path
 ):
-    """A 429 says "not now", not "never" -- exit 1 sends the operator to the next window, while the
-    exit 2 a blocked run returns would send them to look for a broken credential."""
+    """Review B1: partial means the run yielded something. A 429 on the first request yields nothing,
+    and pipeline_health reads partial as "it ran" -- a month of `fresh` over an empty table. The pair
+    with `..._keeps_what_it_collected` above is the whole split: rows written -> 1, none -> 2."""
     error = RateLimited("HTTP 429 (errorCode=012)", status=429, error_code="012")
     code = run(
         "datalab",
@@ -383,10 +384,28 @@ def test_a_rate_limited_datalab_run_is_partial_even_with_nothing_collected(
         captured_at=AT,
     )
 
-    assert code == 1
+    assert code == 2
     (row,) = _run_rows(needs_runtime_url)
-    assert row["status"] == "partial"
+    assert row["status"] == "blocked"
+    assert "429" in row["note"]
     assert _fetch_log_statuses(needs_runtime_url) == [429]
+
+
+def test_a_stopped_blog_run_that_wrote_nothing_is_blocked(needs_runtime_url: str, secret_file: Path):
+    """The blog half of B1's split: the same stop, no rows, exit 2."""
+    error = BudgetExhausted("this run has spent its budget of 200 request(s)")
+    code = run(
+        "blog",
+        database_url=needs_runtime_url,
+        secrets_path=secret_file,
+        fetcher=_StoppingAfter(error),
+        captured_at=AT,
+    )
+
+    assert code == 2
+    assert _blog_count(needs_runtime_url) == 0
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "blocked"
 
 
 def test_one_failed_request_leaves_the_blog_run_partial(needs_runtime_url: str, secret_file: Path):

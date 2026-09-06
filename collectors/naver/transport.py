@@ -170,7 +170,10 @@ class HttpFetcher:
                 last = RequestFailed(message, status=status, error_code=code)
             if attempt < RETRY_MAX_ATTEMPTS:
                 self._sleep(RETRY_BACKOFF_S * 2 ** (attempt - 1))
-        assert last is not None  # the loop runs at least once and every path through it sets this
+        if last is None:
+            # Unreachable: the loop runs at least once and every path through it either returns or
+            # sets `last`. Explicit rather than an assert, which -O would strip out of the run.
+            raise RequestFailed("the retry loop ended without an answer")
         raise last
 
     def _charge(self) -> None:

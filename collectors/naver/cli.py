@@ -6,7 +6,8 @@ What a status does to the run (#182, contracts/entrypoints.md's exit codes):
 
   401 / 403       the credential is refused -- the run stops, blocked (2), the note naming the
                   status and the vendor's errorCode (never its errorMessage, which echoes the request)
-  429             the vendor says "not now" -- the run stops and keeps what it collected, partial (1)
+  429             the vendor says "not now" -- the run stops: partial (1) when it wrote rows,
+                  blocked (2) when it wrote none (partial means we yielded, blocked means we were refused)
   budget spent    scope.MAX_REQUESTS_PER_RUN reached -- the same stop as a 429
   other 4xx       that one request failed; the run goes on and ends partial if anything failed
   5xx / timeout   retried scope.RETRY_MAX_ATTEMPTS times with a doubling backoff, then a failed request
@@ -111,13 +112,15 @@ def run(
     # An injected fetcher stays its caller's to close; the one built here is this run's, and an
     # httpx pool left open outlives `cosmai collect` inside the cron container.
     built: HttpFetcher | None = None
-    if fetcher is None:
-        built = HttpFetcher(found[SECRET_KEYS[0]], found[SECRET_KEYS[1]])
-        active_fetcher: Fetcher = built
-    else:
-        active_fetcher = fetcher
 
     try:
+        # Inside the try, after log.start: a constructor that raises out here would otherwise leave
+        # this run at `running` forever, with nothing to say why.
+        if fetcher is None:
+            built = HttpFetcher(found[SECRET_KEYS[0]], found[SECRET_KEYS[1]])
+            active_fetcher: Fetcher = built
+        else:
+            active_fetcher = fetcher
         if wanted is Dataset.DATALAB:
             outcome = _run_datalab(engine, active_fetcher, journal, now=now)
         else:
@@ -189,9 +192,11 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
         total_points += len(points)
 
     if stopped is not None:
-        # "Not now" is not "never": partial sends the operator to the next window, while the blocked
-        # exit 2 would send them looking for a broken credential.
+        # partial means the run yielded something, blocked means it was refused -- a stop with no row
+        # written is a refusal, and pipeline_health reads partial as "it ran" (review B1).
         print(f"datalab: {total_points} point(s) before the run stopped")
+        if total_points == 0:
+            return _Outcome("blocked", 2, f"datalab stopped: {stopped}")
         return _Outcome("partial", 1, f"datalab stopped: {stopped}")
     if blocked and total_points == 0:
         return _Outcome("blocked", 2, f"no points from: {', '.join(blocked)}")
@@ -221,6 +226,9 @@ def _run_blog(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcome:
         return _Outcome("blocked", 2, f"blog blocked: {stopped}")
     if stopped is not None:
         print(f"blog: {total_posts} post(s) before the run stopped")
+        # The same split as datalab above: nothing written is a refusal, not a partial yield (B1).
+        if total_posts == 0:
+            return _Outcome("blocked", 2, f"blog stopped: {stopped}")
         return _Outcome("partial", 1, f"blog stopped: {stopped}")
     if failed_terms and total_posts == 0:
         return _Outcome("blocked", 2, f"every query failed: {', '.join(failed_terms)}")
