@@ -371,7 +371,8 @@ def test_an_entry_from_before_the_class_was_recorded_never_skips(repo: Path):
 # verification line and then stop at `require_command`, before it would ever start a container.
 # ---------------------------------------------------------------------------------------------
 
-REAL_CARRIED = CARRIED + ("tool/checks/suite-lock",)
+# harness-roles joins suite-lock here: the real script sources both before it looks at a class (#216).
+REAL_CARRIED = CARRIED + ("tool/checks/suite-lock", "tool/checks/harness-roles")
 
 
 @pytest.fixture

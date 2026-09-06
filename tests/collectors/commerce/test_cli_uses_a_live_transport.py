@@ -27,6 +27,11 @@ from collectors.commerce.transport.factory import DispatchingFetcher, LiveFetche
 from collectors.commerce.transport.http import HttpFetcher
 
 LIVE = (HttpFetcher, BrowserFetcher)
+# serial: the per-source advisory key (collectors/commerce/storage/locks.py) is database-wide and
+# nothing renames it per test, so two workers walking the same source take one lock away from each
+# other -- the collision this file exists to prove, arriving as a failure of it (#216).
+pytestmark = pytest.mark.serial
+
 AT = datetime(2026, 8, 24, 3, tzinfo=UTC)
 
 

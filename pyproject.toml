@@ -35,6 +35,9 @@ module-name = ["cosmai", "analysis", "collectors", "db"]
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3",
+    # #216: the class-A suite runs its tests across processes. Only the runner changes -- nothing
+    # under test imports xdist -- so it lives here rather than in the runtime dependencies.
+    "pytest-xdist>=3.6,<4",
     "ruff>=0.9",
     "basedpyright>=1.29",
 ]
@@ -60,6 +63,7 @@ markers = [
     "live: touches the real network; excluded by default",
     "postgres: needs the real roles from db/bootstrap.sql (tool/checks/test provides them)",
     "local_llm: talks to a local ollama on OLLAMA_URL; free and offline-ish but excluded by default",
+    "serial: changes state the whole harness shares -- a db/migrate.sh deploy; tool/checks/test runs these alone, after the parallel workers (#216)",
 ]
 
 [tool.ruff]
