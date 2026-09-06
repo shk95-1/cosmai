@@ -376,19 +376,16 @@ def outside_fences:
   | .out | join("\n");
 # A backticked run is a data value or an identifier at this site -- a search term, a group key, a
 # path -- the same judgment tool/checks/lang makes per file (there, a path allowlist; here, a span).
-# Korean written directly into unbacked prose still fails, which is what #192 D12 is for. Per line,
-# not across the whole body: pairing runs of backticks across line boundaries lets a stray backtick
-# on one line pair with the opener of an unrelated span further down and strip the Korean between
-# them, which is silence, not a miss. A line whose backtick runs do not come in pairs is left whole
-# and faces the check as-is -- the worst case is a false positive an author fixes with one
-# backtick, never a silenced finding. Within a line, the backreference (\k<open>) requires the
-# closer to be the same run length as the opener; that is not the Markdown rule for a span whose
-# content itself contains a literal backtick (`` ``a`b`` `` is such a span), and this helper leaves
-# a case like that unstripped rather than falsely exempting it.
+# Korean written directly into unbacked prose still fails, which is what #192 D12 is for. The rule
+# is exactly the Markdown pairing rule: the opener and the closer must each be a whole run of the
+# same backtick count, not a run of at least that count. The four lookarounds do that work --
+# (?<!`) and (?!`) around the opener force it to be maximal (without the trailing one, backtracking
+# lets a short run capture a prefix of a longer one and silence Korean sitting past it), and the
+# same pair around the closer force that too. A line is left whole exactly when nothing in it
+# pairs this way -- there is no separate parity guard, and none is needed.
 def outside_code_spans:
   split("\n")
-  | map(if (([scan("`+")] | length) % 2) == 1 then .
-        else gsub("(?<open>`+)(?<content>[^`]*?)\\k<open>"; "") end)
+  | map(gsub("(?<!`)(?<open>`+)(?!`)(?<content>.*?)(?<!`)\\k<open>(?!`)"; ""))
   | join("\n");
 # Codepoint escapes, not literal syllables, for the reason tool/checks/lang gives for the same
 # choice: this file must not contain the Hangul the rule below exists to catch.
