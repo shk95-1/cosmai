@@ -376,14 +376,20 @@ def outside_fences:
   | .out | join("\n");
 # A backticked run is a data value or an identifier at this site -- a search term, a group key, a
 # path -- the same judgment tool/checks/lang makes per file (there, a path allowlist; here, a span).
-# Korean written directly into unbacked prose still fails, which is what #192 D12 is for. The
-# backreference (\k<open>) requires the closer to be the same length as the opener, which is how
-# Markdown itself pairs `` `` `` around content that contains a literal backtick. A stray backtick
-# with no partner of the same length ahead of it is left as literal text rather than read as an
-# opener that never closes -- that misreading would exempt everything after it and silence a real
-# finding for the rest of the body.
+# Korean written directly into unbacked prose still fails, which is what #192 D12 is for. Per line,
+# not across the whole body: pairing runs of backticks across line boundaries lets a stray backtick
+# on one line pair with the opener of an unrelated span further down and strip the Korean between
+# them, which is silence, not a miss. A line whose backtick runs do not come in pairs is left whole
+# and faces the check as-is -- the worst case is a false positive an author fixes with one
+# backtick, never a silenced finding. Within a line, the backreference (\k<open>) requires the
+# closer to be the same run length as the opener; that is not the Markdown rule for a span whose
+# content itself contains a literal backtick (`` ``a`b`` `` is such a span), and this helper leaves
+# a case like that unstripped rather than falsely exempting it.
 def outside_code_spans:
-  gsub("(?<open>`+)(?<content>[^`]*?)\\k<open>"; "");
+  split("\n")
+  | map(if (([scan("`+")] | length) % 2) == 1 then .
+        else gsub("(?<open>`+)(?<content>[^`]*?)\\k<open>"; "") end)
+  | join("\n");
 # Codepoint escapes, not literal syllables, for the reason tool/checks/lang gives for the same
 # choice: this file must not contain the Hangul the rule below exists to catch.
 def hangul: test("[\\x{1100}-\\x{11FF}\\x{3130}-\\x{318F}\\x{A960}-\\x{A97F}\\x{AC00}-\\x{D7A3}\\x{FFA0}-\\x{FFDC}]");

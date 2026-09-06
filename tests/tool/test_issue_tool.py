@@ -1197,7 +1197,7 @@ def test_korean_title_still_fails_with_the_inline_span_exemption(run):
 def test_an_odd_backtick_does_not_swallow_the_rest_of_the_body(run):
     # A stray single backtick must not be read as opening a span that never closes -- that would
     # exempt everything after it and silence a real finding. The chosen behaviour is per line: a
-    # line with an unbalanced backtick count is left untouched (not exempted at all), so Korean
+    # line with an odd number of backtick runs is left untouched (not exempted at all), so Korean
     # prose on that same line, and on every line after it, is still caught.
     body = BODY + "\nan odd backtick ` here, then plain " + KOREAN_LINE + " prose.\n"
     done = run(
@@ -1205,6 +1205,47 @@ def test_an_odd_backtick_does_not_swallow_the_rest_of_the_body(run):
         upstream=[
             epic(10, "tool", subs=(11,)),
             issue(11, "odd backtick", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
+
+
+def test_a_stray_backtick_does_not_pair_with_a_later_unrelated_span(run):
+    # #251 review: pairing across the whole body let a stray backtick on one line pair with the
+    # opener of a real, unrelated span further down and strip the Korean sitting between them --
+    # even on a single line. Fixed by counting backtick runs per line: this line has three runs
+    # (one stray, two forming the real span), an odd count, so the whole line is left untouched.
+    body = BODY + "\nstray ` here " + KOREAN_LINE + " and `path` there\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, "stray then span", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
+
+
+def test_a_stray_backtick_does_not_pair_across_lines(run):
+    # Same failure mode, spread over two lines: a stray opener on one line must not reach across a
+    # newline to pair with a real span's opener on another and strip the Korean between them.
+    body = BODY + "\na stray ` backtick\nlater " + KOREAN_LINE + " prose\nand a real `path/here` span\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11,
+                "stray across lines",
+                body=body,
+                labels=("ch:tool",),
+                parent=10,
+                created_at=AFTER_THE_WINDOW,
+            ),
         ],
     )
     assert done.returncode == 1, done.stdout
