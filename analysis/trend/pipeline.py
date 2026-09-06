@@ -129,7 +129,7 @@ OPEN_RUN: LiteralString = (
     "INSERT INTO analysis_run (status, versions, note) VALUES ('running', %s::jsonb, %s) RETURNING run_id"
 )
 CLOSE_RUN: LiteralString = "UPDATE analysis_run SET status = 'ok', finished_at = now() WHERE run_id = %s"
-# TODO(#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
+# TODO(shk95-1/cosmai#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
 # deletes the same run's long_form rows.
 CLEAR: LiteralString = (
     "DELETE FROM metrics_topic_quarter "
@@ -281,7 +281,7 @@ def build(
 ) -> Built:
     """Read, close the transaction, run the formulas. That order is the only shape that avoids the 15-second
     timeout."""
-    # TODO(#201): run() opens and commits the run first, so if the population is empty and run()
+    # TODO(shk95-1/cosmai#201): run() opens and commits the run first, so if the population is empty and run()
     # aborts, status='running' is left behind.
     with conn.cursor() as cur:
         # There is one way to pick the active revision -- a bare `WHERE active` doubles the denominator when

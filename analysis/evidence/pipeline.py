@@ -67,7 +67,7 @@ SELECT c.doc_id, v.quarter, m.topic_id, c.source, c.channel_id,
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
-# TODO(#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
+# TODO(shk95-1/cosmai#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
 # deletes the same run's long_form evidence -- the same four columns as
 # `analysis/trend/pipeline.py`·`analysis/judge/pipeline.py`.
 CLEAR: LiteralString = (
