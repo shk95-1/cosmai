@@ -83,12 +83,24 @@ def test_the_profile_is_what_opens_it():
     assert GATED in _services(PROFILE)
 
 
-@pytest.mark.parametrize("name", ["collector-naver", "collector-youtube-work", "analyze"])
+@pytest.mark.parametrize("name", ["collector-youtube-work", "analyze"])
 def test_the_services_that_send_nothing_yet_are_still_wired_by_a_bare_up(name: str):
     # The ruling gates the arm that acquired a live transport, not collection wiring in general:
     # procedure 1 checks the wiring by bringing the stack up, and gating everything would leave it
     # nothing to compare.
     assert name in _services()
+
+
+def test_the_naver_collector_is_wired_by_a_bare_up_although_it_now_sends():
+    """#182 gave naver a live transport, so it is no longer one of the services above. It is still
+    started by a bare `up -d` because STATE.md §2 names it among what must be running, and its spend
+    is bounded per run by collectors/naver/scope.json's http.max_requests_per_run -- unlike commerce,
+    whose four sites and hourly lines are what the shadow-run ban was written about. Moving it behind
+    a profile is an ops decision (STATE.md §2 + §3), which is why it is asserted here rather than
+    assumed either way."""
+    assert "collector-naver" in _services()
+    naver_cli = (REPO_ROOT / "collectors" / "naver" / "cli.py").read_text(encoding="utf-8")
+    assert "_RaisingFetcher" not in naver_cli, "the premise of this test is that naver sends"
 
 
 def test_the_compose_file_no_longer_claims_nothing_goes_out():
