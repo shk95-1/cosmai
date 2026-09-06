@@ -106,8 +106,10 @@ def test_the_collagen_seat_is_measured_on_the_axis_that_actually_holds_it():
     both = shape["inci_also_asked_with"]
     assert len(both) == 3 and set(both) == {"아보벤존", "옥토크릴렌", "자외선차단제"}
     assert len(both) < shape["inci_in_dictionary"], "두 축이 같아지면 계약 문단을 다시 읽어야 한다"
-    assert f"**{len(both)}개** 있다 — `아보벤존`" in contract()
-    assert f"`콜라겐` 자리 | **{len(both)}** |" in contract()
+    # Spelled from the measurement rather than typed here: this file operates in English (#192), and the
+    # contract lists the three in the same order sorted() gives.
+    assert f"**{len(both)} of them**, `{sorted(both)[0]}`" in contract()
+    assert f"seat | **{len(both)}** |" in contract()
 
 
 def test_the_sample_admits_that_choosing_the_alias_rule_was_also_a_choice():
@@ -116,7 +118,7 @@ def test_the_sample_admits_that_choosing_the_alias_rule_was_also_a_choice():
     wobble = measured()["sample"]["alias_rules"]
     assert wobble["rates"]["first_ko"] == measured()["sample"]["misrouted"]
     assert wobble["low"] < wobble["rates"]["first_ko"] < wobble["high"]
-    assert f"**{wobble['low']}~{wobble['high']}** 사이에서 움직인다" in contract()
+    assert f"**between {wobble['low']} and {wobble['high']}**" in contract()
 
 
 def test_the_tokenizer_dictionary_carries_discourse_words_so_it_is_not_an_ingredient_list():
@@ -183,11 +185,15 @@ def test_ydc_published_queries_route_the_same_way_on_our_dictionary():
 @pytest.mark.parametrize(
     ("sentence", "section", "key"),
     [
-        ("오라우팅 **4/10**", "sample", "misrouted"),
+        ("misrouted **4/10**", "sample", "misrouted"),
         ("| **7/15** |", "sample", "topic_misrouted"),
         ("| **3/3** |", "ydc_published", "misrouted"),
-        ("`ko` 별칭 73개 중 토크나이저 사전에 있는 것 | **11** |", "dictionary", "ko_in_dictionary"),
-        ("`mfds_inci` 표기 24개 중 토크나이저 사전에 있는 것 | **15** |", "dictionary", "inci_in_dictionary"),
+        ("73 `ko` aliases, those in the tokeniser dictionary | **11** |", "dictionary", "ko_in_dictionary"),
+        (
+            "24 `mfds_inci` surface forms, those in the tokeniser dictionary | **15** |",
+            "dictionary",
+            "inci_in_dictionary",
+        ),
     ],
 )
 def test_the_contract_still_says_what_the_tool_measures(sentence: str, section: str, key: str):
@@ -200,22 +206,22 @@ def test_the_contract_still_says_what_the_tool_measures(sentence: str, section: 
 def test_every_number_the_routing_table_cites_is_the_number_the_tool_measures():
     table = contract()
     found = measured()
-    assert f"오라우팅 **{found['sample']['misrouted']}/{found['sample']['size']}**" in table
+    assert f"misrouted **{found['sample']['misrouted']}/{found['sample']['size']}**" in table
     assert f"| **{found['sample']['topic_misrouted']}/{found['sample']['topics']}** |" in table
-    assert f"`ko` 별칭 {found['dictionary']['ko_aliases']}개" in table
-    assert f"`mfds_inci` 표기 {found['dictionary']['inci_surfaces']}개" in table
-    assert f"{found['dictionary']['surfaces']:,}표기" in table
-    assert f"{found['candidates']['entity_rows']}행 / {found['candidates']['entity_keys']}키" in table
+    assert f"{found['dictionary']['ko_aliases']} `ko` aliases" in table
+    assert f"{found['dictionary']['inci_surfaces']} `mfds_inci` surface forms" in table
+    assert f"{found['dictionary']['surfaces']:,} surface forms" in table
+    assert f"{found['candidates']['entity_rows']} rows / {found['candidates']['entity_keys']} keys" in table
     keys = found["candidates"]["entity_ingredient_keys"]
     # The denominator goes with it -- with only 8 written down it reads against the 28 keys right next to it
     # (the measurement is 8 of the 32 keys of the original CSV).
-    assert f"`category='ingredient'` 는 **32키 중 {keys}키**" in table
-    assert f"32키의 `category` 가 **{found['candidates']['entity_categories']}종**" in table
+    assert f"`category='ingredient'` is only **{keys} of the 32 keys**" in table
+    assert f"32 keys is split into **{found['candidates']['entity_categories']} kinds**" in table
     only = found["brand_only"]
-    assert f"`kind='brand'` {only['rows']}행 / 고유 표기 {only['surfaces']}" in table
-    assert f"**{only['short_surfaces']}개가 2자 이하**" in table
-    assert f"주제 별칭 {only['queries']}개에서 `bm25` 로 보내는 질의 | **{only['misrouted']}**" in table
-    assert f"그중 옳은 것 **{only['correct']}**" in table
+    assert f"`kind='brand'` {only['rows']} rows / {only['surfaces']} distinct surface forms" in table
+    assert f"**{only['short_surfaces']} of the 950 surface forms are two characters or shorter**" in table
+    assert f"out of the {only['queries']} topic aliases | **{only['misrouted']}**" in table
+    assert f"of which correct **{only['correct']}**" in table
 
 
 def test_the_decision_and_its_blockers_are_still_written_down():
@@ -223,11 +229,11 @@ def test_the_decision_and_its_blockers_are_still_written_down():
     table = contract()
     assert "The canonical decision on an ingredient name is not the tokeniser dictionary" in table
     assert "slopindustries/cosmai#73" in table
-    assert "§검색 실측 과 **같은 자가 아니다**" in table
-    assert "라우터는 #11 을 대체하지 못한다" in table
+    assert "**not on the same footing as §Retrieval measurements**" in table
+    assert "a router cannot replace #11" in table
     # The misread number (`4/10`) is nailed down as a literal, and without the sentence that defuses it nailed
     # down too it is asymmetric.
-    assert "**그래서 이 절의 답은 첫 줄이 아니라 넷째 줄과 마지막 줄이다**" in table
+    assert "**So this section's answer is not the first row but the fourth row and the last row**" in table
     assert "Not one of the seven lines of the table above is an input to #11" in table
-    assert "**표본을 규칙이 만들어도 규칙 선택의 자의성은 남는다.**" in table
-    assert "이득 0 · 손해 2" in table
+    assert "**Even with the sample made by rules, the arbitrariness of the rule choice remains.**" in table
+    assert "a gain of 0 and a loss of 2" in table

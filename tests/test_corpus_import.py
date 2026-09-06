@@ -301,7 +301,7 @@ def test_the_contract_does_not_claim_a_foreign_key_for_orphan_comments():
 
 def test_the_count_rule_is_a_sentence_in_the_formats_contract():
     """With the rule living only in the code, the next person cannot tell it from "it was left out"."""
-    assert "선언한 행수와 반입분을 대조한다" in FORMATS.read_text(encoding="utf-8")
+    assert "holds the declared row counts against what came in" in FORMATS.read_text(encoding="utf-8")
 
 
 def test_a_manifest_whose_rules_differ_is_refused(tmp_path: Path):

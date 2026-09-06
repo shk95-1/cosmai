@@ -2,52 +2,52 @@
 
 ## Lexicon CSV (→ loaded into `needs.entity_lexicon` / `needs.aspect_lexicon`)
 - entity: `kind,canonical,surface,tier,source,note` — one row = one surface. Latin aliases only where they actually appeared in the corpus (P3: Latin is nearly useless).
-- aspect: `aspect,scope,category,pattern,is_neutral_noun,ruleset,priority` — pattern 은 Python `re`. 중립 명사 쌍둥이(펌프/거품/탈모 등)는 `is_neutral_noun=true`.
+- aspect: `aspect,scope,category,pattern,is_neutral_noun,ruleset,priority` — pattern is a Python `re`. A neutral-noun twin (펌프/거품/탈모 and the like) is `is_neutral_noun=true`.
 - **Columns of an aspect CSV outside the seven known ones go to `extra`** (jsonb, 021) — each ruleset needs different facts, and putting them on a shared column gives one column a different meaning per ruleset. An empty cell is not a value but an absence, so it does not enter `extra`.
 - Versions: assigned at load with `--version n`, swapped with `activate`. Re-loading the same version is a no-op — the one exception is a **single backfill** of rows whose `ruleset`·`priority` are still empty (`ruleset=''`), i.e. v1 rows loaded before 002. Once a value is in, re-loading changes nothing: dictionary content changes by version alone.
 
 ### The aspect lexicon's ruleset and order (B4·B5)
-- `ruleset ∈ {suncare-v2.2, p1-v2.2, shared, retrieval-topic}` — DDL 의 CHECK 로 묶지 않는다. 값이 사전 버전마다 늘어나므로(`suncare-v2.3` …) 어휘를 DDL 에 박으면 사전 개정마다 마이그레이션이 필요해진다. `shared` = 두 사전에 **같은 패턴으로** 들어 있는 행(현재 `선블록`의 `백탁`·`색상어두움` 2행)이고, UNIQUE 가 중복 적재를 막으므로 한 행으로만 존재한다.
-- 로더는 항상 `WHERE version = <v> AND ruleset IN (<요청 ruleset>, 'shared')` 로 읽는다. `scope='generic' OR category='선블록'` 같은 조건은 어느 슬라이스도 재현하지 못하는 혼합물을 준다.
+- `ruleset ∈ {suncare-v2.2, p1-v2.2, shared, retrieval-topic}` — not tied down by a CHECK in the DDL. The values grow with every dictionary version (`suncare-v2.3` …), so nailing the vocabulary into the DDL would need a migration at every dictionary revision. `shared` = the rows that sit in both dictionaries **with the same pattern** (today the 2 rows `백탁`·`색상어두움` of `선블록`), and UNIQUE stops a duplicate load, so it exists as one row only.
+- The loader always reads `WHERE version = <v> AND ruleset IN (<요청 ruleset>, 'shared')`. A condition like `scope='generic' OR category='선블록'` gives a mixture that reproduces no slice at all.
 - Matching order = `priority` ascending, ties by `id` ascending. `priority` is 0 for `scope='category'` and 1 for `scope='generic'` — a category-only pattern hides a generic of the same name.
-- `retrieval-topic` 은 검색 유닛의 **주제 사전**이다(포크 #8, 적재 원본 `analysis/retrieval/dict/topics_v1.csv`). 한 행 = 한 주제의 한 별칭이고 `pattern` 은 정규식이 아니라 **표기 그대로**다 — 한글은 부분문자열, 라틴은 경계 매칭(`(?<![A-Za-z])…`)이라 매칭 방식이 계열마다 다르고, 그 별칭이 Kiwi 사용자 단어이자 확장 목록이라 정규식으로는 쓸 수 없다. `extra` 가 나머지를 나른다: `term_kind ∈ {ko, latin, mfds_inci}`(`|` 로 겹칠 수 있다 — 아보벤존은 ko 이자 식약처 표기다) · `topic_type` · `trend_use` · `note`. 뒤 셋은 주제 단위 사실이라 그 주제의 아무 행에 한 번만 적고(관례: 첫 행), 두 행이 다른 값을 말하면 적재가 아니라 `analysis/retrieval/topics.py` 가 거절한다.
+- `retrieval-topic` is the retrieval unit's **topic dictionary** (fork #8, the loaded source `analysis/retrieval/dict/topics_v1.csv`). One row = one alias of one topic, and `pattern` is not a regular expression but **the surface form as written** — Hangul is a substring and Latin is a boundary match (`(?<![A-Za-z])…`), so the way of matching differs per family, and since that alias is a Kiwi user word and an expansion list at once it cannot be written as a regular expression. `extra` carries the rest: `term_kind ∈ {ko, latin, mfds_inci}` (they can overlap with `|` — 아보벤존 is ko and an MFDS notation at once) · `topic_type` · `trend_use` · `note`. The last three are facts about the topic, so they are written once on any one row of that topic (by convention the first), and when two rows say different values it is `analysis/retrieval/topics.py`, not the load, that refuses.
 - Neutral-noun twins carry the same `aspect` name (the source dictionary's `~` suffix is not kept in the CSV). A twin follows in the source order = the same priority, a larger id.
 ### Topic lexicon v3 — the judgment ledger for ydc's aliases and the dictionary candidates (fork #56)
-`lexicon.json` 의 별칭 9 중 자리가 있던 셋(`썬크림`·`자외선차단제`·`코스알엑스`)은 이미 사전에 있었고, `선크림추천` 은 `bm25.expand` 의 부분문자열 확장이 잡아 행이 필요 없다(포크 #37 1c). 남은 5종과 `protected` 32 가 남긴 후보 7종을 여기서 판정한다. **원장은 `tool/measure-lexicon-candidates` 의 `LEDGER` 이고**(판정·자리·근거·df·new 가 한 자리에 있다), 그 도구가 261,317 문서(`archive/yt-handoff/document.csv`, 읽기 전용) 위에서 그 수를 다시 재 원장과 **정확히 맞대는** 길이다(어긋나면 종료 코드 1). 주제 단위 수(아래 12,197 → 12,418 · 959 → 2,021)는 같은 도구의 `--topics` 가 낸다. `tests/retrieval/test_lexicon_v3.py` 가 원장과 적재 원본을 맞댄다.
+Of `lexicon.json`'s 9 aliases the three that had a slot (`썬크림`·`자외선차단제`·`코스알엑스`) were already in the dictionary, and `선크림추천` is caught by `bm25.expand`'s substring expansion, so it needs no row (fork #37 1c). The remaining 5, and the 7 candidates `protected` 32 left behind, are judged here. **The ledger is `LEDGER` in `tool/measure-lexicon-candidates`** (the verdict, the slot, the grounds, df and new in one place), and that tool is the way to measure those numbers again over 261,317 documents (`archive/yt-handoff/document.csv`, read-only) and hold them **exactly** against the ledger (exit code 1 when they diverge). The per-topic counts (12,197 → 12,418 · 959 → 2,021 below) come from the same tool's `--topics`. `tests/retrieval/test_lexicon_v3.py` holds the ledger against the loaded source.
 - **The counting rule is the dictionary's matching rule** — `ko` is a substring (case ignored), `latin` is a boundary match. Mix them and the numbers part: `sunscreen` is **81** as a substring and **76** on a boundary, and the five of difference are the plural `sunscreens`. The dictionary matches on a boundary, so the ledger's value is 76 (the place where #56 corrected the 81 in the issue body).
-- **df 하나로는 등재를 못 정한다.** 이미 있는 별칭이 그 문서를 전부 보고 있으면 새 행은 아무것도 관측하지 않는다. 그래서 원장은 df 옆에 `new` 를 함께 든다 — `톤업크림` 628 편은 `톤업` 이 전부 보므로 `new` 가 0 이다. **`new` 의 기준 사전은 원장의 표기를 *전부* 뺀 사전이다**: 한 행씩 빼며 잰 값이 아니므로 같은 주제에 여럿이 붙으면 `new` 의 합이 그 주제의 실제 델타보다 크다(선크림 다섯의 합 224 vs 실제 +221 — 겹쳐 나오는 문서를 각각 세기 때문이다).
+- **df alone cannot decide a listing.** If an alias that is already there sees all of those documents, the new row observes nothing. So the ledger carries `new` beside df — `톤업크림`'s 628 items are all seen by `톤업`, so its `new` is 0. **`new`'s reference dictionary is the dictionary with *every* surface form of the ledger taken out**: it is not a value measured by taking out one row at a time, so when several attach to the same topic the sum of `new` is larger than that topic's real delta (선크림's five sum to 224 vs the real +221 — because a document that comes up in more than one is counted in each).
 - **Listing has to clear all four.**
   1. **df ≥ `analysis/retrieval/terms.MIN_DOCS`(5)** — not a floor this issue invented but the floor the uncaptured-expression table already uses.
-  2. **그 행이 없으면 관측되지 않는 것이 있되, 있던 것을 잃지 않는다** — 매칭이 넓어지거나(`new` > 0) 토큰이 달라지고, **기존 토큰을 잃지 않는다.** 별칭은 Kiwi 사용자 단어가 되어 복합어를 한 덩어리로 묶으므로 조각 토큰이 사라질 수 있다: `속건조` 는 `속건조` 를 얻고 확장이 `건조` 를 지켜 통과하지만, `톤업크림` 은 `크림` 을, `비비크림` 은 `비비`·`크림` **둘 다** 잃어 걸린다.
-  3. **그 주제의 뜻을 바꾸지 않는다** — 별칭은 같은 축의 다른 표기여야 한다. 축이 같은지는 뜻으로 가르고 실측이 그 판단을 되묻는다: **그 주제의 등장 문서를 50% 이상 늘리는 말은 별칭이 아니라 그 주제가 지금까지 안 세던 것**이다. 지금 이 문턱은 데이터가 한 점뿐이지만 판정이 그 값에 둔감하다 — 통과한 최대가 `파데프리` +14.6% 이고 걸린 최소가 `화잘먹` +110.7% 라 사이가 비어 있다.
-  4. **그 주제 유형의 축이어야 한다** — 사전에서 제품 범주는 `topic_type='product_category'`(`선크림`, `trend_use=false`) 자리이지 `attribute` 주제가 아니다. `비비크림` 은 1~3 을 다 넘고 여기서 걸린다.
-- v3 가 더한 것은 일곱이다: `선크림` 에 `썬쿠션`·`썬스틱`·`선에센스`·`선스프레이`(ko)와 `sunscreen`(latin) · `촉촉함_건조함` 에 `속건조` · `톤업_메이크업베이스` 에 `파데프리`. **`속건조` 는 매칭이 아니라 토큰으로 자리를 얻었다**(`new` 0): `건조` 가 2,217 문서를 이미 보지만 Kiwi 가 `속`+`건조` 로 쪼개 그 말을 정확히 찾을 수 없었다.
-- **행이 되지 않은 여덟.** `올영`(5,583) — 자리는 `entity_lexicon`(kind=brand)이지만 정본 `올리브영` 이 유통 채널이라 `tier='stop'` 이고, `analysis/lexicon.compile_lexicon` 이 stop 정본의 표면을 `surface_re` 에서 통째로 빼므로 행을 더해도 링커·추출기의 산출이 한 비트도 안 바뀐다. 게다가 brand 는 `db/seed/lexicon.py` 가 `LEXICON_VERSION`(1) 으로 적재하는 유일한 길이고 `activate` 는 그 kind 를 통째로 갈아끼우므로, 행 하나를 더하려면 950표기짜리 v2 를 통째로 세워야 한다 — 자리를 만드는 것이 먼저다. `sunstick`(3) — 기준 1 아래이고 그 3편을 이미 `선크림` 이 본다. `톤업크림`(628 · new 0) — 기준 2. `화잘먹`(1,154 · new 1,062) — 기준 3: `밀림_들뜸` 의 별칭 넷이 전부 결함어인데 반대 방향의 결과어라 959 → 2,021(+110.7%)이 된다. `비비크림`(698 · new 581) — 기준 4. `모공막힘`(5 · new 5) — **보류**: 네 기준을 다 넘지만 표본이 바닥과 같아 축(`자극_눈시림` 의 `트러블` 계열인지)을 가를 수 없다. `케미컬`(3)·`olive영`(0) — 기준 1, #37 판정 유지.
-- **선크림 주제가 넓어진다.** v3 의 다섯 표기가 그 주제에 붙어 활성 사전으로 세는 문서가 12,197 → 12,418(**+221**)이 된다. 이 수는 `match_topics` 를 직접 부르는 자리(`retrieval eval` 의 정답 · `terms` · `crosscheck`)에만 걸린다 — 분기 지표·근거·민감도는 `corpus_mention`(2026-08-19 관측, ydc 의 매칭)을 읽으므로 사전 버전이 그 표들을 움직이지 않는다.
+  2. **Without that row something goes unobserved, and nothing that was there is lost** — the matching widens (`new` > 0) or the tokens change, and **no existing token is lost.** An alias becomes a Kiwi user word and binds a compound into one lump, so a fragment token can disappear: `속건조` gains `속건조` and passes because the expansion keeps `건조`, but `톤업크림` loses `크림` and `비비크림` loses **both** `비비` and `크림`, and they are caught.
+  3. **It does not change what that topic means** — an alias has to be another surface form on the same axis. Whether the axis is the same is decided by meaning, and the measurement asks that judgment back: **a word that raises that topic's appearing documents by 50% or more is not an alias but something that topic has not been counting until now**. This threshold stands on a single data point today, but the verdict is insensitive to its value — the largest that passed is `파데프리` at +14.6% and the smallest that was caught is `화잘먹` at +110.7%, so the space between them is empty.
+  4. **It has to be an axis of that topic type** — in the dictionary a product category is the `topic_type='product_category'` slot (`선크림`, `trend_use=false`), not an `attribute` topic. `비비크림` clears 1 to 3 and is caught here.
+- What v3 added is seven: `썬쿠션`·`썬스틱`·`선에센스`·`선스프레이` (ko) and `sunscreen` (latin) on `선크림` · `속건조` on `촉촉함_건조함` · `파데프리` on `톤업_메이크업베이스`. **`속건조` earned its slot as a token, not as a match** (`new` 0): `건조` already sees 2,217 documents, but Kiwi split it into `속`+`건조` and that word could not be found exactly.
+- **The eight that did not become rows.** `올영` (5,583) — its slot is `entity_lexicon` (kind=brand), but the canonical `올리브영` is a retail channel and therefore `tier='stop'`, and `analysis/lexicon.compile_lexicon` takes the surfaces of a stop canonical out of `surface_re` altogether, so adding the row would not move the linker's or the extractor's output by one bit. On top of that, brand is loaded only by `db/seed/lexicon.py` at `LEXICON_VERSION` (1) and `activate` swaps that kind out whole, so adding one row means standing up a whole v2 of 950 surface forms — making the slot comes first. `sunstick` (3) — below criterion 1, and those 3 items are already seen by `선크림`. `톤업크림` (628 · new 0) — criterion 2. `화잘먹` (1,154 · new 1,062) — criterion 3: `밀림_들뜸`'s four aliases are all defect words, while this is a result word in the opposite direction, so it becomes 959 → 2,021 (+110.7%). `비비크림` (698 · new 581) — criterion 4. `모공막힘` (5 · new 5) — **held**: it clears all four criteria, but the sample is level with the floor, so the axis (whether it belongs to `자극_눈시림`'s `트러블` family) cannot be decided. `케미컬` (3)·`olive영` (0) — criterion 1, the #37 verdict stands.
+- **The 선크림 topic widens.** v3's five surface forms attach to that topic, so the documents counted with the active dictionary become 12,197 → 12,418 (**+221**). This number reaches only the places that call `match_topics` directly (`retrieval eval`'s answer key · `terms` · `crosscheck`) — the quarterly metrics, the evidence and the sensitivity read `corpus_mention` (observed 2026-08-19, ydc's matching), so a dictionary version does not move those tables.
 
 
 ### Query stopwords — the entity lexicon's `kind='stopword'` (fork #46)
 - One row = one surface form to erase from a query. `canonical` is not the canonical surface but **the axis that surface is caught on** — the only value today is `query`, and the judgment that no stopword goes on the index and extraction axis (`entrypoints.md` §Search, fork #8·#37) still stands as it was. The axis is not split by `kind` because `activate` works per kind and every added axis would make a new version axis, and it is not split by `tier` because that slot already holds a brand-only vocabulary.
 - **The second axis has no place today.** The unique key is `UNIQUE (kind, surface, version)` (`001_needs.sql:50`) and does not carry `canonical`, so if another axis holds the same `surface`, `db/lexicon.py`'s `ON CONFLICT … DO NOTHING` **drops it quietly** without an error. So the paragraph above promises no room to add an axis — adding one starts with additive DDL that widens the unique key (grade B review M3, 2026-08-26).
-- `surface` 는 정규식도 원형도 아니라 **`bm25.tokenize` 가 실제로 내놓는 토큰**이다 — 필터가 토큰 목록 위에서 돌기 때문이다(`관해서` → `관하`, `어떻게` → `어떻`). 그래서 목록을 고치는 사람은 표기가 아니라 토큰을 적어야 하고, `tests/retrieval/test_query_stopwords.py` 가 그 파일의 프로브 질의 다섯 개에서 각 행의 토큰이 나오는지를 되묻는다(코퍼스 전수가 아니라 손으로 고른 시험 벡터다) — 나오지 않는 행은 지우지 않고 `note` 가 그 사실을 적는다(판단은 같고 도달만 못 하므로, 형태소 분석기가 바뀌면 살아난다).
+- `surface` is neither a regular expression nor a base form but **the token `bm25.tokenize` actually produces** — because the filter runs over a token list (`관해서` → `관하`, `어떻게` → `어떻`). So whoever edits the list has to write the token rather than the surface form, and `tests/retrieval/test_query_stopwords.py` asks back whether each row's token comes out of the five probe queries in that file (hand-picked test vectors, not the whole corpus) — a row that does not come out is not deleted, `note` writes that fact down instead (the judgment is the same and only the reach is missing, so it comes alive again when the morphological analyser changes).
 - The loaded source is `analysis/retrieval/dict/query_stopwords_v1.csv` (13 rows) and the only path is `cosmai lexicon load/diff/activate --kind stopword`. The **active version** turns separately from aspect (`entity_lexicon`'s `activate` is `WHERE kind = %s`).
 - The version **number**, though, is global to `entity_lexicon` — `_label` in `analysis/lexicon.py` and `analysis/aggregate/pipeline.py:149` read `max(version)` without looking at the kind, so raising this list to v2 makes a run's `versions.lexicon` 2 even while `brand` stays at v1. `:149` does not even look at `active`, so **a `load` without an `activate`** is enough. Both kinds are at v1 today, so it is harmless, and fixing it is **fork #58**'s job — this list is the first user to step on that pre-existing property. **The v3 topic dictionary (fork #56) does not step on it**: `aspect_lexicon` is a different table and does not share `max(version)`, and `versions.lexicon` reads `entity_lexicon` alone (`aggregate/pipeline.py:149`). Raising aspect to v3 leaves that column at 1 — what moves is `versions.lexicon.aspect` (`analysis/pipeline.py:139`) alone, and that side carries one entry per ruleset.
 
 ## need_key registry CSV (→ `needs.need_key`, A17)
 `need_key,canonical,note` — the union of the two slices' vocabularies. `canonical` is the representative of a synonym group, and where there is none it is itself.
-v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · `향→향냄새` · `발림텍스처→제형발림` · `지속력워터→지속력` · `톤업색상→색상발색`. `site_axis_map.need_key` 가 p1 어휘라서 대표를 그쪽으로 맞춘다. `scope='all'` 롤업은 `canonical` 기준으로 합산한다.
+v1's 5 synonym pairs (the suncare name → the p1 name): `밀림→밀림들뜸` · `향→향냄새` · `발림텍스처→제형발림` · `지속력워터→지속력` · `톤업색상→색상발색`. `site_axis_map.need_key` is p1 vocabulary, so the representative is aligned to that side. The `scope='all'` rollup sums on `canonical`.
 
 ## Category map CSV (→ `needs.category_map`, A18)
 `site,source_category,lexicon_category,method,priority`
 - `method='rank_snapshot'`: `source_category` is the leaf of the site's category (the last piece split on ` > `). `site='*'` applies to every site.
-- `method='name_keyword'`: `source_category` 는 **제품명 정규식**이다 — 랭킹 스냅샷이 없는 제품(글로우픽)의 폴백. 정규식은 서로 겹치므로(`선크림|…` 과 `크림` 이 "선크림"에 둘 다 맞는다) **`priority` 오름차순으로 먼저 맞는 것**을 쓴다. 동률의 순서는 정의하지 않는다 — 동률을 만들지 마라. v1 은 CSV 행 번호(1부터)를 그대로 쓴다.
+- `method='name_keyword'`: `source_category` is a **product-name regular expression** — the fallback for a product with no rank snapshot (glowpick). The expressions overlap each other (`선크림|…` and `크림` both match "선크림"), so **the first one to match in ascending `priority`** is used. The order of a tie is not defined — do not make a tie. v1 uses the CSV row number (from 1) as it stands.
 - Derivation order: the site category leaf → failing that `name_keyword` → failing that, no category. A leaf absent from the table becomes the `lexicon_category` as it stands (identity).
 
 ## Category notation (A21, #123)
-`category` 의 정본은 하나뿐이다: **사이트가 발행한 카테고리 경로를 자르지 않은 문자열**. 아래 세 자리가
-그 같은 문자열을 쓴다 — 한 자리가 leaf 로 자르면(`'01 > 선케어 > 선블록'` → `'선블록'`) 두 값은 절대
-같아지지 않고 카테고리 scope 는 분모를 하나도 받지 못한다(운영 실측 run 24: 카테고리 scope 22개에서
-`population_share_pct`·`low_share`·`denom_low`·`denom_site` 전부 NULL).
+`category` has one canonical form only: **the category path the site published, as a string that is not
+cut**. The three places below use that same string — if one place cuts to the leaf (`'01 > 선케어 > 선블록'`
+→ `'선블록'`) the two values can never become equal and the category scope receives not one denominator
+(measured in operations, run 24: on 22 category scopes, `population_share_pct`·`low_share`·`denom_low`·`denom_site` all NULL).
 
 | place | value |
 |---|---|
@@ -55,15 +55,15 @@ v1 의 동의어 5쌍(suncare 이름 → p1 이름): `밀림→밀림들뜸` · 
 | `needs.product_denominator.category` | the same string (`analysis/aggregate/ranking.py:denominators`) |
 | `needs.metrics_need.scope` | the same string — the `scope='all'` rollup is the only exception (`analysis/aggregate/pipeline.py:scopes_for`) |
 
-- 사이트마다 깊이가 다르다: oliveyoung 은 `'01 > 선케어 > 선블록'`, glowpick 은 `'크림'`, daisomall 은
-  `'뷰티/위생'` 하나뿐이다. 얕은 값도 그 사이트가 발행한 **경로 전체**이므로 이미 정본이다 — 정본은
-  "계층형으로 만들어라"가 아니라 "원문을 자르지 마라"다.
+- The depth differs per site: oliveyoung has `'01 > 선케어 > 선블록'`, glowpick has `'크림'`, and daisomall
+  has `'뷰티/위생'` and nothing else. A shallow value is the **whole path** that site published too, so it is
+  already canonical — canonical does not say "make it hierarchical" but "do not cut the original".
 - When the site says no category it is NULL. It is not filled in with a dictionary label — that is
   `lexicon_category`'s place (B10) and the two columns mean different things. The product-name regex
   fallback (`category_map.method='name_keyword'`) produces `lexicon_category` alone.
-- leaf 로 자른 짧은 형이 필요하면 `analysis/units.py:leaf()` 로 그때 자른다. 저장하지 않는다 —
-  경로→leaf 는 함수지만 leaf→경로는 아니다(`'블러셔'` 는 glowpick 의 `'블러셔'` 이기도 하고
-  oliveyoung 의 `'02 > 베이스 메이크업 > 블러셔'` 이기도 하다).
+- When the short leaf-cut form is needed, cut it at that moment with `analysis/units.py:leaf()`. It is not
+  stored — path→leaf is a function but leaf→path is not (`'블러셔'` is glowpick's `'블러셔'` and also
+  oliveyoung's `'02 > 베이스 메이크업 > 블러셔'`).
 
 ```python
 CATEGORY_CANONICAL_SOURCE = "trend_radar.rank_snapshot.category_name"
@@ -147,12 +147,13 @@ differs from them — a corpus made under different rules mixed into the same ta
 table with no error.
 
 ### The row counts the manifest declared (`manifest.table_counts` · `documents_by_content_type`)
-적재기는 **선언한 행수와 반입분을 대조한다**(`db/corpus.load` → `contract.check_counts`) — 다르면 켜기
-전에 거절한다. 규칙·한계와 달리 이 값은 판본마다 달라서 계약이 수를 지지 않고 대조한다는 규칙만
-진다. 잘려 들어온 CSV 는 행이 **적을 뿐** 오류가 없고, 그러면 이 스냅샷의 모든 비율이 조용히 달라진다
-— `reproduces` 는 선크림 한 주제만 다시 세므로 그 바깥이 잘린 것을 잡지 못한다. 2026-08-19 판본의 값은
-document 261,317 · mention 105,358 · channel 43 이고 문서 구성은 `video_long` 7,085 · `video_short`
-6,888 · `video_unknown` 6 · `comment` 247,338 이다.
+The loader **holds the declared row counts against what came in** (`db/corpus.load` →
+`contract.check_counts`) — when they differ it refuses before switching on. Unlike the rules and the limits
+this value differs per version, so the contract does not carry the numbers, only the rule that it compares
+them. A CSV that came in truncated has **merely fewer** rows and no error, and then every ratio of this
+snapshot quietly changes — `reproduces` recounts the one topic 선크림 alone, so it cannot catch a truncation
+outside that. The 2026-08-19 version's values are document 261,317 · mention 105,358 · channel 43, and the
+document composition is `video_long` 7,085 · `video_short` 6,888 · `video_unknown` 6 · `comment` 247,338.
 
 When the comparison disagrees, **the rows stay.** The composition only shows after all 260k document
 rows have been read, so the refusal comes after the import -- but those rows sit under their own
