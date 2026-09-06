@@ -1756,10 +1756,10 @@ next remeasurement replaces this line with the stamp it was measured on.
   The dictionary is not the same version either: that table is recorded as a value on active v1 and this one
   is a value on v2, and since `needs.aspect_lexicon` no longer has a v1 row for
   `ruleset='retrieval-topic'`, the two versions cannot be held against each other **inside the DB**
-  (2026-08-27 · what is active today is not even v2 but v3). Fork #62 took that seat over: §Retrieval
-  measurements records what could be traced back (the dictionary's content) apart from what could not (the
-  number tag and the fingerprint), and two ways of holding a CSV against a DB version now stand — row by
-  row, `cosmai lexicon diff --kind aspect --csv <path>`, and at compiled-dictionary grain,
+  (2026-08-27 · what is active today is not even v2 but v3). Fork #62 took that seat over:
+  §Retrieval measurements records what could be traced back (the dictionary's content) apart from what could
+  not be (the number tag and the fingerprint), and two ways of holding a CSV against a DB version now
+  stand — row by row, `cosmai lexicon diff --kind aspect --csv <path>`, and at compiled-dictionary grain,
   `tool/show-lexicon-stamp --csv <path> --against <n>`. But **this table's sample (61) is not confirmed
   again by them**: the comparison of the time was "the 61 literal queries of active v2 are the same as the
   loaded source CSV at that point", and since then the loaded source has become the v3 content and the

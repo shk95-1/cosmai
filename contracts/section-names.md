@@ -64,7 +64,9 @@ allowlist now admits these files: `§LLM 실측` is the row above, and the `comm
 `interfaces.md` never was a `§` target — only the `#7 §확인할 것` it cites, an issue anchor, stays. One
 citation still names the old Korean form and resolves through this ledger alone until the W2/W4 residue
 moves: `analysis/polarity/ownership.py:61` (`§LLM 실측`, on a Korean line the lang check forbids rewriting).
-`§라벨 기준(polarity)` names a bullet of
+`§선언` is not a section at all: it is the stdout label `tool/compare-ydc-holdout` prints over the
+constants it does not hold against ydc's, cited as such by `interfaces.md` §Holdout and by the tool itself
+(#206 part 2 re-review, N2). `§라벨 기준(polarity)` names a bullet of
 `formats.md` §Evaluation set CSV whose text is the polarity labels themselves. Every `§` that points into a
 GitHub issue rather than into this directory also stays (`#8 §산출물`, `#16 §1단계 판정 4`,
 `#48 §범위 확장`, `#7 §확인할 것`).
