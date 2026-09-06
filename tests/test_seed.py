@@ -48,12 +48,13 @@ EXPECTED = {
     "analysis_run": 3,  # one run per slice: seed:slice-{suncare,p1,p9}
     "metrics_need": 346,  # suncare 15 + 30 (suncare run) + p1 301 (p1 run)
     "metrics_wish": 601,  # slice-p9-wish-mining/wish_aggregates.csv
-    # An operational declaration, not a slice -- 1:1 with the cron's 14 lines, and
-    # tests/test_pipeline_stage.py checks that pairing (#138).
-    "pipeline_stage": 14,
-    # The edges linking 28 nodes (14 stages + 14 stores). Checked against reality by
-    # tests/test_pipeline_edge.py (#141).
-    "pipeline_edge": 31,
+    # An operational declaration, not a slice -- 1:1 with the cron's 13 lines, and
+    # tests/test_pipeline_stage.py checks that pairing (#138). analyze:polarity_missing dropped out with
+    # its cron line, suspended (#242).
+    "pipeline_stage": 13,
+    # The edges linking the stages and stores above. Checked against reality by tests/test_pipeline_edge.py
+    # (#141); two edges (analyze:polarity_missing's read and write of needs.need_mention) left with it.
+    "pipeline_edge": 29,
 }
 
 

@@ -22,7 +22,16 @@ from analysis import predictors, registry
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
-from analysis.polarity.ownership import ALWAYS, NO_OWNERS, OWNERS, Owner, unready
+from analysis.polarity.ownership import (
+    _CRON_SCOPES,
+    _GEMMA4_2026_08_24,
+    ALWAYS,
+    CRON_SINCE,
+    NO_OWNERS,
+    OWNERS,
+    Owner,
+    unready,
+)
 from analysis.polarity.pipeline import run
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -565,8 +574,10 @@ def test_two_dictionaries_on_one_page_land_on_their_own_sentences(loaded: str, _
 
 
 # 구현 소유권 (#31): 선블록은 gemma4 가, 나머지는 규칙이 갱신한다 — 표는 ownership.py 한 곳이다.
+# OWNERS is suspended empty (#242): GEMMA4 here names the implementation's own version, and the tests below
+# exercise the ownership mechanism with an explicit local owners= table rather than the shipped one.
 MONTH = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")  # the shape of need_mention.month (formats.md)
-GEMMA4 = OWNERS["선블록"].version
+GEMMA4 = OllamaPolarity().version
 # The owner's row left where the rule run does not extract again — see whether the delete statement takes it.
 OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 # 규칙 실행이 같은 자연키로 다시 쓰는 자리 — 005 의 자연키에 polarity_version 이 없어 제자리 upsert 가
@@ -608,22 +619,26 @@ def _labels(url: str, ref: str) -> list[tuple[Any, ...]]:
 
 def test_an_unscoped_rule_run_does_not_delete_the_owners_rows(loaded: str, _schema_name: str):
     """Exactly the defect of today: a scope-less rule run wiped the gemma4 labels wholesale at 05:00 daily.
-    소유 표가 배송되는 값 그대로(=선블록은 gemma4)일 때 그 행은 그 자리에 남아야 한다."""
+    OWNERS is suspended empty (#242), so this exercises the mechanism with an explicit owners= table rather
+    than the shipped one — a registered owner's row still has to survive an unscoped rule run."""
     ref, need_key, sentence = OWNED_ONLY
     _label(loaded, ref, need_key, sentence, GEMMA4)
-    with connect(loaded) as conn:  # as cron calls it: with no ownership table named, the shipped one stands
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners=owners)
     assert _labels(loaded, ref) == [(need_key, "만족", GEMMA4)]
 
 
 def test_an_unscoped_rule_run_does_not_overwrite_the_owners_label(loaded: str, _schema_name: str):
     """Where the rules extract the same sentence again — the natural key has no polarity_version, so even
     when the delete is escaped an in-place upsert swaps the owner's label for the rule label. A run that is
-    not the owner does not classify that sentence at all."""
+    not the owner does not classify that sentence at all. OWNERS is suspended empty (#242), so an explicit
+    owners= table stands in for the shipped one."""
     ref, need_key, sentence = CONTESTED
     _label(loaded, ref, need_key, sentence, GEMMA4)
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
     with connect(loaded) as conn:
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners=owners)
     assert _labels(loaded, ref) == [(need_key, "만족", GEMMA4)]
 
 
@@ -697,18 +712,30 @@ def test_with_no_owners_the_later_run_takes_every_scope_as_it_always_did(loaded:
 def test_a_run_that_names_a_scope_it_does_not_own_is_refused(loaded: str, _schema_name: str):
     """`--scope 선블록` 을 --impl 없이 부르면 규칙이 주인의 자리를 도는 셈이다. 조용한 무동작이 아니라
     거절이어야 운영자가 표를 본다."""
+    # OWNERS is suspended empty (#242): an explicit owners= table stands in for the shipped one so this
+    # exercises the refusal mechanism regardless.
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
     with pytest.raises(ValueError, match=GEMMA4):
-        _run(loaded, _schema_name, scope="선블록", owners=OWNERS)
+        _run(loaded, _schema_name, scope=SUNBLOCK, owners=owners)
 
 
 def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quietly(
     loaded: str, _schema_name: str
 ):
     """The shape entrypoints.md §Analysis promises: a refusal stays as `analysis_run.status='failed'` and the
-    CLI emits 1 — neither a run left open nor an exit code 0 as if nothing had happened."""
+    CLI emits 1 — neither a run left open nor an exit code 0 as if nothing had happened.
+
+    OWNERS is suspended empty (#242): an explicit owners= table stands in for the shipped one.
+    """
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
     with connect(loaded) as conn:
         found = run_stage(
-            conn, "polarity", scope="선블록", commerce_schema=_schema_name, youtube_schema=_schema_name
+            conn,
+            "polarity",
+            scope=SUNBLOCK,
+            commerce_schema=_schema_name,
+            youtube_schema=_schema_name,
+            owners=owners,
         )
     assert found.status == "failed" and GEMMA4 in found.detail
     with connect(loaded) as conn, conn.cursor() as cur:
@@ -716,21 +743,26 @@ def test_the_refusal_closes_the_stage_as_failed_instead_of_writing_nothing_quiet
         assert cur.fetchall() == [("failed", True)]
 
 
-def test_the_owner_table_names_the_version_the_implementation_actually_stamps():
-    """When ownership changes (a swapped implementation · a raised few-shot or prompt revision) this assertion
-    breaks first — moving only the table while the version of the output rows does not follow creates an
-    ownerless scope quietly."""
-    assert OWNERS["선블록"].version == OllamaPolarity().version
+def test_owners_is_suspended_to_the_empty_table():
+    """2026-09-06 (#242): the model host is gone, so OWNERS releases every gemma4 scope — same shape as
+    NO_OWNERS, so scopes_of finds no foreign scope and the 05:00 rules line refreshes every scope again."""
+    assert dict(OWNERS) == {}
 
 
-def test_every_registered_scope_names_that_version_and_a_month_the_rows_carry():
+def test_the_re_registration_recipe_still_names_the_version_the_implementation_actually_stamps():
+    """The ownership-table check while OWNERS was populated: with the table empty this is the check that
+    matters instead — a typo in the constants OWNERS is rebuilt from (#242) would leave a scope quietly
+    ownerless the day the pass is re-registered."""
+    assert _GEMMA4_2026_08_24 == OllamaPolarity().version
+
+
+def test_the_re_registration_recipe_still_has_the_right_shape():
     """A typo that makes one line a different string leaves that category quietly ownerless (#31) — however
-    many lines the table has, the revision it points at has to be one. since has to be the same grain as
+    many lines the recipe has, the revision it points at has to be one. CRON_SINCE has to be the same grain as
     need_mention.month: the predicate compares it with that column as a string, so a different shape goes
     quietly wrong (#97)."""
-    assert {owner.version for owner in OWNERS.values()} == {OllamaPolarity().version}
-    for scope, owner in OWNERS.items():
-        assert owner.since == ALWAYS or MONTH.match(owner.since), f"{scope} = {owner.since!r}"
+    assert MONTH.match(CRON_SINCE)
+    assert len(_CRON_SCOPES) == len(set(_CRON_SCOPES)) == 27
 
 
 # 저장된 lexicon_category 와 오늘의 매핑이 갈리는 자리 — rank_snapshot 의 최신 행과 category_map 이 매일
@@ -745,11 +777,13 @@ def test_an_unscoped_rule_run_does_not_overwrite_an_owned_row_whose_scope_moved(
 ):
     """When two implementations pick the same need_key the natural key (005) overlaps entirely — an in-place
     upsert swaps out the owner's row, the one that escaped the delete. The ownership predicate of the delete
-    statement has to be in the update statement too."""
+    statement has to be in the update statement too. OWNERS is suspended empty (#242): an explicit owners=
+    table stands in for the shipped one."""
     ref, sentence = MOVED
     _label(loaded, ref, RULE_KEY, sentence, GEMMA4)
-    with connect(loaded) as conn:  # exactly as cron calls it: the shipped table stands
-        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name)
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
+    with connect(loaded) as conn:
+        run(conn, commerce_schema=_schema_name, youtube_schema=_schema_name, owners=owners)
     assert _labels(loaded, ref) == [(RULE_KEY, "만족", GEMMA4)]
 
 
@@ -865,16 +899,21 @@ def test_a_run_without_a_scope_must_own_one():
     a scope-less line from an implementation outside the table is still a full relabel (cosmai/cli.py)."""
     assert unready(OWNERS, RulePolarity.version, None) is None
     # The owner runs its whole scope in one line — the period sets what that line covers, so it is not a full
-    # relabel (#97).
-    assert unready(OWNERS, GEMMA4, None) is None
+    # relabel (#97). OWNERS is suspended empty (#242): an explicit owners= table stands in for the shipped
+    # one for this one assertion.
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS)}
+    assert unready(owners, GEMMA4, None) is None
     assert "--scope" in str(unready(OWNERS, "stub-v9", None))
     # A category with no owner yet (a name not in OWNERS) — unblocked, it succeeds and is wiped at the next
     # 05:00.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, "미등록카테고리"))
-    assert unready(OWNERS, GEMMA4, "선블록") is None
+    assert unready(owners, GEMMA4, SUNBLOCK) is None
     # Someone else's scope is not this function's job: the step refuses it with a failed run (entrypoints.md
     # §Analysis).
-    assert unready(OWNERS, "stub-v9", "선블록") is None
+    assert unready(owners, "stub-v9", SUNBLOCK) is None
+    # With OWNERS suspended for real (#242), the same line is refused instead -- there is no scope for it to
+    # own until re-registration.
+    assert "ownership.py" in str(unready(OWNERS, GEMMA4, SUNBLOCK))
 
 
 # --- incremental run (#98): the owner classifies only "source rows with no row of my version" -----
@@ -994,58 +1033,43 @@ CATEGORY_MAP_CSV = REPO_ROOT / "eval" / "lexicon" / "category_map_v1.csv"
 # as the identity) can be checked.
 CROSSCAT_CSVS = ("crosscat_60.csv", "crosscat_blind40.csv")
 SUNBLOCK = "선블록"
-REGISTERED = 28  # 선블록(전량 패스 끝) + 크론이 도는 27 — 운영 need_mention 의 lexicon_category 전량
 
 
-def _gemma4_line() -> list[str]:
-    """The argv cron really runs — the only `--impl` line with the comments stripped out."""
-    found = [
-        line.split()
+def _impl_lines(needle: str = "--impl") -> list[str]:
+    """Non-comment crontab lines carrying `needle` — used to prove the `--impl` line stays gone while OWNERS
+    is suspended (#242)."""
+    return [
+        line
         for raw in CRONTAB_ANALYZE.read_text(encoding="utf-8").splitlines()
-        if (line := raw.split("#", 1)[0].strip()) and "--impl" in line
+        if (line := raw.split("#", 1)[0].strip()) and needle in line
     ]
-    assert len(found) == 1, f"stack/crontab.d/analyze 의 --impl 줄이 {len(found)}개다"
-    return found[0]
 
 
-def test_the_owner_table_carries_every_category_the_cron_line_walks():
-    """A line without registration is an empty run (#32): what cron runs without `--scope` is every scope this
-    table gave it."""
-    assert len(OWNERS) == REGISTERED, f"등록된 scope {len(OWNERS)}개 — 선블록 + 크론 27 이어야 한다"
-    assert OWNERS[SUNBLOCK].since == ALWAYS, "선블록은 전량 패스가 끝나 모든 달이 주인 몫이다"
-    later = {scope: owner.since for scope, owner in OWNERS.items() if scope != SUNBLOCK}
-    # The cron targets start from the **one** month the first run takes — with months mixed, whether the rules
-    # keep writing the months before it differs per category and nobody can say what the first night takes
-    # (the procedure of #97).
-    assert len(set(later.values())) == 1, f"since 가 갈렸다: {sorted(set(later.values()))}"
-    assert MONTH.match(next(iter(later.values())))
+def test_no_impl_line_runs_while_the_pass_is_suspended():
+    """Suspended 2026-09-06 (#242): the crontab carries no `--impl` line while `OWNERS` is empty — a line with
+    no registration would be an empty run."""
+    assert _impl_lines() == []
 
 
-def test_every_lexicon_category_this_repo_can_name_has_an_owner():
-    """One name diverging from the table leaves that category quietly ownerless and the cron line does not run
-    it — the keys of the table have to be the name `category_map` produces, and the same string as the
-    category of the evaluation set drawn from production rows. Those two are all this repo knows of that name
-    (the rest is only in the production DB)."""
+def test_owners_names_a_gemma4_scope_iff_the_crontab_carries_an_impl_ollama_line():
+    """The invariant #242 leaves behind: a registration with no line is a hole, a line with no registration is
+    an empty run — both move together. Today both are absent; the day either comes back without the other
+    this fails."""
+    assert bool(OWNERS) == bool(_impl_lines("--impl ollama:"))
+
+
+def test_the_re_registration_recipe_names_categories_this_repo_can_recognize():
+    """The scopes the recipe (`_CRON_SCOPES` + the sunblock block) would restore have to be names
+    `category_map` actually produces, and the same string as the evaluation set's category column — otherwise
+    a re-registration would silently miss a category (#31, #97)."""
     with CATEGORY_MAP_CSV.open(encoding="utf-8") as handle:
         named = {row["lexicon_category"] for row in csv.DictReader(handle)}
     for name in CROSSCAT_CSVS:
         with (REPO_ROOT / "eval" / "polarity" / name).open(encoding="utf-8") as handle:
             named |= {row["category"] for row in csv.DictReader(handle)}
-    assert len(named) > len(OWNERS) // 2, "이름을 못 모았으면 이 단언은 진공이다"
-    assert not named - set(OWNERS), f"주인이 없는 카테고리: {sorted(named - set(OWNERS))}"
-
-
-def test_the_cron_line_runs_the_incremental_command_of_the_version_the_table_names():
-    """A registration with no line is a hole, a line with no registration is an empty run (#32). Whether the
-    two point at the same string is confirmed only here: the revision the cron's `--impl` spec builds has to
-    be the revision the table writes down."""
-    argv = _gemma4_line()
-    assert argv[5:8] == ["cosmai", "analyze", "polarity"], argv
-    assert "--missing" in argv, "전량 패스가 아니라 증분이다 (#98) — 매일 밤 도는 T 가 자라면 안 된다"
-    assert "--scope" not in argv, "주인은 자기 scope 전부를 한 줄로 돈다 (#97)"
-    name, _, model = argv[argv.index("--impl") + 1].partition(":")
-    assert name == "ollama" and model
-    assert OllamaPolarity(model).version == GEMMA4
+    recipe = set(_CRON_SCOPES) | {SUNBLOCK}
+    assert len(named) > len(recipe) // 2, "collected no names -- this assertion would be vacuous"
+    assert not named - recipe, f"named but missing from the recipe: {sorted(named - recipe)}"
 
 
 class UnreachablePolarity(OwnerPolarity):

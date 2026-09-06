@@ -20,6 +20,7 @@ from sqlalchemy import create_engine
 from analysis.locks import ANALYZE, advisory_key, analyze_lock
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
+from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.ownership import NO_OWNERS, OWNERS
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from db import seed
@@ -31,7 +32,9 @@ CAPTURED = datetime(2026, 8, 23, tzinfo=UTC)
 WRITTEN = datetime(2026, 3, 4, tzinfo=UTC)
 MONTH = "2026-03"
 SUNBLOCK = "선블록"
-GEMMA4 = OWNERS[SUNBLOCK].version
+# OWNERS is suspended empty (#242): GEMMA4 names the implementation's own version, not an OWNERS entry — the
+# tests below pass owners=OWNERS to prove the concurrency mechanism is unaffected by an empty table.
+GEMMA4 = OllamaPolarity().version
 BOOM = "polarity boom"
 SOURCE_TABLES = ("review", "rank_snapshot", "product")
 TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"

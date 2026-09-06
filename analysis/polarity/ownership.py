@@ -19,6 +19,8 @@ period.
 The value is exactly the `polarity_version` that implementation stamps on its output rows — that string is
 the only clue a run has that a row is its own. When the revision goes up (few-shot, prompt date) this table
 has to move with it, and the ownership-table check in tests/test_analyze_polarity.py catches that moment.
+
+Suspended 2026-09-06 (#242): `OWNERS` is empty for now, so every scope goes back to the rules.
 """
 
 from __future__ import annotations
@@ -98,10 +100,14 @@ _CRON_SCOPES = (
     "스킨케어기기",
     "향수",
 )
-OWNERS: Mapping[str, Owner] = MappingProxyType(
-    {"선블록": Owner(_GEMMA4_2026_08_24, ALWAYS)}
-    | {scope: Owner(_GEMMA4_2026_08_24, CRON_SINCE) for scope in _CRON_SCOPES}
-)
+# Suspended 2026-09-06 (#242) — the model host is gone and this host cannot run the model (CPU-only, not
+# enough memory for the 9.2 GiB Q4_K_M weights and far too slow for the daily call volume; see the issue's
+# evaluation comment). OWNERS releases every gemma4 scope, so scopes_of finds no foreign scope for the rules
+# run and the 05:00 rules line refreshes the 26 categories and the sunblock block again.
+# _GEMMA4_2026_08_24, CRON_SINCE and _CRON_SCOPES above stay as the re-registration recipe: to bring the pass
+# back, put the entries back into OWNERS (the 26 with CRON_SINCE, the sunblock block with ALWAYS) in the same
+# PR as the `0 8` line in stack/crontab.d/analyze.
+OWNERS: Mapping[str, Owner] = MappingProxyType({})
 # Exactly the behaviour from before ownership — empty this table and a rule run writes and deletes all of it.
 NO_OWNERS: Mapping[str, Owner] = MappingProxyType({})
 

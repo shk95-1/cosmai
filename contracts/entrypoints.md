@@ -179,7 +179,8 @@ table one left behind, and skipping it costs the lineage its "by way of".
 
 The criterion for choosing a store node is **a table another stage or a screen consumes**. That
 criterion forces a minimal set — every stage must have at least one edge (the test asks), so a stage's
-only output is necessarily a node. Today that is **14 stages + 14 stores = 28 nodes, 31 edges**. What
+only output is necessarily a node. Today that is **13 stages + 14 stores = 27 nodes, 29 edges**
+(`analyze:polarity_missing` and its two edges are gone, suspended since #242). What
 was left out on purpose, and why, is in the comments of `db/seed/pipeline.py` — among them
 `needs.corpus_*`, tables the fork's DDL 023 makes, which the upstream contract does not reference (in
 production `analyze` really does read them, so the picture is that much emptier; the fork adds those
@@ -808,6 +809,12 @@ altogether.
 21h 는 그 3배다. 조정자가 첫 밤과 정상 밤의 T 를 재고, 21h 를 위협하면 이 두 시각을 옮긴다. 계산과
 GPU 창(08:00–16:00 UTC, `retrieval embed` 가 피한다)은 `stack/crontab.d/analyze` 에 적혀 있다.
 
+**Suspended as of 2026-09-06 (#242).** The `0 8` line above is gone: the model host is gone and this host
+cannot run the model, so `OWNERS` in `analysis/polarity/ownership.py` holds no gemma4 scope and the fenced
+schedule below carries no `--impl` line either — the two only ever move together. The paragraph above (T,
+the interval choice, the GPU window) is historical, kept in `stack/crontab.d/analyze` for the day the line
+returns.
+
 youtube's `work` was added to this table on 2026-08-24 (before that there were three, and no line
 drained the queue). It is cron rather than a resident daemon because
 `collectors/youtube/cli.py:_run_work` is a batch that claims `DEFAULT_WORK_BATCH` at a time and stops —
@@ -821,7 +828,6 @@ the repetition comes from outside. Overlapping runs are safe: `_claim` takes row
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
-0 8 * * *   cosmai analyze polarity --impl ollama:gemma4:latest --missing
 youtube: watch 1h · work 5m · flatten 15m · prune 1d  (after the fan-out cap is applied)
 naver:   datalab once a month (by the keyword dictionary) · blog once a month
 ```
