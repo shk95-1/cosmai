@@ -241,6 +241,53 @@ def test_undeclared_mode_lists_tree_wide_gaps_without_failing(repo: Path) -> Non
     assert "interfaces.md:5" in result.stdout
 
 
+RENAME_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "section_name_rename"
+
+
+def rename_fixture(name: str) -> str:
+    return (RENAME_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_exit_0_on_a_declared_anchor_rename(repo: Path) -> None:
+    """`contracts/section-names.md`'s ledger already declares a Korean-to-English anchor rename
+    (#246): the rename it documents is a rename, not a lost literal."""
+    base_tree(repo)
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_before.md"))
+    base = commit(repo, "the anchor is still Korean")
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_after.md"))
+    commit(repo, "rename the anchor per the ledger")
+
+    result = translation(repo, base)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_exit_1_on_an_undeclared_anchor_rename(repo: Path) -> None:
+    """The same shape of rename with no ledger row for it still fails (#246)."""
+    base_tree(repo)
+    write(repo, "contracts/interfaces.md", rename_fixture("undeclared_before.md"))
+    base = commit(repo, "an anchor the ledger never renamed")
+    write(repo, "contracts/interfaces.md", rename_fixture("undeclared_after.md"))
+    commit(repo, "rename it anyway")
+
+    result = translation(repo, base)
+    assert result.returncode == 1, result.stdout
+    assert "interfaces.md" in result.stdout
+
+
+def test_exit_1_on_a_dropped_literal_beside_a_declared_rename(repo: Path) -> None:
+    """A declared rename excuses only itself -- a literal dropped in the same file, same change,
+    still fails (#246)."""
+    base_tree(repo)
+    write(repo, "contracts/interfaces.md", rename_fixture("dropped_literal_before.md"))
+    base = commit(repo, "before")
+    write(repo, "contracts/interfaces.md", rename_fixture("declared_after.md"))
+    commit(repo, "rename the anchor and drop the other literal")
+
+    result = translation(repo, base)
+    assert result.returncode == 1, result.stdout
+    assert "`foo`" in result.stdout
+
+
 def test_exit_1_on_dropped_comment_block(repo: Path) -> None:
     """Dropped = a comment line removed with no comment line added in the same hunk."""
     base_tree(repo)

@@ -198,6 +198,66 @@ def markdown_literals(text: str) -> list[str]:
     return sorted(match.group(0).replace(" ", "") for match in MARKDOWN_LITERAL.finditer(text))
 
 
+LEDGER_ROW = re.compile(r"^\|(.+)\|(.+)\|(.+)\|$")
+LEDGER_NAME = re.compile(r"`([^`]+)`")
+
+
+def _anchor_core(text: str) -> str:
+    """A token or ledger cell name, reduced to what a rename actually shares: no backticks, no `§`,
+    no `**` bold marker, no whitespace, no trailing sentence punctuation a `§` capture drags in."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] == "`" and text[-1] == "`":
+        text = text[1:-1]
+    text = text.lstrip("§").replace("*", "")
+    text = re.sub(r"\s+", "", text)
+    return text.rstrip(".,;:")
+
+
+def _core_matches(token: str, cores: list[str]) -> bool:
+    core = _anchor_core(token)
+    if not core:
+        return False
+    # A bare `§` capture stops at the first non-ASCII or space char (MARKDOWN_LITERAL), so it is
+    # often a truncated PREFIX of the ledger's full name, in either direction.
+    return any(core == c or c.startswith(core) or core.startswith(c) for c in cores)
+
+
+def section_name_ledger(rev: str) -> list[tuple[list[str], list[str]]]:
+    """[(old cores, new cores), ...] read from contracts/section-names.md's rename table at `rev` --
+    the same ledger the `§` anchor resolver already trusts (#206 part 2)."""
+    text = blob(rev, "contracts/section-names.md")
+    if not text:
+        return []
+    rows: list[tuple[list[str], list[str]]] = []
+    for line in text.split("\n"):
+        match = LEDGER_ROW.match(line.strip())
+        if not match:
+            continue
+        olds = LEDGER_NAME.findall(match.group(1))
+        news = LEDGER_NAME.findall(match.group(2))
+        if not olds or not news:
+            continue  # the header row and the `|---|---|---|` separator have no backtick names
+        rows.append(([_anchor_core(o) for o in olds], [_anchor_core(n) for n in news]))
+    return rows
+
+
+def explain_renames(rev: str, lost: list[str], gained: list[str]) -> tuple[list[str], list[str]]:
+    """Drop a lost/gained pair the ledger declares a rename for (#246).
+
+    A row only excuses anything once its OWN new name shows up among `gained` -- a lost anchor whose
+    old name merely shares a ledger row's prefix, with no matching gain, is still an unexplained loss.
+    """
+    drop_lost: set[str] = set()
+    drop_gained: set[str] = set()
+    for old_cores, new_cores in section_name_ledger(rev):
+        active = [g for g in gained if g not in drop_gained and _core_matches(g, new_cores)]
+        if not active:
+            continue
+        drop_gained.update(active)
+        drop_lost.update(x for x in lost if x not in drop_lost and _core_matches(x, old_cores))
+    return [x for x in lost if x not in drop_lost], [x for x in gained if x not in drop_gained]
+
+
 def changed_lines(base: str, head: str, path: str) -> list[str]:
     diff = git("diff", "-U0", "--no-color", base, head, "--", path)
     out: list[str] = []
@@ -316,6 +376,7 @@ def differs(base: str, head: str, path: str, blank_strings: bool = False) -> str
     if kind == "markdown":
         lost = sorted(set(markdown_literals(before)) - set(markdown_literals(after)))
         gained = sorted(set(markdown_literals(after)) - set(markdown_literals(before)))
+        lost, gained = explain_renames(head, lost, gained)
         if lost or gained:
             return f"anchors and literals changed (lost {lost}, gained {gained})"
         return None
