@@ -33,9 +33,17 @@ cosmai login --source <source>
   run as it is (every write is a natural-key upsert). commerce implements it as a per-source session-scoped
   advisory lock (`collectors/commerce/storage/locks.py`).
 
-**naver over HTTP (#182).** One run may send `collectors/naver/scope.json`'s
-`http.max_requests_per_run` (200) requests, and **every attempt is charged, a retry included** — a
-retry is another request NAVER serves. A 5xx or a timeout is retried `retry_max_attempts` (3) times
+**naver over HTTP (#182).** The transport calls **NAVER Cloud Platform's NAVER API Hub**
+(`https://naverapihub.apigw.ntruss.com`): `GET /search/v1/blog` for blog search and
+`POST /search-trend/v1/search` for the DataLab search trend, both authenticated with the one
+`contracts/secrets.md` key pair in the headers `X-NCP-APIGW-API-KEY-ID` and `X-NCP-APIGW-API-KEY`.
+An error body arrives in one of two shapes and `errorCode` is read from either: the gateway's, which
+nests it (`{"error": {"errorCode": "200", …}}` on a refused key), and the search service's, which
+puts it at the top level beside an `errorMessage` (`{"errorCode": "SE03", …}`); the messages beside
+it are never read, in either shape.
+
+One run may send `collectors/naver/scope.json`'s `http.max_requests_per_run` (200) requests, and
+**every attempt is charged, a retry included** — a retry is another request NAVER serves. A 5xx or a timeout is retried `retry_max_attempts` (3) times
 with `retry_backoff_s` (2.0) doubling (2s, then 4s), under a `timeout_s` of 20.0. What a response
 does to the run, in the exit codes above:
 - **401 / 403** — the credential is refused: the run stops **blocked (2)**, the note carrying the
@@ -58,8 +66,9 @@ production object, so the exception is written here rather than silently widened
 `collectors/naver/scope.py:DATALAB_ANCHOR` (`기준_세럼`) as its own `keywordGroups` entry, so at most
 `DATALAB_CATEGORY_GROUPS_PER_REQUEST` (4) of a category's own groups ride beside it — the vendor's
 cap counts the anchor as one of its five groups. A category of N groups therefore costs `ceil(N / 4)`
-requests where it cost `ceil(N / 5)` before (today's `keywords.json`: 2 requests a run, against a
-vendor ceiling of 50,000 calls a day per API). The collector stores the raw `ratio` and the request
+requests where it cost `ceil(N / 5)` before (today's `keywords.json`: 2 requests a run, against the
+API Hub ceiling of 50,000 search-trend calls a **month** — the search APIs get 775,000 a month, and
+one key is capped at 50 RPS: `guide.ncloud-docs.com/docs/apihub-overview`, read 2026-09-06). The collector stores the raw `ratio` and the request
 boundary only; the value relative to the anchor is the view `db/views/naver_datalab_rescaled.sql`
 (`contracts/formats.md`, NAVER DataLab section), so changing the anchor never means collecting again.
 
