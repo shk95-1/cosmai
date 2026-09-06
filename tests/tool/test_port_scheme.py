@@ -3,9 +3,12 @@
 removed it mid-run, because the holder check could only say "another worktree, or a leak", never
 which.
 
-Snippets are extracted from the real `tool/checks/test` and sourced in isolation with a fake `git`
-or `docker` on PATH: reaching this code for real costs a container start and a `db/migrate.sh` run
-that answering "whose port band is this" and "what does the holder message say" does not need.
+Snippets are extracted from the real `tool/checks/test` and sourced in isolation with `git`/`docker`
+faked as shell functions defined ahead of the snippet, not as executables on PATH: a PATH shim on a
+`noexec`-mounted tmp dir is silently skipped by the shell, which falls through to the real binary
+and made both fake origins answer "" -- the fork case then failed on the CI runner while quietly
+producing the SAME wrong port both times, not a crash (measured 2026-09-06, #226 CI run
+34030264845). A function is looked up before PATH ever comes into it and needs no exec bit.
 """
 
 from __future__ import annotations
@@ -43,31 +46,28 @@ def _holder_check_body() -> str:
     return body[start:end]
 
 
-def _fake_git(bin_dir: Path, origin_url: str) -> None:
-    git = bin_dir / "git"
-    git.write_text(
-        "#!/bin/sh\n"
-        f"if [ \"$1 $2 $3\" = \"remote get-url origin\" ]; then printf '%s\\n' '{origin_url}'; "
-        "else exit 1; fi\n",
-        encoding="utf-8",
-    )
-    git.chmod(0o755)
+# A shell function shadows PATH entirely -- no exec bit, no lookup to skip past on a noexec tmp
+# dir. $FAKE_ORIGIN travels through the environment rather than being baked into the function body,
+# so the same function text serves every origin this file tries.
+FAKE_GIT_FUNCTION = (
+    'git() { if [ "$1 $2 $3" = "remote get-url origin" ]; '
+    "then printf '%s\\n' \"$FAKE_ORIGIN\"; else return 1; fi; }\n"
+)
 
 
 def _run_port(tmp_path: Path, origin_url: str, **env: str) -> subprocess.CompletedProcess:
-    bin_dir = tmp_path / f"bin-{len(list(tmp_path.glob('bin-*')))}"
-    bin_dir.mkdir()
-    _fake_git(bin_dir, origin_url)
+    # The SAME workdir every call: two calls in one test must hash the identical path, so only the
+    # repo (FAKE_ORIGIN) differs between them.
     workdir = tmp_path / "work"
     workdir.mkdir(exist_ok=True)
-    script = _container_guard_body() + "\nprintf '%s\\n' \"$port\"\n"
+    script = FAKE_GIT_FUNCTION + _container_guard_body() + "\nprintf '%s\\n' \"$port\"\n"
     return subprocess.run(
         ["sh", "-c", script],
         cwd=str(workdir),
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", **env},
+        env={**os.environ, "FAKE_ORIGIN": origin_url, **env},
     )
 
 
@@ -82,6 +82,11 @@ def test_upstream_and_fork_land_in_disjoint_bands(tmp_path: Path):
     assert fork.returncode == 0, fork.stderr
     up_port = int(upstream.stdout.strip())
     fork_port = int(fork.stdout.strip())
+    # If the fake `git` were never consulted (a PATH shim skipped on a noexec tmp dir, #226 CI run
+    # 34030264845), $repo_url comes back empty and BOTH calls fall through to the same catch-all
+    # offset -- the same port twice, silently, rather than a crash. Naming that failure mode
+    # directly keeps a future regression to it from passing on the band checks alone.
+    assert up_port != fork_port, "upstream and fork produced the identical port -- was git faked?"
     assert 55000 <= up_port <= 55499, f"upstream port {up_port} left its band"
     assert 55500 <= fork_port <= 55999, f"fork port {fork_port} left its band"
 
@@ -111,52 +116,45 @@ def test_the_container_is_labeled_with_the_worktree_path():
     assert "$(pwd -P)" in run_line, "the label must name THIS worktree, not a fixed string"
 
 
+# Same reasoning as FAKE_GIT_FUNCTION: a function, not a PATH executable, so a noexec tmp dir on
+# the CI runner cannot make this one fall through to the real `docker` either.
+FAKE_DOCKER_FUNCTION = (
+    "docker() {\n"
+    '    case "$1" in\n'
+    "        ps) printf 'cosmai-test-postgres-99999\\n' ;;\n"
+    "        inspect) printf '%s\\n' \"$FAKE_HOLDER_PATH\" ;;\n"
+    "    esac\n"
+    "}\n"
+)
+
+
 def _run_holder_check(
-    tmp_path: Path, docker_script: str, port: str = "55842", name: str = "cosmai-test-postgres-55842"
+    holder_path: str, port: str = "55842", name: str = "cosmai-test-postgres-55842"
 ) -> subprocess.CompletedProcess:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    docker = bin_dir / "docker"
-    docker.write_text(docker_script, encoding="utf-8")
-    docker.chmod(0o755)
-    script = f"port={port}\nname={name}\n" + _holder_check_body()
+    script = FAKE_DOCKER_FUNCTION + f"port={port}\nname={name}\n" + _holder_check_body()
     return subprocess.run(
         ["sh", "-c", script],
         capture_output=True,
         text=True,
         check=False,
-        env={**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+        env={**os.environ, "FAKE_HOLDER_PATH": holder_path},
     )
 
 
 HOLDER_PATH = "../cosmai-wt/contracts-206"
 
-FAKE_DOCKER_LABELED = f"""#!/bin/sh
-case "$1" in
-    ps) printf 'cosmai-test-postgres-99999\\n' ;;
-    inspect) printf '{HOLDER_PATH}\\n' ;;
-esac
-"""
 
-FAKE_DOCKER_UNLABELED = """#!/bin/sh
-case "$1" in
-    ps) printf 'cosmai-test-postgres-99999\\n' ;;
-    inspect) printf '\\n' ;;
-esac
-"""
-
-
-def test_a_labeled_holder_is_named_by_its_worktree_path(tmp_path: Path):
-    done = _run_holder_check(tmp_path, FAKE_DOCKER_LABELED)
+def test_a_labeled_holder_is_named_by_its_worktree_path():
+    done = _run_holder_check(HOLDER_PATH)
     assert done.returncode == 1
     assert "held by another worktree" in done.stderr, done.stderr
     assert HOLDER_PATH in done.stderr, done.stderr
     assert "or a leak" not in done.stderr, "a labeled holder is not an unnamed leak"
 
 
-def test_an_unlabeled_holder_falls_back_to_the_old_wording(tmp_path: Path):
+def test_an_unlabeled_holder_falls_back_to_the_old_wording():
     # A container started before this change carries no label -- still a real holder, just an
     # older one, so the fallback message must still say so rather than crash on an empty path.
-    done = _run_holder_check(tmp_path, FAKE_DOCKER_UNLABELED)
+    done = _run_holder_check(holder_path="")
     assert done.returncode == 1
     assert "another worktree, or a leak" in done.stderr, done.stderr
