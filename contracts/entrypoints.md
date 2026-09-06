@@ -338,11 +338,12 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   practice (an ollama exception, a `statement_timeout`) is caught and closes the run as `failed`, so
   looking at `running` alone misses that half month entirely. It is said **once only**, and the run that
   said it records the fact by attaching `stale-reported` to that note.
-- 그 "한 번"이 충분한지가 scope 마다 다르다. **주인 없는** scope 의 반쪽 달은 다음 밤 규칙 실행이 그 달을
-  통째로 다시 써서 스스로 메워진다 — 한 번 말하면 그것으로 끝이다. **주인 있는** scope(선블록→gemma4)의
-  반쪽 달은 규칙 실행이 배제하므로 아무도 메우지 않고, 한 번 말한 뒤로는 아무도 다시 말하지 않는다:
-  그 달을 되찾는 길은 사람이 주인의 패스를 그 달에 다시 돌리는 것 하나뿐이고, 그때까지 남는 증거는 죽은
-  run 의 note 에 계속 붙어 있는 `rewriting=` 표식이다.
+- Whether that "once" is enough differs per scope. The half month of a scope with **no owner** fills itself
+  in, because the next night's rule run rewrites that month whole — saying it once is the end of it. The
+  half month of a scope **with an owner** (선블록→gemma4) is excluded by the rule run, so nobody fills it in,
+  and after it has been said once nobody says it again: the only way to win that month back is for a person
+  to run the owner's pass over that month again, and until then the evidence that stays is the `rewriting=`
+  marker still attached to the dead run's note.
 
 ## Search (#28 → fork cosmai-import-ydc, upstream PR #59)
 ```
@@ -406,17 +407,20 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   (`terms.MIN_DOCS` 5) and its three videos are already seen by the sunscreen topic. The same v3 judged #37's
   seven candidates and raised four more. The judgment ledger and the four listing criteria are `formats.md`
   (topic lexicon v3 section), and `tool/measure-lexicon-candidates` re-measures those counts against it.
-- **질의 토큰화는 색인 토큰화와 갈린다**(포크 #46). 색인은 `bm25.tokenize`, 질의는 `bm25.tokenize_query`
-  — 같은 토큰화에 **질의 불용어 제거**만 얹은 것이고, `Index.search` 만 그쪽을 탄다. 색인에서 빼지 않는
-  이유는 그러면 `소비자` 를 직접 찾는 질의를 못 하게 되기 때문이다. 뺄 근거가 lift 도 idf 도 아닌 이유는
-  그 말들이 흔해서가 아니라 **질문을 서술하는 말이라 주제가 아니어서**다 — 통계로는 반대로 나온다(위의
-  `소비자` 289 < `백탁` 338). 그래서 통계가 아니라 판단이고, 판단이므로 **버전을 받는 행으로 산다**:
-  `needs.entity_lexicon` 의 `kind='stopword'` · `canonical='query'` 활성 버전이 정본이고, 고치는 길은
-  `cosmai lexicon load/diff/activate --kind stopword` 하나다(적재 원본은 주제 사전과 같은 자리의
-  `analysis/retrieval/dict/query_stopwords_v1.csv`). 그 kind 는 주제 사전과 **활성 버전이 따로**다 —
-  `entity_lexicon` 의 `activate` 는 kind 하나만 켜고 끄므로(`db/lexicon.py` `ENTITY_ACTIVATE`), 질의
-  불용어 개정과 aspect 사전 개정이 서로를 끄지 않는다. 버전 **번호표**는 그렇지 않다 —
-  `formats.md` §entity 사전의 `kind='stopword'` 가 그 한계와 포크 #58 을 적는다.
+- **Query tokenisation parts from index tokenisation** (fork #46). The index is `bm25.tokenize`, the query
+  is `bm25.tokenize_query` — the same tokenisation with **query stopword removal** laid on it, and
+  `Index.search` alone rides that side. The reason they are not taken out of the index is that doing so
+  would make a query that looks for `소비자` itself impossible. The reason the grounds for taking them out
+  are neither lift nor idf is not that those words are common but that **they describe the question and so
+  are not the topic** — statistics say the opposite (`소비자` 289 < `백탁` 338 above). So it is a judgment
+  rather than a statistic, and being a judgment it **lives as a row that gets a version**: the canonical
+  form is the active version of `kind='stopword'` · `canonical='query'` in `needs.entity_lexicon`, and the
+  one way to change it is `cosmai lexicon load/diff/activate --kind stopword` (the loaded source is
+  `analysis/retrieval/dict/query_stopwords_v1.csv`, the same place as the topic dictionary). That kind has
+  an **active version of its own**, separate from the topic dictionary's — `entity_lexicon`'s `activate`
+  turns one kind on and off (`db/lexicon.py` `ENTITY_ACTIVATE`), so a query-stopword revision and an aspect
+  dictionary revision do not turn each other off. The version **number tag** is not like that —
+  `formats.md` §Query stopwords writes down that limit and fork #58.
 - Three rules hang on that list. (1) **A query that is entirely stopwords is not stripped** — 0 tokens
   means 0 results, which is worse than a ranking with filler in it. (2) **It does not invalidate the index
   cache**: `pipeline.index_signature` does not bite on this list and must not — the index is `tokenize` as
@@ -445,8 +449,8 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   not rank at all and answers with one stderr line and 0 results — it means the corpus has never once said
   that name, so even a result that did come out would be a document unrelated to it.
   **The exit code is the `1` (no results) that already exists and no new code is added.**
-  토큰이 0개인 질의(`톤 업`·키릴 표기)는 빈도로 판정하지 않고 통과시킨다 — 막으면 벡터가 유일하게
-  답하는 자리를 막는다.
+  A query with 0 tokens (`톤 업`, a Cyrillic notation) is not judged by frequency but let through — stopping
+  it would stop the one place where the vector side is the only one that answers.
 - **`bm25` behaves as it did before this issue.** Lexical search ignores a word of frequency 0 as idf 0 and
   **answers with the words that are left**, so putting the gate on it would turn the partial answer that used
   to come out of a "a real topic + a new product name not yet in the corpus" query into 0 results. Nobody
@@ -524,11 +528,13 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   score is on). `chunked_at_max` is **not a required key** — without it only the count is compared and
   that fact is warned about (refusing would stop every search running on a store baked before that key).
   A mismatch is fixed by a full `embed` re-encode.
-- **평가 행은 저장소 판본을 어긋나지 않아도 싣는다** (포크 #49). `eval` 의 vector·hybrid 는 매니페스트의
-  `model`·`revision`·벡터 수·`chunked_at_max` 를 CSV `store` 열과 stdout 요약 한 줄에 싣는다 — 바로 위
-  커버리지 경고와 **축이 다르다**: 그쪽은 어긋날 때만 말하므로 정상일 때는 판본이 아무 데도 안 남고, 그
-  자리가 ydc 에서 "1차 → 2차" 로 라벨한 델타가 실은 "식약처 벡터 없음 → 2차" 였던 사고다(`v0.3.0` 은
-  산출 파일명에 판본을 붙여 고쳤다 — 우리는 파일이 아니라 행으로 내므로 같은 자리가 행이다).
+- **An evaluation row carries the store version even when nothing is out of step** (fork #49). `eval`'s
+  vector·hybrid carry the manifest's `model`·`revision`·vector count·`chunked_at_max` in the
+  CSV `store` column and in one line of the stdout summary — **a different axis** from the coverage
+  warning right above: that one speaks only when something is out of step, so when all is well the
+  version is left nowhere, and that is the place where the delta ydc labelled "1st → 2nd" was really
+  "no MFDS vectors → 2nd" (`v0.3.0` fixed it by putting the version into the output file name — we
+  produce rows rather than files, so the same place is a row).
   **A row with no version cannot come out**: if the store cannot be opened that whole run is blocked (2), and
   a store whose `model` is empty is refused by `load` (the blocked item above). The bm25 rows are empty — no
   store is opened, so there is no version to invent. This column does not change the exit code.
@@ -568,9 +574,10 @@ cosmai trend quarter [--url <url>]
   roster is an argument** — two ways of choosing means two denominators, and the place that picks the
   active version is one each: `db/corpus.active_snapshot` and `db/seed/panel.active_version` (the latter
   stops instead of answering when there are two active versions).
-- 모집단은 매니페스트 규칙 그대로다: `content_type='video_long'` · `panel_role='product'` ·
-  `topic_id='선크림'` 언급이 있는 영상, 그리고 그 영상들에 달린 댓글. 산출 행의 `scope` 는
-  `metrics_need.scope` 와 같은 어휘(`선블록`)이고 `content_type` 은 `long_form` 이다.
+- The population is the manifest rule as it stands: videos carrying a `content_type='video_long'` ·
+  `panel_role='product'` · `topic_id='선크림'` mention, and the comments attached to those videos. The
+  `scope` of an output row is the same vocabulary as `metrics_need.scope` (`선블록`) and its `content_type`
+  is `long_form`.
 - **One run rewrites the rows of that (run, scope, roster) wholesale.** Not updating in part is how the
   grid is kept dense — a re-run produces the same rows under the same `run_id` (found by the note).
 - After writing it asks `needs.metrics_topic_quarter_violation` back about that run. If the view says
@@ -696,27 +703,31 @@ cosmai trend crosscheck [--url <url>]
   roster among them. The answer is stdout rather than a table, and being read-only it is run against the
   production DB as it is. That the stored tables are untouched is pinned by a fingerprint in
   `tests/test_crosscheck_pipeline.py`.
-- run 은 `quarter`·`judge`·`sensitivity` 와 **같은 길**로 찾는다(활성 스냅샷·활성 명부에서 만든 note) —
-  인자가 `--url` 하나인 이유도 같다. 대조하는 분기는 그 run 격자의 **마지막에서 두 번째**다(마지막은
-  판정이 `미확정(진행 중)` 으로 두는 진행 중 분기라 과소 집계된다).
+- The run is found by the **same path** as `quarter`·`judge`·`sensitivity` (the note made from the active
+  snapshot and the active roster) — which is also why `--url` is the only argument. The quarter it
+  crosschecks is the **second from last** of that run's grid (the last is the quarter in progress, which the
+  verdict leaves as `미확정(진행 중)`, so it is undercounted).
 - It walks the chunk index once — measured for real at 381,950 chunks, 48MB, **11.3 seconds** over
   everything (2026-08-27, keyset pages of 20,000 rows with a commit per page). Walking it in one stream
   hits `needs_runtime`'s `transaction_timeout` (60 seconds), so it uses the same method as
   `gold_from_chunks` in `analysis/retrieval/eval.py`.
-- 종료 코드: **0 ok — 대조표가 계산됐다** · 1 partial(**이 산출을 믿지 마라** — 성분 키가 사람이 한 번
-  읽어 금지한 성분명을 잡았거나(`key_mismatch`, §대조 의 `시카` 사고가 이 자리다), 커머스
-  `topic_group` 이 가리키는 우리 주제가 활성 사전에 없다(`group_map_drift`)) · 2 blocked(연결 거절, 활성
-  명부·스냅샷·주제 사전 없음, **그 스냅샷·명부에 지표 run 이 없음**(`cosmai trend quarter` 를 아직 안
-  돌렸다), **그 run 에 판정 행이 없음** — `cosmai trend judge` 를 아직 안 돌렸다는 뜻이라 실패가 아니라
-  막힘이다. 청크가 비었거나(`cosmai retrieval chunk`) 랭킹에 선케어 제품이 없는 것
-  (`cosmai collect commerce`)도 같은 자리다 — 대조할 소스가 아직 없다). **여덟 갈래 전부** 코드의
-  `NoPopulation`·`NoCrosscheck`·`NoDictionary` 셋 중 하나이고, 메시지가 어느 것인지 갈라 말한다.
-- **"소스가 어긋난다"는 1 이 아니다.** 그것은 이 명령이 답하려고 존재하는 **발견**이지 실행의 실패가
-  아니고, 이 파일 맨 위의 공통 규약에서 1 은 "산출이 온전하지 않다"는 뜻이다 — 위 §민감도 의 "흔들린다는
-  1 이 아니다", §근거·카드 의 "규칙에 걸린 셀이 없다는 1 이 아니다"와 **같은 자리, 같은 문장**이다. 실측
-  으로도 그렇다: 전량에서 13주제 중 어긋남 해석이 붙는 주제가 여럿이라(예: `백탁` 커머스 9.80% 대 댓글
-  1.55%) 1 로 내면 평상 상태가 실패로 읽힌다. 어긋남은 종료 코드가 아니라 표의 `reading` 열과 `note` 가
-  싣는다.
+- exit codes: **0 ok — the crosscheck table was computed** · 1 partial (**do not trust this output** —
+  either an ingredient key caught an ingredient name a person read once and forbade (`key_mismatch`; the
+  `시카` incident of §Crosscheck is this place), or the topic of ours that a commerce `topic_group` points
+  at is not in the active dictionary (`group_map_drift`)) · 2 blocked (connection refused, no active
+  roster·snapshot·topic dictionary, **no metrics run on that snapshot and roster** (`cosmai trend quarter`
+  has not been run yet), **no verdict row on that run** — which means `cosmai trend judge` has not been run
+  yet, so it is a block rather than a failure. An empty chunk store (`cosmai retrieval chunk`) and no
+  suncare product in the ranking (`cosmai collect commerce`) are the same place — there is no source to
+  crosscheck yet). **All eight branches** are one of the code's `NoPopulation`·`NoCrosscheck`·`NoDictionary`,
+  and the message says which.
+- **"The sources disagree" is not a 1.** That is the **finding** this command exists to give, not a failure
+  of the run, and in the common convention at the top of this file a 1 means "the output is not whole" —
+  **the same place and the same sentence** as "shaking is not a 1" in §Sensitivity and backtest above and
+  "no cell caught by the rules is not a 1" in §Evidence and cards. The measurement says so too: over
+  everything, several of the 13 topics carry a disagreement reading (for example `백탁` commerce 9.80%
+  against comments 1.55%), so emitting a 1 would read the normal state as a failure. A disagreement is
+  carried by the table's `reading` column and the `note`, not by the exit code.
 - **Thin evidence is not a 1 either.** A topic with fewer than `MIN_PRODUCTS` (5) attribute-rated products
   gets no reading written, and `thin=` in the `note` counts them. Thin is a computed answer, not a
   truncated output.
@@ -760,7 +771,7 @@ cosmai trend holdout [--url <url>]
   common convention at the top of this file a 1 means "the output is not whole" — **the same place and the
   same sentence** as "shaking is not a 1" in §Sensitivity above and "disagreeing is not a 1" in §Crosscheck.
   ydc's `report`, the source, always emits 0 too.
-  어느 갈래인지(`재현`·`순위 재현`·`순위 변동`·`순위 없음`)는 `note` 와 표가 싣는다.
+  Which branch it is (`재현`·`순위 재현`·`순위 변동`·`순위 없음`) is carried by the `note` and the table.
 - **A thin sample is not a 1 either.** A topic whose seen arm has fewer documents than `MIN_MENTIONS` (5)
   gets no rank (`-`), and `ranked=` in the `note` counts how many topics do have one.
 - **Not put on cron. "0 is the normal state" from §Crosscheck above is false for this command.** Read-only it
@@ -793,21 +804,26 @@ seed basis alone and the budget basis of those two pairs stays **permanently** x
 strict catches is not the lock landing but the day the budget shrinks and the overlap disappears
 altogether.
 
-**둘 다 상한이 아니라 하한이다.** 위 계산은 정책이 *선언한* 페이스를 쓰는데, `Gate._back_off`는 사이트가
-403·429·503으로 답하면 살아 있는 인터벌을 `Gate.MAX_INTERVAL_S`(300초)까지 벌린다 — daisomall의 30초가
-300초가 된다. 응답 지연과 재시도도 값에 없고, `max_requests_per_run`이 없는 소스는 예산 기준에서도
-씨드 수로만 계산된다(#10 이후 네 소스 모두 선언하므로 오늘 그런 소스는 없다). 레인 산술도 마찬가지로
-낙관적이다: 실제 실행은 레인을 등록 순서대로 나눠 주지 긴 소스부터 주지 않으므로, 소스가 레인보다 많은
-줄은 위 두 하한 중 어느 쪽보다도 오래 걸릴 수 있다. 그러니 이 숫자는 "적어도 이만큼"이지 "많아야 이만큼"이 아니다. 겹치지 않는다는 보장은
-간격이 아니라 락이 준다. `analyze all`은 외부 fetch가 없는 DB 전용 작업이라 매시 실행과 겹쳐도
-무해하므로 이 규칙에서 제외된다. 다만 `analyze all` 에도 간격 규칙이 하나 있고 그것은 락이 세운다:
-같은 락을 쓰는 주인의 극성 패스와 겹치면 뒤에 온 쪽이 그 밤을 통째로 건너뛰므로, 그 줄과 `0 5` 사이의
-간격은 그 패스의 최악 소요 T 보다 넓어야 한다. **그 줄은 이제 있다**(`0 8`, #32) — 명령은 증분
-(`--missing`, #98)이고 **그 T 는 아직 미측정이다**: 운영 실행이 조정자의 몫이라 줄을 넣은 작업이 재지
-못했다. 그래서 시각은 T 를 아는 대신 간격을 최대로 벌려 골랐다 — `0 8` 은 `0 5` 에 3h 를 주고 자기는
-21h 를 받는다. 실측이 있는 유일한 값은 전량 패스의 것이고(선블록 하나를 도는 run 16 이 **6h44m**),
-21h 는 그 3배다. 조정자가 첫 밤과 정상 밤의 T 를 재고, 21h 를 위협하면 이 두 시각을 옮긴다. 계산과
-GPU 창(08:00–16:00 UTC, `retrieval embed` 가 피한다)은 `stack/crontab.d/analyze` 에 적혀 있다.
+**Both are a lower bound, not an upper one.** The calculation above uses the pace the policy *declares*,
+but `Gate._back_off` widens the live interval up to `Gate.MAX_INTERVAL_S` (300 seconds) when the site
+answers 403·429·503 — daisomall's 30 seconds becomes 300 seconds. Response latency and retries are not in
+the value either, and a source with no `max_requests_per_run` is counted by its seed count even on the
+budget basis (since #10 all four sources declare one, so there is no such source today). The lane
+arithmetic is optimistic in the same way: a real run hands the lanes out in registration order rather than
+longest source first, so a line with more sources than lanes can take longer than either of the two lower
+bounds above. So this number is "at least this much", not "at most this much". What guarantees they do not
+overlap is the lock, not the interval. `analyze all` is a DB-only job with no outside fetch, so it is
+harmless even overlapping the hourly run and is out of this rule. `analyze all` does have one interval
+rule, though, and the lock is what sets it: overlapping an owner's polarity pass that takes the same lock
+makes whichever arrived second skip that whole night, so the gap between that line and `0 5` has to be
+wider than that pass's worst-case duration T. **That line now exists** (`0 8`, #32) — the command is
+incremental (`--missing`, #98) and **that T is still unmeasured**: running in operations is the
+coordinator's part, so the work that put the line in could not measure it. So the time was chosen by
+widening the gap to its maximum instead of by knowing T — `0 8` gives `0 5` 3h and takes 21h for itself.
+The only value that has a measurement is the full pass's (run 16, going round 선블록 alone, at **6h44m**),
+and 21h is three times that. The coordinator measures T on the first night and on a normal night, and moves
+these two times if it threatens the 21h. The calculation and the GPU window (08:00–16:00 UTC, which
+`retrieval embed` avoids) are written down in `stack/crontab.d/analyze`.
 
 **Suspended as of 2026-09-06 (#242).** The `0 8` line above is gone: the model host is gone and this host
 cannot run the model, so `OWNERS` in `analysis/polarity/ownership.py` holds no gemma4 scope and the fenced

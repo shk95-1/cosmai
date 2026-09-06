@@ -175,7 +175,7 @@ def test_the_scorecard_column_the_contract_names_is_a_column():
     from analysis.retrieval import eval as retrieval_eval
 
     section = "\n".join(_search_section())
-    assert "CSV `store` 열" in section
+    assert "CSV `store` column" in section
     # The revision and the warning are two columns on different axes -- merged into one, the revision
     # disappears when everything is normal.
     assert {"store", "note"} <= set(retrieval_eval.FIELDS)
