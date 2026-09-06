@@ -403,6 +403,99 @@ def test_a_dockerfile_syntax_directive_is_not_a_comment(repo: Path):
     assert done.returncode == 1, done.stdout
 
 
+HTML_BLOCK_BEFORE = (
+    "<section>\n"
+    "<!-- Lineage (#144). Descends from one metrics cell -> mention -> excerpt.\n"
+    "     Closes on tab switch. -->\n"
+    '<div id="drill"></div>\n'
+    "</section>\n"
+)
+
+
+def test_an_html_block_comment_change_is_invariant(repo: Path):
+    # #241: a continuation line inside a `<!-- -->` block carries no per-line marker of its own, so
+    # this has to track the block state rather than test each line against a fixed prefix.
+    after = HTML_BLOCK_BEFORE.replace("Closes on tab switch.", "Closes when the tab changes.")
+    done = rewrite(repo, "portal/public/index.html", HTML_BLOCK_BEFORE, after)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_html_tag_change_inside_the_block_comment_file_is_not(repo: Path):
+    after = HTML_BLOCK_BEFORE.replace('id="drill"', 'id="drilldown"')
+    done = rewrite(repo, "portal/public/index.html", HTML_BLOCK_BEFORE, after)
+    assert done.returncode == 1, done.stdout
+    assert "index.html" in done.stdout, done.stdout
+
+
+HTML_LINE_BEFORE = '<section id="map-canvas"></section>\n<!-- The picture comes from a declaration. -->\n'
+
+
+def test_an_html_single_line_comment_change_is_invariant(repo: Path):
+    after = HTML_LINE_BEFORE.replace(
+        "The picture comes from a declaration.", "The picture is drawn from a declaration."
+    )
+    done = rewrite(repo, "portal/public/map.html", HTML_LINE_BEFORE, after)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_an_html_markup_change_is_not_invariant(repo: Path):
+    done = rewrite(
+        repo,
+        "portal/public/map.html",
+        HTML_LINE_BEFORE,
+        HTML_LINE_BEFORE.replace("map-canvas", "map-canvas2"),
+    )
+    assert done.returncode == 1, done.stdout
+
+
+CSS_BEFORE = (
+    "/* Colors are the dataviz skill's default palette --\n"
+    "   a placeholder before a brand is decided. */\n"
+    ":root {\n"
+    "  --seq-2: #eb6834;          /* the second sequential context is the next categorical slot */\n"
+    "}\n"
+)
+
+
+def test_a_css_comment_change_is_invariant(repo: Path):
+    after = CSS_BEFORE.replace(
+        "a placeholder before a brand is decided.", "a placeholder until a brand exists."
+    )
+    done = rewrite(repo, "portal/public/style.css", CSS_BEFORE, after)
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_css_value_change_is_not_invariant(repo: Path):
+    done = rewrite(repo, "portal/public/style.css", CSS_BEFORE, CSS_BEFORE.replace("#eb6834", "#eb6835"))
+    assert done.returncode == 1, done.stdout
+    assert "style.css" in done.stdout, done.stdout
+
+
+DOTLESS_ENV_EXAMPLE_BEFORE = "# the old wording\nDATABASE_URL=postgres://localhost/app\n"
+
+
+def test_a_dotless_env_example_comment_only_change_is_invariant(repo: Path):
+    # #241: `stack/env.example` has no leading dot, so the existing `.env*` rule never sees it.
+    done = rewrite(
+        repo,
+        "stack/env.example",
+        DOTLESS_ENV_EXAMPLE_BEFORE,
+        DOTLESS_ENV_EXAMPLE_BEFORE.replace("# the old wording", "# db url"),
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+
+
+def test_a_dotless_env_example_value_change_is_not_invariant(repo: Path):
+    done = rewrite(
+        repo,
+        "stack/env.example",
+        DOTLESS_ENV_EXAMPLE_BEFORE,
+        DOTLESS_ENV_EXAMPLE_BEFORE.replace("localhost", "127.0.0.1"),
+    )
+    assert done.returncode == 1, done.stdout
+    assert "env.example" in done.stdout, done.stdout
+
+
 def test_a_dockerfile_escape_directive_is_not_a_comment(repo: Path):
     before = "# escape=a\nFROM python:3.13-slim\n"
     done = rewrite(repo, "stack/Dockerfile", before, before.replace("escape=a", "escape=b"))
