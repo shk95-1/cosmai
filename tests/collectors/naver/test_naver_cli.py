@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -31,17 +32,25 @@ pytestmark = pytest.mark.postgres
 AT = datetime(2026, 8, 24, 6, 10, tzinfo=UTC)
 
 
-def _datalab_body(spec: FetchSpec) -> dict[str, Any]:
+def _datalab_body(spec: FetchSpec, empty: Collection[str] = ()) -> dict[str, Any]:
     """One series per group the request asked for -- the vendor echoes the `groupName` back as
     `title`, which is what the parser keys `group_key` off. Built from the request rather than
     fixed, because since #90 what a request holds is the thing under test (the anchor plus at most
-    four of a category's groups)."""
+    four of a category's groups).
+
+    A group named in `empty` comes back the way a term nobody searches really does (#250): the
+    series is present and its `data` array is empty. Until this parameter existed every group always
+    carried a point, so no test had ever seen the case that hid the defect."""
     return {
         "results": [
             {
                 "title": group["groupName"],
                 "keywords": list(group["keywords"]),
-                "data": [{"period": "2016-01-01", "ratio": 10.0 + 10.0 * index}],
+                "data": (
+                    []
+                    if group["groupName"] in empty
+                    else [{"period": "2016-01-01", "ratio": 10.0 + 10.0 * index}]
+                ),
             }
             for index, group in enumerate(spec.params["keywordGroups"])
         ]
@@ -53,16 +62,19 @@ def _blog_page(items: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 class _FakeFetcher:
-    """No network: one datalab response, and a single populated page per blog query (empty after)."""
+    """No network: one datalab response, and a single populated page per blog query (empty after).
 
-    def __init__(self) -> None:
+    `empty_groups` names the datalab groups whose series comes back with an empty `data` array."""
+
+    def __init__(self, empty_groups: Collection[str] = ()) -> None:
         self.calls: list[FetchSpec] = []
+        self._empty_groups = frozenset(empty_groups)
         self._blog_served: set[str] = set()
 
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
         self.calls.append(spec)
         if spec.kind == "datalab":
-            return _datalab_body(spec)
+            return _datalab_body(spec, self._empty_groups)
         if spec.query in self._blog_served:
             return _blog_page([])
         self._blog_served.add(spec.query)
@@ -514,7 +526,8 @@ def test_every_datalab_request_carries_the_anchor_group(needs_runtime_url: str, 
     for spec in fetcher.calls:
         groups = spec.params["keywordGroups"]
         anchors = [g for g in groups if g["groupName"] == scope.DATALAB_ANCHOR]
-        assert anchors == [{"groupName": scope.DATALAB_ANCHOR, "keywords": [scope.DATALAB_ANCHOR]}], groups
+        expected = {"groupName": scope.DATALAB_ANCHOR, "keywords": list(scope.DATALAB_ANCHOR_TERMS)}
+        assert anchors == [expected], groups
 
 
 def test_a_datalab_request_never_passes_the_vendors_group_cap(needs_runtime_url: str, secret_file: Path):
@@ -590,3 +603,69 @@ def test_the_anchor_rows_carry_the_request_key_of_the_batch_they_came_with(
     sent_last = {g["groupName"] for g in last.params["keywordGroups"]} - {scope.DATALAB_ANCHOR}
     assert sent_last, last.params["keywordGroups"]
     assert {by_group[g] for g in sent_last} == {anchor_key}
+
+
+# --- the anchor is a label over a real term, and an empty series is visible (#250) ----------------
+
+
+def _datalab_group_keys(url: str) -> set[str]:
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        keys = conn.execute(sa.select(naver_datalab_point.c.group_key)).scalars().all()
+    engine.dispose()
+    return {str(k) for k in keys}
+
+
+def _declared_groups() -> set[str]:
+    return {group for groups in keywords.load().values() for group in groups}
+
+
+def test_the_anchor_group_is_a_label_over_a_real_search_term(needs_runtime_url: str, secret_file: Path):
+    """#250: `groupName` is only a label the vendor echoes back as `results[].title`, and `keywords`
+    is what is actually searched. The label went out as its own keyword, that token has no search
+    volume, DataLab answered with an empty `data` array, and every rescaled row was NULL."""
+    fetcher = _FakeFetcher()
+    run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
+
+    assert fetcher.calls, "no datalab request was sent"
+    for spec in fetcher.calls:
+        anchor = [g for g in spec.params["keywordGroups"] if g["groupName"] == scope.DATALAB_ANCHOR]
+        assert anchor and anchor[0]["keywords"] == list(scope.DATALAB_ANCHOR_TERMS), spec.params
+        assert scope.DATALAB_ANCHOR not in anchor[0]["keywords"], "the label is not a search term"
+
+
+def test_a_group_that_comes_back_with_an_empty_series_stores_no_point(
+    needs_runtime_url: str, secret_file: Path
+):
+    """The case that hid #250: a requested group whose response carries an empty `data` array. It
+    stores nothing, and the rest of the request is written as usual -- which is why the run stayed
+    ok for a fortnight with no anchor row in the table at all."""
+    silent = sorted(_declared_groups())[0]
+    fetcher = _FakeFetcher(empty_groups={silent})
+    code = run(
+        "datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+
+    assert code == 0
+    assert silent in {g["groupName"] for spec in fetcher.calls for g in spec.params["keywordGroups"]}
+    assert _datalab_group_keys(needs_runtime_url) == (_declared_groups() - {silent} | {scope.DATALAB_ANCHOR})
+
+
+def test_a_datalab_request_that_got_no_anchor_back_leaves_the_run_partial(
+    needs_runtime_url: str, secret_file: Path
+):
+    """#250 item 3: with no anchor point for a request, every one of that request's rows rescales to
+    NULL (`db/views/naver_datalab_rescaled.sql`). An ok run is the state this issue exists against,
+    so the run reports partial (1) with a note naming the anchor -- it did yield rows, so it is not
+    blocked (contracts/entrypoints.md)."""
+    fetcher = _FakeFetcher(empty_groups={scope.DATALAB_ANCHOR})
+    code = run(
+        "datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+
+    assert code == 1
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "partial"
+    assert scope.DATALAB_ANCHOR in row["note"], row["note"]
+    # The category's own points are kept: a raw ratio stays comparable inside its own request_key.
+    assert _datalab_group_keys(needs_runtime_url) == _declared_groups()

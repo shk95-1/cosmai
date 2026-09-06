@@ -40,9 +40,10 @@ printf '\355\225\234\n' | grep -qP "$HANGUL" || {
 # category names the sites publish -- so a translated line in them still holds Hangul (#206 part 3,
 # user decision 2026-09-05 on #74); contracts/ stays reviewed, which is what keeps Korean prose from
 # slipping back in.
-# The three naver files below carry one Korean data value between them: the DataLab anchor keyword
-# (#90), which is a search term sent to the vendor -- the constant, its declarative copy in
-# scope.json, and the SQL literal the rescale view divides by. A translated anchor collects nothing.
+# The three naver files below carry the DataLab anchor between them (#90, #250), in two Korean data
+# values: the group name, which the vendor echoes back and which the constant, its declarative copy
+# in scope.json and the SQL literal the rescale view divides by all hold; and the terms that group
+# searches, in the first two. Both go to the vendor -- a translated anchor collects nothing.
 # A fixture directory is named twice because git's default pathspec matching gives `**` no empty
 # match: `tests/**/fixtures/` needs a segment in between and would miss `tests/fixtures/`.
 # Unquoted on purpose: one word, either --cached or a revision range.

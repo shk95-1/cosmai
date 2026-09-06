@@ -62,15 +62,28 @@ stays NULL (#182 M1); and `collector_health` buckets **403 and 429** as blocked,
 for a refused key lands in `failed` beside `naver_run.status = blocked` (#182 M2 — the view is a
 production object, so the exception is written here rather than silently widened).
 
-**The DataLab anchor (#90).** Every DataLab request carries the one global anchor keyword
-`collectors/naver/scope.py:DATALAB_ANCHOR` (`기준_세럼`) as its own `keywordGroups` entry, so at most
-`DATALAB_CATEGORY_GROUPS_PER_REQUEST` (4) of a category's own groups ride beside it — the vendor's
+**The DataLab anchor (#90, #250).** Every DataLab request carries the one global anchor group as its
+own `keywordGroups` entry. **The anchor is a label over a real search term.** Its `groupName` is
+`collectors/naver/scope.py:DATALAB_ANCHOR` (`기준_세럼`) — a label the vendor only echoes back as
+`results[].title`, which is what the stored `group_key` and the rescale view's SQL literal key off —
+while what it actually searches is `DATALAB_ANCHOR_TERMS` (`세럼`, user decision 2026-09-06),
+measured to have a point in every month of the collector's window. The two were the same string
+until #250, so the anchor searched a token with no volume, DataLab answered with an empty `data`
+array, no anchor row was ever stored and every rescaled row was NULL. The terms are part of the
+request body, so changing them changes `request_key` — that is correct, it is a different request.
+At most `DATALAB_CATEGORY_GROUPS_PER_REQUEST` (4) of a category's own groups ride beside it — the vendor's
 cap counts the anchor as one of its five groups. A category of N groups therefore costs `ceil(N / 4)`
 requests where it cost `ceil(N / 5)` before (today's `keywords.json`: 2 requests a run, against the
 API Hub ceiling of 50,000 search-trend calls a **month** — the search APIs get 775,000 a month, and
 one key is capped at 50 RPS: `guide.ncloud-docs.com/docs/apihub-overview`, read 2026-09-06). The collector stores the raw `ratio` and the request
 boundary only; the value relative to the anchor is the view `db/views/naver_datalab_rescaled.sql`
 (`contracts/formats.md`, NAVER DataLab section), so changing the anchor never means collecting again.
+
+**A request whose response carried no anchor point leaves the run partial (1)**, with a note naming
+the anchor and the batch it is missing from (`no 기준_세럼 point from: …`). The rows are still
+written, so this is partial and not blocked, by the same rule as a stop above: partial means we
+yielded. The groups of that request can only rescale to NULL, and an `ok` run whose rescale is
+entirely NULL is the state #250 was filed for.
 
 ## DB connection knobs (not secrets)
 ```

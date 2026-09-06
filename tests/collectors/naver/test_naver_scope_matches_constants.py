@@ -17,6 +17,7 @@ def test_scope_json_matches_the_module_constants():
     assert on_disk["datalab"]["time_unit"] == scope.DATALAB_TIME_UNIT
     assert on_disk["datalab"]["max_groups_per_request"] == scope.DATALAB_MAX_GROUPS_PER_REQUEST
     assert on_disk["datalab"]["anchor"] == scope.DATALAB_ANCHOR
+    assert tuple(on_disk["datalab"]["anchor_terms"]) == scope.DATALAB_ANCHOR_TERMS
     assert on_disk["datalab"]["category_groups_per_request"] == scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST
     assert on_disk["blog"]["display"] == scope.BLOG_DISPLAY
     assert on_disk["blog"]["pages_max"] == scope.BLOG_PAGES_MAX
@@ -37,3 +38,13 @@ def test_the_anchor_leaves_room_for_the_category_groups_beside_it():
     # max_groups_per_request category groups would be refused with the anchor added.
     assert scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST == scope.DATALAB_MAX_GROUPS_PER_REQUEST - 1
     assert scope.DATALAB_ANCHOR
+
+
+def test_the_anchor_label_and_the_terms_it_searches_are_two_different_things():
+    """#250: the group name is only a label the vendor echoes back as `results[].title`; the
+    keywords are what is searched. Sending the label as its own keyword searched a token with no
+    volume, the anchor series came back empty, and every rescaled row was NULL."""
+    terms = tuple(scope.DATALAB_ANCHOR_TERMS)
+    assert terms, "the anchor group must search something"
+    assert all(isinstance(t, str) and t for t in terms)
+    assert scope.DATALAB_ANCHOR not in terms
