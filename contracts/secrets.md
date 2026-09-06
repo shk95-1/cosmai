@@ -2,7 +2,12 @@
 
 - File: `~/.config/cosmai/env` (KEY=VALUE, mode 600). The values are written nowhere else -- not in the repository, the logs or the documents.
 - Keys each component reads:
-  - collectors/naver: `COSMA_SRC_NAVER_BLOG_CLIENT_ID`, `COSMA_SRC_NAVER_BLOG_CLIENT_SECRET`
+  - collectors/naver: `COSMA_SRC_NAVER_BLOG_CLIENT_ID`, `COSMA_SRC_NAVER_BLOG_CLIENT_SECRET` —
+    a **NAVER Cloud Platform, NAVER API Hub** application key (sent as `X-NCP-APIGW-API-KEY-ID`
+    and `X-NCP-APIGW-API-KEY`), not a developers.naver.com application (whose
+    `X-Naver-Client-Id`/`-Secret` pair this key is refused as, #182). The key is account-level,
+    so the one pair grants blog search and search trend alike — despite the `BLOG` in its names,
+    which are the names the values are stored under and do not move.
   - collectors/youtube: `YOUTUBE_DATA_API_TOKEN` (trending only), the tubedepth API key `COSMA_SRC_TUBEDEPTH_API_KEY` (when the api is protected)
   - db: `COSMA_DB_MIGRATOR`, `COSMA_DB_RUNTIME` (+ the needs role passwords are added to the same file as `NEEDS_DB_MIGRATOR`, `NEEDS_DB_RUNTIME`)
   - collectors/commerce (`collectors/commerce/storage/db.py`): `TREND_RADAR_DB_RUNTIME` — for the `trend_radar_runtime` role alone. The old stack still attaches to that role with its own `.env` value, so it is kept apart from `COSMA_DB_RUNTIME` (#29 — sharing them fails authentication).
