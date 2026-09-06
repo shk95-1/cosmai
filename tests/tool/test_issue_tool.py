@@ -1123,6 +1123,94 @@ def test_korean_inside_a_code_fence_is_not_a_lint_error(run):
     assert done.stdout.strip() == "", done.stdout
 
 
+def test_korean_inside_an_inline_code_span_is_not_a_lint_error(run):
+    # #251: a backticked run is a data value or an identifier at this site, the same judgment
+    # tool/checks/lang makes per file (a path allowlist) rather than per span.
+    body = BODY + "\nthe anchor term is `" + KOREAN_LINE + "`.\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, "inline korean", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+
+
+def test_korean_inside_a_double_backtick_span_is_not_a_lint_error(run):
+    # #252 quotes a stale heading citation inside a double-backtick span -- the Markdown form for
+    # content that may itself contain a literal backtick. The closer has to match the opener's
+    # length, not just be "some backtick", or this live case regresses.
+    body = BODY + "\nthe old heading was ``contracts/entrypoints.md " + KOREAN_LINE + "``.\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11,
+                "double backtick korean",
+                body=body,
+                labels=("ch:tool",),
+                parent=10,
+                created_at=AFTER_THE_WINDOW,
+            ),
+        ],
+    )
+    assert done.returncode == 0, done.stdout
+    assert done.stdout.strip() == "", done.stdout
+
+
+def test_korean_in_unbacked_prose_still_fails_alongside_an_inline_span(run):
+    # The exemption is narrow: a Korean value in backticks passes, but Korean written directly
+    # into prose on the same line still trips D12 -- that is what #192 D12 is for.
+    body = BODY + "\nthe term `" + KOREAN_LINE + "` means " + KOREAN_LINE + " in prose.\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "mixed korean", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
+
+
+def test_korean_title_still_fails_with_the_inline_span_exemption(run):
+    # The exemption only touches the body helper; a Korean title is still caught the same way
+    # test_korean_in_an_issue_opened_after_the_effective_date_is_a_lint_error proves it today.
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11, f"[{KOREAN_LINE}]", body=BODY, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW
+            ),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
+
+
+def test_an_odd_backtick_does_not_swallow_the_rest_of_the_body(run):
+    # A stray single backtick must not be read as opening a span that never closes -- that would
+    # exempt everything after it and silence a real finding. The chosen behaviour is per line: a
+    # line with an unbalanced backtick count is left untouched (not exempted at all), so Korean
+    # prose on that same line, and on every line after it, is still caught.
+    body = BODY + "\nan odd backtick ` here, then plain " + KOREAN_LINE + " prose.\n"
+    done = run(
+        "lint",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "odd backtick", body=body, labels=("ch:tool",), parent=10, created_at=AFTER_THE_WINDOW),
+        ],
+    )
+    assert done.returncode == 1, done.stdout
+    assert "Korean" in done.stdout, done.stdout
+
+
 @pytest.fixture
 def checkout(tmp_path: Path) -> Path:
     """A repo whose main and working tree disagree about markers in both directions.
