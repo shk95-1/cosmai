@@ -1,7 +1,9 @@
 # UTC. naver datalab: monthly (basis: the keyword dictionary, contracts/entrypoints.md), day 1. 06:10 clears every
 # commerce time (02:10/03:30/04:15/04:45/05:30); naver walks a different host, so the commerce gap rule
 # does not bind it.
-10 6 1 * *  cosmai collect naver --dataset datalab
+# Gated until upstream #90 (the global anchor): a DataLab pull taken before the anchor exists is scraped again later.
+# An unattended run would also overwrite a deliberate pull's ratios under a new endDate basis (upsert key: category, group_key, month).
+#10 6 1 * *  cosmai collect naver --dataset datalab
 # naver blog: monthly too -- every run re-walks all 15 keyword-group terms from scratch (no cursor;
 # natural-key upsert on post_id makes that safe), so once a month is enough spend. 06:40 clears datalab
 # (06:10), analyze all (05:00, entrypoints.md §Schedule) and every commerce time.

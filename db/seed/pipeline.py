@@ -46,10 +46,11 @@ STAGES: tuple[Stage, ...] = (
     # A cron line exists but the container never starts because it sits behind a compose profile
     # (STATE.md §2). The condition for turning it back on is #39.
     Stage("youtube:watch", "youtube", "watch", "1 hour", False, "profiles: youtube-watch 뒤 — 재가동은 #39"),
-    # The table has zero rows. It is enabled because the cron has a line, and freshness sits at never
-    # (#138 user decision).
+    # The table has zero rows, and since #182 the cron line is commented out (gated until #90, the
+    # global anchor -- stack/crontab.d/collector-naver says why), so this stage is declared disabled
+    # rather than never-fresh. It goes back to True in the PR that uncomments that line.
     # The values are filled in by fork cosmai-import-ydc#53 (DataLab 128-month collection).
-    Stage("naver:datalab", "naver", "datalab", "1 mon", True, "검색어 트렌드 — 아직 0행"),
+    Stage("naver:datalab", "naver", "datalab", "1 mon", False, "검색어 트렌드 — 아직 0행 (#90 까지 게이트)"),
     Stage("naver:blog", "naver", "blog", "1 mon", True, "블로그 — 아직 0행"),
     Stage("analyze:all", "analyze", "all", "1 day", True, "규칙 전량 패스 05:00 UTC"),
     # analyze:polarity_missing (the gemma4 incremental pass) is gone rather than disabled: the crontab
