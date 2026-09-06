@@ -10,11 +10,21 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import sqlalchemy as sa
 
+from collectors.naver import cli
 from collectors.naver.cli import FetchSpec, run
 from collectors.naver.storage.tables import naver_blog_post, naver_datalab_point, naver_fetch_log, naver_run
+from collectors.naver.transport import (
+    AuthBlocked,
+    BudgetExhausted,
+    HttpFetcher,
+    RateLimited,
+    RequestFailed,
+    TransportError,
+)
 
 pytestmark = pytest.mark.postgres
 
@@ -162,18 +172,6 @@ def test_datalab_is_blocked_when_the_fetcher_fails_every_category(needs_runtime_
     assert code == 2
 
 
-def test_datalab_is_blocked_with_a_message_when_no_fetcher_is_injected(
-    needs_runtime_url: str, secret_file: Path, capsys
-):
-    """Same #95 path as the blog test above, for datalab -- both datasets go through
-    `_run_datalab`/`_run_blog`'s own `fetcher.fetch` call, so both need the guard."""
-    code = run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
-    assert code == 2
-    out = capsys.readouterr().out
-    assert "no live transport" in out
-    assert "#95" in out or "_RaisingFetcher" in out
-
-
 def test_blog_writes_one_post_per_query_term(needs_runtime_url: str, secret_file: Path):
     fetcher = _FakeFetcher()
     code = run(
@@ -217,20 +215,6 @@ def test_blog_is_blocked_when_every_query_fails(needs_runtime_url: str, secret_f
     assert code == 2
 
 
-def test_blog_is_blocked_with_a_message_when_no_fetcher_is_injected(
-    needs_runtime_url: str, secret_file: Path, capsys
-):
-    """#95: the default fetcher (`_RaisingFetcher`, no live transport yet) must end the run exit 2
-    with a one-line explanation, not let `NotImplementedError` escape silently or as a traceback.
-    Unlike every other test here, this one deliberately does not pass `fetcher=` -- that's the path
-    #95 found broken."""
-    code = run("blog", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
-    assert code == 2
-    out = capsys.readouterr().out
-    assert "no live transport" in out
-    assert "#95" in out or "_RaisingFetcher" in out
-
-
 def test_cosmai_collect_naver_reaches_this_module():
     """Not `--help` -- that only proves the parser accepts `naver`. This proves _run_collect's
     dispatch actually imports collectors.naver.cli rather than the "not wired yet" refusal."""
@@ -245,3 +229,251 @@ def test_cosmai_collect_naver_reaches_this_module():
     assert result.returncode == 2
     assert "not wired yet" not in result.stdout
     assert "no dataset named" in result.stdout
+
+
+# --- the live default, and what a status does to the run's exit code (#182) ----------------------
+
+
+class _AuthBlockedFetcher:
+    """The gateway refusing the credential: every later request would be refused the same way."""
+
+    def __init__(self) -> None:
+        self.calls: list[FetchSpec] = []
+
+    def fetch(self, spec: FetchSpec) -> dict[str, Any]:
+        self.calls.append(spec)
+        raise AuthBlocked("HTTP 401 (errorCode=024)", status=401, error_code="024")
+
+
+class _StoppingAfter:
+    """Serves `allowed` requests, then raises whatever ends a run early (429 or a spent budget)."""
+
+    def __init__(self, error: TransportError, allowed: int = 0) -> None:
+        self.error = error
+        self.allowed = allowed
+        self.calls = 0
+
+    def fetch(self, spec: FetchSpec) -> dict[str, Any]:
+        self.calls += 1
+        if self.calls > self.allowed:
+            raise self.error
+        if spec.kind == "datalab":
+            return DATALAB_BODY
+        if spec.params["start"] > 1:
+            return _blog_page([])
+        return _blog_page([_post_for(spec.query)])
+
+
+class _FailingOneTerm:
+    """One term's request fails; every other one is served."""
+
+    def __init__(self, term: str) -> None:
+        self.term = term
+
+    def fetch(self, spec: FetchSpec) -> dict[str, Any]:
+        if spec.query == self.term:
+            raise RequestFailed("HTTP 400 (errorCode=101)", status=400, error_code="101")
+        if spec.params["start"] > 1:
+            return _blog_page([])
+        return _blog_page([_post_for(spec.query)])
+
+
+def _post_for(term: str) -> dict[str, Any]:
+    return {
+        "title": f"{term} review",
+        "link": f"https://blog.naver.com/x/{term.replace(' ', '_')}",
+        "description": "an excerpt",
+        "bloggername": "someone",
+        "postdate": "20260801",
+    }
+
+
+def _run_rows(url: str) -> list[Any]:
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        rows = conn.execute(sa.select(naver_run.c.status, naver_run.c.note)).mappings().all()
+    engine.dispose()
+    return list(rows)
+
+
+def _fetch_log_statuses(url: str) -> list[int | None]:
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        rows = conn.execute(sa.select(naver_fetch_log.c.status)).scalars().all()
+    engine.dispose()
+    return list(rows)
+
+
+def _blog_count(url: str) -> int:
+    engine = sa.create_engine(url)
+    with engine.begin() as conn:
+        n = conn.execute(sa.select(sa.func.count()).select_from(naver_blog_post)).scalar_one()
+    engine.dispose()
+    return n
+
+
+def test_a_refused_credential_blocks_the_datalab_run_and_names_the_status(
+    needs_runtime_url: str, secret_file: Path
+):
+    fetcher = _AuthBlockedFetcher()
+    code = run(
+        "datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+
+    assert code == 2
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "blocked"
+    assert "401" in row["note"] and "024" in row["note"]
+    # The fetch_log status is what collector_health buckets as blocked (contracts/entrypoints.md).
+    assert _fetch_log_statuses(needs_runtime_url) == [401]
+
+
+def test_a_refused_credential_stops_the_blog_run_at_the_first_query(
+    needs_runtime_url: str, secret_file: Path
+):
+    fetcher = _AuthBlockedFetcher()
+    code = run(
+        "blog", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+
+    assert code == 2
+    # 15 query terms, one request: a refused key is not asked fourteen more times.
+    assert len(fetcher.calls) == 1
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "blocked"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RateLimited("HTTP 429 (errorCode=012)", status=429, error_code="012"),
+        BudgetExhausted("this run has spent its budget of 200 request(s)"),
+    ],
+    ids=["rate-limited", "budget-spent"],
+)
+def test_a_stopped_blog_run_is_partial_and_keeps_what_it_collected(
+    needs_runtime_url: str, secret_file: Path, error: TransportError
+):
+    # Two requests served: the first term's page and its empty second page. The third request --
+    # the second term's first page -- is the one that stops the run.
+    fetcher = _StoppingAfter(error, allowed=2)
+    code = run(
+        "blog", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+
+    assert code == 1
+    assert _blog_count(needs_runtime_url) == 1
+    # Stopped, not skipped: the other 14 terms are not asked after the vendor said "not now".
+    assert fetcher.calls == 3
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "partial"
+
+
+def test_a_rate_limited_datalab_run_is_partial_even_with_nothing_collected(
+    needs_runtime_url: str, secret_file: Path
+):
+    """A 429 says "not now", not "never" -- exit 1 sends the operator to the next window, while the
+    exit 2 a blocked run returns would send them to look for a broken credential."""
+    error = RateLimited("HTTP 429 (errorCode=012)", status=429, error_code="012")
+    code = run(
+        "datalab",
+        database_url=needs_runtime_url,
+        secrets_path=secret_file,
+        fetcher=_StoppingAfter(error),
+        captured_at=AT,
+    )
+
+    assert code == 1
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "partial"
+    assert _fetch_log_statuses(needs_runtime_url) == [429]
+
+
+def test_one_failed_request_leaves_the_blog_run_partial(needs_runtime_url: str, secret_file: Path):
+    from collectors.naver import keywords
+
+    term = keywords.queries()[0].term
+    code = run(
+        "blog",
+        database_url=needs_runtime_url,
+        secrets_path=secret_file,
+        fetcher=_FailingOneTerm(term),
+        captured_at=AT,
+    )
+
+    assert code == 1
+    assert _blog_count(needs_runtime_url) == 14  # 15 terms, the one that failed missing
+    (row,) = _run_rows(needs_runtime_url)
+    assert row["status"] == "partial"
+    assert 400 in _fetch_log_statuses(needs_runtime_url)
+
+
+class _RecordingLive(HttpFetcher):
+    """The live transport with its socket replaced -- everything else on the path is the real code
+    the CLI builds, including the retry loop and the status mapping."""
+
+    built: list[dict[str, str]] = []
+
+    def __init__(self, client_id: str, client_secret: str, **kwargs: Any) -> None:
+        _RecordingLive.built.append({"client_id": client_id, "client_secret": client_secret})
+        kwargs["transport"] = httpx.MockTransport(_serve_one_page)
+        super().__init__(client_id, client_secret, **kwargs)
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+        super().close()
+
+
+def _serve_one_page(request: httpx.Request) -> httpx.Response:
+    term = request.url.params["query"]
+    start = int(request.url.params["start"])
+    return httpx.Response(200, json=_blog_page([_post_for(term)] if start == 1 else []))
+
+
+def test_the_default_fetcher_is_the_live_transport(needs_runtime_url: str, secret_file: Path, monkeypatch):
+    """#182: with no `fetcher=`, a run builds the live transport out of the secret file's two keys
+    and closes it. Before this, the default raised and every scheduled run ended blocked."""
+    _RecordingLive.built.clear()
+    monkeypatch.setattr(cli, "HttpFetcher", _RecordingLive)
+
+    code = run("blog", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
+
+    assert code == 0
+    assert _RecordingLive.built == [{"client_id": "id", "client_secret": "secret"}]
+    assert _blog_count(needs_runtime_url) == 15
+
+
+def test_nothing_is_left_that_refuses_to_fetch():
+    assert not hasattr(cli, "_RaisingFetcher"), "the #9 placeholder is what this issue replaces"
+
+
+def test_the_run_closes_the_transport_it_built(needs_runtime_url: str, secret_file: Path, monkeypatch):
+    """An httpx pool left open outlives `cosmai collect` inside the cron container."""
+    built: list[_RecordingLive] = []
+
+    class _Kept(_RecordingLive):
+        def __init__(self, client_id: str, client_secret: str, **kwargs: Any) -> None:
+            super().__init__(client_id, client_secret, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(cli, "HttpFetcher", _Kept)
+    run("blog", database_url=needs_runtime_url, secrets_path=secret_file, captured_at=AT)
+
+    assert [f.closed for f in built] == [True]
+
+
+def test_an_injected_fetcher_is_the_callers_to_close(needs_runtime_url: str, secret_file: Path):
+    # The other side of the same rule: a fetcher closed out from under the caller that made it
+    # fails on that caller's *next* run, not on this one.
+    class _Owned(_FailingOneTerm):
+        def __init__(self) -> None:
+            super().__init__(term="")
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    owned = _Owned()
+    run("blog", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=owned, captured_at=AT)
+    assert not owned.closed
