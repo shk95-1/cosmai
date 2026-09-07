@@ -374,6 +374,19 @@ def outside_fences:
       elif .inside then .
       else .out += [$line] end)
   | .out | join("\n");
+# A backticked run is a data value or an identifier at this site -- a search term, a group key, a
+# path -- the same judgment tool/checks/lang makes per file (there, a path allowlist; here, a span).
+# Korean written directly into unbacked prose still fails, which is what #192 D12 is for. The rule
+# is exactly the Markdown pairing rule: the opener and the closer must each be a whole run of the
+# same backtick count, not a run of at least that count. The four lookarounds do that work --
+# (?<!`) and (?!`) around the opener force it to be maximal (without the trailing one, backtracking
+# lets a short run capture a prefix of a longer one and silence Korean sitting past it), and the
+# same pair around the closer force that too. A line is left whole exactly when nothing in it
+# pairs this way -- there is no separate parity guard, and none is needed.
+def outside_code_spans:
+  split("\n")
+  | map(gsub("(?<!`)(?<open>`+)(?!`)(?<content>.*?)(?<!`)\\k<open>(?!`)"; ""))
+  | join("\n");
 # Codepoint escapes, not literal syllables, for the reason tool/checks/lang gives for the same
 # choice: this file must not contain the Hangul the rule below exists to catch.
 def hangul: test("[\\x{1100}-\\x{11FF}\\x{3130}-\\x{318F}\\x{A960}-\\x{A97F}\\x{AC00}-\\x{D7A3}\\x{FFA0}-\\x{FFDC}]");
@@ -575,8 +588,9 @@ flat as $all
        then {key: .key, short: .short, number: .number, reason: "deferred with no open blockedBy and no Release condition section"} else empty end),
       (if (.body | test("/ho" + "me/[A-Za-z0-9._-]")) then {key: .key, short: .short, number: .number, reason: "body contains a machine path (home directory)"} else empty end),
       # #192 D12. Only issues opened on or after the effective date, and only prose: a fenced block
-      # is quoted evidence, and rewriting it would falsify the quote.
-      (if .createdAt >= $lang_effective and ((.title | hangul) or (.body | outside_fences | hangul))
+      # is quoted evidence and rewriting it would falsify the quote (#251), an inline code span is
+      # a data value or an identifier the same way (#251).
+      (if .createdAt >= $lang_effective and ((.title | hangul) or (.body | outside_fences | outside_code_spans | hangul))
        then {key: .key, short: .short, number: .number,
              reason: ("Korean in the title or body of an issue opened on or after " + $lang_effective)} else empty end)]
    | sort_by(.short, .number, .reason)) as $findings
