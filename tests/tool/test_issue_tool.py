@@ -274,7 +274,9 @@ def run(tmp_path: Path):
             "FAKE_GH_CI_CONCLUSION": fixture_kwargs.get("ci_conclusion", ""),
             "FAKE_GH_NIGHTLY_FAIL": "1" if fixture_kwargs.get("nightly_fails") else "",
             "FAKE_GH_NIGHTLY_MISSING": "1" if fixture_kwargs.get("nightly_missing") else "",
-            "FAKE_GH_NIGHTLY_DATE": fixture_kwargs.get("nightly_date", ""),
+            # Never "": the fake would fall back to a literal date of its own, and every audit test
+            # that does not name a nightly would inherit the same rot (#253).
+            "FAKE_GH_NIGHTLY_DATE": fixture_kwargs.get("nightly_date") or _hours_ago(2),
             "FAKE_GH_NIGHTLY_CONCLUSION": fixture_kwargs.get("nightly_conclusion", ""),
             "FAKE_DOCKER_OPS_FAIL": "1" if fixture_kwargs.get("ops_fails") else "",
             "FAKE_DOCKER_OPS_PIPELINE": fixture_kwargs.get("ops_pipeline", ""),
@@ -741,21 +743,30 @@ def test_audit_reports_drift_without_failing(run):
 # ---------------------------------------------------------------------------------------------
 
 
+def _hours_ago(hours: float) -> str:
+    """A nightly timestamp relative to now. A literal date here rots: the audit warns once a run is
+    over 36h old (`tool/issue`), so a date written into the file turns the green case red on its own
+    the day after tomorrow, and turns the red and missing cases into false passes whose ⚠ comes from
+    age rather than from the conclusion they mean to assert (#253)."""
+    return (datetime.now(UTC) - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _nightly_block(stdout: str) -> str:
     return stdout.split("nightly")[1].split("\n\n")[0]
 
 
 def test_audit_reports_a_green_nightly_first(run):
+    recent = _hours_ago(2)
     done = run(
         "audit",
         upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
-        nightly_date="2026-09-05T17:00:00Z",
+        nightly_date=recent,
         nightly_conclusion="success",
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.strip().startswith("nightly"), done.stdout
     block = _nightly_block(done.stdout)
-    assert "2026-09-05T17:00:00Z" in block and "success" in block, done.stdout
+    assert recent in block and "success" in block, done.stdout
     assert "⚠" not in block, done.stdout
 
 
@@ -763,12 +774,37 @@ def test_audit_flags_a_red_nightly(run):
     done = run(
         "audit",
         upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
-        nightly_date="2026-09-05T17:00:00Z",
+        nightly_date=_hours_ago(2),
         nightly_conclusion="failure",
     )
     block = _nightly_block(done.stdout)
     assert "failure" in block, done.stdout
+    # The run is 2h old, so this ⚠ can only be the red conclusion -- with a literal date it was the
+    # age, and this case would have passed with the red-nightly rule removed entirely (#253).
     assert "⚠" in block, done.stdout
+
+
+def test_a_nightly_just_inside_the_age_bound_does_not_warn(run):
+    # The 36h rule (`tool/issue`) had nothing asserting it deliberately -- the only thing that ever
+    # exercised it was a literal date ageing past it and turning the green case red (#253).
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_date=_hours_ago(35),
+        nightly_conclusion="success",
+    )
+    assert "\u26a0" not in _nightly_block(done.stdout), done.stdout
+
+
+def test_a_nightly_past_the_age_bound_warns_even_when_green(run):
+    done = run(
+        "audit",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        nightly_date=_hours_ago(37),
+        nightly_conclusion="success",
+    )
+    block = _nightly_block(done.stdout)
+    assert "success" in block and "\u26a0" in block, done.stdout
 
 
 def test_audit_flags_a_missing_nightly(run):
