@@ -88,6 +88,17 @@ test("scope='all' 칸만 canonical 로 접힌 need_key 를 본다", () => {
   assert.ok(!f.some((x) => x.column === 'need_key'));
 });
 
+test('a rollup cell is narrowed by its population, a category cell is not', () => {
+  // #126: scope='all' counts generic mentions alone, so the population is one of that cell's axes.
+  // Without it the retrace returns the category mentions too -- a strict superset (12 of the 16 rollup
+  // rows on production run 39, the worst 35.4% uncounted) that app.js prints under the cell as the
+  // cell's own count. The same drift as #128's product axis, one axis over.
+  const rollup = needCellFilters({ ...CELL, scope: 'all' }, RUNS[2]);
+  assert.ok(rollup.some((x) => x.column === 'aspect_scope' && x.op === 'eq' && x.value === 'generic'));
+  // A category scope counts every mention of that category, generic aspects included.
+  assert.ok(!needCellFilters(CELL, RUNS[2]).some((x) => x.column === 'aspect_scope'));
+});
+
 test('월 칸과 제품 칸은 축 하나씩을 더 건다', () => {
   const month = needCellFilters({ ...CELL, month: '2026-07' }, RUNS[2]);
   assert.ok(month.some((x) => x.column === 'month' && x.op === 'eq' && x.value === '2026-07'));

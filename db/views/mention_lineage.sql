@@ -53,6 +53,12 @@ WITH mention AS (
         -- have to sit side by side for the raw category column and the rollup column to split apart in
         -- the same view.
         coalesce(k.canonical, m.need_key)       AS need_key_rollup,
+        -- #126: the scope='all' rollup counts generic mentions alone, so retracing a rollup cell by
+        -- need_key_rollup alone returns the category mentions too -- a strict superset the screen then
+        -- prints under the cell as if it were the cell's own count (12 of 16 rollup rows on production
+        -- run 39: the worst returns 2,052 rows for a cell of 1,325). lineage.js filters this column on
+        -- the rollup branch, and a category-scope cell does not, because a category counts both.
+        m.aspect_scope,
         m.month,
         -- The value of the product axis, and it has to be _product (analysis/aggregate/__init__.py)
         -- character for character: lineage.js filters this column by a metrics_need cell's product_ref,
@@ -90,6 +96,8 @@ WITH mention AS (
         w.video_id,
         '',
         NULL,
+        NULL,
+        -- a wish has no aspect at all, so it has no aspect_scope either
         NULL,
         w.month,
         coalesce(w.product_ref, ''),
@@ -132,6 +140,7 @@ SELECT
     l.category,
     l.need_key,
     l.need_key_rollup,
+    l.aspect_scope,
     l.month,
     l.product_axis,
     l.wish_class,

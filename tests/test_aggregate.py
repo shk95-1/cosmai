@@ -518,3 +518,54 @@ def test_a_mention_with_no_product_axis_at_all_still_gets_no_product_row():
         CATEGORY,
     )
     assert products(rows, "a") == {}
+
+
+# The synthetic keys of the two #126 tests are ASCII on purpose: tool/checks/lang bars a new Korean literal
+# in tests, and what these two measure is the aspect_scope axis, which no need_key spelling touches.
+CATEGORY_ONLY = "aspect-of-one-category"
+BOTH_SIDES = "aspect-on-both-sides"
+ONE_CATEGORY = "cat-a"
+
+
+def test_the_rollup_counts_generic_mentions_only():
+    """#126: a category-only aspect is measured against its own category's population, a generic one against
+    every category's. Standing them in one ranking compares two denominators, so the rollup takes the generic
+    mentions alone — a category-only aspect emits no scope='all' row and a both-sides aspect enters with its
+    generic share."""
+    mentions = [
+        need(CATEGORY_ONLY, NEGATIVE, category=ONE_CATEGORY, ref="a/1", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="b/1", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="c/1", scope="generic"),
+    ]
+    rollup = by_key(RuleAggregator().need_metrics(mentions, [], "all"))
+    assert CATEGORY_ONLY not in rollup
+    assert rollup[BOTH_SIDES].neg == 1
+    # The month and product axes answer to the same population, or the axes stop adding up — and each is
+    # one row per (need_key, month, product_ref), which is what screen 3 dedupes by.
+    rolled = RuleAggregator().need_metrics(mentions, [], "all")
+    assert {r.need_key for r in rolled} == {BOTH_SIDES}
+    assert [r.product_ref for r in rolled if r.product_ref] == ["oy:p"]
+    assert len({(r.need_key, r.month, r.product_ref) for r in rolled}) == len(rolled)
+    # The category scope is untouched — it is where a category-only aspect is read.
+    category = by_key(RuleAggregator().need_metrics(mentions, [], ONE_CATEGORY))
+    assert (category[CATEGORY_ONLY].neg, category[BOTH_SIDES].neg) == (1, 2)
+
+
+def test_the_aspect_scope_label_does_not_depend_on_which_mention_came_last():
+    """#126: the label was scopes[-1], the scope of whichever mention closed the group, so one (scope,
+    need_key) was stamped `generic` on its category total and `category` on a product row of the same run —
+    12 such pairs in production run 39. It is now decided once over the scope, and a need_key whose mentions
+    disagree carries no label rather than one of the two at random."""
+    mentions = [
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="a/1", product="oy:a", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="b/1", product="oy:b", scope="generic"),
+    ]
+    rows = RuleAggregator().need_metrics(mentions, [], ONE_CATEGORY)
+    assert {r.aspect_scope for r in rows} == {None}
+    # A need_key its mentions agree on keeps its label, on every axis.
+    agreed = RuleAggregator().need_metrics(
+        [replace(m, aspect_scope="category") for m in mentions], [], ONE_CATEGORY
+    )
+    assert {r.aspect_scope for r in agreed} == {"category"}
+    # The rollup population is generic alone, so a rollup row is always labelled generic.
+    assert {r.aspect_scope for r in RuleAggregator().need_metrics(mentions, [], "all")} == {"generic"}
