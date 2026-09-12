@@ -293,9 +293,44 @@ def needs_runtime_url(needs_schema: str, _schema_name: str) -> str:
     return url.render_as_string(hide_password=False)
 
 
-TREND_RADAR_DDL = (
-    Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.trend_radar.sql"
-)
+DDL_ROOT = Path(__file__).resolve().parents[1] / "contracts" / "ddl"
+
+
+def _source_additive_files(source: str) -> list[Path]:
+    """Every contracts/ddl/<source>/NNN_*.sql, in filename order -- the layer db/migrate.sh puts on
+    top of the baseline dump, read from the same directory by the same rule."""
+    return sorted((DDL_ROOT / source).glob("*.sql"))
+
+
+def _apply_source_ddl(conn: Any, schema: str, source: str) -> None:
+    """One source schema's canonical form, composed into a throwaway schema of another name:
+    the baseline dump contracts/ddl/current/app.<source>.sql, then every additive file, then the
+    per-schema ledger carrying one row per file applied (#223).
+
+    This is `db/migrate.sh` step (0) statement for statement, and it cannot call that script -- the
+    script deploys one named schema into a container and every test here wants its own renamed copy.
+    So the two are held against each other instead, object by object and row by row, by
+    tests/test_empty_db_bootstrap.py. That comparison is the only thing keeping this function and the
+    deploy from drifting apart, which is why the ledger was added to both sides at once: a fixture
+    that skipped it would be a schema production does not have.
+    """
+    lines = [
+        ln
+        for ln in (DDL_ROOT / "current" / f"app.{source}.sql").read_text(encoding="utf-8").splitlines()
+        if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
+    ]
+    # The per-test schema already exists (database_url_for_tests); the dump's own CREATE SCHEMA would
+    # collide with it, and every object in the file is qualified with the schema name it is renaming.
+    ddl = "\n".join(lines).replace(f"CREATE SCHEMA {source};", "").replace(f"{source}.", f'"{schema}".')
+    conn.exec_driver_sql(ddl)
+    for path in _source_additive_files(source):
+        conn.exec_driver_sql(path.read_text(encoding="utf-8").replace(f"{source}.", f'"{schema}".'))
+    conn.exec_driver_sql(
+        f'CREATE TABLE IF NOT EXISTS "{schema}".schema_migration ('
+        " version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
+    )
+    for path in _source_additive_files(source):
+        conn.exec_driver_sql(f"INSERT INTO \"{schema}\".schema_migration(version) VALUES ('{path.stem}')")
 
 
 @pytest.fixture
@@ -307,48 +342,12 @@ def trend_radar_schema(database_url_for_tests: str, _schema_name: str) -> str:
     No role switch, unlike `needs_schema`: `trend_radar` predates the needs-style owner/runtime split
     (contracts/README.md) and is already live in production without one, so the per-test schema is
     applied and read back as the same role that created it.
-
-    The deploy composes the same schema the same way -- `db/migrate.sh` step (0), which is what the
-    harness container's real `trend_radar` comes from since #178. This fixture cannot call that
-    script (its schemas are renamed and one per test), so the two are held against each other
-    instead: tests/test_empty_db_bootstrap.py compares them column by column.
     """
-    schema = _schema_name
     engine = create_engine(database_url_for_tests)
-    lines = [
-        ln
-        for ln in TREND_RADAR_DDL.read_text(encoding="utf-8").splitlines()
-        if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
-    ]
-    # The per-test schema already exists (database_url_for_tests); the dump's own CREATE SCHEMA would
-    # collide with it, and every object in the file is qualified with the schema name it is renaming.
-    ddl = "\n".join(lines).replace("CREATE SCHEMA trend_radar;", "").replace("trend_radar.", f'"{schema}".')
     with engine.begin() as conn:
-        conn.exec_driver_sql(ddl)
+        _apply_source_ddl(conn, _schema_name, "trend_radar")
     engine.dispose()
     return database_url_for_tests
-
-
-TUBEDEPTH_DDL = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "current" / "app.tubedepth.sql"
-TUBEDEPTH_NEEDS_DIR = Path(__file__).resolve().parents[1] / "contracts" / "ddl" / "tubedepth"
-
-
-def _apply_tubedepth_ddl(conn: Any, schema: str) -> None:
-    """The current 13-table dump verbatim (same substitution `trend_radar_schema` uses), then every
-    additive file in contracts/ddl/tubedepth/ on top.
-
-    That order is the schema's canonical form (contracts/README.md), and `db/migrate.sh` step (0)
-    composes the deploy's copy from the same two sources -- tests/test_empty_db_bootstrap.py holds
-    the result of this function against the result of that one."""
-    lines = [
-        ln
-        for ln in TUBEDEPTH_DDL.read_text(encoding="utf-8").splitlines()
-        if not ln.startswith("\\restrict") and not ln.startswith("\\unrestrict")
-    ]
-    ddl = "\n".join(lines).replace("CREATE SCHEMA tubedepth;", "").replace("tubedepth.", f'"{schema}".')
-    conn.exec_driver_sql(ddl)
-    for path in sorted(TUBEDEPTH_NEEDS_DIR.glob("*.sql")):
-        conn.exec_driver_sql(path.read_text(encoding="utf-8").replace("tubedepth.", f'"{schema}".'))
 
 
 @pytest.fixture
@@ -358,7 +357,7 @@ def tubedepth_schema(database_url_for_tests: str, _schema_name: str) -> str:
     """
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        _apply_tubedepth_ddl(conn, _schema_name)
+        _apply_source_ddl(conn, _schema_name, "tubedepth")
     engine.dispose()
     return database_url_for_tests
 
@@ -377,7 +376,7 @@ def tubedepth_side_schema(database_url_for_tests: str, _schema_name: str) -> Ite
         with engine.begin() as conn:
             conn.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
             conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
-            _apply_tubedepth_ddl(conn, schema)
+            _apply_source_ddl(conn, schema, "tubedepth")
         # The pool is not held across the yield. needs_migrator has CONNECTION LIMIT 2 for the whole
         # cluster, so an idle pooled connection is a third of the budget a test that runs
         # db/migrate.sh needs, and the deploy then fails on "too many connections" (#178 review 4).

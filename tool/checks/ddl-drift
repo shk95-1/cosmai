@@ -66,52 +66,54 @@ report() { # $1 = db.schema label (also the $work filename), $2 = what expected 
 # baseline contracts/ddl/current/cosmai.cosmai.sql stays only as the record of what was dropped.
 pairs='app:trend_radar app:tubedepth'
 
-# Everything is built before anything is dumped, and no schema is dropped in between. That is not
+# A missing baseline would otherwise surface as a db/migrate.sh failure three steps later, naming
+# the schema rather than the file (`grep` on a path that is not there).
+for pair in $pairs; do
+    baseline=contracts/ddl/current/${pair%%:*}.${pair#*:}.sql
+    [ -f "$baseline" ] || { echo "ddl-drift: no baseline for $pair" >&2; exit 1; }
+done
+
+# ---------------------------------------------------------------------------------------------
+# Expected, for all three schemas, is db/migrate.sh -- the script production runs.
+#
+# trend_radar and tubedepth used to be rebuilt here by a loop of this file's own: the baseline, then
+# every contracts/ddl/<schema>/*.sql. That was a second copy of the composition rule, and #223
+# measured what it cost. The deploy applied those files only where the schema was absent, which
+# production never is, so "expected" carried a column production had no path to, and this check
+# reporting drift on a file the deploy was meant to carry was the only thing that would ever have
+# said so. One composition and one path is the fix: the container below is empty, so step (0) builds
+# both source schemas from the same baseline and the same additive files and seeds each one's ledger
+# from what it applied; production reaches that same state through step (0b).
+#
+# Everything is built by this one call and nothing is dropped before the dumps, which is not
 # tidiness. pg_dump orders objects by dependency, not by name, so a schema dumped alone sorts
 # differently from the same schema dumped beside the views that read it: since #77
 # db/views/collector_health.sql reads tubedepth.jobs, and production -- where that view exists --
 # hoists jobs to the front of the tubedepth dump, while a lone rebuild leaves it in alphabetical
-# place. Building one schema at a time and dropping it after its own dump also left db/migrate.sh
-# below with no tubedepth.jobs to bind to, so the view failed and the app.needs verdict vanished
+# place. Building one schema at a time and dropping it after its own dump also left the `needs` half
+# with no tubedepth.jobs to bind to, so the view failed and the app.needs verdict vanished
 # altogether (#114). Expected is therefore assembled as the whole graph production carries.
-for pair in $pairs; do
-    db=${pair%%:*}
-    schema=${pair#*:}
-    baseline=contracts/ddl/current/$db.$schema.sql
-    [ -f "$baseline" ] || { echo "ddl-drift: no baseline for $pair" >&2; exit 1; }
-
-    # Expected = baseline, then every additive file the contract declares for that schema.
-    #
-    # This loop must stay *before* the db/migrate.sh call below, and not only for the dump-ordering
-    # reason above: since #178 that script has a step (0) that builds trend_radar and tubedepth
-    # itself when they are absent. Run migrate.sh first and it would compose them here, off the same
-    # baseline and additive files -- and the expected side would then be measuring this checkout
-    # against itself twice instead of against production.
-    docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 \
-        -c 'SET client_min_messages = warning' -f - < "$baseline" > /dev/null
-    for add in contracts/ddl/"$schema"/*.sql; do
-        [ -e "$add" ] || continue
-        docker exec -i "$name" psql -U drift -d drift -X -q -v ON_ERROR_STOP=1 -f - < "$add" > /dev/null
-    done
-done
-
-# ---------------------------------------------------------------------------------------------
-# app.needs is this repo's own schema, so it gets its expected state from the script production
-# runs -- db/migrate.sh -- not from a dump baseline. Assembling it from the ledger instead would
-# be impossible: needs.schema_migration records the fork's 020, whose file is not in this
-# checkout. What the fork put into production is therefore declared, not assembled:
-# contracts/ddl/needs/foreign.txt names each object that is theirs -- minus whatever this
-# checkout turns out to declare after all, which is the fork's own case (cosmai#108, below).
+#
+# app.needs is this repo's own schema and has no dump baseline for a second reason: db/migrate.sh IS
+# its expected state, and production carries objects a fork put there whose files are not in this
+# checkout. Assembling it from the ledger instead would be impossible -- needs.schema_migration
+# records the fork's 020, whose file is not here. What the fork put into production is therefore
+# declared, not assembled: contracts/ddl/needs/foreign.txt names each object that is theirs -- minus
+# whatever this checkout turns out to declare after all, which is the fork's own case (cosmai#108).
 needs_db=app
 foreign=contracts/ddl/needs/foreign.txt
 [ -f "$foreign" ] || { echo "ddl-drift: missing $foreign" >&2; exit 1; }
 
-# The loop above already stood up every schema db/views/*.sql binds to, so migrate.sh deploys the
-# views here rather than skipping them. The two passwords are throwaway values for this container,
-# not secrets. Output is held back rather than passed through: migrate.sh's DROP VIEW IF EXISTS
-# prints two NOTICEs on a fresh database, and two stray lines in the middle of four verdicts read
-# like a fault.
+# Step (0) stands up every schema db/views/*.sql binds to before the same run reaches them, so the
+# views deploy here rather than being skipped. The five passwords are throwaway values for this
+# container, not secrets; the three source keys are the ones step (0) asks for only where
+# trend_radar and tubedepth are absent (#223). Output is held back rather than passed through:
+# migrate.sh's DROP VIEW IF EXISTS prints two NOTICEs on a fresh database, and two stray lines in
+# the middle of four verdicts read like a fault.
 printf 'NEEDS_DB_MIGRATOR=drift\nNEEDS_DB_RUNTIME=drift-runtime\n' > "$work/needs.env"
+printf 'TREND_RADAR_DB_RUNTIME=drift-trend-radar\nTREND_RADAR_DB_READER=drift-trend-radar-reader\n' \
+    >> "$work/needs.env"
+printf 'TUBEDEPTH_DB_RUNTIME=drift-tubedepth\n' >> "$work/needs.env"
 COSMAI_SECRET_FILE="$work/needs.env" db/migrate.sh --container "$name" --db drift --superuser drift \
     > /dev/null 2> "$work/migrate.err" || { cat "$work/migrate.err" >&2; exit 1; }
 
