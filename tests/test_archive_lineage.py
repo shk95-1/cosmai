@@ -238,6 +238,36 @@ def test_the_archive_surface_follows_the_latest_ok_run_of_the_archive_snapshot(
             assert [r[0] for r in cur.fetchall()] == [rerun], view
 
 
+def test_the_archive_surface_is_empty_while_the_archive_run_is_not_ok(
+    lineages: dict[str, Lineage], needs_runtime_url: str
+):
+    """The window the migration's comment names, and the one that can actually happen.
+
+    `analysis/trend/pipeline.py`'s `_run_id()` finds the run **by note** and re-opens that same row
+    rather than inserting another, so a re-run of `cosmai trend quarter` against the archive snapshot
+    does not add a row -- it flips the one row to `running`, and an aborted run leaves it there
+    (the marker at `analysis/trend/pipeline.py:284` names shk95-1/cosmai#201 for it). `partial` does the
+    recomputed so this should not arise, but if it does the surface has to go **empty rather than
+    wrong**, and that is the trade `archive_run`'s status filter makes. The re-run test above
+    fabricates a second run row with the same note, which is a state `_run_id()` cannot produce;
+    this is the state it can.
+    """
+    archive_run = lineages["archive"].run_id
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        for status in ("running", "partial"):
+            cur.execute("UPDATE analysis_run SET status = %s WHERE run_id = %s", (status, archive_run))
+            conn.commit()
+            cur.execute("SELECT count(*) FROM archive_run")
+            assert cur.fetchone() == (0,), status
+            for view in VIEW_NAMES:
+                cur.execute(_runs_of(view))
+                assert cur.fetchall() == [], f"{view} under status={status}"
+        cur.execute("UPDATE analysis_run SET status = 'ok' WHERE run_id = %s", (archive_run,))
+        conn.commit()
+        cur.execute("SELECT run_id FROM archive_run")
+        assert cur.fetchone() == (archive_run,)
+
+
 def test_the_archive_surface_is_empty_when_no_snapshot_is_marked_archive(
     needs_schema: str, needs_runtime_url: str, _schema_name: str
 ):

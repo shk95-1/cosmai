@@ -22,6 +22,14 @@
 -- that step needs.archive_run resolves to nothing and the three archive views return **no** rows --
 -- an empty answer, never another lineage's rows, which is the failure mode #93 D0 is about.
 --
+-- That is not the only window, and the other one is wider: the status filter below empties these views
+-- for as long as the archive's run is not 'ok'. analysis/trend/pipeline.py's _run_id() finds the run by
+-- note and **re-opens that same row** rather than inserting a new one, so `cosmai trend quarter` against
+-- snapshot 1 flips run 23 to 'running' for the length of the run, and an aborted run leaves it there
+-- (the marker at analysis/trend/pipeline.py:284 names shk95-1/cosmai#201 for it). 'partial' does the same.
+-- Under #93 D0 the archive is never recomputed, so this should never happen -- but if it does, the
+-- surface goes empty rather than wrong, and that is the trade this view is making deliberately.
+--
 -- `instrument` records how the observation was made, which is what makes two snapshots comparable
 -- at all (#38, fork #91 decision 2). The keys goal shk95-1/cosmai#255 names are listing_route,
 -- comment_depth, refetch_window_days and dictionary_version. There is no CHECK on the key set: the
@@ -55,8 +63,13 @@ CREATE UNIQUE INDEX corpus_snapshot_one_archive
 -- delimited segment, which is what strpos of ':snapshot<id>:panel' says and a LIKE pattern only
 -- approximates -- 'snapshot1' would otherwise also be a prefix of 'snapshot10'.
 --
--- Ordering by started_at and then run_id: a re-run of the archive's analysis is a new row, and the
--- surface has to follow the newest **successful** one. A failed or still-running row never takes it.
+-- The status filter and the ordering are not the same kind of thing, and only one of them is load-bearing
+-- today. `status = 'ok'` is: it is what makes a run that is mid-flight, aborted or partial stop answering
+-- here. The ORDER BY is defensive only -- _run_id() re-opens the run it finds by note instead of inserting
+-- another, so there is at most one analysis_run row per (metric, scope, snapshot, panel) and nothing for
+-- the ordering to discriminate. It is kept because the grammar, not this file, is what guarantees that,
+-- and if a second writer of 'trend-quarter:' notes ever appears the newest successful row is the one
+-- wanted. Do not read the ORDER BY as evidence that re-runs pile up: they do not.
 --
 -- Why this view sits in a migration while the three views that read it sit in db/views/:
 -- db/migrate.sh stage (f) recreates db/views/*.sql in **file order**, and every file's stem has to
