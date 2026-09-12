@@ -456,7 +456,9 @@ def _collect_one(
         # one watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
         payload = payloads.get(job.kind, cached.digest)
         digest, byte_count = cached.digest, cached.byte_count
-        route = cached.fetch_route
+        # No new artifact row, so no route to write: the cached row already carries the one that
+        # fetched it, and a cache hit is not a second observation of the source.
+        route = None
     else:
         try:
             dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
