@@ -185,6 +185,53 @@ def test_the_run_is_recorded_with_its_versions_and_the_captured_at_fallback_coun
     assert "captured_at_fallback=1" in note
 
 
+def test_a_review_carries_the_canonical_product_ref_the_linker_catalogued(loaded: str, _schema_name: str):
+    """#128: the polarity stage fills need_mention.product_ref from product_member, which the link stage
+    has just rebuilt in the same `analyze all` (analysis/pipeline.py run_all). Before this the column was
+    written NULL on every row and no other writer existed, so it held nothing but the seed."""
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO product_ref (product_ref, name_norm, name, linker_version)"
+            " VALUES ('oy:P1', 'test suncream', 'test suncream spf50', 'test')"
+        )
+        cur.execute(
+            "INSERT INTO product_member (source, product_key, product_ref, role, match_score)"
+            " VALUES ('oliveyoung', 'P1', 'oy:P1', 'primary', 1)"
+        )
+        conn.commit()
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT source_product_key, product_ref FROM need_mention"
+            " WHERE src = 'review' AND extractor_version LIKE 'rule-v%' ORDER BY source_product_key"
+        )
+        # P2 has no member row, so it stays NULL -- unattached is not the same as unwritten.
+        assert cur.fetchall() == [("P1", "oy:P1"), ("P2", None)]
+
+
+def test_the_product_ref_of_a_mention_follows_the_catalogue_of_the_latest_run(loaded: str, _schema_name: str):
+    """The daily 05:00 line runs without --missing, so a mention written before its product was catalogued
+    picks the ref up on the next run -- that is what NEED_UPSERT's DO UPDATE ... product_ref is for."""
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM need_mention WHERE product_ref IS NOT NULL")
+        assert cur.fetchone() == (0,)
+        cur.execute(
+            "INSERT INTO product_ref (product_ref, name_norm, name, linker_version)"
+            " VALUES ('oy:P1', 'test suncream', 'test suncream spf50', 'test')"
+        )
+        cur.execute(
+            "INSERT INTO product_member (source, product_key, product_ref, role, match_score)"
+            " VALUES ('oliveyoung', 'P1', 'oy:P1', 'primary', 1)"
+        )
+        conn.commit()
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM need_mention WHERE product_ref = 'oy:P1'")
+        attached = cur.fetchone()
+    assert attached is not None and attached[0] > 0
+
+
 def test_a_review_gets_the_lexicon_category_the_category_map_derives(loaded: str, _schema_name: str):
     _run(loaded, _schema_name)
     with connect(loaded) as conn, conn.cursor() as cur:

@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from analysis.aggregate import LIKE_CAP, RuleAggregator
+from analysis.aggregate import COMMENT, LIKE_CAP, NEGATIVE, UNLINKED, RuleAggregator
 from analysis.aggregate.pipeline import scopes_for
 from analysis.types import DenominatorRow, NeedMentionRow, WishMentionRow
 
@@ -471,3 +471,50 @@ def test_one_comment_of_unknown_month_makes_that_whole_month_unknown():
     assert months(rows, "밀림")["2026-02"].yt_neg == 1
     # The whole-period row is unchanged.
     assert (by_key(rows)["밀림"].yt_neg, by_key(rows)["백탁"].yt_neg) == (2, 1)
+
+
+# The category and polarity values are data, and the repository operates in English (tool/checks/lang) —
+# read them off the helper's own defaults rather than repeating the literals.
+CATEGORY = need("any", NEGATIVE).category or ""
+
+
+def test_an_unattached_mention_is_marked_on_the_product_axis_not_passed_off_as_a_ref():
+    """#128: metrics_need.product_ref held canonical refs and raw site keys in one column, so every join
+    through it was silently half right. A mention the linker has not attached now carries the reserved
+    `unlinked:<site>:<key>` marker, which no canonical ref (`<abbr>:<key>`) can collide with."""
+    rows = RuleAggregator().need_metrics(
+        [
+            need("a", NEGATIVE, ref="a/1", product="oy:a"),
+            need("a", NEGATIVE, ref="b/1", product=None),
+        ],
+        [],
+        CATEGORY,
+    )
+    per = products(rows, "a")
+    assert set(per) == {"oy:a", f"{UNLINKED}oliveyoung:b"}
+    # The raw site key never stands on its own in that column — that was the defect.
+    assert "b" not in per
+
+
+def test_the_unattached_marker_keeps_two_sites_sharing_a_product_key_apart():
+    """A product key is unique only inside a site (001), so the bare key folded two sites into one row."""
+    rows = RuleAggregator().need_metrics(
+        [
+            need("a", NEGATIVE, ref="k/1", product=None),
+            replace(need("a", NEGATIVE, ref="k/2", product=None), site="glowpick"),
+        ],
+        [],
+        CATEGORY,
+    )
+    assert set(products(rows, "a")) == {f"{UNLINKED}oliveyoung:k", f"{UNLINKED}glowpick:k"}
+
+
+def test_a_mention_with_no_product_axis_at_all_still_gets_no_product_row():
+    """YouTube comments carry no source_product_key (51% of production need_mention) — they are not
+    unattached products, they have no product axis, and marking them would invent one."""
+    rows = RuleAggregator().need_metrics(
+        [replace(need("a", NEGATIVE, src=COMMENT, ref="v/1", product=None), source_product_key=None)],
+        [],
+        CATEGORY,
+    )
+    assert products(rows, "a") == {}
