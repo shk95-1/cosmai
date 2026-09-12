@@ -373,3 +373,34 @@ def test_rekey_repairs_a_stored_key_that_no_longer_matches_the_function(needs_ru
         # A second pass rewrites no row -- that is what makes it safe to run after any change.
         assert mfds.rekey(cur) == 0
         conn.commit()
+
+
+@pytest.mark.postgres
+def test_rekey_refuses_a_folding_change_that_empties_a_key_and_updates_nothing(
+    needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch
+):
+    """A folding change to `normalize_company` that sends one company to the empty key must not
+    surface as a bare `CheckViolation` from the UPDATE, half-way through the loop, without the
+    company name -- `rekey` refuses before it touches a row, the same way `rows()` refuses before
+    loading one."""
+    seed.run_all(needs_runtime_url, only=("mfds",))
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT entp_name FROM mfds_registration ORDER BY report_seq LIMIT 1")
+        row = cur.fetchone()
+        assert row
+        (folded_name,) = row
+        before = _snapshot(cur)
+
+        real_normalize_company = mfds.normalize_company
+        monkeypatch.setattr(
+            mfds,
+            "normalize_company",
+            lambda name: "" if name == folded_name else real_normalize_company(name),
+        )
+        with pytest.raises(ValueError, match="empty join key") as raised:
+            mfds.rekey(cur)
+        conn.rollback()
+
+    assert folded_name in str(raised.value)
+    with connect(needs_runtime_url) as conn, conn.cursor() as cur:
+        assert _snapshot(cur) == before
