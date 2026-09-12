@@ -31,4 +31,11 @@
   rather than of the schema name -- the table is the baseline's own marker, so a schema standing
   without it is a build that died part-way and not a schema to leave alone.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
+- `needs.analysis_run.versions` gains three keys for the live lineage, declared by fork #94 and written by fork
+  #95 and #96: `snapshot`, the `corpus_snapshot.snapshot_id` the run read; `cutoff`, the
+  `corpus_document.collected_at` ceiling it applied — the same cutoff gives the same answer, which is what
+  replaces a frozen copy (#93 D2); and `topics`, the dictionary version whose match produced that run's
+  mentions. `versions` is jsonb, so none of the three needs a migration. The archive's run predates all three
+  and carries none of them: its snapshot is named inside `analysis_run.note`, and `needs.archive_run` resolves
+  it from there rather than from `versions`.
 - The ydc import pin is **`v0.4.0` `76db718`** of `shk95-1/cosmai-ydc-old` (formerly `slopindustries/youtube-data-collector`), the last commit of that repository — the marker for "seen up to here": every commit up to that tag carries a disposition in the ledger on goal `shk95/cosmai-import-ydc#1` (fork #52). The pin is not the promotion source. Each promoted module's header names the ydc tag its rules were copied from — `v0.1.0` `02440ab` for the v0.1.0 lineage, `v0.3.0` `e5a1b00` for `cross_source.py` · `holdout_commerce.py` · `vector_threshold.py` — and `tests/test_ydc_pin.py` checks that this line names one pin, that every header tag is one of the four ydc tags, and that none is newer than the pin. Nothing in this checkout compares the code against the ydc repository itself: `tool/compare-ydc-*` read the ydc checkout `--ydc` points at, on demand, and a change to the original after the pin is caught only by the next disposition pass.
