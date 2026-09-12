@@ -1,0 +1,36 @@
+{
+  "kind": "youtube#videoListResponse",
+  "etag": "etag-video-list",
+  "pageInfo": {
+    "totalResults": 1,
+    "resultsPerPage": 1
+  },
+  "items": [
+    {
+      "kind": "youtube#video",
+      "etag": "etag-video",
+      "id": "dQw4w9WgXcQ",
+      "snippet": {
+        "publishedAt": "2026-09-01T09:00:07Z",
+        "channelId": "UC5oM4Ai05dQqiVL6rypAo_A",
+        "title": "long upload",
+        "description": "a description",
+        "channelTitle": "panel channel",
+        "tags": [
+          "tag"
+        ],
+        "categoryId": "26"
+      },
+      "contentDetails": {
+        "duration": "PT4M13S",
+        "definition": "hd",
+        "caption": "true"
+      },
+      "statistics": {
+        "viewCount": "1523",
+        "likeCount": "88",
+        "commentCount": "12"
+      }
+    }
+  ]
+}

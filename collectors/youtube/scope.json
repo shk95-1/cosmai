@@ -4,6 +4,42 @@
   "MAX_FOLLOWUPS_PER_VIDEO_note": "video.metadata + video.comments + video.transcript -- every follow-up kind a watchlist directive can name today (collectors/youtube/watchlist.py DIRECTIVES). One video reaching this many *active* (queued or running) follow-up jobs at once means something is re-fanning it faster than work() drains it, which is exactly the shape of the 224k incident.",
   "MAX_QUEUE_DEPTH": 5000,
   "MAX_QUEUE_DEPTH_note": "queued+running rows allowed system-wide before watch refuses to enqueue more and exits 1 (partial). Two orders of magnitude below the 224,036 duplicates actually observed -- a breaker meant to trip long before a runaway sweep gets anywhere near that scale, not a capacity plan.",
+  "COMMENT_REFETCH_WINDOW_DAYS": 30,
+  "COMMENT_REFETCH_WINDOW_DAYS_note": "#183, PROVISIONAL -- not measured. How far back a listed video may have been published and still have its video.comments follow-up fanned out again. A video published before this window gets video.comments exactly once, at first observation, and never again; inside the window FRESHNESS_SECONDS['video.comments'] keeps governing the re-fetch. Without it a daily cadence re-fetches every panel video's comments every day -- against the 13,979 videos the panel corpus holds that is the quota shape the archive measured as 5,098 of 5,679 units, every day, forever. 30 is a placeholder chosen to equal PRUNE_MAX_AGE_DAYS (collectors/youtube/cli.py) so the two ages cannot disagree silently; it is not evidence for 30. The real number comes from the timed sample of fork shk95/cosmai-import-ydc#38, which is blocked on this issue -- so the constant has to exist before its value can be known.",
+  "LISTING_WINDOW_START": "2024-07-01",
+  "LISTING_WINDOW_START_note": "#183: the oldest publication date the first listing walk goes back to (the fork's window decision, shk95/cosmai-import-ydc#38). The uploads playlist comes back newest first, so the walk stops at the first entry published before this date rather than paging to the end of a channel's history.",
+  "MAX_LISTING_ITEMS": 2000,
+  "MAX_LISTING_ITEMS_note": "#183: the hard stop on one listing walk, independent of LISTING_WINDOW_START. A channel whose uploads playlist is longer than this is cut off and the dump says so (truncated), which `work` reports as a partial run -- the alternative is a walk whose length is decided by somebody else's upload history. 2000 is 20 pages of 100 at 1 unit each.",
+  "MAX_COMMENTS_PER_VIDEO": 200,
+  "MAX_COMMENTS_PER_VIDEO_note": "#183: copied verbatim from the archived CommentsSource.DEFAULT_LIMIT (service/yt-scrapper/src/tubedepth/sources/comments.py), not re-derived. yt-dlp returns roughly one request per twenty comments, so this is the real cost control on the expensive kind. A harvest that comes back at exactly this many is marked truncated rather than passed off as the whole thread.",
+  "VIDEO_METADATA_ROUTE": "data_api",
+  "VIDEO_METADATA_ROUTE_note": "#183: which of the two routes video.metadata is fetched over -- 'ytdlp' or 'data_api'. Either is admissible (the Autonomous decision of 2026-09-13, tier 2) and the route used is written to artifacts.fetch_route on every row, so an analysis axis can declare which routes it accepts (the population model of shk95/cosmai-import-ydc#91, option D). data_api, because every column tubedepth.video_snapshots actually has is served by both routes and one of them is served by neither of the other's: source_metadata.has_paid_product_placement comes only from videos.list's paidProductPlacementDetails part, and analysis/sensitivity/pipeline.py reads it as the declared half of ad marking (contracts/interfaces.md: 254 reported, 465 in union -- dropping the field costs about 12% of ad videos, silently). What yt-dlp has and the Data API does not -- chapters, tags-with-heatmap, the most-replayed graph -- has no column and no reader here, so it would be collected into nothing.",
+  "ROUTES": {
+    "data_api": {
+      "max_requests_per_run": 1200,
+      "sleep_seconds": 0.0,
+      "timeout_s": 20.0
+    },
+    "ytdlp": {
+      "max_requests_per_run": 400,
+      "sleep_seconds": 0.75,
+      "timeout_s": 60.0
+    },
+    "timedtext": {
+      "max_requests_per_run": 400,
+      "sleep_seconds": 0.75,
+      "timeout_s": 20.0
+    }
+  },
+  "ROUTES_note": "#183: one request budget and one pause per source, counted per run, in the shape collectors/naver/scope.json's http block uses. Every attempt is charged, retries included, because a retry is another request the source serves; a run that spends its budget stops that route rather than deepening whatever made it slow. data_api: the budget is quota units' proxy, not units -- a 43-channel pass is about 600 units by the fork's arithmetic against a 10,000/day ceiling, so 1200 requests bounds a runaway walk well under it, and Google's own quota is the real limit so no pause is added. ytdlp/timedtext: sleep_seconds is the archived LibraryYtdlpRuntime.BASE_OPTIONS' sleep_requests 0.75 (service/yt-scrapper/src/tubedepth/sources/ytdlp_runtime.py), carried over verbatim -- being unremarkable in someone's logs is the whole posture. timeout_s for ytdlp is the whole extraction, which walks several pages inside one call, not one round trip.",
+  "VIDEO_PARTS": [
+    "snippet",
+    "statistics",
+    "contentDetails",
+    "status",
+    "paidProductPlacementDetails"
+  ],
+  "VIDEO_PARTS_note": "#183: the `part` string videos.list is asked for. One quota unit whatever is in it, so the list is as wide as source_metadata needs rather than as narrow as the row's columns. paidProductPlacementDetails is the one part Google documents as retrievable by the video's owner and this collector's key is not an owner's -- if it is refused as a part, DataApiClient drops it once for the rest of the run rather than failing every video.metadata job for a field that three of the nine source_metadata keys do not need. The live run is what settles whether it is served.",
   "FRESHNESS_SECONDS": {
     "channel.videos": 21600,
     "search.videos": 21600,

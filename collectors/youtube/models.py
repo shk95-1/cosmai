@@ -34,6 +34,27 @@ MAX_QUEUE_DEPTH: int = _SCOPE["MAX_QUEUE_DEPTH"]
 # caches (timedelta(0)): always refetch is the safe default for an unrecognised kind.
 FRESHNESS: dict[str, timedelta] = {k: timedelta(seconds=v) for k, v in _SCOPE["FRESHNESS_SECONDS"].items()}
 
+# #183, the live transport's constants -- same rule as the caps above: the number is read from
+# scope.json so it and its recorded reason cannot drift apart.
+#
+# How far back a listed video may have been published and still have its `video.comments` follow-up
+# fanned out a second time. Applied where the fan-out is made, which is where the 224k-duplicate
+# incident happened -- not in `work`'s collection of a job that already reached the queue, and not in
+# the queue's dedupe, where the row exists by then and MAX_QUEUE_DEPTH has already seen it.
+COMMENT_REFETCH_WINDOW_DAYS: int = _SCOPE["COMMENT_REFETCH_WINDOW_DAYS"]
+#: The oldest publication date one listing walk goes back to (fork shk95/cosmai-import-ydc#38).
+LISTING_WINDOW_START: str = _SCOPE["LISTING_WINDOW_START"]
+#: The hard stop on one listing walk, whatever LISTING_WINDOW_START would allow.
+MAX_LISTING_ITEMS: int = _SCOPE["MAX_LISTING_ITEMS"]
+#: How many comments one video's harvest asks for; at exactly this many the harvest is truncated.
+MAX_COMMENTS_PER_VIDEO: int = _SCOPE["MAX_COMMENTS_PER_VIDEO"]
+#: Which route `video.metadata` is fetched over; both are admissible and the row records which ran.
+VIDEO_METADATA_ROUTE: str = _SCOPE["VIDEO_METADATA_ROUTE"]
+#: The `part` string `videos.list` is asked for -- one quota unit however wide it is.
+VIDEO_PARTS: tuple[str, ...] = tuple(_SCOPE["VIDEO_PARTS"])
+#: Per-source request budget, pause and timeout, keyed by route name (transport.Route).
+ROUTES: dict[str, dict[str, float]] = _SCOPE["ROUTES"]
+
 
 class Dataset(StrEnum):
     WATCH = "watch"
@@ -61,4 +82,11 @@ __all__ = [
     "MAX_FOLLOWUPS_PER_VIDEO",
     "MAX_QUEUE_DEPTH",
     "FRESHNESS",
+    "COMMENT_REFETCH_WINDOW_DAYS",
+    "LISTING_WINDOW_START",
+    "MAX_LISTING_ITEMS",
+    "MAX_COMMENTS_PER_VIDEO",
+    "VIDEO_METADATA_ROUTE",
+    "VIDEO_PARTS",
+    "ROUTES",
 ]

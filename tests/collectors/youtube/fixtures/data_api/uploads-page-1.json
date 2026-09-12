@@ -1,0 +1,79 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "etag": "etag-uploads-page-1",
+  "nextPageToken": "EAAaBlBUOkNBVQ",
+  "items": [
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "etag-playlist-item-0",
+      "id": "VVU1b01BaTA1ZFFxaVZMNnJ5cEFvX0Eu0000",
+      "snippet": {
+        "publishedAt": "2026-09-10T09:00:07Z",
+        "channelId": "UC5oM4Ai05dQqiVL6rypAo_A",
+        "title": "shorts upload",
+        "description": "",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/aB3dEf7GhJk/default.jpg",
+            "width": 120,
+            "height": 90
+          }
+        },
+        "channelTitle": "panel channel",
+        "playlistId": "UU5oM4Ai05dQqiVL6rypAo_A",
+        "position": 0,
+        "resourceId": {
+          "kind": "youtube#video",
+          "videoId": "aB3dEf7GhJk"
+        },
+        "videoOwnerChannelTitle": "panel channel",
+        "videoOwnerChannelId": "UC5oM4Ai05dQqiVL6rypAo_A"
+      },
+      "contentDetails": {
+        "videoId": "aB3dEf7GhJk",
+        "videoPublishedAt": "2026-09-10T09:00:07Z"
+      },
+      "status": {
+        "privacyStatus": "public"
+      }
+    },
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "etag-playlist-item-1",
+      "id": "VVU1b01BaTA1ZFFxaVZMNnJ5cEFvX0Eu0001",
+      "snippet": {
+        "publishedAt": "2026-09-01T09:00:07Z",
+        "channelId": "UC5oM4Ai05dQqiVL6rypAo_A",
+        "title": "long upload",
+        "description": "",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg",
+            "width": 120,
+            "height": 90
+          }
+        },
+        "channelTitle": "panel channel",
+        "playlistId": "UU5oM4Ai05dQqiVL6rypAo_A",
+        "position": 1,
+        "resourceId": {
+          "kind": "youtube#video",
+          "videoId": "dQw4w9WgXcQ"
+        },
+        "videoOwnerChannelTitle": "panel channel",
+        "videoOwnerChannelId": "UC5oM4Ai05dQqiVL6rypAo_A"
+      },
+      "contentDetails": {
+        "videoId": "dQw4w9WgXcQ",
+        "videoPublishedAt": "2026-09-01T09:00:07Z"
+      },
+      "status": {
+        "privacyStatus": "public"
+      }
+    }
+  ],
+  "pageInfo": {
+    "totalResults": 5,
+    "resultsPerPage": 2
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": 403,
+    "message": "Access Not Configured. YouTube Data API has not been used in project 0 before.",
+    "errors": [
+      {
+        "message": "Access Not Configured.",
+        "domain": "usageLimits",
+        "reason": "accessNotConfigured"
+      }
+    ]
+  }
+}
