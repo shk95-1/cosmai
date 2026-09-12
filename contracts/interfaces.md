@@ -2070,9 +2070,9 @@ lexicon the evidence stood on (the same rule `eval.run` keeps; fork #62, #68). T
 are each opened once per run and handed down to `search`.
 
 **Cost** — `analysis/polarity/pricing.UsageLedger` as it is: `reserve` before the call (estimate = prompt
-characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the $10
-total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
-same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
+characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the
+`COSMAI_LLM_BUDGET_USD` total hard stop shared with polarity (#136 — the amount is a knob, not a number
+written here). The output ceiling is 4096 tokens because adaptive thinking spends the same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
 the money moved — but refused to the caller (exit 1), never printed as if complete. The per-`purpose` cap for
 `retrieval_ask` is **$0.20 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
 #78 and #80, 2026-09-05; #74 measured $0.025 mean · $0.042 max per settled call over 17 calls, and the reservation

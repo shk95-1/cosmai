@@ -406,3 +406,54 @@ def test_rollback_stops_exactly_the_scheduled_services():
         "stack/rollback.sh stops "
         f"{sorted(match.group(1).split())}, but the scheduled services are {sorted(SCHEDULED)}"
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# #136: the LLM hard stop and the implementation chain reach the analyze container as knobs.
+# ---------------------------------------------------------------------------------------------
+
+LLM_KNOBS = ("COSMAI_LLM_BUDGET_USD", "COSMAI_LLM_CHAIN")
+
+
+@pytest.mark.parametrize("key", LLM_KNOBS)
+def test_the_analyze_service_is_handed_the_llm_knobs(key: str):
+    # `<<:` replaces environment: wholesale, so a knob dropped from this block is not inherited back
+    # from the anchor -- it simply stops arriving, and the container starts with an empty value.
+    assert re.search(rf"^\s*{key}: ", SERVICES["analyze"], re.MULTILINE), (
+        f"analyze is not handed {key}, so the container would start without it"
+    )
+
+
+@pytest.mark.parametrize("key", LLM_KNOBS)
+def test_the_llm_knobs_are_passed_without_a_compose_level_default(key: str):
+    """The one thing #136 exists to prevent. `${KEY:-something}` would give a deployment that forgot
+    the knob an amount nobody chose, applied silently -- the amount would be back in a file, in a
+    fourth place. Unset has to arrive empty so analysis/polarity/pricing.py ends the process."""
+    line = next(ln for ln in COMPOSE_TEXT.splitlines() if re.search(rf"^\s*{key}: ", ln))
+    assert f"${{{key}}}" in line, f"{key} must be passed as ${{{key}}}, not {line.strip()}"
+    assert ":-" not in line, (
+        f"{key} carries a compose-level default: {line.strip()}. OLLAMA_URL's pattern is deliberately "
+        "not followed here -- an unset budget knob must stop the container, not become one."
+    )
+
+
+@pytest.mark.parametrize("key", LLM_KNOBS)
+def test_the_llm_knobs_have_a_value_to_copy_in_env_example(key: str):
+    # env.example is the template an operator copies to stack/.env; nothing reads it at runtime, so a
+    # default there is a suggestion rather than a fallback that fires in production.
+    assert re.search(rf"^{key}=\S", ENV_EXAMPLE.read_text(encoding="utf-8"), re.MULTILINE), (
+        f"stack/env.example names no value for {key}, so an operator has nothing to copy"
+    )
+
+
+@pytest.mark.parametrize("key", LLM_KNOBS)
+def test_the_llm_knobs_are_declared_not_a_secret(key: str):
+    # contracts/secrets.md is where a reader decides whether a value may be written down. Both knobs
+    # carry one, so both have to be named in the "what is not a secret" section -- and unbackticked,
+    # or test_no_secret_key_is_given_a_value_in_the_repo above would refuse env.example for it.
+    text = SECRETS_MD.read_text(encoding="utf-8")
+    assert key in text, f"contracts/secrets.md does not mention {key}"
+    assert f"`{key}`" not in text, (
+        f"{key} is backticked in contracts/secrets.md, which makes it a secret key name -- and it has "
+        "a value in stack/env.example"
+    )

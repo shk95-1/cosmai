@@ -24,7 +24,8 @@ from analysis.polarity.pricing import PurposeCap, UsageLedger, cost_usd
 from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
-pytestmark = pytest.mark.postgres
+# llm_knobs: ask's ledger takes no budget of its own, so it reads COSMAI_LLM_BUDGET_USD (#136).
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("llm_knobs")]
 
 QUERY = "panthenol"
 # Long enough for the grounding gate to treat a chunk frequency of 0 as "the corpus never says this

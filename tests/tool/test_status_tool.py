@@ -1,4 +1,4 @@
-"""tool/status against fake `docker`/`nvidia-smi`, so #62's six sections are checked offline.
+"""tool/status against fake `docker`/`nvidia-smi`, so its sections are checked offline.
 
 Isolation here is PATH precedence, not conftest's socket block: tool/status shells out to
 `docker`/`nvidia-smi`, and a subprocess is outside the guard that stops in-process sockets.
@@ -14,7 +14,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STATUS = REPO_ROOT / "tool" / "status"
 
-SECTIONS = ["containers", "images", "db", "cron", "gpu", "test-leftovers"]
+SECTIONS = ["containers", "images", "db", "cron", "llm", "gpu", "test-leftovers"]
 
 # Answers "docker ps -a --format ...", "docker image inspect ...", "docker run ... sh -c ...",
 # and "docker exec cosmai-postgres psql ..." with fixed text so the test never touches a real
@@ -116,7 +116,7 @@ def header_of(name: str) -> str:
     return f"== {name} =="
 
 
-def test_all_six_headers_print_in_order(run):
+def test_all_headers_print_in_order(run):
     done = run()
     assert done.returncode == 0, done.stderr
     positions = [done.stdout.index(header_of(name)) for name in SECTIONS]
@@ -237,3 +237,41 @@ def test_ci_section_is_unavailable_without_gh(tmp_path: Path):
     )
     body = done.stdout.split(header_of("ci"))[1]
     assert "(unavailable)" in body, done.stdout
+
+
+# ---------------------------------------------------------------------------------------------
+# #136 Work 6: the LLM knobs have no ledger behind them, so `== llm ==` is where "what the limit
+# is now" becomes a computed fact rather than a sentence someone remembered to update.
+# ---------------------------------------------------------------------------------------------
+
+STACK_ENV = REPO_ROOT / "stack" / ".env"
+
+
+def llm_body(stdout: str) -> str:
+    return stdout.split(header_of("llm"))[1].split("== ")[0]
+
+
+def test_the_llm_section_prints_the_effective_hard_stop_and_chain(run):
+    done = run(
+        env_extra={
+            "COSMAI_LLM_BUDGET_USD": "12.50",
+            "COSMAI_LLM_CHAIN": "ollama:gemma4:latest,llm:claude-sonnet-5",
+        }
+    )
+    assert done.returncode == 0, done.stderr
+    body = llm_body(done.stdout)
+    assert "COSMAI_LLM_BUDGET_USD: 12.50" in body, done.stdout
+    assert "COSMAI_LLM_CHAIN: ollama:gemma4:latest,llm:claude-sonnet-5" in body, done.stdout
+
+
+@pytest.mark.skipif(
+    STACK_ENV.exists(),
+    reason="stack/.env is the second place tool/status looks, and a developer host may have one",
+)
+def test_an_unset_knob_is_reported_rather_than_guessed(run):
+    # "(unset)" is the state in which the analyze container refuses to start (#136), so the status
+    # tool has to be able to say it -- inventing a default here would hide exactly that.
+    done = run(env_extra={"COSMAI_LLM_BUDGET_USD": "", "COSMAI_LLM_CHAIN": ""})
+    body = llm_body(done.stdout)
+    assert "COSMAI_LLM_BUDGET_USD: (unset)" in body, done.stdout
+    assert "COSMAI_LLM_CHAIN: (unset)" in body, done.stdout

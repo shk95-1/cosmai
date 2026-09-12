@@ -555,7 +555,7 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   three grounds), and the Limits section says so. Engine as `search` (`--engine`, default `bm25`, no router);
   sources as `search`. `--model` defaults to `claude-sonnet-5`; `--dry-run` prints the prompt and the folded
   evidence and calls nothing. Every real call is reserved on the shared `needs.llm_usage` ledger **before**
-  it goes out and settled after (`purpose='retrieval_ask'`, the $10 hard stop of `analysis/polarity/pricing`),
+  it goes out and settled after (`purpose='retrieval_ask'`, the `COSMAI_LLM_BUDGET_USD` hard stop of `analysis/polarity/pricing`),
   and leaves one row in `needs.retrieval_ask_log` (DDL 026) written after the round trip; the prompt rules,
   the note and the log columns are `interfaces.md` §Answer layer.
 - exit codes: 0 ok · 1 partial (`chunk`'s contract violation, `search`'s no results — a query stopped for
