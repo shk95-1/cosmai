@@ -17,14 +17,21 @@ __all__ = [
     "LIKE_CAP",
     "LOW_RATING",
     "ROLLUP_SCOPE",
-    "RuleAggregator",
+    "UNLINKED",
     "WISH_SCOPES",
+    "RuleAggregator",
 ]
 
 # It has to be one of the two formats in versioning.md — an instance attribute cannot go into VERSIONS in
 # tests/test_version_strings.py as a single line, so the module constant is canonical and the default
 # argument points at it.
 AGGREGATE_VERSION = "rule-v1.0"
+
+# #128: the reserved prefix of a `metrics_need.product_ref` the linker has not attached. Two sentinels and
+# one namespace live in that column now — '' is the category total, `unlinked:` is a raw site key, and
+# everything else is a `needs.product_ref` key. No site abbreviation can collide with it: `_ref_id` in
+# analysis/linker builds a ref as `<two letters>:<key>`.
+UNLINKED = "unlinked:"
 
 # interfaces.md §Formulas A8: the cap is not in the slice; the contract sets it.
 LIKE_CAP = 100
@@ -62,7 +69,24 @@ def _ratio(numerator: float, denominator: float) -> float | None:
 
 
 def _product(mention: NeedMentionRow) -> str:
-    return mention.product_ref or mention.source_product_key or ""
+    """The product axis of one mention — a canonical ref, or the marker for one the linker has not attached
+    (#128, interfaces.md §`metrics_need.product_ref`).
+
+    It used to fall back to the bare `source_product_key`, which put canonical refs (`oy:A000000155458`) and
+    raw site keys (`81569`) into one column: a join to `needs.product_ref` then matched the refs, missed the
+    keys and said nothing about it. `UNLINKED` keeps the row — the volume of what is not yet attributed is
+    itself a number worth having, and dropping it would silently stop the product axis from adding up to the
+    category total — while making it impossible to mistake for a ref, since a canonical ref is
+    `<two-letter site>:<key>`. The site stays in the value because a product key is unique only inside a
+    site (001).
+    """
+    if mention.product_ref:
+        return mention.product_ref
+    # A mention with no product axis at all (a YouTube comment) is not an unattached product: it has no
+    # product to attach, so it gets no product-axis row, exactly as before.
+    if mention.source_product_key:
+        return f"{UNLINKED}{mention.site}:{mention.source_product_key}"
+    return ""
 
 
 class RuleAggregator:

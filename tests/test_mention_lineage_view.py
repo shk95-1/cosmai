@@ -25,6 +25,8 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, text
 
+from analysis.aggregate import UNLINKED
+
 pytestmark = pytest.mark.postgres
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -187,10 +189,11 @@ def test_the_cell_axes_are_filterable_columns(rows: dict[tuple[str, str], Any]):
     row = rows[("need", "g:1/r:1")]
     assert row["extractor_version"] == "rule-v2.3"
     assert (row["category"], row["need_key"], row["month"]) == ("선케어", "백탁", "2026-07")
-    # The product axis's value is product_ref, or source_product_key if that is absent (_product in
-    # aggregate/__init__.py).
+    # The product axis's value is the canonical ref when there is one (_product in aggregate/__init__.py).
     assert row["product_axis"] == "p:라운드랩"
-    assert rows[("need", "g:1/r:2")]["product_axis"] == "g:1"
+    # #128: the unattached arm carries the reserved marker, not the bare site key, and the site is in it
+    # because a product key is unique only inside a site.
+    assert rows[("need", "g:1/r:2")]["product_axis"] == f"{UNLINKED}glowpick:g:1"
     assert rows[("need", "v-1/c-1")]["product_axis"] == ""
 
 
@@ -308,3 +311,11 @@ def test_the_deploy_leaves_the_view_readable_by_the_screen(deployed: Any):
             text("SELECT has_table_privilege(:r, 'needs.mention_lineage', 'SELECT')"), {"r": role}
         ).scalar_one()
         assert granted, role
+
+
+def test_the_view_spells_the_product_axis_exactly_as_the_aggregator_does():
+    """The view is a second implementation of `_product`, and lineage.js joins the two by string equality
+    (it filters product_axis by a metrics_need cell's product_ref). A drift between the two spellings
+    retraces no mentions and raises nothing — the one axis this file's other assertions cannot see,
+    because they read the view alone (#128)."""
+    assert f"'{UNLINKED}'" in VIEW.read_text(encoding="utf-8")

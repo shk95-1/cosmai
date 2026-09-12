@@ -587,6 +587,41 @@ class Predictor(Protocol):  # an eval implementation. Takes a batch and returns 
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: the slice has no cap, so the contract sets the constant). An implementation that uses no cap leaves this column NULL.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — if a 3-star review is mixed into the RATING_ASC sample, or there are fewer than 150 at ≤2 stars, then the ≤2-star rows are complete. 150 is the collection sample ceiling (`REVIEW_PAGES 3 x 50`) and `collectors/commerce/scope.json` (#7) and `formats.md` hold the same value.
 
+## What `metrics_need.product_ref` holds (#128)
+
+**One namespace and two reserved sentinels, never a bare site key.** A value in that column is exactly one
+of three things:
+
+| value | meaning |
+|---|---|
+| `''` | the category total — the row measured over the whole scope, no product axis |
+| `unlinked:<site>:<product_key>` | a mention the linker has not attached to any canonical product |
+| anything else | a key of `needs.product_ref`, e.g. `oy:A000000155458` |
+
+The decision and its reason: the column used to be `mention.product_ref or mention.source_product_key or
+''` (`analysis/aggregate/__init__.py` `_product`), so canonical refs and raw site keys (`81569`) sat in one
+column with nothing to tell them apart. A join from that column to `needs.product_ref` then matched the refs,
+silently dropped the keys, and reported no error — **every join through it was half right and said so
+nowhere**. The `unlinked:` prefix cannot be mistaken for a ref, because a canonical ref is
+`<two-letter site abbreviation>:<key>` (`_ref_id`, `analysis/linker/__init__.py`); a reader that means
+canonical products filters `product_ref NOT LIKE 'unlinked:%'` and gets exactly them.
+
+The unattached rows are **kept and marked rather than dropped**, for two reasons: the product axis stays a
+partition of the category total (the mentions of one scope are split across its product rows exactly once,
+so the two add up), and how much of a category is not yet attributed is itself a number worth reading. The
+site is part of the marker because a product key is unique only inside a site (`needs.product_member`'s PK
+is `(source, product_key)`), and the bare key folded two sites' products into one row.
+
+A mention with **no product axis at all** — a YouTube comment, 51% of production `need_mention` — gets no
+product-axis row. It is not an unattached product; there is nothing to attach, and marking it would invent
+a product that does not exist.
+
+Upstream of this, `need_mention.product_ref` is filled by the **polarity** stage from `needs.product_member`
+(`analysis/polarity/pipeline.py`), not by the linker: `run_all` runs the link stage first, so the value is
+the catalogue as of that run, and `NEED_UPSERT`'s `DO UPDATE ... product_ref = EXCLUDED.product_ref` means a
+mention picks up its ref on the first nightly run after its product is catalogued. A backfill `UPDATE` after
+the polarity stage is **not** an alternative — that same `DO UPDATE` writes NULL over it the next night.
+
 ## `metrics_need`'s month rows (`month <> ''`, #129)
 
 `month <> ''` rows exist **only as the category total (`product_ref = ''`)** — the product axis has
