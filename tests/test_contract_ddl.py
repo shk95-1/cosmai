@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_thirtynine_contract_tables():
+def test_the_ddl_declares_the_forty_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: declaring a pipeline stage's expected interval)
@@ -53,8 +53,10 @@ def test_the_ddl_declares_the_thirtynine_contract_tables():
     # + 2 from 028_mfds_registration.sql (fork issue #55: mfds_snapshot, mfds_registration -- the
     # official MFDS filing ledger as a reference table, plus the one row that says which snapshot of
     # it this is and that it is not updated). 027 adds no table: it is a constraint trigger.
+    # + 1 from 009_naver_datalab_anchor.sql (issue #248: naver_datalab_anchor, the anchor kept per
+    # request instead of per (category, group_key, month)).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 39
+    assert len(declared_tables()) == 40
 
 
 def test_every_declared_table_exists_in_the_database():
