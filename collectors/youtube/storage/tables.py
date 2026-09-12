@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sqlalchemy as sa
 from sqlalchemy import Table
+from sqlalchemy.dialects.postgresql import JSONB
 
 metadata = sa.MetaData()
 
@@ -74,6 +75,10 @@ artifacts = Table(
     sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("fresh_until", sa.DateTime(timezone=True), nullable=False),
     sa.Column("schema_version", sa.String(16)),
+    # #183 (contracts/ddl/tubedepth/005): which source answered -- transport.Route. One column on the
+    # row every fetch produces, rather than one per snapshot table, so no two of them can disagree
+    # about a single fetch.
+    sa.Column("fetch_route", sa.String(16)),
     sa.Index("ix_artifact_lookup", "fingerprint", "fresh_until"),
     sa.Index("ix_artifact_recent", "kind", "fetched_at"),
     sa.Index("ix_artifact_target", "target", "fetched_at"),
@@ -94,6 +99,10 @@ video_snapshots = Table(
     sa.Column("comment_count", sa.BigInteger),
     sa.Column("published_at", sa.DateTime(timezone=True)),
     sa.Column("published_date", sa.Date),
+    # #183 (contracts/ddl/tubedepth/004): the videos.list fields this table has no column for, in
+    # the archive's spelling -- every value a string but `tags`, jsonb null for unknown. The DDL
+    # file says why that must not be tidied into JSON types.
+    sa.Column("source_metadata", JSONB),
     sa.Index("ix_video_snapshot_series", "video_id", "fetched_at"),
 )
 

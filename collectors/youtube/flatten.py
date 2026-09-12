@@ -35,6 +35,63 @@ FLATTEN_PROGRESS_ID = "flatten"
 DEFAULT_BATCH_SIZE = 500
 
 
+#: The nine keys `video_snapshots.source_metadata` carries, in the archive's order. All nine are
+#: present on every row; a value nobody could tell us is jsonb null, never an absent key and never
+#: the string "None" (measured on the archive's 13,979 rows: like_count null on 876 of them,
+#: duration_seconds on 6, comment_count on 5, key set complete on all of them).
+SOURCE_METADATA_KEYS = (
+    "tags",
+    "has_paid_product_placement",
+    "category_id",
+    "caption_available",
+    "duration_seconds",
+    "view_count",
+    "like_count",
+    "comment_count",
+    "collected_at",
+)
+
+
+def _repr_str(value: Any) -> str | None:
+    """The archive's spelling: a Python `repr`, not JSON. Booleans are "True"/"False" capitalised
+    and numbers are "1234" rather than 1234; `None` stays jsonb null.
+
+    Not a style choice, and it must not be tidied. `analysis/sensitivity/pipeline.py` reads
+    `source_metadata ->> 'has_paid_product_placement'` and compares it against its `DECLARED`
+    constant, which is the string "True" -- so JSON's `true` here makes that comparison false for
+    every live row and the declared half of ad marking silently becomes zero, with no error and the
+    rows still returned. The numbers are harmless under `->>` (jsonb 42 and "42" both read back as
+    "42") and are written this way for parity, so that a projected corpus row and an archive row are
+    the same document. contracts/ddl/tubedepth/004 carries the same warning at the column.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lower() in ("true", "false"):
+            return "True" if stripped.lower() == "true" else "False"
+        return stripped
+    return str(value)
+
+
+def source_metadata(fetched_at: datetime, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The nine keys, archive-spelled. `collected_at` is the artifact's own `fetched_at` rather than
+    the flatten pass's clock -- flatten runs on its own cadence and can be days behind the fetch."""
+    return {
+        "tags": list(payload.get("tags") or []),
+        "has_paid_product_placement": _repr_str(payload.get("has_paid_product_placement")),
+        "category_id": _repr_str(payload.get("category_id")),
+        "caption_available": _repr_str(payload.get("caption_available")),
+        "duration_seconds": _repr_str(payload.get("duration_seconds")),
+        "view_count": _repr_str(payload.get("view_count")),
+        "like_count": _repr_str(payload.get("like_count")),
+        "comment_count": _repr_str(payload.get("comment_count")),
+        "collected_at": fetched_at.isoformat(),
+    }
+
+
 def video_snapshot_row(
     artifact_id: str, target: str, fetched_at: datetime, payload: Mapping[str, Any]
 ) -> dict:
@@ -52,6 +109,7 @@ def video_snapshot_row(
         "comment_count": payload.get("comment_count"),
         "published_at": payload.get("published_at"),
         "published_date": date_type.fromisoformat(published_date) if published_date else None,
+        "source_metadata": source_metadata(fetched_at, payload),
     }
 
 

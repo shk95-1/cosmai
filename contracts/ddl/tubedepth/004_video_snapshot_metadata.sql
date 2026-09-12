@@ -1,0 +1,31 @@
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
+-- Part of this schema's canonical form since #178: the baseline dump
+-- contracts/ddl/current/app.tubedepth.sql plus every file in this directory, applied in filename
+-- order. db/migrate.sh step (0) composes that on a database where tubedepth is absent,
+-- tests/conftest.py composes it into a throwaway schema, and tool/checks/ddl-drift calls it
+-- production's expected state.
+--
+-- #183: the fields `videos.list` returns that tubedepth.video_snapshots has no column for, carried
+-- as one document rather than as five more columns, because their readers are in the fork's
+-- analysis packages and their shape is the archive's rather than this schema's. Nine keys, always
+-- all nine present:
+--   tags · has_paid_product_placement · category_id · caption_available ·
+--   duration_seconds · view_count · like_count · comment_count · collected_at
+-- The four counts duplicate the scalar columns beside them on purpose -- that is what the archive's
+-- 13,979 rows do, and the parity is what lets a projected corpus row be compared against one.
+--
+-- THIS COLUMN IS THE ARCHIVE'S SPELLING VERBATIM, AND THE SPELLING IS NOT JSON-NATURAL.
+-- Every value except `tags` is a **string**, because the archive stored a Python repr: the booleans
+-- are 'True'/'False' capitalised, and the numbers are '1234' rather than 1234. A value that is not
+-- known is jsonb `null` -- never the string 'None', and never an absent key (measured on the
+-- archive: like_count null on 876 rows, duration_seconds on 6, comment_count on 5, and all nine
+-- keys present on all 13,979). This is safe only because every consumer reads through `->>`, under
+-- which jsonb 42 and '42' both come back as '42'. Moving any consumer to `->` or to a jsonb
+-- comparison means revisiting this column first. The one that bites today is the boolean:
+-- analysis/sensitivity/pipeline.py compares `source_metadata ->> 'has_paid_product_placement'`
+-- against its DECLARED constant, which is the string 'True', so writing JSON's `true` makes that
+-- comparison false for every live row and the declared half of ad marking silently becomes zero --
+-- no error, rows still returned. Do not "fix" the types.
+--
+-- Nullable: every row written before this migration has no document to backfill from.
+ALTER TABLE tubedepth.video_snapshots ADD COLUMN source_metadata jsonb;

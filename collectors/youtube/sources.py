@@ -75,6 +75,15 @@ def normalize_video_metadata(dump: Mapping[str, Any]) -> dict[str, Any]:
         "comment_count": dump.get("comment_count"),
         "published_at": _published_at(dump.get("timestamp")),
         "published_date": _published_date(dump.get("upload_date")),
+        # #183: the four fields tubedepth.video_snapshots has no column for. They are carried here
+        # rather than read off the dump in `flatten` so that the payload a job stores is the whole
+        # of what was collected -- `flatten` re-reads a stored payload weeks later and never sees
+        # the dump again. `None` means this route could not tell us, which is not the same fact as
+        # the uploader having said no: `flatten.source_metadata` keeps the two apart.
+        "tags": list(dump.get("tags") or []),
+        "category_id": dump.get("category_id"),
+        "caption_available": dump.get("caption_available"),
+        "has_paid_product_placement": dump.get("has_paid_product_placement"),
     }
 
 
