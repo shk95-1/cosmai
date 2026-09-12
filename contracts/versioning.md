@@ -25,10 +25,18 @@
   would fail on a column that already exists. Their `alembic_version` table is part of the baseline
   and holds no row: the old repos that ran alembic against these schemas are archived, nothing in
   this repo writes that table, and a rebuilt database is therefore not a database alembic could
-  resume. There is no ledger either (`needs.schema_migration` is the needs schema's alone), because
-  `db/migrate.sh` step (0) is all-or-nothing: it composes the two schemas on a database that has
-  neither and skips a database that has them (#178). That question is asked of `alembic_version`
-  rather than of the schema name -- the table is the baseline's own marker, so a schema standing
-  without it is a build that died part-way and not a schema to leave alone.
+  resume. `db/migrate.sh` step (0) composes each schema on a database that has neither and leaves a
+  database that has them alone (#178); that question is asked of `alembic_version` rather than of the
+  schema name -- the table is the baseline's own marker, so a schema standing without it is a build
+  that died part-way and not a schema to leave alone. Each of the two does carry a ledger of its own
+  since #223, `<schema>.schema_migration`, the same shape as `needs.schema_migration`: step (0) seeds
+  it from the files it applied when it builds a schema, and step (0b) applies to an already-present
+  schema every file that ledger does not name. Without it the skip above swallowed a file added after
+  the schema existed -- measured on production 2026-09-12, `tubedepth/004` and `/005` had been on
+  main for a week and neither column was there. The ledger is not a version: it records which files
+  ran, and the composition above is still what the schema *is*. A database that predates the ledger
+  gets its first rows from `contracts/ddl/<schema>/applied_before_the_ledger.txt`, a one-time record
+  of what was already applied that is read only where the schema is present and has no ledger yet,
+  and that is never appended to afterwards.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
 - The ydc import pin is **`v0.4.0` `76db718`** of `shk95-1/cosmai-ydc-old` (formerly `slopindustries/youtube-data-collector`), the last commit of that repository — the marker for "seen up to here": every commit up to that tag carries a disposition in the ledger on goal `shk95/cosmai-import-ydc#1` (fork #52). The pin is not the promotion source. Each promoted module's header names the ydc tag its rules were copied from — `v0.1.0` `02440ab` for the v0.1.0 lineage, `v0.3.0` `e5a1b00` for `cross_source.py` · `holdout_commerce.py` · `vector_threshold.py` — and `tests/test_ydc_pin.py` checks that this line names one pin, that every header tag is one of the four ydc tags, and that none is newer than the pin. Nothing in this checkout compares the code against the ydc repository itself: `tool/compare-ydc-*` read the ydc checkout `--ydc` points at, on demand, and a change to the original after the pin is caught only by the next disposition pass.
