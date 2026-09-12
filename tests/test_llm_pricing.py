@@ -18,6 +18,7 @@ from analysis.polarity.pricing import (
     PRICES,
     PRICES_SOURCE_DATE,
     BudgetExceeded,
+    KnobMissing,
     Reservation,
     Usage,
     UsageLedger,
@@ -189,27 +190,25 @@ def test_this_module_no_longer_carries_the_amount(monkeypatch: pytest.MonkeyPatc
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "abc", "-1", "1,0", "nan", "Infinity"])
-def test_an_unreadable_hard_stop_kills_the_process_and_names_the_key(
-    raw: str, monkeypatch: pytest.MonkeyPatch
-):
+def test_an_unreadable_hard_stop_refuses_and_names_the_key(raw: str, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(BUDGET_KEY, raw)
-    with pytest.raises(SystemExit) as died:
+    with pytest.raises(KnobMissing) as died:
         budget_usd()
     assert BUDGET_KEY in str(died.value)
 
 
-def test_a_missing_hard_stop_kills_the_process_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
+def test_a_missing_hard_stop_refuses_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(BUDGET_KEY, raising=False)
-    with pytest.raises(SystemExit) as died:
+    with pytest.raises(KnobMissing) as died:
         budget_usd()
     assert BUDGET_KEY in str(died.value)
 
 
-def test_a_ledger_built_without_the_knob_dies_before_it_can_be_used(monkeypatch: pytest.MonkeyPatch):
+def test_a_ledger_built_without_the_knob_refuses_before_it_can_be_used(monkeypatch: pytest.MonkeyPatch):
     """The point of the whole issue. No connection is opened here: __init__ has to refuse first, so
     there is no path on which a call goes out against a budget nobody chose."""
     monkeypatch.delenv(BUDGET_KEY, raising=False)
-    with pytest.raises(SystemExit) as died:
+    with pytest.raises(KnobMissing) as died:
         UsageLedger(cast(Any, None))
     assert BUDGET_KEY in str(died.value)
 
@@ -234,15 +233,27 @@ def test_the_chain_is_the_fallback_order_as_written(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "ollama", "ollama:gemma4:latest,", ":gemma4", "ollama:"])
-def test_an_unreadable_chain_kills_the_process_and_names_the_key(raw: str, monkeypatch: pytest.MonkeyPatch):
+def test_an_unreadable_chain_refuses_and_names_the_key(raw: str, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(CHAIN_KEY, raw)
-    with pytest.raises(SystemExit) as died:
+    with pytest.raises(KnobMissing) as died:
         llm_chain()
     assert CHAIN_KEY in str(died.value)
 
 
-def test_a_missing_chain_kills_the_process_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
+def test_a_missing_chain_refuses_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv(CHAIN_KEY, raising=False)
-    with pytest.raises(SystemExit) as died:
+    with pytest.raises(KnobMissing) as died:
         llm_chain()
     assert CHAIN_KEY in str(died.value)
+
+
+def test_the_refusal_is_the_class_every_entry_point_already_blocks_on():
+    """The regression this guards. `SystemExit` is a BaseException: it walks past `except ask.BLOCKING`
+    (cosmai/cli.py's retrieval ask), past `except (ValueError, LookupError, psycopg.Error)` (analyze and
+    eval) and out of `main()`, leaving exit 1 where contracts/entrypoints.md requires 2 -- and on `ask`
+    exit 1 already means "no evidence", so an unconfigured host would read as an empty corpus."""
+    from analysis.retrieval.ask import BLOCKING
+
+    assert issubclass(KnobMissing, LookupError)
+    assert issubclass(KnobMissing, Exception)  # an Exception, so a bare `except` for refusals sees it
+    assert any(issubclass(KnobMissing, blocked) for blocked in BLOCKING)

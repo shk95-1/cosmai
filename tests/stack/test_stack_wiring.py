@@ -428,7 +428,7 @@ def test_the_analyze_service_is_handed_the_llm_knobs(key: str):
 def test_the_llm_knobs_are_passed_without_a_compose_level_default(key: str):
     """The one thing #136 exists to prevent. `${KEY:-something}` would give a deployment that forgot
     the knob an amount nobody chose, applied silently -- the amount would be back in a file, in a
-    fourth place. Unset has to arrive empty so analysis/polarity/pricing.py ends the process."""
+    fourth place. Unset has to arrive empty so analysis/polarity/pricing.py refuses (exit 2)."""
     line = next(ln for ln in COMPOSE_TEXT.splitlines() if re.search(rf"^\s*{key}: ", ln))
     assert f"${{{key}}}" in line, f"{key} must be passed as ${{{key}}}, not {line.strip()}"
     assert ":-" not in line, (

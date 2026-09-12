@@ -285,8 +285,8 @@ services:
       # secrets, so they belong here for the same reason OLLAMA_URL does -- but **deliberately without
       # OLLAMA_URL's `:-default`**. A default here would be an amount nobody chose, applied silently to
       # a deployment that forgot the knob, which is exactly the failure #136 removes. Unset arrives
-      # empty and analysis/polarity/pricing.py ends the process naming the key. The value to copy is in
-      # stack/env.example.
+      # empty and analysis/polarity/pricing.py refuses the command (exit 2) naming the key. The value
+      # to copy is in stack/env.example.
       COSMAI_LLM_BUDGET_USD: ${COSMAI_LLM_BUDGET_USD}
       COSMAI_LLM_CHAIN: ${COSMAI_LLM_CHAIN}
 

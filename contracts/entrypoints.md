@@ -268,6 +268,14 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
 - Every step is idempotent by **natural-key upsert**. A re-run produces the same result.
 - An output row always carries a `*_version` (`versioning.md`).
 - `analyze --impl <spec>` uses the same registry and the same spec grammar as `eval` (`ollama:gemma4:latest`·`llm:claude-sonnet-5`). Without it the rules run; with it that implementation's version is recorded in `analysis_run.versions.polarity` and on the output rows. **An implementation with no slot of its own in the ownership table is refused without `--scope`** — even a free one (analyze defaults to everything, so one scope-less line of such an implementation is a full relabel, and it costs either money or GPU time). An implementation with a slot (= an owner) may run without `--scope`: that one line covers its own `(scope, period)` alone, and `--scope` only narrows it further. It is refused even when that `--scope` is a `lexicon_category` that still has no owner in the table: registration has to come before the pass, or the result is deleted at the next 05:00. A paid implementation (`registry.is_paid`) is caught once more, ahead of that, on the grounds of money — the same place as `eval`'s enforced `--split`. Both refusals happen before the run opens, so they are blocked (exit code 2), and the verdict is made by `analysis/polarity/ownership.py`.
+- **`--impl` on `eval` and on `analyze` needs `COSMAI_LLM_BUDGET_USD` in the environment (#136).** Both
+  build the shared `needs.llm_usage` ledger, the free `ollama:` specs included — the chain the knob names
+  can fall back from ollama to the paid model inside one run, so the hard stop is resolved before anything
+  starts rather than at the first paid call. `analyze` runs in the compose container, which is handed the
+  knob; `eval` is typed in a host shell, where nothing sources `stack/.env`, so there it has to be exported
+  by hand. The refusal is `pricing.KnobMissing`, a `LookupError`, so it lands in the same place as the two
+  refusals above — blocked before the run opens, **exit code 2**. Rules-only `analyze` (no `--impl`) builds
+  no ledger and needs no knob.
 - `analyze all` makes one `needs.analysis_run` row (polarity opens it and aggregate writes metrics under
   that `run_id`) and records linker·extractor·polarity·aggregate plus `lexicon` (the active version +
   ruleset) in `versions`. If any one step fails, that run is closed with `status='failed'` + a note and
@@ -569,7 +577,10 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   0 hits, and the fixed refusal still goes to stdout — and an answer the model cut off at `max_tokens` or
   left empty, which is settled and logged but never passed off as complete · 2 blocked — no active topic
   lexicon, the vector store unreadable, the ledger's hard stop (`BudgetExceeded`, before any call), a model
-  `pricing.py` has no price for, or no `CLAUDE_API_KEY` outside `--dry-run`. stdout carries only the
+  `pricing.py` has no price for, **no `COSMAI_LLM_BUDGET_USD` in the environment** (#136 — this command is
+  typed in a host shell, where nothing sources `stack/.env`, so the knob has to be exported by hand; the
+  refusal is `pricing.KnobMissing`, a `LookupError`, and it comes before the reservation, so `--dry-run` and
+  a query with no evidence still work without it), or no `CLAUDE_API_KEY` outside `--dry-run`. stdout carries only the
   three-section markdown (or the refusal, or the dry-run dump); the version note and the cost line go to
   stderr, like `cards`.
 - **A coverage warning goes to stderr and does not change the exit code** — the vector and hybrid paths of

@@ -36,24 +36,38 @@ CHAIN_KEY = "COSMAI_LLM_CHAIN"
 CHAIN_SEPARATOR = ","
 
 
+class KnobMissing(LookupError):
+    """A knob this module needs is absent or unreadable.
+
+    A `LookupError` and not `SystemExit`: every entry point already has one handler for "refused before
+    anything started", and all four are written around `LookupError` -- `cosmai/cli.py`'s analyze, eval and
+    retrieval paths, and `ask.BLOCKING`. A `BaseException` walks past all of them and leaves exit 1, which
+    `contracts/entrypoints.md` gives to a run that failed and, on `ask`, to a query with no evidence: a host
+    that was never configured would read as a corpus with nothing to say. `analysis/retrieval/ask.client_for`
+    converts `db/secrets.py`'s `SystemExit` for exactly this reason; this raises the right class outright."""
+
+
 def budget_usd() -> Decimal:
     """The hard stop in USD, read from the environment every time it is needed.
 
     There is deliberately no default. An amount that lived in this file needed a commit and a redeploy to
     change and STATE.md carried a second copy of it that could disagree (#136); an amount defaulted *here*
     would put both failures back one layer down, and a deployment that forgot the knob would spend against a
-    number nobody chose. Forgetting has to be loud, so an absent or unreadable knob ends the process."""
+    number nobody chose. Forgetting has to be loud, so an absent or unreadable knob refuses the command
+    (exit 2) before it starts."""
     raw = os.environ.get(BUDGET_KEY, "").strip()
     if not raw:
-        raise SystemExit(f"{BUDGET_KEY} is not set; it carries the LLM hard stop in USD (stack/.env)")
+        raise KnobMissing(f"{BUDGET_KEY} is not set; it carries the LLM hard stop in USD (stack/.env)")
     try:
         amount = Decimal(raw)
     except InvalidOperation:
-        raise SystemExit(f"{BUDGET_KEY}={raw!r} is not a number of USD") from None
+        raise KnobMissing(f"{BUDGET_KEY}={raw!r} is not a number of USD") from None
     # is_finite() first: NaN is a Decimal that compares to nothing, and `< 0` on it signals rather than
     # answers. Infinity is rejected for what it means here -- an unlimited budget, spelled out.
     if not amount.is_finite() or amount < 0:
-        raise SystemExit(f"{BUDGET_KEY}={raw!r} is not a hard stop; it must be a finite amount, zero or more")
+        raise KnobMissing(
+            f"{BUDGET_KEY}={raw!r} is not a hard stop; it must be a finite amount, zero or more"
+        )
     return amount
 
 
@@ -65,13 +79,13 @@ def llm_chain() -> tuple[str, ...]:
     a registered factory is the caller's question, since the registry is loaded later than this."""
     raw = os.environ.get(CHAIN_KEY, "").strip()
     if not raw:
-        raise SystemExit(
+        raise KnobMissing(
             f"{CHAIN_KEY} is not set; it names the polarity implementations in fallback order (stack/.env)"
         )
     steps = tuple(step.strip() for step in raw.split(CHAIN_SEPARATOR))
     malformed = [step for step in steps if len(parts := step.split(":", 1)) != 2 or not all(parts)]
     if malformed:
-        raise SystemExit(f"{CHAIN_KEY}={raw!r} is not a chain of <impl>:<argument> specs: {malformed}")
+        raise KnobMissing(f"{CHAIN_KEY}={raw!r} is not a chain of <impl>:<argument> specs: {malformed}")
     return steps
 
 
