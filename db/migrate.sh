@@ -13,7 +13,8 @@ usage() {
     cat <<'EOF'
 usage: db/migrate.sh [--container NAME] [--db NAME] [--superuser NAME]
 
-Stands up trend_radar and tubedepth when they are absent, then applies db/bootstrap.sql,
+Stands up trend_radar and tubedepth when they are absent and brings each one's
+contracts/ddl/<schema>/NNN_*.sql up to date when it is already there, then applies db/bootstrap.sql,
 contracts/ddl/needs/*.sql, the two named grants files (db/grants/postgrest_anon_needs.sql,
 db/grants/needs_runtime_reader.sql) and db/views/*.sql to $container/$db through `docker exec`.
 Every path is repo-relative: run it from the repo root (the image's WORKDIR is that root --
@@ -149,6 +150,36 @@ schema_state() { # $1 = schema name (a literal from the loop below, never input)
         END" < /dev/null
 }
 
+# 0b. The ledger these two schemas did not have until #223, and why they need one.
+#
+# Step (0) above composes a source schema out of the baseline plus every additive file, but only on
+# the `absent`/`empty` path. Production has had both schemas since before #178, so production always
+# takes the `built` skip -- and a file added to contracts/ddl/<schema>/ after that schema was built
+# was therefore applied by the test harness, expected by tool/checks/ddl-drift, and reached
+# production by no path at all. Measured 2026-09-12: tubedepth/004 and /005 had been on main for a
+# week, every deploy printed `tubedepth: present, left alone`, and neither column existed.
+#
+# The shape is needs.schema_migration's (step (b) below), one per source schema. A flag on this
+# script was the other option offered and was refused: a step that runs only when somebody remembers
+# to pass it is the same failure one layer up.
+source_ledger_ddl() { # $1 = schema -- run under SET ROLE <schema>_owner, like everything step (0) writes
+    printf 'CREATE TABLE IF NOT EXISTS %s.schema_migration (\n' "$1"
+    printf '    version text PRIMARY KEY,\n'
+    printf '    applied_at timestamptz NOT NULL DEFAULT now()\n'
+    printf ');\n'
+}
+
+# What could not be computed: which versions a database that predates the ledger already carries.
+# A ledger created on such a database starts empty, so every file would look unapplied and the
+# ALTER TABLEs that already ran would run again and fail. contracts/ddl/<schema>/
+# applied_before_the_ledger.txt is that one-time record, read only where the schema is present AND
+# has no ledger yet -- which happens once per database, ever. A schema built from absent never
+# reads it: step (0) applies every file and records every file.
+source_ledger_adopted() { # $1 = the adoption file; prints one version per line, nothing if absent
+    [ -f "$1" ] || return 0
+    sed 's/#.*//' "$1" | awk 'NF { print $1 }'
+}
+
 for schema in trend_radar tubedepth; do
     prefix=$schema
     # The exit status decides, never the stdout alone: a psql that cannot connect prints nothing,
@@ -158,7 +189,64 @@ for schema in trend_radar tubedepth; do
     state=$(schema_state "$schema") \
         || { echo "$prefix: could not ask $container/$db what state the schema is in" >&2; exit 1; }
     case "$state" in
-        built) echo "$schema: present, left alone"; continue ;;
+        built)
+            # Production's path. The schema itself is left exactly as it was -- nothing here rebuilds
+            # it, and the one thing it may still be owed is an additive file it predates (#223).
+            echo "$schema: present, left alone"
+            had_ledger=$(superuser_psql -Atq \
+                -c "SELECT to_regclass('$schema.schema_migration') IS NOT NULL" < /dev/null) \
+                || { echo "$prefix: could not ask $container/$db whether the ledger is there" >&2; exit 1; }
+            if [ "$had_ledger" != t ]; then
+                adoption_file=contracts/ddl/"$schema"/applied_before_the_ledger.txt
+                # Validated before any of it is written: these versions go into a quoted SQL literal,
+                # and a line that is not a bare version has no business seeding a ledger.
+                for version in $(source_ledger_adopted "$adoption_file"); do
+                    case "$version" in
+                        *[!A-Za-z0-9_]*)
+                            echo "$prefix: $adoption_file names '$version', which is not a version" >&2
+                            exit 1
+                            ;;
+                    esac
+                done
+                # The table and its seed go in one transaction. Split, a seed that failed would leave
+                # an empty ledger behind, the next run would find the table and skip the seeding, and
+                # every file the adoption list names would be re-applied -- an ALTER TABLE that
+                # already ran, against production.
+                { printf 'BEGIN;\nSET ROLE %s_owner;\n' "$schema"
+                  source_ledger_ddl "$schema"
+                  for version in $(source_ledger_adopted "$adoption_file"); do
+                      printf "INSERT INTO %s.schema_migration(version) VALUES ('%s');\n" "$schema" "$version"
+                  done
+                  printf 'COMMIT;\n'
+                } | superuser_psql \
+                    || { echo "$prefix: could not record what this schema already carried" >&2; exit 1; }
+            fi
+            # Same loop as step (c) below, one transaction per file, so a file that fails takes only
+            # itself and leaves no ledger row behind.
+            applied=0
+            present=0
+            for file in contracts/ddl/"$schema"/*.sql; do
+                [ -e "$file" ] || continue
+                version=$(basename "$file" .sql)
+                recorded=$(printf "SET ROLE %s_owner;\nselect 1 from %s.schema_migration where version = :'version';\n" \
+                    "$schema" "$schema" | superuser_psql -v version="$version" -A -t)
+                if [ "$recorded" = "1" ]; then
+                    present=$((present + 1))
+                    continue
+                fi
+                {
+                    # 5s, the same as step (c): an ALTER TABLE behind a long reader would otherwise
+                    # wait forever, and a plain retry is the right answer to losing that race.
+                    printf 'BEGIN;\nSET ROLE %s_owner;\nSET lock_timeout = '"'"'5s'"'"';\n' "$schema"
+                    cat "$file"
+                    printf "\nINSERT INTO %s.schema_migration(version) VALUES (:'version');\nCOMMIT;\n" "$schema"
+                } | superuser_psql -v version="$version" \
+                    || { echo "$prefix: migration failed: $file" >&2; exit 1; }
+                applied=$((applied + 1))
+            done
+            echo "$schema: $applied migration(s) applied, $present already present"
+            continue
+            ;;
         absent | empty) ;;
         partial)
             echo "$prefix: the schema holds objects but no alembic_version -- a build died part-way," >&2
@@ -213,6 +301,16 @@ for schema in trend_radar tubedepth; do
           [ -e "$file" ] || continue
           printf '\n'
           cat "$file"
+      done
+      # The ledger travels with them, seeded from the same list: a schema built here is current by
+      # construction, so step (0b) has nothing left to do the next time this runs, and no database
+      # this script made ever needs the adoption file (#223).
+      printf '\n'
+      source_ledger_ddl "$schema"
+      for file in contracts/ddl/"$schema"/*.sql; do
+          [ -e "$file" ] || continue
+          printf "INSERT INTO %s.schema_migration(version) VALUES ('%s');\n" \
+              "$schema" "$(basename "$file" .sql)"
       done
       printf '\nCOMMIT;\n'
       # -o /dev/null: the dump opens with `SELECT pg_catalog.set_config('search_path', ...)` and its

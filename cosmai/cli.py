@@ -45,6 +45,21 @@ def _add_collect(subparsers: argparse._SubParsersAction) -> None:
     p.add_argument("--dataset", required=True, help="Which dataset to collect.")
     p.add_argument("--board", default=None, help="commerce review_low only: which board to walk.")
     p.add_argument("--since", default=None, help="Accepted for shape; unused by every dataset today.")
+    # youtube watch only, the same way --board above is commerce review_low only (#183). Without
+    # these two, one channel is not expressible from the command line at all: `watch` reads all 43
+    # active panel rows and `work` then fans out the whole panel, bounded only by MAX_QUEUE_DEPTH --
+    # so the first live run of a new transport could only be made by driving
+    # collectors.youtube.cli.run(...) from a Python shell, which is not a thing an operator does.
+    p.add_argument(
+        "--watchlist",
+        default=None,
+        help="youtube watch only: read directives from this file, not collectors/youtube/watchlist.txt.",
+    )
+    p.add_argument(
+        "--no-roster",
+        action="store_true",
+        help="youtube watch only: do not read needs.panel_channel; watch exactly what --watchlist names.",
+    )
 
 
 def _add_login(subparsers: argparse._SubParsersAction) -> None:
@@ -239,7 +254,13 @@ def _run_collect(args: argparse.Namespace) -> int:
     if args.collector == "youtube":
         from collectors.youtube.cli import run
 
-        return run(args.dataset, board=args.board, since=args.since)
+        return run(
+            args.dataset,
+            board=args.board,
+            since=args.since,
+            watchlist_path=Path(args.watchlist) if args.watchlist else None,
+            read_roster=not args.no_roster,
+        )
     if args.collector == "naver":
         from collectors.naver.cli import run
 

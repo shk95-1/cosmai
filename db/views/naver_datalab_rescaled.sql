@@ -16,11 +16,12 @@
 -- A NULL therefore reads as "not comparable across requests"; the raw `ratio` on the same row is
 -- still comparable inside its own request_key.
 --
--- The anchor join is on the source table's whole primary key (category, group_key, month) plus the
--- request boundary, so it matches at most one row. A category whose groups do not all fit beside
--- the anchor in one request takes several requests and keeps only the last one's anchor row (that
--- primary key), so the earlier batches' rows land in the NULL rule above -- collectors/naver/cli.py
--- sends the largest batch last to keep that loss at its smallest.
+-- The anchor join is on needs.naver_datalab_anchor (request_key, month), which the collector writes
+-- one row into per request (#248, contracts/ddl/needs/009_naver_datalab_anchor.sql) -- unlike
+-- naver_datalab_point's own PK (category, group_key, month), a request boundary is never overwritten
+-- by a later request of the same category, so every batch keeps the anchor it was sent with. The
+-- anchor row is still written into naver_datalab_point too, unchanged, for #90's readers -- this
+-- view no longer reads it from there.
 --
 -- Not on the postgrest_anon whitelist: the portal reads no naver surface today, and
 -- db/grants/postgrest_anon_needs.sql stays a whitelist (contracts/anon_exposure.md).
@@ -45,10 +46,8 @@ SELECT
     p.terms                                                           AS terms,
     p.captured_at                                                     AS captured_at
 FROM needs.naver_datalab_point p
-LEFT JOIN needs.naver_datalab_point a
-       ON a.category = p.category
-      AND a.month = p.month
-      AND a.group_key = '기준_세럼'
-      AND a.request_key = p.request_key;
+LEFT JOIN needs.naver_datalab_anchor a
+       ON a.request_key = p.request_key
+      AND a.month = p.month;
 
 GRANT SELECT ON needs.naver_datalab_rescaled TO needs_runtime;

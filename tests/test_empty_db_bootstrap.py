@@ -92,9 +92,13 @@ def _psql(container: str, database: str, sql: str) -> list[list[str]]:
 
 
 def _declared_tables(schema: str) -> set[str]:
-    """Every table the contract composes for one schema: the baseline dump plus any additive file."""
+    """Every table the contract composes for one schema: the baseline dump, any additive file, and
+    the ledger step (0) writes alongside them.
+
+    `schema_migration` is in no .sql file because it is not a migration -- it is what records them
+    (#223), the same as needs.schema_migration, which db/bootstrap.sql does not declare either."""
     sources = [DUMPS / f"app.{schema}.sql", *sorted((REPO_ROOT / "contracts" / "ddl" / schema).glob("*.sql"))]
-    found: set[str] = set()
+    found: set[str] = {"schema_migration"}
     for path in sources:
         if path.exists():
             body = path.read_text(encoding="utf-8")
@@ -200,7 +204,10 @@ def test_a_build_that_fails_leaves_no_schema_behind(
 
     done = deploy(empty_database)
     assert done.returncode == 0, done.stderr
-    assert "tubedepth: created from the baseline dump + 3 additive file(s)" in done.stdout
+    # Counted from the directory, not written out: the point is that the retry applies every additive
+    # file rather than the number there happen to be today (#183 added two).
+    additive = len(list((REPO_ROOT / "contracts" / "ddl" / "tubedepth").glob("*.sql")))
+    assert f"tubedepth: created from the baseline dump + {additive} additive file(s)" in done.stdout
 
 
 def test_no_source_ddl_file_ends_the_deploy_transaction_itself():
@@ -272,7 +279,7 @@ def test_a_deploy_will_not_race_a_connection_something_else_is_holding(
 
 @pytest.mark.parametrize("schema", ["trend_radar", "tubedepth"])
 def test_the_deploy_and_the_test_fixture_build_the_same_schema(
-    request: pytest.FixtureRequest, schema: str, _schema_name: str
+    request: pytest.FixtureRequest, harness_container: str, schema: str, _schema_name: str
 ):
     """conftest.py cannot call db/migrate.sh -- its schemas are renamed and one per test -- so what is
     held here is the thing that matters: both compose the same baseline and the same additive files,
@@ -284,7 +291,28 @@ def test_the_deploy_and_the_test_fixture_build_the_same_schema(
         with engine.connect() as conn:
             fixture = conn.execute(text(RELATIONS.format(schema=_schema_name))).fetchall()
             deployed = conn.execute(text(RELATIONS.format(schema=schema))).fetchall()
+            # The ledger is the one object whose *rows* are part of the composition, so the column
+            # comparison above cannot see it going wrong: a fixture that recorded a different set of
+            # versions from the deploy would still have an identical schema_migration table, and the
+            # next additive file would then be applied in one place and skipped in the other (#223).
+            fixture_versions = [
+                row[0]
+                for row in conn.execute(
+                    text(f'SELECT version FROM "{_schema_name}".schema_migration ORDER BY 1')
+                )
+            ]
     finally:
         engine.dispose()
+    # The deployed side goes through docker exec, not the engine: TEST_POSTGRES_URL connects as
+    # needs_migrator, which owns its own per-test schema but has no USAGE on the two source schemas
+    # (db/grants/needs_runtime_reader.sql grants those to needs_runtime alone). The pg_catalog
+    # comparison above is blind to that; a row SELECT is not.
+    deployed_versions = [
+        row[0]
+        for row in _psql(
+            harness_container, "fleet", f"SELECT version FROM {schema}.schema_migration ORDER BY 1"
+        )
+    ]
     assert deployed, f"the harness container has no {schema} schema"
     assert fixture == deployed
+    assert fixture_versions == deployed_versions

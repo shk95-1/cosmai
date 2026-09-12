@@ -164,6 +164,28 @@ def test_every_file_db_migrate_sh_reads_is_reachable_in_the_image(wheel_contents
     )
 
 
+def test_the_per_schema_adoption_lists_are_reachable_in_the_image(wheel_contents: frozenset[str]):
+    """`migrate_inputs()` reads literal paths out of the script, and this one is not literal: step
+    (0b) resolves contracts/ddl/<schema>/applied_before_the_ledger.txt through the loop variable, so
+    the scan above cannot see it and a .dockerignore line could hide it without a word (#223).
+
+    Losing it is not a crash. A deploy that cannot read the list creates an empty ledger on a
+    database that predates it, calls every applied file unapplied, and re-runs ALTER TABLEs that
+    cannot run twice."""
+    name = "applied_before_the_ledger.txt"
+    assert name in MIGRATE_SH.read_text(encoding="utf-8"), (
+        f"db/migrate.sh no longer reads {name}; this check is measuring a file nothing uses"
+    )
+    lists = sorted((REPO_ROOT / "contracts" / "ddl").glob(f"*/{name}"))
+    assert lists, f"db/migrate.sh reads {name} and no schema declares one"
+    missing = [
+        str(path)
+        for path in (PurePosixPath(p.relative_to(REPO_ROOT).as_posix()) for p in lists)
+        if str(path) not in wheel_contents and not in_image_checkout(path)
+    ]
+    assert not missing, f"the image has no copy of these: {missing}"
+
+
 def test_the_wheel_carries_every_data_file_inside_the_packaged_modules(wheel_contents: frozenset[str]):
     """The #1 shape: code under the four module roots opens its neighbours by path, and a data file
     the backend leaves out only fails once something runs from site-packages instead of the tree."""

@@ -110,6 +110,8 @@ def run(
     found = secrets.load(secrets_path)
     missing = [k for k in SECRET_KEYS if not found.get(k)]
     if missing:
+        # TODO(shk95-1/cosmai#249): M3 -- this exits before log.start below, so a keyless host
+        # leaves no naver_run row and pipeline_health reads the stage as "never" rather than refused.
         print(f"missing secret key(s) in the secret file: {', '.join(missing)}")
         return 2
 
@@ -218,6 +220,8 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
                 )
                 blocked.append(label)
                 continue
+            # TODO(shk95-1/cosmai#249): M1 -- hard-coded status=200 and no elapsed_ms, here and at
+            # the blog call below; a retry that failed and was retried writes no true record of it.
             journal.record(query=label, status=200, attempt=1)
             # request_key from the params actually sent -- not the response, which never echoes them
             # back reliably enough to reconstruct the boundary (#44).
@@ -235,6 +239,10 @@ def _run_datalab(engine, fetcher: Fetcher, journal, *, now: datetime) -> _Outcom
                 anchorless.append(label)
             with engine.begin() as connection:
                 storage_db.write_datalab_points(connection, points)
+                # Keyed by (request_key, month) -- issue #248 -- so this batch's anchor is never
+                # overwritten by the next batch's, the way naver_datalab_point's own PK overwrites it.
+                anchor_points = [p for p in points if p.group_key == DATALAB_ANCHOR]
+                storage_db.write_datalab_anchors(connection, anchor_points)
             total_points += len(points)
         if stopped is not None:
             break

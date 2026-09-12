@@ -25,11 +25,19 @@
   would fail on a column that already exists. Their `alembic_version` table is part of the baseline
   and holds no row: the old repos that ran alembic against these schemas are archived, nothing in
   this repo writes that table, and a rebuilt database is therefore not a database alembic could
-  resume. There is no ledger either (`needs.schema_migration` is the needs schema's alone), because
-  `db/migrate.sh` step (0) is all-or-nothing: it composes the two schemas on a database that has
-  neither and skips a database that has them (#178). That question is asked of `alembic_version`
-  rather than of the schema name -- the table is the baseline's own marker, so a schema standing
-  without it is a build that died part-way and not a schema to leave alone.
+  resume. `db/migrate.sh` step (0) composes each schema on a database that has neither and leaves a
+  database that has them alone (#178); that question is asked of `alembic_version` rather than of the
+  schema name -- the table is the baseline's own marker, so a schema standing without it is a build
+  that died part-way and not a schema to leave alone. Each of the two does carry a ledger of its own
+  since #223, `<schema>.schema_migration`, the same shape as `needs.schema_migration`: step (0) seeds
+  it from the files it applied when it builds a schema, and step (0b) applies to an already-present
+  schema every file that ledger does not name. Without it the skip above swallowed a file added after
+  the schema existed -- measured on production 2026-09-12, `tubedepth/004` and `/005` had been on
+  main for a week and neither column was there. The ledger is not a version: it records which files
+  ran, and the composition above is still what the schema *is*. A database that predates the ledger
+  gets its first rows from `contracts/ddl/<schema>/applied_before_the_ledger.txt`, a one-time record
+  of what was already applied that is read only where the schema is present and has no ledger yet,
+  and that is never appended to afterwards.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
 - `needs.analysis_run.versions` gains three keys for the live lineage, declared by fork #94 and written by fork
   #95 and #96: `snapshot`, the `corpus_snapshot.snapshot_id` the run read; `cutoff`, the

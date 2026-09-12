@@ -1,0 +1,23 @@
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
+-- Part of this schema's canonical form since #178, the same composition 004 above describes.
+--
+-- #183: which source answered. The population model shk95/cosmai-import-ydc#91 settled (option D)
+-- records the fetch route on the row and has each analysis axis declare which routes it admits, and
+-- from this issue on there is more than one route to record: listings come from the YouTube Data
+-- API, comments from yt-dlp, transcripts from timedtext, and video.metadata from either.
+--
+-- On `artifacts` rather than on each of the four snapshot tables because the artifact is the row
+-- every fetch produces, exactly one per fetch, and video_snapshots · listing_entries ·
+-- channel_snapshots all carry `artifact_id` -- so one column is joinable from all of them and no
+-- pair of them can disagree about which route a single fetch took. `comments` and `transcripts` are
+-- keyed by video instead and reach it through the job, which is the same trade #8 made for
+-- `fetched_at`.
+--
+-- The vocabulary is collectors/youtube/transport.py's Route: data_api · ytdlp · timedtext. Left as
+-- varchar rather than an enum, matching `jobs.dataset` (DDL 003) and the rest of this schema, so a
+-- fourth route is a code change and not a migration.
+--
+-- Nullable: every artifact collected before this migration was collected by no live transport at
+-- all (the default fetcher raised), so there is nothing to backfill and nothing that should be
+-- guessed at.
+ALTER TABLE tubedepth.artifacts ADD COLUMN fetch_route varchar(16);
