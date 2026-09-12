@@ -8,19 +8,26 @@
 -- says only "not the current one", and once live snapshots exist that is just as true of last
 -- month's live snapshot.
 --
--- Why the default is 'archive' and not 'live'. Two reasons, and the second is the louder one.
--- (1) The one row that exists becomes the archive without a production row write: this file may not
--- write rows, and defaulting to 'archive' means snapshot 1 is the archive the moment the column
--- exists. (2) A later snapshot inserted without naming its lineage then fails loudly on the partial
--- unique index below, instead of quietly standing as a second archive -- or, worse, being picked up
--- by the archive views, which would leave the fixed archive reading a live run.
+-- Why the default is 'live' and not 'archive'. Defaulting to 'archive' was tried first, because it
+-- would have made snapshot 1 the archive with no production row write at all. It cannot stand: every
+-- writer of this table -- db/corpus's loader today, #95's project:corpus next -- inserts a snapshot
+-- row naming no lineage, so with that default the *second* snapshot ever loaded collides with the
+-- one-archive index and no re-collection can land again (measured: three of
+-- tests/test_corpus_import.py's cases fail on exactly that). The default is therefore the ordinary
+-- value and 'archive' is said out loud, which is also how 023 treats `active` -- special is never
+-- what a row gets by saying nothing.
+--
+-- What that costs is one production row write, and it is the write #94's body already schedules as
+-- the coordinator's approved step: one row, snapshot 1, set to 'archive'. Between the migration and
+-- that step needs.archive_run resolves to nothing and the three archive views return **no** rows --
+-- an empty answer, never another lineage's rows, which is the failure mode #93 D0 is about.
 --
 -- `instrument` records how the observation was made, which is what makes two snapshots comparable
 -- at all (#38, fork #91 decision 2). The keys goal shk95-1/cosmai#255 names are listing_route,
 -- comment_depth, refetch_window_days and dictionary_version. There is no CHECK on the key set: the
 -- instrument grows with the collector, and a vocabulary frozen in DDL would cost a migration per knob.
 ALTER TABLE needs.corpus_snapshot
-  ADD COLUMN lineage text NOT NULL DEFAULT 'archive' CHECK (lineage IN ('archive', 'live'));
+  ADD COLUMN lineage text NOT NULL DEFAULT 'live' CHECK (lineage IN ('archive', 'live'));
 ALTER TABLE needs.corpus_snapshot
   ADD COLUMN instrument jsonb NOT NULL DEFAULT '{}'::jsonb;
 

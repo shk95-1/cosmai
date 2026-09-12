@@ -145,7 +145,7 @@ def lineages(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> di
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("INSERT INTO panel_roster (version, note) VALUES (%s, 'test')", (PANEL_VERSION,))
         for snapshot_id, label, lineage, name in (
-            (ARCHIVE, "yt-handoff-20260819", None, "archive"),
+            (ARCHIVE, "yt-handoff-20260819", "archive", "archive"),
             (LIVE, "live-20260912", "live", "live"),
         ):
             _snapshot(cur, snapshot_id, label, lineage)
@@ -159,27 +159,32 @@ def lineages(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> di
 # --- DDL 030 ---------------------------------------------------------------------------------
 
 
-def test_a_snapshot_written_without_a_lineage_is_the_archive(needs_runtime_url: str):
-    """The default is what makes snapshot 1 the archive with no production row write at all."""
+def test_a_snapshot_written_without_a_lineage_is_live(needs_runtime_url: str):
+    """Special is never what a row gets by saying nothing -- the same reading 023 gives `active`.
+
+    Every writer of this table inserts a snapshot naming no lineage (db/corpus's loader today,
+    #95's project:corpus next), so the other default would make the second snapshot ever loaded
+    collide with the one-archive index and no re-collection could land again.
+    """
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
-        _snapshot(cur, ARCHIVE, "yt-handoff-20260819", None)
-        cur.execute("SELECT lineage, instrument FROM corpus_snapshot WHERE snapshot_id = %s", (ARCHIVE,))
-        assert cur.fetchone() == ("archive", {})
+        _snapshot(cur, LIVE, "live-20260912", None)
+        cur.execute("SELECT lineage, instrument FROM corpus_snapshot WHERE snapshot_id = %s", (LIVE,))
+        assert cur.fetchone() == ("live", {})
 
 
-def test_a_second_archive_snapshot_is_refused_and_a_live_one_is_not(needs_runtime_url: str):
-    """The loud half of the default: a snapshot inserted without naming its lineage fails here rather
-    than standing as a second archive the views could pick."""
+def test_a_second_archive_snapshot_is_refused_and_more_live_ones_are_not(needs_runtime_url: str):
+    """One archive, carried by the index rather than by whoever writes the row."""
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
-        _snapshot(cur, ARCHIVE, "yt-handoff-20260819", None)
+        _snapshot(cur, ARCHIVE, "yt-handoff-20260819", "archive")
         conn.commit()
         with pytest.raises(psycopg.errors.UniqueViolation):
-            _snapshot(cur, LIVE, "live-20260912", None)
+            _snapshot(cur, LIVE, "second-archive", "archive")
         conn.rollback()
-        _snapshot(cur, LIVE, "live-20260912", "live")
+        _snapshot(cur, LIVE, "live-20260912", None)
+        _snapshot(cur, 3, "live-20260913", "live")
         conn.commit()
         cur.execute("SELECT count(*) FROM corpus_snapshot")
-        assert cur.fetchone() == (2,)
+        assert cur.fetchone() == (3,)
 
 
 def test_the_lineage_vocabulary_is_closed(needs_runtime_url: str):
@@ -236,10 +241,11 @@ def test_the_archive_surface_follows_the_latest_ok_run_of_the_archive_snapshot(
 def test_the_archive_surface_is_empty_when_no_snapshot_is_marked_archive(
     needs_schema: str, needs_runtime_url: str, _schema_name: str
 ):
-    """An empty answer, never another lineage's rows -- the failure mode this issue is about."""
+    """An empty answer, never another lineage's rows -- the failure mode this issue is about, and the
+    state production stands in between the migration and the coordinator's one-row archive write."""
     _install_views(needs_schema, _schema_name)
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
-        _snapshot(cur, LIVE, "live-20260912", "live")
+        _snapshot(cur, LIVE, "live-20260912", None)
         conn.commit()
         cur.execute("SELECT count(*) FROM archive_run")
         assert cur.fetchone() == (0,)
