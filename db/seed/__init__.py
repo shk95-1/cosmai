@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from db.seed import labeled, lexicon, mentions, metrics, mfds, panel, pipeline, products
+from db.seed import (
+    labeled,
+    lexicon,
+    mentions,
+    metrics,
+    mfds,
+    panel,
+    pipeline,
+    pipeline_corpus,
+    products,
+)
 from db.seed._common import DEFAULT_SLICES, EVAL_DIR, connect
 
 # Order matters: product_ref before the mentions that reference it, analysis_run before the metrics.
@@ -13,7 +23,20 @@ from db.seed._common import DEFAULT_SLICES, EVAL_DIR, connect
 # common use (#138).
 # mfds sits with the other eval/ reference loads and references nothing, so its position is free;
 # it is next to panel because both are reference tables read out of eval/ rather than a slice (#55).
-GROUP_NAMES = ("lexicon", "panel", "mfds", "labeled", "products", "mentions", "metrics", "pipeline")
+# pipeline_corpus is the fork's share of the same declaration (fork #94) and upserts into the same
+# two tables, so it runs straight after pipeline -- one group could not hold both, since
+# tests/test_pipeline_stage.py reads pipeline.STAGES alone to hold the crontab against it.
+GROUP_NAMES = (
+    "lexicon",
+    "panel",
+    "mfds",
+    "labeled",
+    "products",
+    "mentions",
+    "metrics",
+    "pipeline",
+    "pipeline_corpus",
+)
 
 
 def run_all(
@@ -30,6 +53,7 @@ def run_all(
         "mentions": (mentions.load, slices_dir),
         "metrics": (metrics.load, slices_dir),
         "pipeline": (pipeline.load, slices_dir),
+        "pipeline_corpus": (pipeline_corpus.load, slices_dir),
     }
     out: dict[str, int] = {}
     with connect(url) as conn, conn.cursor() as cur:
