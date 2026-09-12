@@ -1,6 +1,7 @@
-"""`cosmai collect youtube` -- wired for #8. `fetcher` is the seam a live cutover (#10, "no live yt-dlp
-calls" here) plugs a real yt-dlp-backed `Fetcher` into; tests plug a fixture-backed fake in, the same
-shape collectors/commerce/cli.py uses for its `Fetcher`.
+"""`cosmai collect youtube` -- wired for #8, live since #183. `fetcher` is the seam: the default is
+now `collectors/youtube/transport.py`'s `LiveFetcher` (three routes -- the YouTube Data API, yt-dlp
+and timedtext) where it used to be a `_RaisingFetcher`, and tests plug a fixture-backed fake into the
+same seam, the shape collectors/commerce/cli.py uses for its `Fetcher`.
 
 Four datasets, matching contracts/entrypoints.md's `youtube datasets: watch | work | flatten | prune`:
 `watch` only enqueues (issue #8's fan-out cap lives entirely in `queue.py`, exercised here); `work`
