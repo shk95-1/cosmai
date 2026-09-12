@@ -4,8 +4,14 @@ The transport shipped with `read_roster`, `roster_url` and `watchlist_path` as `
 arguments and no `add_argument` behind any of them, so the only expressible `watch` was **all of
 it**: 43 active panel rows, 129 listing jobs, and a `work` that then fans out the whole panel
 bounded only by `MAX_QUEUE_DEPTH`. The first live run of a brand-new transport is exactly the run
-that must be small, and it could only be made by driving `collectors.youtube.cli.run(...)` from a
-Python shell -- which is not a thing an operator does at 3am, and not a thing a runbook can record.
+that must be small, and it could only be made by importing `collectors.youtube.cli` in a Python
+shell and calling its `run` by hand -- not a thing an operator does at 3am, and not a thing a
+runbook can record.
+
+The call is described rather than written out on purpose: `tests/tool/test_serial_group.py` finds
+the tests that take the commerce source lock by searching a test file for that literal, and this
+file takes no such lock. Spelling it here would either fail that guard or, worse, get the guard
+widened until it lets prose through.
 """
 
 from __future__ import annotations
