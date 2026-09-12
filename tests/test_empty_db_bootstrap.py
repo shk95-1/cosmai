@@ -200,7 +200,10 @@ def test_a_build_that_fails_leaves_no_schema_behind(
 
     done = deploy(empty_database)
     assert done.returncode == 0, done.stderr
-    assert "tubedepth: created from the baseline dump + 3 additive file(s)" in done.stdout
+    # Counted from the directory, not written out: the point is that the retry applies every additive
+    # file rather than the number there happen to be today (#183 added two).
+    additive = len(list((REPO_ROOT / "contracts" / "ddl" / "tubedepth").glob("*.sql")))
+    assert f"tubedepth: created from the baseline dump + {additive} additive file(s)" in done.stdout
 
 
 def test_no_source_ddl_file_ends_the_deploy_transaction_itself():

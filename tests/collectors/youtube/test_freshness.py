@@ -30,7 +30,16 @@ class _CountingFetcher:
 def _run_watch_then_work(tubedepth_schema: str, tmp_path, fetcher, *, now: datetime) -> None:
     watchlist = tmp_path / "watch.txt"
     watchlist.write_text("video dQw4w9WgXcQ\n")
-    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=now) == 0
+    assert (
+        run(
+            "watch",
+            read_roster=False,
+            database_url=tubedepth_schema,
+            watchlist_path=watchlist,
+            captured_at=now,
+        )
+        == 0
+    )
     work_exit = run(
         "work", database_url=tubedepth_schema, fetcher=fetcher, payload_root=tmp_path / "p", captured_at=now
     )

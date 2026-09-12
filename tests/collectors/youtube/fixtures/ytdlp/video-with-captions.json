@@ -1,0 +1,41 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "long upload",
+  "language": "ko",
+  "subtitles": {
+    "ko": [
+      {
+        "ext": "vtt",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=&expire=1757000000&lang=ko&fmt=vtt",
+        "name": "Korean"
+      },
+      {
+        "ext": "json3",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=&expire=1757000000&lang=ko&fmt=json3",
+        "name": "Korean"
+      }
+    ],
+    "live_chat": [
+      {
+        "ext": "json",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=&expire=1757000000&lang=live_chat"
+      }
+    ]
+  },
+  "automatic_captions": {
+    "ko-orig": [
+      {
+        "ext": "json3",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=&expire=1757000000&lang=ko&fmt=json3&kind=asr",
+        "name": "Korean (auto-generated)"
+      }
+    ],
+    "en": [
+      {
+        "ext": "json3",
+        "url": "https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ&caps=&expire=1757000000&lang=ko&fmt=json3&kind=asr&tlang=en",
+        "name": "English from Korean"
+      }
+    ]
+  }
+}

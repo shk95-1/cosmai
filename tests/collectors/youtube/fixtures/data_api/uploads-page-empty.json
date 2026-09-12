@@ -1,0 +1,10 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "etag": "etag-uploads-page-empty",
+  "nextPageToken": "EAAaBlBUOkNBVQ",
+  "items": [],
+  "pageInfo": {
+    "totalResults": 5,
+    "resultsPerPage": 2
+  }
+}

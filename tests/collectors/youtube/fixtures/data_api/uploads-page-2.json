@@ -1,0 +1,44 @@
+{
+  "kind": "youtube#playlistItemListResponse",
+  "etag": "etag-uploads-page-2",
+  "items": [
+    {
+      "kind": "youtube#playlistItem",
+      "etag": "etag-playlist-item-2",
+      "id": "VVU1b01BaTA1ZFFxaVZMNnJ5cEFvX0Eu0002",
+      "snippet": {
+        "publishedAt": "2024-08-02T09:00:07Z",
+        "channelId": "UC5oM4Ai05dQqiVL6rypAo_A",
+        "title": "older upload",
+        "description": "",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/9bZkp7q19f0/default.jpg",
+            "width": 120,
+            "height": 90
+          }
+        },
+        "channelTitle": "panel channel",
+        "playlistId": "UU5oM4Ai05dQqiVL6rypAo_A",
+        "position": 2,
+        "resourceId": {
+          "kind": "youtube#video",
+          "videoId": "9bZkp7q19f0"
+        },
+        "videoOwnerChannelTitle": "panel channel",
+        "videoOwnerChannelId": "UC5oM4Ai05dQqiVL6rypAo_A"
+      },
+      "contentDetails": {
+        "videoId": "9bZkp7q19f0",
+        "videoPublishedAt": "2024-08-02T09:00:07Z"
+      },
+      "status": {
+        "privacyStatus": "public"
+      }
+    }
+  ],
+  "pageInfo": {
+    "totalResults": 5,
+    "resultsPerPage": 2
+  }
+}
