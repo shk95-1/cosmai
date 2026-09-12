@@ -169,14 +169,32 @@ export function productNameIndex(rows) {
   return index;
 }
 
-// A ref not in the catalog is left as the ref. A mention the linker could not attach ends up with the
-// site's original key as its ref as-is (aggregate's _product), and inventing a name for that spot would
-// have the screen assert a link the pipeline never made.
+// #128: metrics_need.product_ref carries `unlinked:<site>:<key>` for a mention the linker has not
+// attached (UNLINKED in analysis/aggregate/__init__.py — the two spellings have to stay equal). That is a
+// machine value and the bar slot is 20 characters, so drawing it as it is truncated every oliveyoung row to
+// the same 'unlinked:oliveyoung…': one repeated label on the axis this screen exists for.
+const UNLINKED_PREFIX = 'unlinked:';
+export const UNLINKED_LABEL = '미연결';
+
+// The site's own key, with the marker and the site taken off. indexOf rather than split, because a product
+// key may itself contain ':' — only the first segment after the marker is the site.
+function unlinkedKey(ref) {
+  const rest = ref.slice(UNLINKED_PREFIX.length);
+  const site = rest.indexOf(':');
+  return site === -1 ? rest : rest.slice(site + 1);
+}
+
+// A ref not in the catalog keeps its own identity rather than borrowing a name: inventing one would have
+// the screen assert a link the pipeline never made. An unattached mention (aggregate's _product) carries
+// the `unlinked:` marker, and what identifies it to a reader is the site key inside it — the marker itself
+// is the same on every such row, so it is said once, in words, and the full value stays in the product_ref
+// column beside it (app.js).
 export function productLabel(ref, index) {
   const hit = index && typeof index.get === 'function' ? index.get(ref) : undefined;
-  if (!hit) return String(ref);
-  const parts = [hit.brand, hit.name].filter(Boolean);
-  return parts.length ? parts.join(' · ') : String(ref);
+  const parts = hit ? [hit.brand, hit.name].filter(Boolean) : [];
+  if (parts.length) return parts.join(' · ');
+  const text = String(ref);
+  return text.startsWith(UNLINKED_PREFIX) ? `${UNLINKED_LABEL} · ${unlinkedKey(text)}` : text;
 }
 
 // A bar's label slot has a fixed width, so a long name overflows onto the next bar — a truncated label is
