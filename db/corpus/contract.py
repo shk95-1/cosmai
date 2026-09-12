@@ -13,6 +13,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from db.corpus.author import AUTHOR_HASH, RAW_CHANNEL_ID
+
 # The 11 rules lines of manifest.json, verbatim. The contract sentence's place is
 # contracts/formats.md §Corpus snapshot.
 RULES: tuple[str, ...] = (
@@ -63,9 +65,51 @@ SOURCES = ("youtube_video", "youtube_comment")
 CONTENT_TYPES = ("video_long", "video_short", "video_unknown", "comment")
 
 
+# The two keys the YouTube API answers an author under, and the pair `collectors/youtube/flatten.py`
+# passes straight through today (upstream #183 is the change that stops it at the source).
+RAW_AUTHOR_KEYS = ("author", "author_id")
+
+
 class ManifestMismatch(ValueError):
     """The manifest declared rules that differ from the contract. A row with a different meaning does
     not go into the same table."""
+
+
+class AuthorIdentifierRefused(ValueError):
+    """A document arrived carrying the author's raw channel id or display name. It is refused rather
+    than dropped on the floor, because a loader that silently strips it makes the source look clean
+    (#91 decision 3, #92)."""
+
+
+def check_author(doc_id: str, metadata: Mapping[str, Any]) -> None:
+    """Whether a document's `source_metadata` keeps the author as a hash and nothing else.
+
+    A row is refused **before** the insert, not cleaned up after: once a raw identifier is in the
+    table it has already been written to disk, replicated and backed up, and no later UPDATE takes
+    that back.
+    """
+    problems = [f"source_metadata.{key}" for key in RAW_AUTHOR_KEYS if key in metadata]
+    stored = metadata.get("author_channel_hash")
+    if stored is not None:
+        text = stored if isinstance(stored, str) else ""
+        if RAW_CHANNEL_ID.match(text):
+            problems.append("source_metadata.author_channel_hash is a raw channel id, not a hash")
+        # fullmatch, not match: Python's `$` also matches before a trailing newline and POSIX's does
+        # not, so `<24 hex>\n` would pass here and still be listed by the invariant view -- "empty
+        # means true" has to mean the same thing on both sides. The pattern text stays identical to
+        # the one the view carries.
+        elif not AUTHOR_HASH.fullmatch(text):
+            # A value of the right kind and the wrong shape is the quiet half: an untruncated or
+            # upper-case digest passes every negative check and then matches no creator comment at all.
+            problems.append(
+                f"source_metadata.author_channel_hash is not {AUTHOR_HASH.pattern} ({len(text)} characters)"
+            )
+    if problems:
+        raise AuthorIdentifierRefused(
+            f"{doc_id}: a comment row keeps the author's channel id only as"
+            f' sha256("youtube:" + channel_id)[:24] and no display name -- {", ".join(problems)}'
+            " (db/corpus/contract.py, contracts/formats.md, comment rows)"
+        )
 
 
 def _limitations(manifest: Mapping[str, Any]) -> list[tuple[str, ...]]:

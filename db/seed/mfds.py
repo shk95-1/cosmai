@@ -229,16 +229,26 @@ def rekey(cur: psycopg.Cursor[Any]) -> int:
     repair them, because both INSERTs are `ON CONFLICT DO NOTHING`. This is the repair path, and it is
     why 028 grants `UPDATE` rather than `SELECT, INSERT` alone. It is not called by `load`: a re-key
     is a consequence of changing the function, so it is run deliberately.
+
+    A company that would re-fold to the empty key is refused here before any UPDATE runs, the same way
+    `rows()` refuses one before any INSERT: an empty key joins every other empty key, so one such row
+    would put every brand in the lexicon next to every other. Every key is recomputed first so the
+    refusal can name every offender rather than dying half-way through the loop.
     """
-    # TODO(shk95/cosmai-import-ydc#88): no empty-key guard here, unlike rows(): a folding change that sends
-    # one company to the empty key surfaces as a CheckViolation from the UPDATE, half-way through, without
-    # the company name.
     cur.execute(ALL_KEYS_SQL)
+    recomputed = [
+        (report_seq, entp_name, entp_key, normalize_company(entp_name))
+        for report_seq, entp_name, entp_key in cur.fetchall()
+    ]
+    empty = [(report_seq, entp_name) for report_seq, entp_name, _, new_key in recomputed if not new_key]
+    if empty:
+        raise ValueError(
+            f"{len(empty)} company name(s) fold to the empty join key and cannot be re-keyed: {empty[:5]}"
+        )
     moved = 0
-    for report_seq, entp_name, entp_key in cur.fetchall():
-        recomputed = normalize_company(entp_name)
-        if recomputed != entp_key:
-            cur.execute(REKEY_SQL, (recomputed, report_seq, recomputed))
+    for report_seq, _entp_name, entp_key, new_key in recomputed:
+        if new_key != entp_key:
+            cur.execute(REKEY_SQL, (new_key, report_seq, new_key))
             moved += max(cur.rowcount, 0)
     return moved
 
