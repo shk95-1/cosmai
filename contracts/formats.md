@@ -185,6 +185,29 @@ not an orphan **comment**.
 - The eight limitation sentences are carried by `interfaces.md` §Limitations of the population — they are not
   a format but **how to read the numbers**, so they belong beside the formulas.
 
+### Which lineage a snapshot belongs to (fork #94, from decision #93 D0)
+A snapshot belongs to one of two lineages and the row says which: `corpus_snapshot.lineage` is `archive` or
+`live` (030). **An archive snapshot is read, never recomputed** — its rows and its run's output *are* the
+observation, and the analysis reaches them through three fixed views (`needs.archive_metrics_topic_quarter` ·
+`needs.archive_topic_quarter_judgement` · `needs.archive_topic_quarter_evidence`), each pinned to the run that
+`needs.archive_run` resolves from the archive snapshot's id and `analysis/trend/pipeline.py`'s note grammar —
+not to a run id written down anywhere. There is **exactly one** archive, carried by a partial unique index the
+way `active` is.
+
+The default is `live`, and the archive is said out loud. That is the opposite of what it looks like it should
+be, so the reason is worth keeping: every writer of this table inserts a snapshot naming no lineage, so a
+default of `archive` would make the *second* snapshot ever loaded collide with the one-archive index and no
+re-collection could land again. Special is never what a row gets by saying nothing. The cost is one production
+write to mark snapshot 1, and until it runs the three views return **no** rows — an empty answer, never
+another lineage's, which is the failure #93 D0 is about. The same is true whenever the archive's run is not
+`ok`: `analysis/trend/pipeline.py` re-opens a run by note rather than inserting a new one, so a re-run against
+the archive snapshot empties the surface for its duration rather than answering from a half-finished run.
+
+`corpus_snapshot.instrument` (jsonb) records how the observation was made — `listing_route` · `comment_depth` ·
+`refetch_window_days` · `dictionary_version` — which is what makes two snapshots comparable at all. Its keys
+carry no CHECK, because the instrument grows with the collector and a vocabulary frozen in DDL costs a
+migration per knob.
+
 ## MFDS registration ledger CSV (→ `needs.mfds_registration`, fork #55)
 - Source `eval/mfds/mfds_items_v1.csv`, copied verbatim from ydc `rag/mfds_items.csv` at tag v0.4.0 (`76db718`).
   Four columns map one to one: `COSMETIC_REPORT_SEQ` → `report_seq`, `ITEM_NAME` → `item_name`,
