@@ -46,13 +46,18 @@ UNION ALL
 -- (4) The collector's own table. Cutoff: the last pre-rule comment row was first seen 2026-08-23T22:55:44Z
 -- and the collector has been stopped since; every row after this date is collected under the hash rule
 -- (#92), so the view must see it. A later cutoff would leave the first days of live collection unwatched.
+-- The predicate asks what the value is **not**, not what it is: a `UC...`-shaped test would pass a handle
+-- (`@name`), a legacy `/user/` id or anything else raw that is not that one shape, and every one of those
+-- is as much an identifier as the shape we happen to recognise. Branch (5) already asks the display name
+-- the open question; this is the same question asked of the id.
 SELECT 'comment_raw_author_id'::text,
        'tubedepth.comments'::text,
        format('%s/%s', c.video_id, c.comment_id),
        format('first_seen_at=%s column=author_id', c.first_seen_at)
   FROM tubedepth.comments c
  WHERE c.first_seen_at > '2026-08-24'
-   AND c.author_id ~ '^UC[0-9A-Za-z_-]{22}$'
+   AND c.author_id IS NOT NULL
+   AND c.author_id !~ '^[0-9a-f]{24}$'
 UNION ALL
 -- (5) The display name is not stored at all, so its presence is the violation whatever it holds -- a
 -- name-derived signal belongs in a feature column, never in the name itself (contracts/formats.md).

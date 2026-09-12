@@ -94,7 +94,11 @@ def check_author(doc_id: str, metadata: Mapping[str, Any]) -> None:
         text = stored if isinstance(stored, str) else ""
         if RAW_CHANNEL_ID.match(text):
             problems.append("source_metadata.author_channel_hash is a raw channel id, not a hash")
-        elif not AUTHOR_HASH.match(text):
+        # fullmatch, not match: Python's `$` also matches before a trailing newline and POSIX's does
+        # not, so `<24 hex>\n` would pass here and still be listed by the invariant view -- "empty
+        # means true" has to mean the same thing on both sides. The pattern text stays identical to
+        # the one the view carries.
+        elif not AUTHOR_HASH.fullmatch(text):
             # A value of the right kind and the wrong shape is the quiet half: an untruncated or
             # upper-case digest passes every negative check and then matches no creator comment at all.
             problems.append(

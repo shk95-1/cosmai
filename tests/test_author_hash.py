@@ -133,9 +133,17 @@ def test_the_loader_refuses_a_document_carrying_the_raw_identifier(extra: dict[s
 
 # ---------- the view ----------
 def test_the_view_and_the_loader_recognise_one_shape_of_raw_identifier():
+    """The view carries no pattern of its own: every regex in it is one of the two `db/corpus/author.py`
+    exports, spelled the same way, so the loader cannot accept a value the view goes on to list.
+
+    The counts are the pin. `RAW_CHANNEL_ID` twice -- the `corpus_document` metadata arm and the
+    `author_channel_hash` arm; `AUTHOR_HASH` twice -- the same `author_channel_hash` arm and the
+    `tubedepth.comments.author_id` arm, which asks "is this not a hash" rather than naming one raw
+    shape, so that a handle or a legacy id does not walk past a `UC`-shaped predicate.
+    """
     body = VIEW.read_text(encoding="utf-8")
-    assert body.count(RAW_CHANNEL_ID.pattern) == 3
-    assert body.count(AUTHOR_HASH.pattern) == 1
+    assert body.count(RAW_CHANNEL_ID.pattern) == 2
+    assert body.count(AUTHOR_HASH.pattern) == 2
     assert "GRANT SELECT ON needs.author_identifier_violation TO needs_runtime" in body
     assert body.count(f"'{CUTOFF}'") == 2
     assert "A later cutoff would leave the first days of live collection unwatched." in body
@@ -239,6 +247,9 @@ def test_the_view_lists_a_corpus_row_that_went_round_the_loader(
         ("NAME", "Some Person", None, "2026-09-01T00:00:00Z", ["comment_author_name"]),
         ("ID", None, "UCqrNqg3UgVoD3Sa-F_TxuSA", "2026-09-01T00:00:00Z", ["comment_raw_author_id"]),
         ("HASHED", None, "224427a5eb83274bdf825b8a", "2026-09-01T00:00:00Z", []),
+        # Raw without being `UC`-shaped: a handle is an identifier too, and a predicate that names one
+        # shape would wave it through.
+        ("HANDLE", None, "@some-channel", "2026-09-01T00:00:00Z", ["comment_raw_author_id"]),
     ],
 )
 def test_the_view_watches_what_the_collector_writes_after_the_cutoff(
