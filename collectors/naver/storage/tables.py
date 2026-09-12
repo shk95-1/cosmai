@@ -1,8 +1,9 @@
 """The tables this collector writes, as SQLAlchemy Core -- describes the 4 tables
-`contracts/ddl/needs/004_naver.sql` adds. That file is the one authority for their actual shape
-(#7's completion bar: DDL diff = 0), so `tests/collectors/naver/test_tables_match_ddl.py` reflects
-the applied DDL and diffs it against `metadata` here, the same shape as
-`collectors/commerce/storage/tables.py`.
+`contracts/ddl/needs/004_naver.sql` adds, plus `naver_datalab_anchor`
+(`contracts/ddl/needs/009_naver_datalab_anchor.sql`, #248). Those files are the one authority for
+their actual shape (#7's completion bar: DDL diff = 0), so
+`tests/collectors/naver/test_naver_tables_match_ddl.py` reflects the applied DDL and diffs it
+against `metadata` here, the same shape as `collectors/commerce/storage/tables.py`.
 
 Unqualified on purpose: `needs` is reached through the connection's search_path (bootstrap.sql sets
 it for `needs_runtime`; `tests/conftest.py`'s `needs_schema`/`needs_runtime_url` fixtures point it at
@@ -58,6 +59,15 @@ naver_datalab_point = Table(
     sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+naver_datalab_anchor = Table(
+    "naver_datalab_anchor",
+    metadata,
+    sa.Column("request_key", sa.Text, primary_key=True),
+    sa.Column("month", sa.Text, primary_key=True),
+    sa.Column("ratio", sa.Numeric),
+    sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
+)
+
 naver_blog_post = Table(
     "naver_blog_post",
     metadata,
@@ -79,5 +89,6 @@ __all__ = [
     "naver_run",
     "naver_fetch_log",
     "naver_datalab_point",
+    "naver_datalab_anchor",
     "naver_blog_post",
 ]

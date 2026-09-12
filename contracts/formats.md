@@ -290,13 +290,14 @@ point, and `ratio_rescaled` = `ratio / anchor_ratio` rounded to 6 decimal places
   anchor whose ratio is 0, leaves `ratio_rescaled` NULL. A NULL means "not comparable across
   requests"; a filled-in number would be the plausible wrong one this whole section exists against.
 
-The anchor point is stored like any other group (`group_key` = the anchor), so it shares the source
-table's key `(category, group_key, month)`. **A category whose groups do not all fit beside the
-anchor in one request therefore keeps only its last request's anchor row**, and the rows of the
-earlier requests fall under the NULL rule above — `collectors/naver/cli.py` sends the largest batch
-last so that loss stays at its smallest (today: 4 of `keywords.json`'s 5 groups rescale, the fifth
-does not). Carrying one anchor row per request would need a key this table does not have; #90's
-report leaves that to a follow-up decision.
+The anchor point is still written into `needs.naver_datalab_point` like any other group (`group_key`
+= the anchor) — #90's readers keep reading it there. **The rescale view's join is against
+`needs.naver_datalab_anchor` instead** (`contracts/ddl/needs/009_naver_datalab_anchor.sql`, #248):
+one row per `(request_key, month)`, written by the collector alongside every batch. Unlike
+`naver_datalab_point`'s key `(category, group_key, month)` — which let a category's later request
+overwrite an earlier one's anchor row, since every batch of one category shares that key — a request
+boundary is never overwritten by a different request, so every batch keeps the anchor it was sent
+with and all of a category's groups rescale, however many requests it took.
 
 ## Lists that go into a scalar column (A12)
 `wish_mention.format` · `wish_mention.attribute` are `;`-separated, **at most 3**, and **the first is the main value**. Aggregation uses the first alone.
