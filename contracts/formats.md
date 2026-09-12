@@ -185,6 +185,35 @@ not an orphan **comment**.
 - The eight limitation sentences are carried by `interfaces.md` §Limitations of the population — they are not
   a format but **how to read the numbers**, so they belong beside the formulas.
 
+### What a comment row keeps of its author (fork #92, from #91 decision 3)
+A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the
+first 24 characters, lower-case hex, of `sha256("youtube:" + channel_id)`. The function is named once, in
+`db/corpus/author.py`, and every loader and analysis stage imports that one — a second implementation that
+drifts by one character raises nothing, it matches no creator comment at all, and the evidence stops being
+consumer speech while the output stays just as plausible. No display name is stored, under that key or any
+other; a name-derived signal, if an axis wants one, is stored as a feature (contains a link, digit-run
+pattern) and never as the name.
+
+The prefix is a stored fact rather than a choice: the 247,338 comment documents of the 2026-08-19 handover
+carry that form. Measured against production 2026-09-12, over 200,000 of them joined to their parent video's
+channel — **2,942 match `sha256("youtube:" + channel_id)[:24]` and 0 match `sha256(channel_id)[:24]`** — so
+the bare form is not an alternative spelling of this rule, it is a different rule that matches nothing.
+
+Two sites ask the same question of that shape, and they have to agree:
+- `db/corpus` refuses a document carrying an `author` or `author_id` key, or an `author_channel_hash` that is
+  a raw `UC…` channel id or is not exactly 24 lower-case hex characters.
+- `needs.author_identifier_violation` (`db/views/author_identifier_violation.sql`) asks it of the stored rows
+  in `needs.corpus_document` and of `tubedepth.comments` after the cutoff `2026-08-24` — the last pre-rule
+  comment row was first seen 2026-08-23T22:55:44Z. **Empty means true.**
+
+The negative check alone is not enough, and this is the part worth keeping: `^UC[0-9A-Za-z_-]{22}$` catches an
+identifier pasted in whole and nothing else. An untruncated 64-character digest, an upper-case one, or one
+hashed without the prefix is the right kind of value with the wrong value, it passes every negative check, and
+creator-comment marking then matches zero rows with no error raised. So the shape is asserted positively,
+`^[0-9a-f]{24}$`, and the same question is asked of `tubedepth.comments.author_id` as "is it not a hash"
+rather than "is it one known raw shape" — a handle (`@name`) or a legacy id is as much an identifier as the
+one shape a predicate happens to recognise.
+
 ## MFDS registration ledger CSV (→ `needs.mfds_registration`, fork #55)
 - Source `eval/mfds/mfds_items_v1.csv`, copied verbatim from ydc `rag/mfds_items.csv` at tag v0.4.0 (`76db718`).
   Four columns map one to one: `COSMETIC_REPORT_SEQ` → `report_seq`, `ITEM_NAME` → `item_name`,
