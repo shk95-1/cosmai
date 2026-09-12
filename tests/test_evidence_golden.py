@@ -242,7 +242,7 @@ def test_the_quotes_on_a_card_are_the_quotes_ydc_put_there(quoted: str):
     `contracts/interfaces.md`). So this is a fact to write down rather than a disagreement, and what
     is pinned here is that it stays two.
     """
-    moved: list[str] = []
+    moved: list[tuple[str, str]] = []
     for quarter, wanted in _ydc_cards().items():
         if not wanted:
             continue
@@ -255,11 +255,11 @@ def test_the_quotes_on_a_card_are_the_quotes_ydc_put_there(quoted: str):
                 " ".join(q.text.split())[:60] for q in card.quotes
             ]
             if not (same_terms and same_text):
-                moved.append(f"{quarter} {card.topic_key}")
-    # The topic ids are Korean corpus data; the quarters carry the same fact without them (#192 D12).
-    # TODO(shk95/cosmai-import-ydc#89): a weaker fact than before the translation -- the (quarter, topic_key)
-    # pairs belong in a fixture CSV under tests/fixtures/ so the full comparison comes back.
-    assert [line.split(" ", 1)[0] for line in moved] == ["2025Q2", "2025Q3"], moved
+                moved.append((quarter, card.topic_key))
+    # The topic ids are Korean corpus data, so the pairs live in a fixture CSV rather than here (#192 D12).
+    with (FIXTURE.parent / "moved_quote_cards.csv").open(newline="", encoding="utf-8") as f:
+        wanted_moved = [(row["quarter"], row["topic_key"]) for row in csv.DictReader(f)]
+    assert moved == wanted_moved, moved
 
 
 def test_the_run_carries_all_three_definition_versions(quoted: str):

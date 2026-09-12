@@ -16,11 +16,15 @@ behind that, are carried by the contract's §Evidence.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
 from analysis.types import TopicQuarterEvidenceRow
+
+# Imported rather than written again: the hash the creator-comment test compares against is one
+# function for the whole repository (fork #92, `db/corpus/author.py`). The name stays importable
+# from here because that is where every caller already reaches for it.
+from db.corpus.author import author_hash
 
 # The definition revision of the selection. Unlike `metric` and `judgement` it is the revision of four rules
 # the code settles rather than an agreement document, so it keeps the `rule-vX.Y` form
@@ -51,16 +55,6 @@ class Candidate:
     author_channel_hash: str
     quality_flags: str
     matched_term: str | None = None
-
-
-def author_hash(channel_id: str) -> str:
-    """The same rule the collector used to hash a comment author's channel ID (ydc
-    `youtube_collector.py`).
-
-    If this rule drifts from the collector's, not one creator comment is caught, and that pass is quiet --
-    the evidence stops being consumer speech while the output stays just as plausible.
-    """
-    return hashlib.sha256(f"youtube:{channel_id}".encode()).hexdigest()[:24]
 
 
 def is_creator(candidate: Candidate) -> bool:

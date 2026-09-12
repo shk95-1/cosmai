@@ -113,6 +113,9 @@ def runs_by_collected_at(manifest: dict[str, Any]) -> dict[str, str]:
 def document_row(row: dict[str, str], snapshot_id: int, runs: dict[str, str]) -> tuple[Any, ...]:
     raw = row["source_metadata"] or "{}"
     metadata: dict[str, Any] = json.loads(raw)
+    # Asked per row rather than once over the file: the refusal has to name the row that carried the
+    # identifier, and a snapshot is only ever as clean as its worst line (#92).
+    contract.check_author(row["doc_id"], metadata)
     collected_at = metadata.get("collected_at")
     if collected_at not in runs:
         raise CorpusMismatch(
