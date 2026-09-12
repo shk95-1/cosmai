@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Work 6 of #183: list one channel over both routes and print how the two answers differ.
+
+The listing decision -- the uploads playlist over the yt-dlp videos tab -- rests on a claim this
+repository has not measured: that the videos tab excludes Shorts and past live. What stands behind it
+today is Google's documentation and the archived RUNBOOK's 697-vs-474, which is somebody else's
+number on somebody else's channel. This replaces it with ours, at the cost of one extra listing call.
+
+    tool/measure-youtube-listing-routes UC5oM4Ai05dQqiVL6rypAo_A
+    tool/measure-youtube-listing-routes @beauty_channel --since 2024-07-01 --max-items 500
+    tool/measure-youtube-listing-routes UC... --json
+
+**This reaches the network.** It is the one thing in this issue that does, it is the coordinator's to
+run, and it writes nothing: no database, no artifact, no job row. The arithmetic it prints lives in
+`collectors/youtube/route_compare.py` and is tested offline against saved fixtures, so what happens
+here is only the two fetches.
+
+Read it for one of two answers. The sets are identical -> the cheaper route wins, the listing goes
+back to yt-dlp and `YOUTUBE_DATA_API_TOKEN` goes back to being "trending only". The uploads playlist
+is a superset -> the decision stands, and the size of `only data_api` is the size of the axis a
+videos-tab listing would have silently lost.
+
+Give both arms room: a truncated arm makes every difference unreadable, because an id missing from a
+walk that stopped early says nothing about the route. The report says so when it happens.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+
+from collectors.youtube import route_compare, transport
+from collectors.youtube.cli import DATA_API_SECRET_KEY
+from db import secrets
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("channel", help="a channel id (UC...) or a handle (@name)")
+    parser.add_argument(
+        "--since",
+        default=None,
+        help="the oldest publication date to walk back to; defaults to scope.json's LISTING_WINDOW_START",
+    )
+    parser.add_argument(
+        "--max-items",
+        type=int,
+        default=None,
+        help="cap each arm; defaults to scope.json's MAX_LISTING_ITEMS. A truncated arm is reported.",
+    )
+    parser.add_argument("--json", action="store_true", help="print the numbers rather than the report")
+    args = parser.parse_args(argv)
+
+    key = secrets.load().get(DATA_API_SECRET_KEY)
+    if not key:
+        print(
+            f"missing {DATA_API_SECRET_KEY} (contracts/secrets.md); the data_api arm cannot run",
+            file=sys.stderr,
+        )
+        return 2
+
+    budget = transport.RequestBudget.from_scope()
+    api = transport.DataApiClient(key, budget=budget)
+    ytdlp = transport.YtdlpRoute(budget=budget)
+    try:
+        api_dump = api.listing("channel.videos", args.channel, max_items=args.max_items, since=args.since)
+        # yt-dlp's videos tab has no publication window of its own -- it is walked by position, so
+        # `--since` narrows only the arm that can honour it and the counts are compared as walked.
+        tab_dump = ytdlp.listing("channel.videos", args.channel, max_items=args.max_items)
+    except transport.TransportError as error:
+        print(f"{error.route}: {error}", file=sys.stderr)
+        return 2
+    finally:
+        api.close()
+
+    report = route_compare.compare(args.channel, api_dump, tab_dump)
+    if args.json:
+        print(json.dumps(dict(route_compare.as_rows(report)), ensure_ascii=False, indent=2))
+    else:
+        print(route_compare.render(report))
+    # 0 when the measurement was taken, whatever it says: the verdict is the reader's, and an exit
+    # code that encoded it would make a channel whose routes agree look like a failed run.
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

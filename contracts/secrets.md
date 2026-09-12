@@ -8,7 +8,15 @@
     `X-Naver-Client-Id`/`-Secret` pair this key is refused as, #182). The key is account-level,
     so the one pair grants blog search and search trend alike — despite the `BLOG` in its names,
     which are the names the values are stored under and do not move.
-  - collectors/youtube: `YOUTUBE_DATA_API_TOKEN` (trending only), the tubedepth API key `COSMA_SRC_TUBEDEPTH_API_KEY` (when the api is protected)
+  - collectors/youtube: `YOUTUBE_DATA_API_TOKEN` — **trending and the panel listing** (#183, no
+    longer trending only). Every listing kind goes over the Data API: a channel's uploads playlist
+    (`channels.list` + `playlistItems.list`, 1 unit a page), `videos.list` for `video.metadata` and
+    for trending, `search.list` for an operator's one-off query (100 units a page, which is why no
+    panel directive uses it). The listing moved off yt-dlp because the yt-dlp videos tab excludes
+    Shorts and the production corpus is half short-form, so a videos-tab listing stops the
+    denominator being closed. Comments and captions need no key at all — yt-dlp and timedtext —
+    so a host without this one still collects those, and only the Data API jobs fail.
+    Also the tubedepth API key `COSMA_SRC_TUBEDEPTH_API_KEY` (when the api is protected)
   - db: `COSMA_DB_MIGRATOR`, `COSMA_DB_RUNTIME` (+ the needs role passwords are added to the same file as `NEEDS_DB_MIGRATOR`, `NEEDS_DB_RUNTIME`)
   - collectors/commerce (`collectors/commerce/storage/db.py`): `TREND_RADAR_DB_RUNTIME` — for the `trend_radar_runtime` role alone. The old stack still attaches to that role with its own `.env` value, so it is kept apart from `COSMA_DB_RUNTIME` (#29 — sharing them fails authentication).
   - db, empty-database bootstrap only (`db/migrate.sh` step (0)): `TREND_RADAR_DB_READER` — the

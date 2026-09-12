@@ -158,12 +158,25 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
 - `http_<code>` — any other HTTP status (`http_403` covers a 403 that is not quotaExceeded — forbidden,
   accessNotConfigured and so on — plus `http_500` and the rest).
 - `transport` — a failure with no HTTP status at all (DNS, socket, timeout).
+- `unavailable` (#183) — the thing exists and we may not have it: a private, members-only,
+  age-gated or removed video, or one with no caption track. Counted in `failed`, **not** in
+  `blocked`: one channel's access policy is not the collector being refused.
+- `budget` (#183) — the run spent its own `scope.json` request budget for that route. Also `failed`:
+  it is our cap, and putting it in `blocked` would make a self-limited run look throttled by YouTube.
 
 `error_message` (`Text`) is `str(error)` as it stands — the original exception text did not move
-column, `error_code` merely replaced the class-name slot with a classification. There is no live
-transport yet (before #10, `_RaisingFetcher` is the default), so this code has never reached a real
-403 response body — the classifier was written against the shape of `urllib.error.HTTPError`
-(`.code`·`.read()`), and making whatever transport #10 attaches raise in that shape is #10's job.
+column, `error_code` merely replaced the class-name slot with a classification.
+
+**Since #183 the classification names its route.** `collectors/youtube/transport.py` has three
+sources and they report failure in three vocabularies: the Data API answers with a status and a JSON
+`reason` (a spent quota is a 403 with `quotaExceeded`, not a 429), timedtext answers with a status
+and nothing metered behind it, and yt-dlp answers with prose and **no status at all** — a private
+video, a network blip and a bot check are the same exception. So `_classify_error` reads
+`error.route` first: the quota body is only parsed on `data_api`, the bot check is what becomes
+`rate_limited` on `ytdlp`, and an error carrying no route is read as the Data API's, which is what
+every caller written before #183 meant. `TransportError` keeps `urllib.error.HTTPError`'s
+`.code`·`.read()` shape, which is the obligation the previous paragraph of this section placed on
+whatever transport arrived.
 
 The analysis counterpart is `needs.analysis_health` in `db/views/analysis_health.sql`: per run the
 started/finished/status/versions and that run's `metrics_need`·`metrics_wish` row counts.

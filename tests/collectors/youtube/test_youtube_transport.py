@@ -516,3 +516,38 @@ def test_video_metadata_follows_the_scope_json_route_and_records_which_one_ran()
 def test_an_unknown_job_kind_is_refused_rather_than_guessed():
     with pytest.raises(ValueError, match="video.chapters"):
         _live_fetcher().fetch(FetchSpec(kind="video.chapters", target="dQw4w9WgXcQ"))
+
+
+# --- the one real request -----------------------------------------------------------------------
+
+
+@pytest.mark.live
+def test_one_live_uploads_listing_is_accepted_by_the_normalizer():
+    """`-m live`, so it runs only when a person asks for it (`pyproject.toml` markers, and
+    `tests/conftest.py` refuses a socket to anything unmarked). What it proves is the join the
+    fixtures cannot: that this key opens `channels.list` and `playlistItems.list`, that the uploads
+    playlist of a real channel pages the way the walker assumes, and that
+    `sources.normalize_listing` finds videos in what Google actually answers with.
+
+    One channel, capped at one page. It writes nothing -- no database, no artifact, no job row --
+    and the channel is the archive's own reference target rather than a panel channel, so running it
+    spends a unit of quota and touches nothing this collector owns.
+    """
+    from collectors.youtube import sources
+    from collectors.youtube.cli import DATA_API_SECRET_KEY
+    from db import secrets
+
+    key = secrets.load().get(DATA_API_SECRET_KEY)
+    if not key:
+        pytest.skip(f"no {DATA_API_SECRET_KEY} on this host")
+
+    client = DataApiClient(key)
+    try:
+        dump = client.listing("channel.videos", "@YouTube", max_items=5, since="2000-01-01")
+    finally:
+        client.close()
+
+    listing = sources.normalize_listing(dump, source_kind="channel.videos")
+    assert listing["videos"], "the uploads playlist answered, but the normalizer found no video in it"
+    assert all(len(video["video_id"]) == 11 for video in listing["videos"])
+    assert dump["expected_count"] is not None, "pageInfo.totalResults is what the shortfall check reads"
