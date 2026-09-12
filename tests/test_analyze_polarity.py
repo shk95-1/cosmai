@@ -487,12 +487,17 @@ def _probe_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
-    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch, llm_knobs: None
 ):
     """ollama waits from hundreds of ms to seconds per sentence (analysis/polarity/ollama.py). When that wait
     is inside an open transaction, both the stage's connection and the classifier's ledger connection are cut
     on the first page — the compressed limits reproduce that within seconds. No ollama and no GPU are needed:
     only the round trip is stubbed.
+
+    `llm_knobs`: the free local path builds a UsageLedger too, and since #136 a ledger given no budget
+    of its own reads COSMAI_LLM_BUDGET_USD — the deployed analyze container has it, a test process
+    does not. The free path is not excused from it, because the chain #113 walks can fall back from
+    ollama to the paid model inside one run.
     """
     squeezed = _squeezed(loaded)
     # Confirm the compression actually took first — otherwise the assertions below pass for free.
@@ -525,12 +530,17 @@ UNREACHABLE = "ollama 가 응답하지 않는다"
 
 
 def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
-    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch, llm_knobs: None
 ):
     """A failed round trip (URLError · TimeoutError) is an OSError and so outside FAILURES in
     analysis/pipeline.py — unwrapped, the stage ends in a traceback and the run polarity opened stays open at
     'running' forever (analysis_health keeps reporting that run as still going). On the paid path _Blocking
     covers that place.
+
+    `llm_knobs`: the free local path builds a UsageLedger too, and since #136 a ledger given no budget
+    of its own reads COSMAI_LLM_BUDGET_USD — the deployed analyze container has it, a test process
+    does not. The free path is not excused from it, because the chain #113 walks can fall back from
+    ollama to the paid model inside one run.
     """
 
     def refuse(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:

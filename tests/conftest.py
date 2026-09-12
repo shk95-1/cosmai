@@ -23,6 +23,7 @@ from psycopg.conninfo import conninfo_to_dict
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
+from analysis.polarity.pricing import BUDGET_KEY, CHAIN_KEY
 from db import secrets
 
 TEST_DB_URL_ENV = "TEST_POSTGRES_URL"
@@ -30,6 +31,22 @@ LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 SNAPSHOT_UPDATE = "--snapshot-update"
 # Set by tool/checks/test when it runs the whole suite, and by nothing else (#215).
 FULL_SUITE_ENV = "COSMAI_FULL_SUITE"
+
+
+# stack/env.example's defaults, restated. #136 left the knobs no default in code, so a test that builds a
+# ledger has to be handed them the way compose hands them to the analyze container; keeping the amount at
+# env.example's 10.00 is what lets the budget tests' arithmetic keep the meaning it was written with.
+LLM_BUDGET_FOR_TESTS = "10.00"
+LLM_CHAIN_FOR_TESTS = "ollama:gemma4:latest,llm:claude-sonnet-5"
+
+
+@pytest.fixture
+def llm_knobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The two #136 knobs, present the way a deployed analyze container has them. Not autouse: a test that
+    means to check the refusal deletes them itself, and the rest of the suite must not be given a budget it
+    never asked for."""
+    monkeypatch.setenv(BUDGET_KEY, LLM_BUDGET_FOR_TESTS)
+    monkeypatch.setenv(CHAIN_KEY, LLM_CHAIN_FOR_TESTS)
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

@@ -24,7 +24,8 @@ from analysis.polarity.pricing import PurposeCap, UsageLedger, cost_usd
 from analysis.retrieval import ask, corpus, pipeline
 from tests.retrieval.conftest import install_topics
 
-pytestmark = pytest.mark.postgres
+# llm_knobs: ask's ledger takes no budget of its own, so it reads COSMAI_LLM_BUDGET_USD (#136).
+pytestmark = [pytest.mark.postgres, pytest.mark.usefixtures("llm_knobs")]
 
 QUERY = "panthenol"
 # Long enough for the grounding gate to treat a chunk frequency of 0 as "the corpus never says this
@@ -580,3 +581,32 @@ def test_the_dry_run_is_gated_too(loaded, capsys):
     assert ABSENT in capsys.readouterr().err
     assert log_rows(loaded) == []
     assert UsageLedger(loaded).spent() == 0
+
+
+# ---------------------------------------------------------------------------------------------
+# #136 fix round: the knob's refusal has to arrive as an exit code, not as a BaseException.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_the_cli_refuses_with_exit_2_when_the_budget_knob_is_missing(
+    loaded, needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    """Through `main`, because that is where the exit code is decided and where this went wrong: the
+    module-level `llm_knobs` above means no other test on this path ever runs without the knob, and the
+    refusal tests in tests/test_llm_pricing.py call the resolver directly.
+
+    `retrieval ask` is the sharp case. Three of the five entry points that build a ledger are typed in a
+    host shell, where nothing sources stack/.env -- and exit 1 here already means "no evidence, the fixed
+    refusal is on stdout", so an unconfigured host must not be able to produce it."""
+    from cosmai.cli import main
+
+    # No cache_dir override: this is the real command, so it builds the bm25 index the way a run does
+    # (content-keyed file under var/retrieval/bm25, written atomically -- pipeline.load_index).
+    monkeypatch.delenv("COSMAI_LLM_BUDGET_USD", raising=False)
+    assert main(["retrieval", "ask", "--query", QUERY, "--url", needs_runtime_url]) == 2
+    captured = capsys.readouterr()
+    # stdout is the markdown artefact; a refusal redirected into a `.md` would sit inside the answer.
+    assert captured.out == ""
+    assert "COSMAI_LLM_BUDGET_USD" in captured.err
+    # The evidence was there and nothing was called or billed -- this is a refusal, not an empty corpus.
+    assert log_rows(loaded) == []

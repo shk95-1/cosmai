@@ -42,8 +42,10 @@ def _squeezed_url(base_url: str) -> str:
 
 @pytest.mark.postgres
 def test_a_slow_local_predict_survives_the_squeezed_idle_in_transaction_timeout(
-    needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch
+    needs_runtime_url: str, monkeypatch: pytest.MonkeyPatch, llm_knobs: None
 ):
+    """`llm_knobs`: the free local path builds a UsageLedger too, and since #136 a ledger given no budget of
+    its own reads COSMAI_LLM_BUDGET_USD — the deployed analyze container has it, a test process does not."""
     seed.run_all(needs_runtime_url, only=("lexicon",))
     squeezed = _squeezed_url(needs_runtime_url)
     monkeypatch.setattr(predictors, "LEXICON_URL", squeezed)
