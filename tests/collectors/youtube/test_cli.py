@@ -24,7 +24,12 @@ def test_unknown_dataset_is_blocked(tubedepth_schema: str):
 
 
 def test_watch_with_no_watchlist_file_is_blocked(tubedepth_schema: str, tmp_path: Path):
-    assert run("watch", database_url=tubedepth_schema, watchlist_path=tmp_path / "missing.txt") == 2
+    assert (
+        run(
+            "watch", read_roster=False, database_url=tubedepth_schema, watchlist_path=tmp_path / "missing.txt"
+        )
+        == 2
+    )
 
 
 def test_watch_reports_partial_when_the_queue_is_capped(
@@ -34,7 +39,16 @@ def test_watch_reports_partial_when_the_queue_is_capped(
     watchlist = tmp_path / "watch.txt"
     # channel+comments queues 3 listing jobs; the cap (1) is hit on the second.
     watchlist.write_text("channel+comments UUsome_channel_id\n")
-    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT) == 1
+    assert (
+        run(
+            "watch",
+            read_roster=False,
+            database_url=tubedepth_schema,
+            watchlist_path=watchlist,
+            captured_at=AT,
+        )
+        == 1
+    )
 
     engine = sa.create_engine(tubedepth_schema)
     with engine.begin() as conn:
@@ -49,7 +63,16 @@ def test_watch_stamps_dataset_on_the_job_it_creates(tubedepth_schema: str, tmp_p
     (watch|work|flatten|prune) -- collector_health's youtube arm needs a column in that vocabulary."""
     watchlist = tmp_path / "watch.txt"
     watchlist.write_text("video dQw4w9WgXcQ\n")
-    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT) == 0
+    assert (
+        run(
+            "watch",
+            read_roster=False,
+            database_url=tubedepth_schema,
+            watchlist_path=watchlist,
+            captured_at=AT,
+        )
+        == 0
+    )
 
     engine = sa.create_engine(tubedepth_schema)
     with engine.begin() as conn:
@@ -78,7 +101,16 @@ def test_a_follow_up_job_fanned_out_during_work_inherits_watch(tubedepth_schema:
 
     watchlist = tmp_path / "watch.txt"
     watchlist.write_text("channel @beauty_channel\n")
-    assert run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT) == 0
+    assert (
+        run(
+            "watch",
+            read_roster=False,
+            database_url=tubedepth_schema,
+            watchlist_path=watchlist,
+            captured_at=AT,
+        )
+        == 0
+    )
     work_exit = run(
         "work",
         database_url=tubedepth_schema,

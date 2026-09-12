@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,12 +22,19 @@ from typing import Any, Protocol
 import sqlalchemy as sa
 from sqlalchemy import Connection
 
-from collectors.youtube import flatten, queue, sources
-from collectors.youtube.models import FRESHNESS, Dataset, JobState
+from collectors.youtube import flatten, queue, roster, sources, transport
+from collectors.youtube.models import (
+    COMMENT_REFETCH_WINDOW_DAYS,
+    FRESHNESS,
+    Dataset,
+    JobState,
+)
 from collectors.youtube.payload_store import PayloadStore
 from collectors.youtube.storage import db as storage_db
-from collectors.youtube.storage.tables import artifacts, jobs
+from collectors.youtube.storage.tables import artifacts, comments, jobs
 from collectors.youtube.watchlist import WatchlistError, read_watchlist
+from db import runtime as needs_runtime
+from db import secrets
 
 LISTING_KINDS = frozenset({"channel.videos", "search.videos", "playlist.items", "trending.videos"})
 
@@ -49,15 +56,28 @@ class Fetcher(Protocol):
     def fetch(self, spec: FetchSpec) -> dict[str, Any]: ...
 
 
-class _RaisingFetcher:
-    """The default fetcher: fails loudly rather than opening a real socket. A live cutover (#10)
-    replaces this."""
+#: contracts/secrets.md: the listing route's key. Since #183 it is no longer "trending only" -- the
+#: panel channels are listed with it too.
+DATA_API_SECRET_KEY = "YOUTUBE_DATA_API_TOKEN"
 
-    def fetch(self, spec: FetchSpec) -> dict[str, Any]:  # pragma: no cover - only if actually called
-        raise NotImplementedError(
-            "collectors.youtube has no live transport yet; see issue #10 (cutover). "
-            "Tests inject a fixture-backed fetcher instead of calling the CLI's default."
-        )
+
+def live_fetcher(secrets_path: str | Path | None = None) -> transport.LiveFetcher:
+    """The default `work` fetcher since #183 -- what replaced `_RaisingFetcher`.
+
+    A missing key is not fatal here, unlike `collectors/naver/cli.py`'s `secrets.require`: two of the
+    four job kinds (comments, transcripts) need no key at all, and a run that can still collect them
+    is partial rather than blocked. `LiveFetcher` refuses the Data API routes by itself, naming the
+    key, and those jobs fail one at a time the way any other failed job does."""
+    found = secrets.load(secrets_path)
+    key = found.get(DATA_API_SECRET_KEY)
+    budget = transport.RequestBudget.from_scope()
+    ytdlp = transport.YtdlpRoute(budget=budget)
+    return transport.LiveFetcher(
+        data_api=transport.DataApiClient(key, budget=budget) if key else None,
+        ytdlp=ytdlp,
+        timedtext=transport.TimedtextRoute(ytdlp=ytdlp, budget=budget),
+        budget=budget,
+    )
 
 
 def run(
@@ -70,6 +90,8 @@ def run(
     watchlist_path: Path | None = None,
     payload_root: Path | None = None,
     captured_at: datetime | None = None,
+    roster_url: str | None = None,
+    read_roster: bool = True,
 ) -> int:
     """Run one dataset for one pass. `board`/`since` are accepted for the entrypoint's shape
     (contracts/entrypoints.md); neither means anything to any youtube dataset today."""
@@ -82,15 +104,25 @@ def run(
         return 2
 
     now = captured_at or datetime.now(UTC)
+    if wanted is Dataset.WORK and fetcher is None:
+        # Built before the engine so a missing secret file is reported without a connection open.
+        fetcher = live_fetcher()
     engine = storage_db.create_engine(database_url or storage_db.runtime_url())
     payloads = PayloadStore(payload_root or Path("var") / "youtube-payloads")
     try:
         prune_result: PruneResult | None = None
         with engine.begin() as conn:
             if wanted is Dataset.WATCH:
-                return _run_watch(conn, watchlist_path or DEFAULT_WATCHLIST, now=now)
+                return _run_watch(
+                    conn,
+                    watchlist_path or DEFAULT_WATCHLIST,
+                    now=now,
+                    roster_url=roster_url,
+                    read_roster=read_roster,
+                )
             if wanted is Dataset.WORK:
-                return _run_work(conn, payloads, fetcher or _RaisingFetcher(), now=now)
+                assert fetcher is not None  # noqa: S101 - set just above when the caller passed none
+                return _run_work(conn, payloads, fetcher, now=now)
             if wanted is Dataset.FLATTEN:
                 return _run_flatten(conn, payloads, now=now)
             prune_result = _run_prune(conn, now=now)
@@ -107,14 +139,45 @@ def run(
         engine.dispose()
 
 
-def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
+def _panel_directives(roster_url: str | None) -> list[Any]:
+    """Read once, on its own engine, and let it go: the roster is 43 rows read at boot, and holding
+    a second pool open for the rest of a watch pass would spend a `needs_runtime` connection the
+    analysis stages are sized against."""
+    engine = storage_db.create_engine(roster_url or needs_runtime.runtime_url())
     try:
-        directives = read_watchlist(watchlist_path)
+        with engine.begin() as conn:
+            return roster.read_panel_channels(conn)
+    finally:
+        engine.dispose()
+
+
+def _run_watch(
+    conn: Connection,
+    watchlist_path: Path,
+    *,
+    now: datetime,
+    roster_url: str | None = None,
+    read_roster: bool = True,
+) -> int:
+    try:
+        file_directives = read_watchlist(watchlist_path)
     except WatchlistError as error:
         print(str(error))
         return 2
+
+    panel: list[Any] = []
+    if read_roster:
+        try:
+            panel = _panel_directives(roster_url)
+        except (roster.RosterError, SystemExit) as error:
+            # Blocked, not partial: a `watch` that silently queues only the operator file because the
+            # roster query failed is #39's "no queued jobs" with a new cause and the same silence.
+            print(f"the panel roster could not be read: {error}")
+            return 2
+    directives = roster.merge(panel, file_directives)
+
     if not directives:
-        print(f"nothing to watch: {watchlist_path} holds no directives")
+        print(f"nothing to watch: the panel roster is empty and {watchlist_path} holds no directives")
         return 2
 
     capped = 0
@@ -139,13 +202,13 @@ def _run_watch(conn: Connection, watchlist_path: Path, *, now: datetime) -> int:
                 queued += 1
             elif outcome is queue.EnqueueOutcome.CAPPED:
                 capped += 1
+                source = f"{watchlist_path} line {directive.line}" if directive.line else "panel roster"
                 print(
-                    f"{watchlist_path} line {directive.line}: queue is at MAX_QUEUE_DEPTH, "
-                    f"skipping {directive.kind} {directive.target!r}"
+                    f"{source}: queue is at MAX_QUEUE_DEPTH, skipping {directive.kind} {directive.target!r}"
                 )
     if capped:
         return 1
-    print(f"queued {queued} job(s) from {watchlist_path}")
+    print(f"queued {queued} job(s) from {len(panel)} panel channel(s) and {watchlist_path}")
     return 0
 
 
@@ -188,7 +251,12 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
     cache `_collect_one` consults before spending a request. `fresh_until` is stamped at write time
     (`now + FRESHNESS.get(kind)`), so this is one indexed comparison, not a per-row calculation."""
     return conn.execute(
-        sa.select(artifacts.c.identifier, artifacts.c.digest, artifacts.c.byte_count)
+        sa.select(
+            artifacts.c.identifier,
+            artifacts.c.digest,
+            artifacts.c.byte_count,
+            artifacts.c.fetch_route,
+        )
         .where(artifacts.c.kind == kind, artifacts.c.target == target, artifacts.c.fresh_until > now)
         .order_by(artifacts.c.fetched_at.desc())
         .limit(1)
@@ -217,15 +285,51 @@ def _is_quota_exceeded(error: Exception) -> bool:
     return _QUOTA_EXCEEDED_REASON in reasons
 
 
+def _route_of(error: Exception) -> str:
+    """Which source the failure came from. #183 made this a question with more than one answer: the
+    Data API answers with a status and a JSON `reason`, yt-dlp answers with prose and no status at
+    all, and timedtext answers with a status and no body worth reading. An error carrying no route
+    is classified as the Data API's, which is what every pre-#183 caller of this module meant --
+    `_is_quota_exceeded` was written against a Data API 403 body and nothing else could reach it."""
+    route = getattr(error, "route", None)
+    return route if isinstance(route, str) else transport.Route.DATA_API
+
+
 def _classify_error(error: Exception) -> str:
     """Bucket a fetch failure into a small vocabulary #77's collector_health view can count as
     `blocked` (403/429, the same statuses commerce's fetch_log.status already treats as blocked) vs
     `failed` -- contracts/entrypoints.md 수집기 절 documents this vocabulary as the source #77 reads.
-    `error.code` is how `urllib.error.HTTPError` (and any transport built the same shape) carries a
-    status; a failure with none reached no HTTP response at all (DNS, socket, timeout)."""
+
+    #183: the route decides how the failure is read, because the same word means different things
+    on different routes and one of the three has no status to read at all.
+
+      data_api   `.code` plus, for a 403, the `reason` in the body -- quotaExceeded is a spent quota
+                 and not a refusal, and the two are the same status.
+      ytdlp      no status ever. The bot check is the one failure that is evidence about the address
+                 rather than about the video, so it is `rate_limited`; a private or removed video is
+                 `unavailable`; anything else is `transport`.
+      timedtext  `.code`, and never a quota -- captions are not metered, so reading a 403 body for
+                 `quotaExceeded` there would only ever find nothing.
+
+    `unavailable` is new here and lands in `failed`, not `blocked`: a members-only video is a fact
+    about that video, and counting it as blocked would make one channel's access policy look like
+    the collector being refused."""
+    route = _route_of(error)
+    if isinstance(error, transport.BudgetExhausted):
+        # The run stopped itself. Not the source's answer, and not a status -- calling it
+        # `rate_limited` would put our own cap into collector_health's `blocked` count.
+        return "budget"
+    if route == transport.Route.YTDLP:
+        if isinstance(error, transport.RateLimited):
+            return "rate_limited"
+        if isinstance(error, transport.Unavailable):
+            return "unavailable"
+        return "transport"
+    if isinstance(error, transport.Unavailable):
+        return "unavailable"
     code = getattr(error, "code", None)
     if isinstance(code, int):
-        if code == 403 and _is_quota_exceeded(error):
+        if code == 403 and route == transport.Route.DATA_API and _is_quota_exceeded(error):
             return "quota"
         if code == 429:
             return "rate_limited"
@@ -256,20 +360,108 @@ def _elapsed_ms(started_at: datetime, now: datetime) -> int:
     return int((now - started_at).total_seconds() * 1000)
 
 
+@dataclass(frozen=True, slots=True)
+class _Collected:
+    """What one job produced. `short` is separate from `ok` on purpose: the job succeeded, an
+    artifact was written and the rows are real -- the source simply handed back less than it said it
+    held, which contracts/entrypoints.md calls partial ("some failed **or were truncated**") and
+    which nothing before #183 could observe at all."""
+
+    ok: bool
+    short: bool = False
+
+
+def _shortfall(dump: Mapping[str, Any]) -> str | None:
+    """The #90 axis, read off what the transport reported rather than off the request.
+
+    Two ways a listing ends early and only one of them is the source's doing. `truncated` is ours --
+    the item cap or the publication window -- and is noted, not counted against the run. A walk that
+    ended on its own holding fewer entries than the first page's `totalResults` claimed is the
+    source giving us less than it said it had, and that is the failure that looks exactly like
+    success: on #90 the fake answered every request plausibly, the suite was green, and production
+    wrote 0 rows."""
+    expected = dump.get("expected_count")
+    returned = dump.get("returned_count")
+    if not isinstance(expected, int) or not isinstance(returned, int):
+        return None
+    if dump.get("truncated"):
+        return None
+    if returned >= expected:
+        return None
+    return f"the source reported {expected} item(s) and returned {returned}"
+
+
+def _comment_follow_ups(conn: Connection, videos: Sequence[Mapping[str, Any]], *, now: datetime) -> list[str]:
+    """Which listed videos get a `video.comments` job this pass (#183's re-fetch window).
+
+    A video published inside `COMMENT_REFETCH_WINDOW_DAYS` is fanned out every pass and
+    `FRESHNESS_SECONDS['video.comments']` decides whether that job actually spends a fetch. A video
+    older than the window is fanned out **once, ever** -- at first observation -- and never again.
+    Without the window a daily cadence re-fetches every panel video's comments every day; against
+    13,979 videos that is the quota shape the archive measured as 5,098 of 5,679 units, every day,
+    forever.
+
+    It is applied here, at the fan-out, rather than in `work`'s collection of a job or in the
+    queue's dedupe: by either of those points the row exists, `MAX_QUEUE_DEPTH` has already counted
+    it, and the fan-out is where the 224k-duplicate incident happened. (The decision comment places
+    this "in `watch`"; in this package the listing is expanded during `work`, from the listing job's
+    `follow_up_kind`, which is the same fan-out under a different dataset name.)
+
+    "Ever" is asked of two tables because neither alone survives: `artifacts` is pruned at
+    `PRUNE_MAX_AGE_DAYS`, so an artifact row would quietly stop being evidence after a month and the
+    whole panel would re-fetch; `comments` is never pruned but is only written once `flatten` has
+    run, so it is blind to a harvest collected an hour ago. Two set queries, not two per video.
+    """
+    cutoff = now - timedelta(days=COMMENT_REFETCH_WINDOW_DAYS)
+    inside: list[str] = []
+    outside: list[str] = []
+    for video in videos:
+        video_id = video.get("video_id")
+        if not video_id:
+            continue
+        published = video.get("published_at")
+        # No publication instant is not "new": it is unknown, and the cheap reading of unknown is
+        # the one that collects the video once rather than every day forever.
+        if isinstance(published, datetime) and published >= cutoff:
+            inside.append(video_id)
+        else:
+            outside.append(video_id)
+    if not outside:
+        return inside
+
+    already = set(
+        conn.execute(
+            sa.select(artifacts.c.target).where(
+                artifacts.c.kind == "video.comments", artifacts.c.target.in_(outside)
+            )
+        ).scalars()
+    )
+    already.update(
+        conn.execute(
+            sa.select(comments.c.video_id).where(comments.c.video_id.in_(outside)).distinct()
+        ).scalars()
+    )
+    return inside + [video_id for video_id in outside if video_id not in already]
+
+
 def _collect_one(
     conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
-) -> bool:
+) -> _Collected:
     cached = _fresh_artifact(conn, kind=job.kind, target=job.target, now=now)
+    short: str | None = None
     if cached is not None:
         # A fresh artifact already answers this question -- no fetch, no new artifact row. This is
         # what keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in
         # one watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
         payload = payloads.get(job.kind, cached.digest)
         digest, byte_count = cached.digest, cached.byte_count
+        route = cached.fetch_route
     else:
         try:
             dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
             payload = _normalize(job.kind, dump)
+            route = dump.get("fetch_route")
+            short = _shortfall(dump) if job.kind in LISTING_KINDS else None
         except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
             conn.execute(
                 sa.update(jobs)
@@ -282,7 +474,7 @@ def _collect_one(
                     error_message=str(error),
                 )
             )
-            return False
+            return _Collected(ok=False)
 
         stored = payloads.put(job.kind, payload)
         digest, byte_count = stored.digest, stored.byte_count
@@ -297,11 +489,18 @@ def _collect_one(
                 fetched_at=now,
                 fresh_until=now + FRESHNESS.get(job.kind, timedelta(0)),
                 schema_version="1",
+                # #183: which source answered. Written here, from what the transport reported, and
+                # not guessed from the kind -- `video.metadata` takes either route.
+                fetch_route=route,
             )
         )
 
     if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
-        video_ids = [v["video_id"] for v in payload["videos"]]
+        videos = payload["videos"]
+        if job.follow_up_kind == "video.comments":
+            video_ids = _comment_follow_ups(conn, videos, now=now)
+        else:
+            video_ids = [video["video_id"] for video in videos]
         # #102: the fanned-out job inherits the listing job's own dataset -- it exists only because
         # that job's follow_up_kind named it, not because of anything `work` itself decided.
         queue.fan_out_follow_up(
@@ -319,7 +518,10 @@ def _collect_one(
             payload_bytes=byte_count,
         )
     )
-    return True
+    if short is not None:
+        print(f"{job.kind} {job.target!r}: {short}")
+        return _Collected(ok=True, short=True)
+    return _Collected(ok=True)
 
 
 def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
@@ -327,9 +529,14 @@ def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now
     if not claimed:
         print("no queued jobs")
         return 0
-    failures = sum(0 if _collect_one(conn, payloads, fetcher, job, now=now) else 1 for job in claimed)
-    print(f"worked {len(claimed)} job(s), {failures} failed")
-    return 1 if failures else 0
+    outcomes = [_collect_one(conn, payloads, fetcher, job, now=now) for job in claimed]
+    failures = sum(not outcome.ok for outcome in outcomes)
+    short = sum(outcome.short for outcome in outcomes)
+    print(f"worked {len(claimed)} job(s), {failures} failed, {short} short")
+    # A short listing is partial by contracts/entrypoints.md's own words -- "1 partial (some failed
+    # or were truncated)" -- and is the one failure that otherwise reports 0 and writes half a
+    # channel (#90).
+    return 1 if failures or short else 0
 
 
 def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> int:
