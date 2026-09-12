@@ -212,6 +212,9 @@ none = [
     "tests/test_ownership.py",
     "tests/test_secrets.py",
     "tests/tool/test_ddl_drift_foreign.py",
+    # An additive file under contracts/ddl/<schema>/ is exactly what the per-schema ledger has to
+    # carry to a database that already has that schema (#223).
+    "tests/test_source_schema_ledger.py",
 ]
 "cosmai/" = [
     "tests/test_cli_help.py",
@@ -231,6 +234,7 @@ none = [
     "tests/test_panel_seed.py",
     "tests/test_migrate_ledger_and_grants.py",
     "tests/test_migrate_view_sweep.py",
+    "tests/test_source_schema_ledger.py",
     "tests/test_grants_reader.py",
     "tests/test_runtime_role_cannot_ddl.py",
     "tests/test_collector_health_view.py",
