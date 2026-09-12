@@ -587,6 +587,27 @@ class Predictor(Protocol):  # an eval implementation. Takes a batch and returns 
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: the slice has no cap, so the contract sets the constant). An implementation that uses no cap leaves this column NULL.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — if a 3-star review is mixed into the RATING_ASC sample, or there are fewer than 150 at ≤2 stars, then the ≤2-star rows are complete. 150 is the collection sample ceiling (`REVIEW_PAGES 3 x 50`) and `collectors/commerce/scope.json` (#7) and `formats.md` hold the same value.
 
+## What the `scope='all'` rollup counts (#126)
+
+**Generic mentions alone.** The population of a `scope='all'` row is the mentions whose
+`need_mention.aspect_scope` is `generic`, so a category-only aspect (`맛`·`염색결과`·`세안후건조` …) emits no
+rollup row at all and is read on its own category scope, while an aspect the lexicon states on both sides
+(`눈시림`·`백탁`·`트러블` …) enters the rollup with its generic share alone. The reason is a denominator: a
+category-only value is measured against one category's population and a generic one against every
+category's, so a ranking holding both compares two populations down one column and its top N cannot be read
+as an order. The **category** scopes are unchanged — each counts every mention of that category, the generic
+aspects included, which is where a category-only aspect's number stays readable.
+
+The population is decided from the mentions and **never from `metrics_need.aspect_scope`**: until this
+change that label was the scope of whichever mention closed the group, so the rows labelled `category` and
+the aspects that are category-only were two different sets of the same size.
+
+`metrics_need.aspect_scope` is therefore **a fact of the whole scope, not of one row**: the single
+`aspect_scope` that scope's mentions of that `need_key` carry, and NULL when they carry more than one. The
+same (`scope`, `need_key`) used to be stamped `generic` on its category total and `category` on a product
+row of the same run (12 such pairs in production run 39); now every axis of one `need_key` carries one
+value, and inside the rollup that value is always `generic`.
+
 ## What `metrics_need.product_ref` holds (#128)
 
 **One namespace and two reserved sentinels, never a bare site key.** A value in that column is exactly one
