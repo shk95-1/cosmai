@@ -14,6 +14,7 @@ from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedM
 __all__ = [
     "AGGREGATE_VERSION",
     "EXAMPLE_CHARS",
+    "GENERIC_SCOPE",
     "LIKE_CAP",
     "LOW_RATING",
     "ROLLUP_SCOPE",
@@ -43,6 +44,9 @@ EXAMPLE_CHARS = 160
 LOW_RATING = 2.0
 LOW_STRENGTH = 0.6
 ROLLUP_SCOPE = "all"
+# #126: the population of the rollup. An aspect the lexicon states for every category, as against one it
+# states for a single category (interfaces.md §What the `scope='all'` rollup counts).
+GENERIC_SCOPE = "generic"
 REVIEW = "review"
 COMMENT = "yt_comment"
 FORMAT_SEP = ";"
@@ -89,6 +93,24 @@ def _product(mention: NeedMentionRow) -> str:
     return ""
 
 
+def _labels(rows: Sequence[NeedMentionRow], key: Callable[[str], str]) -> dict[str, str | None]:
+    """The generic/category label of each need_key, decided once over the whole scope (#126).
+
+    It used to be `scopes[-1]`, the scope of whichever mention closed the group, so the same (scope,
+    need_key) was stamped `generic` on its category total and `category` on a product row of the same run —
+    12 such pairs in production run 39. A label that changes with the row order is not a fact about the
+    need_key, and on a rollup row it hid the real defect: two populations already summed into one number,
+    wearing one of their two names. A need_key whose mentions do not agree therefore carries no label at
+    all, because there is no single answer and NULL is the column's way of saying so. Inside the rollup the
+    mentions always agree — that population is generic alone.
+    """
+    seen: dict[str, set[str]] = {}
+    for mention in rows:
+        if mention.aspect_scope:
+            seen.setdefault(key(mention.need_key), set()).add(mention.aspect_scope)
+    return {need_key: next(iter(found)) if len(found) == 1 else None for need_key, found in seen.items()}
+
+
 class RuleAggregator:
     def __init__(self, version: str = AGGREGATE_VERSION, canonical: Mapping[str, str] | None = None) -> None:
         self.version = version
@@ -102,13 +124,26 @@ class RuleAggregator:
         # B8: the need_key='' sentinel of a row whose aspect could not be decided drops out before
         # aggregation — counting it in the denominator too would put months and products no need_key can
         # reach into persist_*_total (formats.md).
-        rows = [m for m in mentions if m.need_key and (rollup or (m.category or "") == scope)]
+        # #126: the rollup counts generic mentions alone. A category-only aspect is a value measured against
+        # its own category's population while a generic one is measured against every category's, so standing
+        # the two in one ranking compares two denominators on one axis — the top of screen 1 then reads as a
+        # jumble of magnitudes that cannot be held against each other. A category-only aspect therefore emits
+        # no scope='all' row and is read on its category scope; an aspect that carries both scopes enters the
+        # rollup with its generic share alone. The population is decided from the mentions and never from
+        # metrics_need.aspect_scope, which before this change was the label of whichever mention closed the
+        # group.
+        rows = [
+            m
+            for m in mentions
+            if m.need_key and (m.aspect_scope == GENERIC_SCOPE if rollup else (m.category or "") == scope)
+        ]
         denoms = [d for d in denominators if rollup or (d.category or "") == scope]
 
         def key(need_key: str) -> str:
             return self._canonical.get(need_key, need_key) if rollup else need_key
 
-        out = self._rows(scope, "", rows, denoms, key)
+        labels = _labels(rows, key)
+        out = self._rows(scope, "", rows, denoms, key, labels)
         # Month axis (#129): the same category total measured again from that month's mentions alone. The
         # denominators are not passed on — product_denominator is a captured_at snapshot, so there is no such
         # thing as 'that month's denominator', and dividing a whole-period denominator into a monthly
@@ -125,7 +160,7 @@ class RuleAggregator:
             if mention.month:
                 by_month.setdefault(mention.month, []).append(mention)
         for month, group in by_month.items():
-            out += self._rows(scope, "", group, [], key, month=month)
+            out += self._rows(scope, "", group, [], key, labels, month=month)
         # Product axis (#41): the same formula applied again to a population narrowed to that product alone.
         # The category total row keeps product_ref='', so the PK (run_id, scope, need_key, month,
         # product_ref) does not collide.
@@ -143,7 +178,7 @@ class RuleAggregator:
             # population_share_pct collapses back to the per-product definition (interfaces.md §Formulas).
             keys = {(m.site, m.source_product_key) for m in group}
             mine = [d for k in keys if k in by_key for d in by_key[k]]
-            out += self._rows(scope, product, group, mine, key)
+            out += self._rows(scope, product, group, mine, key, labels)
         # month and product_ref go into the trailing key as well — several rows of both axes hang off the
         # same (neg, need_key), and leaving that place to insertion order writes the same input in a
         # different order from run to run.
@@ -157,6 +192,7 @@ class RuleAggregator:
         rows: Sequence[NeedMentionRow],
         denoms: Sequence[DenominatorRow],
         key: Callable[[str], str],
+        labels: Mapping[str, str | None],
         month: str = "",
     ) -> list[MetricsNeedRow]:
         """The per-need_key rows of one population (a whole category, one product, one month). The totals are
@@ -226,7 +262,6 @@ class RuleAggregator:
                 else None
             )
             low_share = _ratio(low_mentioning, denom_low or 0) if low_mentioning is not None else None
-            scopes = [m.aspect_scope for m in group if m.aspect_scope]
             out.append(
                 MetricsNeedRow(
                     run_id=0,  # a pure function knows no run — the side that records it fills it in
@@ -263,7 +298,7 @@ class RuleAggregator:
                         len({_product(m) for m in neg if _product(m)}) if whole_period else None
                     ),
                     persist_products_total=products_total if whole_period else None,
-                    aspect_scope=scopes[-1] if scopes else None,
+                    aspect_scope=labels.get(need_key),
                 )
             )
         return out
