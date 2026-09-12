@@ -21,7 +21,10 @@
 -- archive: like_count null on 876 rows, duration_seconds on 6, comment_count on 5, and all nine
 -- keys present on all 13,979). This is safe only because every consumer reads through `->>`, under
 -- which jsonb 42 and '42' both come back as '42'. Moving any consumer to `->` or to a jsonb
--- comparison means revisiting this column first. The one that bites today is the boolean:
+-- comparison means revisiting this column first. `collected_at` is spelled the archive's way too --
+-- '2026-08-19T05:30:57Z', UTC at second resolution with a 'Z', not datetime.isoformat()'s
+-- '+00:00' and microseconds (tests/fixtures/yt_handoff/document.csv is the copy that settles it).
+-- The one that bites today is the boolean:
 -- analysis/sensitivity/pipeline.py compares `source_metadata ->> 'has_paid_product_placement'`
 -- against its DECLARED constant, which is the string 'True', so writing JSON's `true` makes that
 -- comparison false for every live row and the declared half of ad marking silently becomes zero --

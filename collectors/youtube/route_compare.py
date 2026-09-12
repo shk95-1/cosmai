@@ -20,10 +20,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from typing import Any
 
 from collectors.youtube import sources
 from collectors.youtube.transport import Route
+
+
+class IncomparableWindow(ValueError):
+    """A publication window was asked for that one arm cannot honour.
+
+    The Data API walks the uploads playlist by publication date; the yt-dlp videos tab is walked by
+    position and its flat entries often carry no publication instant at all. Windowing the arm that
+    can and not the arm that cannot is not a comparison -- every pre-window upload lands in
+    `only_ytdlp` and the report reads as a difference between the routes when it is a difference
+    between the two invocations. So the window is applied to both or the measurement is refused.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,15 +65,46 @@ def _video_ids(dump: Mapping[str, Any], *, kind: str) -> list[str]:
     return [video["video_id"] for video in listing["videos"]]
 
 
+def _windowed(dump: Mapping[str, Any], *, kind: str, since: str | None) -> list[str]:
+    """The ids of one arm, narrowed to the window if there is one.
+
+    Refuses rather than guesses on an entry with no publication instant: keeping it would put a
+    pre-window upload on one side of the difference, dropping it would take a real video off the
+    other, and both read as a difference between the routes.
+    """
+    listing = sources.normalize_listing(dump, source_kind=kind)
+    if since is None:
+        return [video["video_id"] for video in listing["videos"]]
+    cutoff = date.fromisoformat(since)
+    undated = [video["video_id"] for video in listing["videos"] if not _instant_of(video)]
+    if undated:
+        raise IncomparableWindow(
+            f"{len(undated)} entry/entries carry no publication instant, so the window "
+            f"{since} cannot be applied to this arm (first: {undated[0]})"
+        )
+    return [
+        video["video_id"]
+        for video in listing["videos"]
+        if (_instant_of(video) or datetime.min.replace(tzinfo=UTC)).date() >= cutoff
+    ]
+
+
+def _instant_of(video: Mapping[str, Any]) -> datetime | None:
+    published = video.get("published_at")
+    return published if isinstance(published, datetime) else None
+
+
 def compare(
     channel: str,
     data_api_dump: Mapping[str, Any],
     ytdlp_dump: Mapping[str, Any],
     *,
     kind: str = "channel.videos",
+    since: str | None = None,
 ) -> RouteComparison:
-    api_ids = _video_ids(data_api_dump, kind=kind)
-    tab_ids = _video_ids(ytdlp_dump, kind=kind)
+    """`since` narrows **both** arms or neither -- see `IncomparableWindow`."""
+    api_ids = _windowed(data_api_dump, kind=kind, since=since)
+    tab_ids = _windowed(ytdlp_dump, kind=kind, since=since)
     api_set, tab_set = set(api_ids), set(tab_ids)
     return RouteComparison(
         channel=channel,

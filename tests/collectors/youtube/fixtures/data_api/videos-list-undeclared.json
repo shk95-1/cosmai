@@ -1,6 +1,6 @@
 {
   "kind": "youtube#videoListResponse",
-  "etag": "etag-video-list",
+  "etag": "etag-video-list-undeclared",
   "pageInfo": {
     "totalResults": 1,
     "resultsPerPage": 1
@@ -9,11 +9,11 @@
     {
       "kind": "youtube#video",
       "etag": "etag-video",
-      "id": "dQw4w9WgXcQ",
+      "id": "9bZkp7q19f0",
       "snippet": {
         "publishedAt": "2026-09-01T09:00:07Z",
         "channelId": "UC5oM4Ai05dQqiVL6rypAo_A",
-        "title": "long upload",
+        "title": "older upload",
         "description": "a description",
         "channelTitle": "panel channel",
         "tags": [
@@ -24,7 +24,7 @@
       "contentDetails": {
         "duration": "PT4M13S",
         "definition": "hd",
-        "caption": "true"
+        "caption": "false"
       },
       "statistics": {
         "viewCount": "1523",
@@ -40,7 +40,7 @@
         "madeForKids": false
       },
       "paidProductPlacementDetails": {
-        "hasPaidProductPlacement": true
+        "hasPaidProductPlacement": false
       }
     }
   ]

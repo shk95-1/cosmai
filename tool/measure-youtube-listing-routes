@@ -7,8 +7,17 @@ today is Google's documentation and the archived RUNBOOK's 697-vs-474, which is 
 number on somebody else's channel. This replaces it with ours, at the cost of one extra listing call.
 
     tool/measure-youtube-listing-routes UC5oM4Ai05dQqiVL6rypAo_A
-    tool/measure-youtube-listing-routes @beauty_channel --since 2024-07-01 --max-items 500
+    tool/measure-youtube-listing-routes @beauty_channel --max-items 500
     tool/measure-youtube-listing-routes UC... --json
+
+**Neither arm is windowed by default**, and that is a correction. The collector's own listing walks
+back only to `LISTING_WINDOW_START`, but the yt-dlp videos tab is walked by position and cannot
+honour a publication window at all -- so applying the collector's default to the Data API arm alone
+filled `only_ytdlp` with every pre-window upload and made the report read as a difference between
+the routes when it was a difference between the two invocations. Both arms are bounded by the same
+`--max-items` instead. `--since` still exists and narrows **both** arms, and the run is refused
+outright if the yt-dlp arm carries an entry with no publication instant, which is the state in which
+the window cannot be applied to it.
 
 **This reaches the network.** It is the one thing in this issue that does, it is the coordinator's to
 run, and it writes nothing: no database, no artifact, no job row. The arithmetic it prints lives in
@@ -43,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--since",
         default=None,
-        help="the oldest publication date to walk back to; defaults to scope.json's LISTING_WINDOW_START",
+        help="narrow BOTH arms to uploads published on or after this date; default: no window",
     )
     parser.add_argument(
         "--max-items",
@@ -66,9 +75,11 @@ def main(argv: list[str] | None = None) -> int:
     api = transport.DataApiClient(key, budget=budget)
     ytdlp = transport.YtdlpRoute(budget=budget)
     try:
-        api_dump = api.listing("channel.videos", args.channel, max_items=args.max_items, since=args.since)
-        # yt-dlp's videos tab has no publication window of its own -- it is walked by position, so
-        # `--since` narrows only the arm that can honour it and the counts are compared as walked.
+        # `since=""`, not None: None means "the collector's own LISTING_WINDOW_START", and the
+        # yt-dlp arm below cannot be given any window at fetch time, so the two would be walked
+        # differently. Both arms are walked whole, bounded by the same --max-items, and `--since`
+        # (if given) is applied to both afterwards by `route_compare`.
+        api_dump = api.listing("channel.videos", args.channel, max_items=args.max_items, since="")
         tab_dump = ytdlp.listing("channel.videos", args.channel, max_items=args.max_items)
     except transport.TransportError as error:
         print(f"{error.route}: {error}", file=sys.stderr)
@@ -76,7 +87,12 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         api.close()
 
-    report = route_compare.compare(args.channel, api_dump, tab_dump)
+    try:
+        report = route_compare.compare(args.channel, api_dump, tab_dump, since=args.since)
+    except route_compare.IncomparableWindow as error:
+        print(f"--since {args.since} cannot be applied to both arms: {error}", file=sys.stderr)
+        print("drop --since and bound both arms with --max-items instead", file=sys.stderr)
+        return 2
     if args.json:
         print(json.dumps(dict(route_compare.as_rows(report)), ensure_ascii=False, indent=2))
     else:

@@ -54,6 +54,7 @@ def test_the_transport_constants_are_scope_json_verbatim():
     assert models.LISTING_WINDOW_START == on_disk["LISTING_WINDOW_START"]
     assert models.MAX_LISTING_ITEMS == on_disk["MAX_LISTING_ITEMS"]
     assert models.MAX_COMMENTS_PER_VIDEO == on_disk["MAX_COMMENTS_PER_VIDEO"]
+    assert models.COMMENT_INCLUDE_REPLIES == on_disk["COMMENT_INCLUDE_REPLIES"]
     assert models.VIDEO_METADATA_ROUTE == on_disk["VIDEO_METADATA_ROUTE"]
     assert list(models.VIDEO_PARTS) == on_disk["VIDEO_PARTS"]
     assert models.ROUTES == on_disk["ROUTES"]

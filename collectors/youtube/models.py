@@ -46,8 +46,14 @@ COMMENT_REFETCH_WINDOW_DAYS: int = _SCOPE["COMMENT_REFETCH_WINDOW_DAYS"]
 LISTING_WINDOW_START: str = _SCOPE["LISTING_WINDOW_START"]
 #: The hard stop on one listing walk, whatever LISTING_WINDOW_START would allow.
 MAX_LISTING_ITEMS: int = _SCOPE["MAX_LISTING_ITEMS"]
-#: How many comments one video's harvest asks for; at exactly this many the harvest is truncated.
+#: How many top-level comment **threads** one video's harvest asks for -- the archive's own
+#: ceiling, and a one-way door: the live lineage is collected incrementally, so a later
+#: increase leaves early quarters shallow and cannot be backfilled. At exactly this many the
+#: harvest is marked truncated.
 MAX_COMMENTS_PER_VIDEO: int = _SCOPE["MAX_COMMENTS_PER_VIDEO"]
+#: Whether a thread's replies are collected at all. The archive has none, so the default is
+#: False and a reply that arrives anyway is dropped rather than stored (transport.py).
+COMMENT_INCLUDE_REPLIES: bool = _SCOPE["COMMENT_INCLUDE_REPLIES"]
 #: Which route `video.metadata` is fetched over; both are admissible and the row records which ran.
 VIDEO_METADATA_ROUTE: str = _SCOPE["VIDEO_METADATA_ROUTE"]
 #: The `part` string `videos.list` is asked for -- one quota unit however wide it is.
@@ -86,6 +92,7 @@ __all__ = [
     "LISTING_WINDOW_START",
     "MAX_LISTING_ITEMS",
     "MAX_COMMENTS_PER_VIDEO",
+    "COMMENT_INCLUDE_REPLIES",
     "VIDEO_METADATA_ROUTE",
     "VIDEO_PARTS",
     "ROUTES",

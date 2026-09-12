@@ -114,3 +114,72 @@ def test_as_rows_gives_the_same_numbers_the_report_prints():
     assert rows["ytdlp_count"] == 1
     assert rows["only_data_api"] == 1
     assert rows["shared"] == 1
+
+
+# --- the window must narrow both arms or neither (#183 fix round) ---------------------------------
+
+from datetime import UTC, datetime  # noqa: E402 - the window tests are what need it
+
+import pytest  # noqa: E402
+
+from collectors.youtube.route_compare import IncomparableWindow  # noqa: E402
+
+
+def _dated(video_id: str, when: datetime) -> dict[str, Any]:
+    return {
+        "id": video_id,
+        "title": video_id,
+        "channel_id": "UC5oM4Ai05dQqiVL6rypAo_A",
+        "timestamp": int(when.timestamp()),
+    }
+
+
+def _dated_dump(*entries: dict[str, Any], route: str = Route.DATA_API) -> dict[str, Any]:
+    return {"id": "UU…", "entries": list(entries), "fetch_route": route, "truncated": False}
+
+
+IN_WINDOW = _dated(LONG, datetime(2026, 3, 1, tzinfo=UTC))
+BEFORE_WINDOW = _dated(OLDER, datetime(2023, 3, 1, tzinfo=UTC))
+
+
+def test_a_window_narrows_both_arms_and_not_just_the_one_that_can_be_walked_by_date():
+    """The defect this replaced: the Data API arm was walked from LISTING_WINDOW_START while the
+    yt-dlp videos tab, which is walked by position, got no window at all -- so every pre-window
+    upload landed in `only_ytdlp` and the report read as a difference between the routes when it was
+    a difference between the two invocations."""
+    both = _dated_dump(IN_WINDOW, BEFORE_WINDOW)
+    report = route_compare.compare("UC…", both, dict(both, fetch_route=Route.YTDLP), since="2024-07-01")
+
+    assert report.data_api_count == 1
+    assert report.ytdlp_count == 1
+    assert report.same_set
+    assert report.only_ytdlp == ()
+
+
+def test_no_window_is_the_default_and_leaves_both_arms_whole():
+    both = _dated_dump(IN_WINDOW, BEFORE_WINDOW)
+    report = route_compare.compare("UC…", both, dict(both, fetch_route=Route.YTDLP))
+    assert report.data_api_count == 2
+    assert report.ytdlp_count == 2
+
+
+def test_a_window_is_refused_when_an_arm_carries_an_entry_with_no_publication_instant():
+    """yt-dlp's flat entries often have no timestamp. Keeping such an entry puts a possibly
+    pre-window upload on one side of the difference and dropping it takes a real video off the
+    other; both read as a difference between the routes, so the measurement is refused instead."""
+    undated = {"id": SHORT, "title": SHORT, "channel_id": "UC…"}
+    with pytest.raises(IncomparableWindow, match="no publication instant"):
+        route_compare.compare(
+            "UC…",
+            _dated_dump(IN_WINDOW),
+            _dated_dump(IN_WINDOW, undated, route=Route.YTDLP),
+            since="2024-07-01",
+        )
+
+
+def test_an_undated_entry_is_fine_when_no_window_was_asked_for():
+    undated = {"id": SHORT, "title": SHORT, "channel_id": "UC…"}
+    report = route_compare.compare(
+        "UC…", _dated_dump(IN_WINDOW), _dated_dump(IN_WINDOW, undated, route=Route.YTDLP)
+    )
+    assert report.only_ytdlp == (SHORT,)

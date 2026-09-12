@@ -14,8 +14,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from datetime import date as date_type
-from datetime import datetime
 from typing import Any
 
 import sqlalchemy as sa
@@ -76,6 +76,14 @@ def _repr_str(value: Any) -> str | None:
     return str(value)
 
 
+#: The archive spells an instant `2026-08-19T05:30:57Z` -- UTC, second resolution, a `Z` rather than
+#: `+00:00` (`tests/fixtures/yt_handoff/document.csv`). `datetime.isoformat()` writes `+00:00` and
+#: keeps microseconds, so both parse and neither is the archive's. Spelled out here because DDL 004
+#: claims this column is the archive's spelling verbatim, and a claim like that has to hold for all
+#: nine keys or say which ones it does not cover.
+_ARCHIVE_INSTANT = "%Y-%m-%dT%H:%M:%SZ"
+
+
 def source_metadata(fetched_at: datetime, payload: Mapping[str, Any]) -> dict[str, Any]:
     """The nine keys, archive-spelled. `collected_at` is the artifact's own `fetched_at` rather than
     the flatten pass's clock -- flatten runs on its own cadence and can be days behind the fetch."""
@@ -88,7 +96,7 @@ def source_metadata(fetched_at: datetime, payload: Mapping[str, Any]) -> dict[st
         "view_count": _repr_str(payload.get("view_count")),
         "like_count": _repr_str(payload.get("like_count")),
         "comment_count": _repr_str(payload.get("comment_count")),
-        "collected_at": fetched_at.isoformat(),
+        "collected_at": fetched_at.astimezone(UTC).strftime(_ARCHIVE_INSTANT),
     }
 
 

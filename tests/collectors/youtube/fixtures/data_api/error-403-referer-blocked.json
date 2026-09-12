@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": 403,
+    "message": "Requests from referer are blocked.",
+    "errors": [
+      {
+        "message": "Requests from referer are blocked.",
+        "domain": "global",
+        "reason": "forbidden",
+        "location": "Referer",
+        "locationType": "header"
+      }
+    ]
+  }
+}

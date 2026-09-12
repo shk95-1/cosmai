@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": 403,
+    "message": "The request is not properly authorized to retrieve the specified video's paid product placement details.",
+    "errors": [
+      {
+        "message": "Forbidden",
+        "domain": "youtube.video",
+        "reason": "forbidden",
+        "location": "part",
+        "locationType": "parameter"
+      }
+    ]
+  }
+}

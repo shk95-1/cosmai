@@ -38,6 +38,7 @@ The API key is set on the client once, never logged, and never interpolated into
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -50,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from collectors.youtube.models import (
+    COMMENT_INCLUDE_REPLIES,
     LISTING_WINDOW_START,
     MAX_COMMENTS_PER_VIDEO,
     MAX_LISTING_ITEMS,
@@ -69,6 +71,11 @@ SEARCH_PATH = "/youtube/v3/search"
 
 #: The vendor's own page cap on every list method. Asking for more is refused, not silently clamped.
 PAGE_SIZE = 50
+
+#: Google documents `paidProductPlacementDetails` as retrievable by the video's owner. This
+#: collector's key is not an owner's, so this is the one part of `VIDEO_PARTS` that may come back
+#: refused -- and the only one `DataApiClient` will drop to get an answer.
+OWNER_ONLY_PART = "paidProductPlacementDetails"
 
 #: We identify ourselves rather than imitate a browser -- STATE.md §3, and the same line
 #: `collectors/naver/transport.py` and `collectors/commerce/contract.py` state for their sources.
@@ -343,6 +350,9 @@ class DataApiClient:
         self._key = api_key
         self._budget = budget if budget is not None else RequestBudget.from_scope()
         self._video_parts = list(video_parts)
+        #: Video ids whose `videos.list` had to be retried without the owner-only part. Counted
+        #: rather than inferred from: `notes()` is what puts it in the run's output.
+        self.part_drops: list[str] = []
         self._client = httpx.Client(
             base_url=DATA_API_HOST.rsplit("/youtube/v3", 1)[0],
             timeout=float(ROUTES[Route.DATA_API]["timeout_s"]),
@@ -535,22 +545,42 @@ class DataApiClient:
         }
 
     def _videos_list(self, video_id: str) -> dict[str, Any]:
-        """One retry without `paidProductPlacementDetails`, and only for the error that names a part.
+        """One retry without `paidProductPlacementDetails`, for this video only, and only for an
+        error that names `part` as the thing being refused.
 
-        Google documents that field as retrievable by the video's owner, and this collector's key is
+        Google documents that field as retrievable by the video's owner and this collector's key is
         not an owner's. If that restriction is enforced as a refused part, the whole `videos.list`
-        call fails and every `video.metadata` job in the run fails with it -- for a field three of
-        the nine `source_metadata` keys do not even need. So a part-shaped 400/403 drops it once and
-        goes on; anything else is raised as it came."""
-        parts = ",".join(self._video_parts)
+        call fails and every `video.metadata` job in the run fails with it -- over a field that three
+        of the nine `source_metadata` keys do not need.
+
+        **Per video, not per client.** An earlier round of this dropped the part from
+        `self._video_parts` for the life of the client, so one unrelated 400 on one video silently
+        removed the field from every remaining job in the run -- an inference from a single response,
+        made permanent, with nothing printed. The cost of not being sticky is one extra unit on each
+        video that really does refuse, which the route budget already bounds and `part_drops` now
+        counts. If the live run shows the key simply cannot have this part, the fix is to take it out
+        of `scope.json`'s `VIDEO_PARTS` -- a configuration change somebody made and can read, not an
+        inference this client drew at three in the morning.
+        """
         try:
-            return self._get(VIDEOS_PATH, {"part": parts, "id": video_id})
+            return self._get(VIDEOS_PATH, {"part": ",".join(self._video_parts), "id": video_id})
         except TransportError as error:
-            reduced = [part for part in self._video_parts if part != "paidProductPlacementDetails"]
+            reduced = [part for part in self._video_parts if part != OWNER_ONLY_PART]
             if len(reduced) == len(self._video_parts) or not _is_part_refusal(error):
                 raise
-            self._video_parts = reduced
+            self.part_drops.append(video_id)
             return self._get(VIDEOS_PATH, {"part": ",".join(reduced), "id": video_id})
+
+    def notes(self) -> list[str]:
+        """What a run should say out loud about this client. Read by `cli._run_work`, which prints
+        it -- a field silently missing from every row is the failure this exists to make visible."""
+        if not self.part_drops:
+            return []
+        return [
+            f"{OWNER_ONLY_PART} was refused for {len(self.part_drops)} video(s); "
+            f"source_metadata.has_paid_product_placement is null on those rows "
+            f"(first: {self.part_drops[0]})"
+        ]
 
     # -- one request ---------------------------------------------------------------------------------
 
@@ -597,31 +627,49 @@ def _before(timestamp: int | None, cutoff: date) -> bool:
 _REASON = re.compile(r"[^0-9A-Za-z_-]")
 
 
-def _error_reason(body: bytes) -> str:
-    """The vendor's machine-readable `reason` alone (`quotaExceeded`, `accessNotConfigured`). The
-    `message` beside it repeats the request and would carry the key into a jobs row."""
-    import json
-
+def _error_items(body: bytes) -> list[Mapping[str, Any]]:
     try:
         parsed = json.loads(body)
     except (TypeError, ValueError):
-        return "?"
-    reasons = [
-        item.get("reason")
-        for item in ((parsed.get("error") or {}).get("errors") or [])
-        if isinstance(item, Mapping)
-    ]
+        return []
+    if not isinstance(parsed, Mapping):
+        return []
+    return [item for item in ((parsed.get("error") or {}).get("errors") or []) if isinstance(item, Mapping)]
+
+
+def _error_reason(body: bytes) -> str:
+    """The vendor's machine-readable `reason` alone (`quotaExceeded`, `accessNotConfigured`). The
+    `message` beside it repeats the request and would carry the key into a jobs row."""
+    reasons = [item.get("reason") for item in _error_items(body)]
     first = next((reason for reason in reasons if isinstance(reason, str) and reason), None)
     return _REASON.sub("", first)[:32] if first else "?"
 
 
-_PART_REFUSAL_REASONS = ("invalidpart", "forbidden", "insufficientpermissions", "badrequest")
+#: The only two reasons that can mean "this part is refused to this key". Narrow on purpose.
+#: `badrequest` and a bare `forbidden` were in this list once and both are wrong: a malformed video
+#: id, a referrer-restricted key and a disabled API all answer with one of them, and treating any of
+#: those as a part problem drops a field over an error that had nothing to do with it.
+_PART_REFUSAL_REASONS = ("invalidpart", "forbidden")
+#: What actually discriminates. Google marks a parameter-level error with the parameter's own name,
+#: so an error about `part` says so and an error about the key or the id does not.
+_PART_LOCATION = "part"
 
 
 def _is_part_refusal(error: TransportError) -> bool:
+    """A 400/403 that names `part` as the thing it is refusing.
+
+    The location, not the reason alone: `forbidden` is what a referrer-restricted key returns too,
+    and that one is about the key (`location: Referer`), not about a field we could do without.
+    """
     if error.code not in (400, 403):
         return False
-    return _error_reason(error.read()).lower() in _PART_REFUSAL_REASONS
+    for item in _error_items(error.read()):
+        reason = item.get("reason")
+        if not isinstance(reason, str) or reason.lower() not in _PART_REFUSAL_REASONS:
+            continue
+        if str(item.get("location") or "").lower() == _PART_LOCATION:
+            return True
+    return False
 
 
 # --- yt-dlp --------------------------------------------------------------------------------------
@@ -688,30 +736,58 @@ class YtdlpRoute:
         self._budget.charge(Route.YTDLP)
         return self._runtime.extract(target, options=dict(options or {}))
 
-    def comments(self, target: str, *, limit: int = MAX_COMMENTS_PER_VIDEO) -> dict[str, Any]:
-        """`limit` is the real control, not an optimisation: yt-dlp fetches roughly one request per
-        twenty comments, so a thousand-comment video is fifty-odd requests and minutes of wall clock.
+    def comments(
+        self,
+        target: str,
+        *,
+        limit: int = MAX_COMMENTS_PER_VIDEO,
+        include_replies: bool = COMMENT_INCLUDE_REPLIES,
+    ) -> dict[str, Any]:
+        """The archive's instrument: **top 100 threads, no replies** (`scope.json`).
 
-        A harvest that comes back at exactly `limit` is marked truncated. Nothing else in the dump
-        distinguishes a thread that ended from one that was cut off, and a truncated harvest passed
-        off as whole is a comment count that is really a measure of our own cap."""
+        `limit` counts top-level threads, and it is the real control rather than an optimisation:
+        yt-dlp fetches roughly one request per twenty comments, so a deep video is fifty-odd requests
+        and minutes of wall clock. It is also a one-way door -- the live lineage is collected
+        incrementally over years, so deepening it later never re-collects what was already stored.
+
+        **yt-dlp's `max_comments` is not the Data API's thread count**, and getting that wrong is
+        what this method's previous version did. The list is
+        `[total, max_parents, max_replies, max_replies_per_thread]` and its *first* element counts
+        every comment **including replies**, so "100 threads, no replies" is not `["100", …]` with
+        the old `"all", "all", "8"` left behind it -- that asks for 100 comments of which an unknown
+        share are replies, which is neither 100 threads nor zero replies. The reply arguments are
+        zeroed alongside it.
+
+        And then the arguments are not trusted. A reply that arrives anyway is dropped here rather
+        than stored, because the argument list is precisely the thing this fix round found wrong,
+        and because the archive has **zero** reply rows for a live reply row to be compared against.
+        `replies_dropped` says so out loud instead of letting the count quietly disagree.
+
+        A harvest that comes back at exactly `limit` is marked truncated: nothing else in the dump
+        tells a thread list that ended from one that was cut off, and a truncated harvest passed off
+        as whole is a comment count that is really a measure of our own cap.
+        """
+        max_comments = (
+            [str(limit), "all", "all", "all"] if include_replies else [str(limit), str(limit), "0", "0"]
+        )
         dump = self.extract(
             _watch_url(target),
             {
                 "getcomments": True,
-                "extractor_args": {
-                    "youtube": {"comment_sort": ["top"], "max_comments": [str(limit), "all", "all", "8"]}
-                },
+                "extractor_args": {"youtube": {"comment_sort": ["top"], "max_comments": max_comments}},
             },
         )
-        harvested = dump.get("comments") or []
+        harvested = list(dump.get("comments") or [])
+        kept = harvested if include_replies else [raw for raw in harvested if _is_top_level(raw)]
         return {
             **dump,
-            "comments": list(harvested),
+            "comments": kept,
             "fetch_route": Route.YTDLP,
             "requested_limit": limit,
-            "returned_count": len(harvested),
-            "truncated": len(harvested) >= limit,
+            "include_replies": include_replies,
+            "returned_count": len(kept),
+            "replies_dropped": len(harvested) - len(kept),
+            "truncated": len(kept) >= limit,
         }
 
     def video_metadata(self, target: str) -> dict[str, Any]:
@@ -741,6 +817,17 @@ class YtdlpRoute:
             "returned_count": len(entries),
             "truncated": len(entries) >= cap,
         }
+
+
+#: yt-dlp marks a top-level comment with the sentinel `root` in `parent`; a reply carries the parent
+#: comment's id there. `sources.normalize_comments` maps the sentinel to None, and is left alone --
+#: it is a faithful normalizer of what it is given, and which comments we collect is a policy that
+#: belongs at the source, not in the parser.
+_ROOT_PARENT = (None, "root")
+
+
+def _is_top_level(raw: Mapping[str, Any]) -> bool:
+    return raw.get("parent") in _ROOT_PARENT
 
 
 def _watch_url(video_id: str) -> str:
@@ -984,6 +1071,12 @@ class LiveFetcher:
                 route=Route.DATA_API,
             )
         return self._data_api
+
+    def notes(self) -> list[str]:
+        """Everything the routes want a run to say out loud. `cli._run_work` prints these, so a
+        field that quietly stopped arriving is a line in the run's output rather than a column
+        somebody notices as null three weeks later."""
+        return self._data_api.notes() if self._data_api is not None else []
 
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
         if spec.kind in LISTING_KINDS:

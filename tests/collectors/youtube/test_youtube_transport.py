@@ -551,3 +551,95 @@ def test_one_live_uploads_listing_is_accepted_by_the_normalizer():
     assert listing["videos"], "the uploads playlist answered, but the normalizer found no video in it"
     assert all(len(video["video_id"]) == 11 for video in listing["videos"])
     assert dump["expected_count"] is not None, "pageInfo.totalResults is what the shortfall check reads"
+
+
+# --- the owner-only part, and what may not drop it (#183 fix round) -------------------------------
+
+PART_FORBIDDEN = _fixture("data_api", "error-403-part-forbidden.json")
+REFERER_BLOCKED = _fixture("data_api", "error-403-referer-blocked.json")
+
+
+def _videos_handler(*responses: tuple[int, dict[str, Any]]):
+    """Answers each request with the next saved body. Not keyed by the request at all -- the point
+    is a first answer that refuses and a second that serves, which is a sequence and not a shape."""
+    seen: list[httpx.Request] = []
+    remaining = list(responses)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        status, body = remaining.pop(0) if remaining else responses[-1]
+        return httpx.Response(status, json=body)
+
+    return handler, seen
+
+
+def test_the_video_part_list_asks_for_the_owner_only_part():
+    handler, seen = _videos_handler((200, VIDEOS))
+    _client(handler).video_metadata("dQw4w9WgXcQ")
+    assert transport.OWNER_ONLY_PART in seen[0].url.params["part"]
+
+
+def test_a_403_that_names_part_drops_the_owner_only_part_for_that_video_and_says_so():
+    handler, seen = _videos_handler((403, PART_FORBIDDEN), (200, VIDEOS))
+    client = _client(handler)
+    dump = client.video_metadata("dQw4w9WgXcQ")
+
+    assert transport.OWNER_ONLY_PART in seen[0].url.params["part"]
+    assert transport.OWNER_ONLY_PART not in seen[1].url.params["part"]
+    assert dump["id"] == "dQw4w9WgXcQ"
+    # Counted and said out loud: a field that quietly stops arriving is a column nobody notices is
+    # null until an analysis marks nothing.
+    assert client.part_drops == ["dQw4w9WgXcQ"]
+    assert "1 video(s)" in client.notes()[0]
+    assert transport.OWNER_ONLY_PART in client.notes()[0]
+
+
+def test_the_drop_is_per_video_and_does_not_outlive_the_one_that_caused_it():
+    """An earlier round mutated the client's part list for the life of the run, so one refusal
+    removed the field from every remaining job -- an inference from a single response, made
+    permanent, printing nothing. The cost of not being sticky is one extra unit on each video that
+    really refuses; the cost of being sticky is a silently truncated column."""
+    handler, seen = _videos_handler((403, PART_FORBIDDEN), (200, VIDEOS), (200, VIDEOS))
+    client = _client(handler)
+    client.video_metadata("dQw4w9WgXcQ")
+    client.video_metadata("9bZkp7q19f0")
+
+    assert transport.OWNER_ONLY_PART in seen[2].url.params["part"], (
+        "the second video must still be asked for the part the first one was refused"
+    )
+    assert client.part_drops == ["dQw4w9WgXcQ"]
+
+
+def test_a_403_about_the_key_never_drops_a_part():
+    """Same `reason` (`forbidden`), different `location`: `Referer` is the key being refused, and
+    dropping a field over it would hide the real problem behind a column that is merely emptier."""
+    handler, seen = _videos_handler((403, REFERER_BLOCKED), (200, VIDEOS))
+    client = _client(handler)
+    with pytest.raises(transport.Blocked):
+        client.video_metadata("dQw4w9WgXcQ")
+    assert len(seen) == 1  # no retry at all
+    assert client.part_drops == []
+
+
+def test_a_400_about_the_video_id_never_drops_a_part():
+    bad_id = {
+        "error": {
+            "code": 400,
+            "errors": [
+                {"reason": "invalidVideoId", "location": "id", "locationType": "parameter"},
+            ],
+        }
+    }
+    handler, seen = _videos_handler((400, bad_id), (200, VIDEOS))
+    client = _client(handler)
+    with pytest.raises(transport.RequestFailed):
+        client.video_metadata("not-a-video")
+    assert len(seen) == 1
+    assert client.part_drops == []
+
+
+def test_a_client_that_dropped_nothing_has_nothing_to_say():
+    handler, _ = _videos_handler((200, VIDEOS))
+    client = _client(handler)
+    client.video_metadata("dQw4w9WgXcQ")
+    assert client.notes() == []

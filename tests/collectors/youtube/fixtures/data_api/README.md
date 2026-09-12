@@ -16,5 +16,17 @@ no token, so a walker that trusts `pageInfo.totalResults` disagrees with what it
 `uploads-page-empty.json` is the page that answers with a token and no items at all, which the Data
 API does return and which loops a walker forever.
 
+`videos-list.json` carries `paidProductPlacementDetails.hasPaidProductPlacement` as a JSON **boolean**
+and `contentDetails.caption` as the **string** `"true"`, which is how Google sends each of them and
+is the whole reason `flatten._repr_str` exists: both have to come out of the column as the string
+`"True"`. `videos-list-undeclared.json` is the other arm of both. Until these two keys were in the
+fixture, the path from Google's boolean to `analysis.sensitivity.pipeline.DECLARED` was asserted only
+from a literal somebody typed into a test -- which is #90 one level down.
+
+`error-403-part-forbidden.json` and `error-403-referer-blocked.json` are the same `reason`
+(`forbidden`) with different `location`s: `part` (the owner-only field is refused, and dropping it is
+right) against `Referer` (the key is refused, and dropping a field over it would hide the real
+problem). The location is the discriminator, which is why both bodies are here.
+
 When the live run happens, replacing these with captured bodies is worth doing -- the field set is
 what this asserts, and only a capture proves the field set.

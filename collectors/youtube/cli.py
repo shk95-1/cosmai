@@ -264,6 +264,12 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
     ).first()
 
 
+#: Work 3: "a block (403/429) is exit 2". These are exactly the four `error_code` values
+#: `db/views/collector_health.sql` counts as `blocked` for the youtube arm -- kept identical on
+#: purpose, so the exit code and the view can never call the same run two different things (the
+#: mismatch contracts/entrypoints.md already records for NAVER's 401, #182 M2).
+BLOCKED_CODES = frozenset({"quota", "rate_limited", "http_403", "http_429"})
+
 _QUOTA_EXCEEDED_REASON = "quotaExceeded"
 
 
@@ -370,6 +376,7 @@ class _Collected:
 
     ok: bool
     short: bool = False
+    blocked: bool = False
 
 
 def _shortfall(dump: Mapping[str, Any]) -> str | None:
@@ -466,6 +473,7 @@ def _collect_one(
             route = dump.get("fetch_route")
             short = _shortfall(dump) if job.kind in LISTING_KINDS else None
         except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
+            code = _classify_error(error)
             conn.execute(
                 sa.update(jobs)
                 .where(jobs.c.identifier == job.identifier)
@@ -473,11 +481,11 @@ def _collect_one(
                     state=JobState.FAILED.value,
                     finished_at=now,
                     elapsed_ms=_elapsed_ms(job.started_at, now),
-                    error_code=_classify_error(error),
+                    error_code=code,
                     error_message=str(error),
                 )
             )
-            return _Collected(ok=False)
+            return _Collected(ok=False, blocked=code in BLOCKED_CODES)
 
         stored = payloads.put(job.kind, payload)
         digest, byte_count = stored.digest, stored.byte_count
@@ -532,14 +540,54 @@ def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now
     if not claimed:
         print("no queued jobs")
         return 0
-    outcomes = [_collect_one(conn, payloads, fetcher, job, now=now) for job in claimed]
+    outcomes: list[_Collected] = []
+    blocked = False
+    for index, job in enumerate(claimed):
+        outcome = _collect_one(conn, payloads, fetcher, job, now=now)
+        outcomes.append(outcome)
+        if outcome.blocked:
+            # Work 3: a block is the whole source refusing us, so every later request in this batch
+            # would be refused the same way and would only deepen it. The jobs already claimed but
+            # not yet attempted go back to QUEUED -- leaving them RUNNING would strand them, since
+            # nothing here reclaims a job whose worker stopped (the lease machinery is out of scope).
+            blocked = True
+            _requeue(conn, [row.identifier for row in claimed[index + 1 :]])
+            break
+
     failures = sum(not outcome.ok for outcome in outcomes)
     short = sum(outcome.short for outcome in outcomes)
-    print(f"worked {len(claimed)} job(s), {failures} failed, {short} short")
+    print(f"worked {len(outcomes)} job(s), {failures} failed, {short} short")
+    for note in _notes_of(fetcher):
+        print(note)
+    if blocked:
+        print(f"blocked: {len(claimed) - len(outcomes)} claimed job(s) returned to the queue")
+        return 2
     # A short listing is partial by contracts/entrypoints.md's own words -- "1 partial (some failed
     # or were truncated)" -- and is the one failure that otherwise reports 0 and writes half a
     # channel (#90).
     return 1 if failures or short else 0
+
+
+def _requeue(conn: Connection, identifiers: Sequence[str]) -> None:
+    if not identifiers:
+        return
+    conn.execute(
+        sa.update(jobs)
+        .where(jobs.c.identifier.in_(identifiers))
+        .values(state=JobState.QUEUED.value, started_at=None)
+    )
+
+
+def _notes_of(fetcher: Fetcher) -> list[str]:
+    """A transport may have something to say that is not an exception -- #183's owner-only
+    `videos.list` part being refused, for instance, which leaves a `source_metadata` key null on
+    every affected row and raises nothing at all. Optional, so a fixture-backed fake needs no such
+    method."""
+    notes = getattr(fetcher, "notes", None)
+    if not callable(notes):
+        return []
+    produced = notes()
+    return [str(note) for note in produced] if isinstance(produced, list) else []
 
 
 def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> int:

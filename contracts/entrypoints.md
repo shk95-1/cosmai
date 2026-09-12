@@ -164,6 +164,13 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
 - `budget` (#183) — the run spent its own `scope.json` request budget for that route. Also `failed`:
   it is our cap, and putting it in `blocked` would make a self-limited run look throttled by YouTube.
 
+**`youtube work` exits 2 on a block** (#183): when a job fails with one of the four codes the view
+counts as `blocked` above, the pass stops rather than sending the rest of the batch into the same
+refusal, and the jobs it had claimed but not yet attempted go back to `queued` — nothing here
+reclaims a job whose worker stopped, so leaving them `running` would strand them. The exit-2 set is
+`collectors/youtube/cli.py`'s `BLOCKED_CODES` and is held equal to this view's list by a test, so the
+exit code and `collector_health` can never call one run two different things.
+
 `error_message` (`Text`) is `str(error)` as it stands — the original exception text did not move
 column, `error_code` merely replaced the class-name slot with a classification.
 
