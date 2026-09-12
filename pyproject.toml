@@ -16,6 +16,12 @@ dependencies = [
     # real Chromium while its POST-only review API still goes out over httpx.
     "httpx>=0.28,<1",
     "playwright>=1.47",
+    # collectors/youtube's live transport (#183): comments and caption-track discovery. Capped at a
+    # major, and the floor is not decorative -- yt-dlp breaks whenever YouTube changes something on
+    # its side, so an unbounded range would let `uv lock` pick up a release whose extractor behaves
+    # differently from the one this transport was written and measured against, and an old release
+    # stops extracting at all. Moving the cap is a decision that belongs with a live run behind it.
+    "yt-dlp>=2026.8,<2027",
 ]
 
 [project.scripts]
@@ -87,6 +93,7 @@ extend-include = [
     "tool/measure-transcript-bimodal",
     "tool/measure-trend-sample",
     "tool/measure-mfds-join",
+    "tool/measure-youtube-listing-routes",
 ]
 
 [tool.ruff.lint]

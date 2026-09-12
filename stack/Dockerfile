@@ -61,7 +61,14 @@ RUN cosmai --help >/dev/null \
     && db/migrate.sh --help >/dev/null \
     && ls contracts/ddl/needs/*.sql >/dev/null \
     && (cd / && python -c 'from analysis.aggregate.ranking import scope_threshold; scope_threshold()') \
-    && (cd / && python -c 'from collectors.commerce.transport import HttpFetcher, LiveFetchers')
+    && (cd / && python -c 'from collectors.commerce.transport import HttpFetcher, LiveFetchers') \
+    && (cd / && python -c 'from collectors.youtube.transport import LibraryYtdlpRuntime; import yt_dlp; print(yt_dlp.version.__version__)')
+
+# yt-dlp is asked for its version, not just its import: the package is a thin wrapper over an
+# extractor tree, `uv sync --no-editable` is what would leave it out of the wheel, and a youtube
+# collection with no yt-dlp in the image fails at 03:00 on the two kinds that are the whole point
+# (#183). Printed so `tool/stack-build` leaves the extractor version that shipped in the build log --
+# yt-dlp breaks on YouTube-side changes, so which release is in there is the first question asked.
 
 # The browser half of that check, kept apart because it is the one that costs a driver start. It
 # asks playwright itself where chromium is and whether that file can be executed -- not whether the
