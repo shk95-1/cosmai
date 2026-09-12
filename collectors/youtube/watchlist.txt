@@ -1,4 +1,10 @@
 # cosmai collect youtube --dataset watch reads this file (collectors/youtube/watchlist.py DIRECTIVES).
-# Placeholder: no real targets are named here in #8 -- watch is not being run in production (watch
-# 재가동 is issue #10's decision, not this issue's), so a live list is #10's job to fill in, not this
-# file's. See watchlist.py's docstring for the directive syntax.
+#
+# It is the OPERATOR OVERRIDE, not the watch list. Since #183 the 43 panel channels come from the
+# database -- needs.panel_channel WHERE active, read at boot as `channel+comments` directives
+# (collectors/youtube/roster.py) -- and no panel channel is named here. Writing one in makes the
+# file canonical in practice and drifts from the roster the moment somebody forgets to update it;
+# a test asserts this file names nothing.
+#
+# What belongs here is a one-off target that is not in the panel: a single video, a search, a
+# playlist, a trending region. See watchlist.py's docstring for the directive syntax.
