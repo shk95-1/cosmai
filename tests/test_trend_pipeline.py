@@ -16,7 +16,7 @@ from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION
-from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, build, note_of, run
+from analysis.trend.pipeline import SCOPE, NoPopulation, TopicAxisDrift, build, note_of, run
 from cosmai.cli import main
 from db import corpus, seed
 from db.corpus import verify
@@ -230,6 +230,31 @@ def test_a_row_left_over_from_an_earlier_run_is_cleared_not_merged(loaded: str):
         with conn.cursor() as cur:
             assert _violations(cur) == []
     assert again.written == ROWS
+
+
+def test_clear_does_not_touch_a_sibling_content_type_under_the_same_run(loaded: str):
+    """Without content_type in CLEAR's delete key, a short_form computation sharing a run_id would
+    delete the pre-existing long_form rows (#200) -- here a sibling row is planted by hand to ask
+    whether it survives a rerun."""
+    with connect(loaded) as conn:
+        outcome = run(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO metrics_topic_quarter (run_id, scope, topic_key, quarter, source,"
+                " content_type, panel_version, panel_role, mentions, documents, quarter_mentions,"
+                " denom_channels, sample_ok) VALUES (%s, %s, %s, %s, 'youtube_video', 'short_form',"
+                " 1, 'product', 0, 2, 0, 2, false)",
+                (outcome.run_id, SCOPE, OBSERVED[0], QUARTER),
+            )
+        conn.commit()
+        run(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM metrics_topic_quarter"
+                " WHERE run_id = %s AND content_type = 'short_form'",
+                (outcome.run_id,),
+            )
+            assert cur.fetchone() == (1,)
 
 
 def test_the_run_records_the_metric_version_the_rows_were_made_with(loaded: str):
