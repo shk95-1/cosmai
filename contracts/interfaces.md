@@ -608,6 +608,15 @@ same (`scope`, `need_key`) used to be stamped `generic` on its category total an
 row of the same run (12 such pairs in production run 39); now every axis of one `need_key` carries one
 value, and inside the rollup that value is always `generic`.
 
+**The population is one of the rollup cell's axes, so the lineage retrace carries it too.**
+`needs.mention_lineage` emits `aspect_scope`, and `portal/public/lineage.js` narrows by it on the
+`scope='all'` branch and only there — a category scope counts every mention of that category, generic
+aspects included. Retracing a rollup cell by `need_key_rollup` alone returns a strict superset (12 of the
+16 rollup rows on production run 39, the worst 35.4% uncounted) that the screen prints under the cell as
+its own count. It is the `_product` drift of #128 one axis over and harder to see: an empty retrace reads
+as broken, a superset reads as a plausible number. `tests/test_mention_lineage_view.py` pins the two
+together.
+
 ## What `metrics_need.product_ref` holds (#128)
 
 **One namespace and two reserved sentinels, never a bare site key.** A value in that column is exactly one
