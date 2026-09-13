@@ -51,16 +51,17 @@ EXPECTED = {
     # An operational declaration, not a slice -- 1:1 with the cron's 13 lines, and
     # tests/test_pipeline_stage.py checks that pairing (#138). analyze:polarity_missing dropped out with
     # its cron line, suspended (#242).
-    # 13 upstream (1:1 with the cron's 13 lines) + the 5 the fork's corpus lineage declares
-    # (db/seed/pipeline_corpus.py, fork #94 and #95): corpus:load and the three analysis stages, all
-    # enabled = False, plus project:corpus, which is enabled and does have a cron line -- so the
+    # 13 upstream (1:1 with the cron's 13 lines) + the 6 the fork's corpus lineage declares
+    # (db/seed/pipeline_corpus.py, fork #94, #95 and #96): corpus:load, match:topic and the three analysis
+    # stages, all enabled = False, plus project:corpus, which is enabled and does have a cron line -- so the
     # crontab pairing test_pipeline_stage.py asks for reads both modules since fork #95.
-    "pipeline_stage": 18,
+    "pipeline_stage": 19,
     # The edges linking the stages and stores above. Checked against reality by tests/test_pipeline_edge.py
     # (#141); two edges (analyze:polarity_missing's read and write of needs.need_mention) left with it.
-    # 29 upstream + the corpus lineage's 18: fork #94's 12 (6 writes, 6 reads) and fork #95's 6 for
-    # project:corpus (2 writes, 4 reads -- three tubedepth tables and the panel roster).
-    "pipeline_edge": 47,
+    # 29 upstream + the corpus lineage's 22: fork #94's 12 (6 writes, 6 reads), fork #95's 6 for
+    # project:corpus (2 writes, 4 reads -- three tubedepth tables and the panel roster) and fork #96's 4 for
+    # match:topic (2 writes, 2 reads -- the documents and the dictionary).
+    "pipeline_edge": 51,
 }
 
 

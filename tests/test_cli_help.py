@@ -32,6 +32,8 @@ COMMANDS = (
     ("trend", "holdout"),
     ("project",),
     ("project", "corpus"),
+    ("match",),
+    ("match", "topic"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

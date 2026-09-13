@@ -374,7 +374,8 @@ def test_every_arm_is_one_the_stage_table_accepts():
 
 
 def test_only_the_stage_with_a_cron_line_is_enabled():
-    """The archive ran once and never runs again (#93 D0); the three analysis crons are #96's. An
+    """The archive ran once and never runs again (#93 D0); the three analysis stages and match:topic run
+    inside fork #96's gated chain, which stays disabled until its gate can pass. An
     enabled stage with nothing scheduling it reads as stalled forever on the ops screen, and the
     reverse -- a scheduled stage left disabled -- reads as 'disabled' while it really runs. Fork #95's
     `project:corpus` landed its crontab line with this row, so it is the one enabled here and
