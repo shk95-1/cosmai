@@ -417,6 +417,22 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   to run the owner's pass over that month again, and until then the evidence that stays is the `rewriting=`
   marker still attached to the dead run's note.
 
+### `cosmai project corpus` — the live lineage's documents (fork #95)
+```
+cosmai project corpus [--cutoff <instant>] [--url <url>]
+```
+It reads `tubedepth.video_snapshots` · `listing_entries` · `comments` for the active panel roster and writes
+`needs.corpus_document` and one `needs.corpus_snapshot` row under the live lineage. **Neither the snapshot
+nor the roster is an argument** — the live snapshot is resolved from its label and the roster is the active
+version, for the same reason `trend quarter` takes neither. `--cutoff` defaults to now and is recorded in
+`analysis_run.versions.cutoff`; the same cutoff gives the same answer, which is what replaces a frozen copy
+(#93 D2). It never writes `corpus_snapshot.active`, and it refuses an archive snapshot outright.
+
+Exit codes: **0** ok · **1** partial — `needs.author_identifier_violation` says something about the rows
+*this run* wrote; they stand, but their meaning differs from the contract · **2** blocked — connection
+refused, no active roster, nothing flattened to project yet, or an archive snapshot named. Exit 1 and exit 2
+are indistinguishable to supercronic, so the operator's signal for blocked is the stdout line.
+
 ## Search (#28 → fork cosmai-import-ydc, upstream PR #59)
 ```
 cosmai retrieval chunk  [--since <date>] [--source <s>]...
@@ -856,6 +872,12 @@ cosmai trend holdout [--url <url>]
   answer on the issue.
 
 ## Schedule (stack/crontab.d/, UTC)
+- `project:corpus` runs hourly at `:41` (`stack/crontab.d/analyze`). **Its T is unmeasured**: the first pass
+  runs over the pre-cutover backlog and every pass after it over one flatten hour's increment, and those are
+  not the same number. Each pass re-reads every panel video and comment and re-issues the no-op inserts the
+  conflict clause discards, so "almost nothing" describes what is *written*, not what is *read*. The
+  coordinator times the first two passes by hand before the stack is recreated and the interval is confirmed
+  or moved from those numbers.
 The rule for the commerce lines is not "avoid minute 0" but **the gap between two adjacent lines is wider
 than the earlier line takes**. That duration is not written here as a number — it comes out of the code.
 `engine.collect` runs the sources that declare that dataset (and `--board`) **concurrently, one lane per

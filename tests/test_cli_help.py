@@ -30,6 +30,8 @@ COMMANDS = (
     ("trend", "cards"),
     ("trend", "crosscheck"),
     ("trend", "holdout"),
+    ("project",),
+    ("project", "corpus"),
     ("eval",),
     ("lexicon",),
     ("lexicon", "load"),

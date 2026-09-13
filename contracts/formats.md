@@ -208,6 +208,44 @@ the archive snapshot empties the surface for its duration rather than answering 
 carry no CHECK, because the instrument grows with the collector and a vocabulary frozen in DDL costs a
 migration per knob.
 
+### The long/short rule (fork #95, from ydc v0.4.0 `76db718`)
+`content_type` is derived from the video's duration by one rule shared by the archive path and the live
+path: a blank or unparseable `duration_seconds` is `video_unknown`, `seconds <= 60` is `video_short`, and
+anything longer is `video_long`. **The comparison is inclusive.** 611 of the archive's 13,979 videos have a
+duration of exactly 60, so an exclusive `< 60` moves every one of them out of `video_short`, changes every
+`composition`, and fails to reproduce the reported split of `video_long` 7,085 · `video_short` 6,888 ·
+`video_unknown` 6 — a split the rule was verified against 13,979/13,979 before it was used. The unparseable
+branch is kept although `tubedepth.video_snapshots.duration_seconds` is `integer NULL` and can never take
+it: without it `video_unknown` quietly becomes "NULL only", and the 6 archive rows it names are live streams
+the agreement excludes from both series.
+
+### The live lineage's documents (fork #95, from #93 D1 · D2)
+`project:corpus` projects `tubedepth.video_snapshots` and `tubedepth.comments` for the active panel roster
+into `needs.corpus_document` under the live snapshot, `ON CONFLICT DO NOTHING` on
+`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation and never moves; current
+view and like counts stay in `tubedepth`, where they are current.
+
+**`source_metadata` is copied, not rebuilt.** The video side is the upstream column read as text and handed
+back to jsonb without being parsed into Python values, because re-assembly is the step the archive's
+spelling is lost in. The comment side has no column to copy and is built from the archive's seven keys in
+the archive's spelling — a Python-repr boolean (`is_reply` is the string `"False"`), jsonb `null` for a
+value nobody could tell us (never the string `"None"`), and a key that is always null kept present
+(`parent_comment_id`, while the reply relationship lives in the `parent_item_id` column). Each of those
+three is a way a rebuilt object diverges with no error raised and a measurement changed.
+
+A video is projected only once its `source_metadata` is present: a listing row has none, and the conflict
+clause would make that emptiness permanent. `quality_flags` carries exactly one value, `empty_text` before
+`duplicate_in_parent`, because every consumer matches the column exactly.
+
+**The live video `text` is the title alone until the collector persists a description**, recorded on the
+snapshot as `instrument.text_parts`. The archive's `text_rule` is normalised title + description, and
+measured over the 4,283 archive videos that also exist in `tubedepth`, a title-only text carries **915 of
+3,534 topic hits — 25.9%**. The same conflict clause that protects `collected_at` also **freezes that short
+text forever**: a row written before the description lands is never revised. So a live snapshot built while
+`text_parts` is `["title"]` is disposable by design — recovery is a delete of that snapshot's documents and
+a re-run, which is cheap only while `active` is false and no mentions have been written against it.
+Upstream shk95-1/cosmai#264 is the fix, and it gates the first live collection rather than following it.
+
 ### What a comment row keeps of its author (fork #92, from #91 decision 3)
 A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the
 first 24 characters, lower-case hex, of `sha256("youtube:" + channel_id)`. The function is named once, in

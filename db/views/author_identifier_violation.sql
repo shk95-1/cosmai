@@ -67,6 +67,31 @@ SELECT 'comment_author_name'::text,
        format('first_seen_at=%s column=author', c.first_seen_at)
   FROM tubedepth.comments c
  WHERE c.first_seen_at > '2026-08-24'
-   AND c.author IS NOT NULL;
+   AND c.author IS NOT NULL
+UNION ALL
+-- (6) The allow-list, mirrored (fork #95). Branch (1) names two keys, so `author_name`,
+-- `author_channel_id` or a whole `snippet` object carrying `authorDisplayName` passed it and the
+-- loader alike. The seven keys below are the archive's own comment metadata, measured on all 247,338
+-- of its comment rows, and they are the same tuple db/corpus/contract.py refuses against
+-- (COMMENT_METADATA_KEYS) -- a test holds the two spellings together. Every one of them holds a
+-- scalar, so an object can only ever arrive as a key of its own and this list is the whole question.
+-- Key names, never values: a view the analysis role reads must not become the channel out for the
+-- identifier it is complaining about.
+SELECT 'corpus_comment_metadata_key'::text,
+       'needs.corpus_document'::text,
+       d.doc_id,
+       format('snapshot=%s keys=%s', d.snapshot_id,
+              (SELECT string_agg(k, ',' ORDER BY k)
+                 FROM (SELECT jsonb_object_keys(d.source_metadata)
+                       EXCEPT
+                       SELECT unnest(ARRAY['author_channel_hash', 'collected_at', 'is_reply',
+                                           'like_count', 'parent_comment_id', 'thread_id',
+                                           'total_reply_count'])) u(k)))
+  FROM needs.corpus_document d
+ WHERE d.source = 'youtube_comment'
+   AND EXISTS (SELECT jsonb_object_keys(d.source_metadata)
+               EXCEPT
+               SELECT unnest(ARRAY['author_channel_hash', 'collected_at', 'is_reply', 'like_count',
+                                   'parent_comment_id', 'thread_id', 'total_reply_count']));
 
 GRANT SELECT ON needs.author_identifier_violation TO needs_runtime;

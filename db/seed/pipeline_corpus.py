@@ -33,9 +33,11 @@ import psycopg
 from db.seed._common import counts, write
 from db.seed.pipeline import EDGE_UPSERT, STAGE, STORE, TABLES, UPSERT, Edge, Stage
 
-# Every row here is enabled = False. The archive stage is off because it ran once and must never run
-# again (#93 D0); the three analysis stages are off because their cron line is #96's to land, and a
-# stage declared enabled with nothing scheduling it reads as stalled forever on the ops screen.
+# Every row here but one is enabled = False. The archive stage is off because it ran once and must
+# never run again (#93 D0); the three analysis stages are off because their cron line is #96's to land,
+# and a stage declared enabled with nothing scheduling it reads as stalled forever on the ops screen.
+# `project:corpus` is the exception because fork #95 landed its cron line at the same time as this row
+# -- the two only ever move together (tests/test_pipeline_stage.py holds them against each other).
 STAGES: tuple[Stage, ...] = (
     # expected_interval '0' -- the archive is not periodic at all. A period cannot say "never", and
     # enabled = False is what the screen actually reads (pipeline_health colours a disabled stage
@@ -47,6 +49,18 @@ STAGES: tuple[Stage, ...] = (
         "0",
         False,
         "archive: loaded once 2026-08-26, never rerun (#93 D0)",
+    ),
+    # The arm is `analyze` for the same reason `corpus:load` takes it: 007's CHECK cannot be widened
+    # additively, and of the four arms it is the true one -- this stage writes a needs.analysis_run row
+    # and no collector_health row. The dataset name is what makes the stage_key `project:corpus`, which
+    # is the name #93's graph, the crontab line and needs.pipeline_health all spell.
+    Stage(
+        "project:corpus",
+        "analyze",
+        "corpus",
+        "1 hour",
+        True,
+        "live lineage: tubedepth -> needs.corpus_document (#93 D1)",
     ),
     Stage("analyze:trend", "analyze", "trend", "1 day", False, "live cron lands with #96"),
     Stage("analyze:judge", "analyze", "judge", "1 day", False, "live cron lands with #96"),
@@ -67,6 +81,15 @@ EDGES: tuple[Edge, ...] = (
     _writes("corpus:load", "needs.corpus_snapshot", "one row: the 2026-08-19 handover"),
     _writes("corpus:load", "needs.corpus_document", "261,317 documents"),
     _writes("corpus:load", "needs.corpus_mention", "ydc's matcher, at collection time (#93 D0)"),
+    # -- the live projection (fork #95). Three reads, one write; the three source tables are #93's
+    # graph verbatim, and listing_entries is read for how far the metadata fan-out is behind rather
+    # than to write a document from (db/corpus/project.py says why that distinction is load-bearing).
+    _writes("project:corpus", "needs.corpus_document", "live snapshot, ON CONFLICT DO NOTHING (#93 D2)"),
+    _reads("tubedepth.video_snapshots", "project:corpus", "the video document and its source_metadata"),
+    _reads("tubedepth.comments", "project:corpus", "the comment documents"),
+    _reads("tubedepth.listing_entries", "project:corpus", "listed videos not yet flattened"),
+    _reads("needs.panel_channel", "project:corpus", "the 43 channels projected, active roster"),
+    _writes("project:corpus", "needs.corpus_snapshot", "one row: the live lineage"),
     # -- the three analysis stages, in the order the graph of #93 draws them.
     _writes("analyze:trend", "needs.metrics_topic_quarter", "cosmai trend quarter"),
     _writes("analyze:judge", "needs.topic_quarter_judgement", "cosmai trend judge"),

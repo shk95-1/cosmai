@@ -192,6 +192,27 @@ def _add_trend(subparsers: argparse._SubParsersAction) -> None:
     cards.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
 
 
+def _add_project(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("project", help="Project a collector's tables into the corpus.")
+    actions = p.add_subparsers(dest="action", required=True)
+
+    # The stage_key is `project:corpus` (db/seed/pipeline_corpus.py) and the colon is the space -- one
+    # spelling for the crontab line, the graph row and needs.pipeline_health.
+    corpus = actions.add_parser(
+        "corpus", help="Load needs.corpus_document from tubedepth under the live snapshot."
+    )
+    # No --snapshot-id and no --activate. Which snapshot the live lineage writes is resolved from its
+    # label, and switching the active snapshot is a production UPDATE the coordinator runs on purpose
+    # (#93 D5) -- a cron line able to move it would move it at 3am.
+    corpus.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+    corpus.add_argument(
+        "--cutoff",
+        default=None,
+        help="Only project rows collected at or before this instant (default: now). The same cutoff"
+        " gives the same answer, which is what replaces a frozen copy (#93 D2).",
+    )
+
+
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
     p.add_argument("task", choices=TASKS)
@@ -241,6 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_analyze(subparsers)
     _add_retrieval(subparsers)
     _add_trend(subparsers)
+    _add_project(subparsers)
     _add_eval(subparsers)
     _add_lexicon(subparsers)
     return parser
@@ -539,6 +561,33 @@ def _run_trend(args: argparse.Namespace) -> int:
     return 0 if outcome.status == "ok" else 1
 
 
+def _run_project(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from db.corpus.project import ArchiveSnapshotRefused, NoLivePopulation, project
+    from db.seed._common import as_timestamp
+
+    try:
+        conn = _connect(args.url)
+    except (ValueError, LookupError, psycopg.Error) as refused:
+        print(refused)
+        return 2
+    try:
+        with conn:
+            outcome = project(conn, cutoff=as_timestamp(args.cutoff) if args.cutoff else None)
+    # No roster, no flattened row yet: the collector has not been stood up, so this is blocked rather
+    # than a failed run -- the same convention as `cosmai trend quarter` with no snapshot. An archive
+    # snapshot is refused at the same exit: it is a wrong argument, not a broken run.
+    except (NoLivePopulation, ArchiveSnapshotRefused) as blocked:
+        print(blocked)
+        return 2
+    print(outcome.note)
+    for violation in outcome.violations:
+        print(f"  {violation}")
+    # The rows stand either way; a 1 says the invariant view has something to say about them.
+    return 0 if outcome.status == "ok" else 1
+
+
 def _run_eval(args: argparse.Namespace) -> int:
     from analysis import predictors, registry
     from analysis.baselines import adoption_misses
@@ -703,6 +752,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_retrieval(args)
     if args.command == "trend":
         return _run_trend(args)
+    if args.command == "project":
+        return _run_project(args)
     if args.command == "eval":
         return _run_eval(args)
     if args.command == "lexicon":
