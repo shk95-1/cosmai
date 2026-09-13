@@ -247,7 +247,7 @@ the agreement excludes from both series.
 ### The live lineage's documents (fork #95, from #93 D1 · D2)
 `project:corpus` projects `tubedepth.video_snapshots` and `tubedepth.comments` for the active panel roster
 into `needs.corpus_document` under the live snapshot, `ON CONFLICT DO NOTHING` on
-`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation and never moves; current
+`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation that carries both `source_metadata` and a description, and never moves; current
 view and like counts stay in `tubedepth`, where they are current.
 
 **`source_metadata` is copied, not rebuilt.** The video side is the upstream column read as text and handed
@@ -262,14 +262,18 @@ A video is projected only once its `source_metadata` is present: a listing row h
 clause would make that emptiness permanent. `quality_flags` carries exactly one value, `empty_text` before
 `duplicate_in_parent`, because every consumer matches the column exactly.
 
-**The live video `text` is the title alone until the collector persists a description**, recorded on the
-snapshot as `instrument.text_parts`. The archive's `text_rule` is normalised title + description, and
-measured over the 4,283 archive videos that also exist in `tubedepth`, a title-only text carries **915 of
-3,534 topic hits — 25.9%**. The same conflict clause that protects `collected_at` also **freezes that short
-text forever**: a row written before the description lands is never revised. So a live snapshot built while
-`text_parts` is `["title"]` is disposable by design — recovery is a delete of that snapshot's documents and
-a re-run, which is cheap only while `active` is false and no mentions have been written against it.
-Upstream shk95-1/cosmai#264 is the fix, and it gates the first live collection rather than following it.
+**The live video `text` is `youtube_video_text(title, description)`** — ydc's `video_text()` rule, imported
+from `analysis/retrieval/corpus.py` rather than restated — recorded on the snapshot as `instrument.text_parts
+= ["title", "description"]`. A video whose only flattened rows have a NULL `description` (flattened before DDL
+`tubedepth/006`) is deferred like one without `source_metadata`, and `undescribed_videos` counts it: written
+then, the conflict clause would freeze a title-only text, which carries 915 of the archive's 3,534 topic hits
+(25.9%). `description = ''` is an observation — the uploader wrote none — and is projected. **A snapshot that
+already records different `text_parts` is refused, not relabelled** (exit 2), and so is one that records none
+but already holds documents, whose text then has no provenance at all; an empty snapshot with no record is
+simply stamped: its documents keep the text they were written with, so stamping the new parts over the old
+would erase the only record that the snapshot is thin, and fork #96's gate reads that record. Recovery is a
+delete of that snapshot's documents and a re-run, cheap only while `active` is false and no mentions have been
+written against it.
 
 **The live lineage's mentions (fork #96).** `match:topic` writes the live snapshot's `corpus_mention` from
 `corpus_document` with `match_topics` on the active `retrieval-topic` dictionary — all 15 topics, `trend_use`
