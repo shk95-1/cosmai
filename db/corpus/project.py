@@ -103,6 +103,18 @@ class NoLivePopulation(LookupError):
     with no snapshot: the collector has not been stood up, so there is no run to call unsuccessful."""
 
 
+class TextPartsChanged(NoLivePopulation):
+    """The snapshot already records a different `instrument.text_parts` from the one this pass would stamp.
+
+    Blocked, not merged over. Every insert is `ON CONFLICT DO NOTHING`, so the documents an earlier pass
+    wrote keep the text they were written with: a snapshot built title-only stays title-only row by row
+    whatever its instrument says. Merging the new value over the old one would erase the one record that
+    the snapshot is thin -- the exact signal the recovery depends on -- and fork #96's gate, which reads
+    `text_parts`, would open over a corpus carrying about a quarter of its topic hits. The way out is the
+    one contracts/formats.md names: delete that snapshot's documents and project it again.
+    """
+
+
 class ArchiveSnapshotRefused(ValueError):
     """The resolved snapshot is the archive. #93 D0 makes the archive read-only, and a projection that
     landed on it would be indistinguishable afterwards from the handover's own rows."""
@@ -138,6 +150,9 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
 ON CONFLICT (snapshot_id, source, source_item_id) DO NOTHING
 """
 DOCUMENT_COUNT: LiteralString = "SELECT count(*) FROM corpus_document WHERE snapshot_id = %s"
+SNAPSHOT_TEXT_PARTS: LiteralString = (
+    "SELECT instrument -> 'text_parts' FROM corpus_snapshot WHERE snapshot_id = %s"
+)
 # Narrowed to this stage's own rows. `needs.author_identifier_violation` also lists
 # `tubedepth.comments` for the raw author id and display name the collector still writes, and those
 # rows are upstream's to fix -- a projection reporting itself partial because of them would be partial
@@ -421,8 +436,9 @@ def instrument(cur: psycopg.Cursor[Any]) -> dict[str, Any]:
         "comment_depth": {"threads": MAX_COMMENTS_PER_VIDEO, "include_replies": COMMENT_INCLUDE_REPLIES},
         "refetch_window_days": COMMENT_REFETCH_WINDOW_DAYS,
         # The parts a live video's `text` is made of, recorded because a shorter text is invisible in the
-        # rows afterwards. It holds for every row without a per-row condition: VIDEO_PAGE defers any
-        # video whose description is NULL, so every projected video has a non-NULL description.
+        # rows afterwards. It holds for every row *this code* writes: VIDEO_PAGE defers any video whose
+        # description is NULL. It does not hold for documents an earlier pass wrote, which is why
+        # project() refuses a snapshot already recording different text_parts (TextPartsChanged).
         "text_parts": ["title", "description"],
     }
 
@@ -556,6 +572,16 @@ def project(  # noqa: PLR0913 -- every argument is a seam one test or the CLI ne
         row = cur.fetchone()
         first_seen = row[0] if row else None
         if first_seen is None:
+            cur.execute(UNDESCRIBED_VIDEOS.format(**schema), scope)
+            waiting = int((cur.fetchone() or (0,))[0])
+            if waiting:
+                # Flattened, with source_metadata, and no description: rows written before DDL
+                # tubedepth/006. Collecting more does not help them -- a re-fetch of those videos does.
+                raise NoLivePopulation(
+                    f"{waiting} flattened panel video(s) in {youtube_schema} carry source_metadata but no "
+                    f"description (flattened before DDL tubedepth/006) at or before {at.isoformat()}; they "
+                    "are waiting for a re-fetch that writes a description, not for more collection"
+                )
             raise NoLivePopulation(
                 f"{youtube_schema} holds no flattened video with source_metadata and a description for the "
                 f"{len(channels)} panel channels at or before {at.isoformat()}; run"
@@ -568,11 +594,29 @@ def project(  # noqa: PLR0913 -- every argument is a seam one test or the CLI ne
         undescribed = int((cur.fetchone() or (0,))[0])
         cur.execute(UNFLATTENED_LISTED.format(**schema), scope)
         unflattened = int((cur.fetchone() or (0,))[0])
-        knobs = json.dumps(instrument(cur), ensure_ascii=False)
+        measured = instrument(cur)
+        knobs = json.dumps(measured, ensure_ascii=False)
         cur.execute(
             SNAPSHOT_INSERT,
             (live, label, LIVE_PRODUCED_BY, [SOURCE_RUN], first_seen, LIVE_NOTE, knobs),
         )
+        # Asked before SNAPSHOT_REFRESH merges `instrument`, because that merge would overwrite the answer.
+        # A new snapshot was just stamped with `measured` by the insert above, so it passes. A snapshot with
+        # no recorded text_parts and no documents is empty and passes too; one with documents and no record
+        # has unknown provenance and is refused with the rest.
+        cur.execute(SNAPSHOT_TEXT_PARTS, (live,))
+        recorded = (cur.fetchone() or (None,))[0]
+        if recorded != measured["text_parts"]:
+            cur.execute(DOCUMENT_COUNT, (live,))
+            written = int((cur.fetchone() or (0,))[0])
+            if recorded is not None or written:
+                conn.rollback()
+                raise TextPartsChanged(
+                    f"live snapshot {live} records text_parts {recorded!r} over {written} document(s),"
+                    f" and this pass would stamp {measured['text_parts']!r}; its documents keep the text"
+                    f" they were written with. Delete snapshot {live}'s documents and project again"
+                    " (contracts/formats.md, the live lineage's documents)"
+                )
         cur.execute(SNAPSHOT_REFRESH, (knobs, first_seen, live))
         run_id = _run_id(cur, run_note_of(live), {"snapshot": live, "cutoff": at.isoformat()})
     conn.commit()

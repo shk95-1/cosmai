@@ -247,7 +247,7 @@ the agreement excludes from both series.
 ### The live lineage's documents (fork #95, from #93 D1 · D2)
 `project:corpus` projects `tubedepth.video_snapshots` and `tubedepth.comments` for the active panel roster
 into `needs.corpus_document` under the live snapshot, `ON CONFLICT DO NOTHING` on
-`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation and never moves; current
+`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation that carries both `source_metadata` and a description, and never moves; current
 view and like counts stay in `tubedepth`, where they are current.
 
 **`source_metadata` is copied, not rebuilt.** The video side is the upstream column read as text and handed
@@ -262,7 +262,16 @@ A video is projected only once its `source_metadata` is present: a listing row h
 clause would make that emptiness permanent. `quality_flags` carries exactly one value, `empty_text` before
 `duplicate_in_parent`, because every consumer matches the column exactly.
 
-**The live video `text` is `youtube_video_text(title, description)`** — ydc's `video_text()` rule, imported from `analysis/retrieval/corpus.py` rather than restated — recorded on the snapshot as `instrument.text_parts = ["title", "description"]`. A video whose only flattened rows have a NULL `description` (flattened before DDL `tubedepth/006`) is deferred like one without `source_metadata`, and `undescribed_videos` counts it: written then, the conflict clause would freeze a title-only text, which carries 915 of the archive's 3,534 topic hits (25.9%). `description = ''` is an observation — the uploader wrote none — and is projected. A live snapshot whose `text_parts` is `["title"]` is disposable by design: recovery is a delete of that snapshot's documents and a re-run, cheap only while `active` is false and no mentions have been written against it.
+**The live video `text` is `youtube_video_text(title, description)`** — ydc's `video_text()` rule, imported
+from `analysis/retrieval/corpus.py` rather than restated — recorded on the snapshot as `instrument.text_parts
+= ["title", "description"]`. A video whose only flattened rows have a NULL `description` (flattened before DDL
+`tubedepth/006`) is deferred like one without `source_metadata`, and `undescribed_videos` counts it: written
+then, the conflict clause would freeze a title-only text, which carries 915 of the archive's 3,534 topic hits
+(25.9%). `description = ''` is an observation — the uploader wrote none — and is projected. **A snapshot that
+already records different `text_parts` is refused, not relabelled** (exit 2): its documents keep the text they
+were written with, so stamping the new parts over the old would erase the only record that the snapshot is
+thin, and fork #96's gate reads that record. Recovery is a delete of that snapshot's documents and a re-run,
+cheap only while `active` is false and no mentions have been written against it.
 
 ### What a comment row keeps of its author (fork #92, from #91 decision 3)
 A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the

@@ -625,6 +625,35 @@ def test_a_video_without_a_description_waits_and_a_later_observation_writes_its_
 
 
 @pytest.mark.postgres
+def test_a_snapshot_written_title_only_is_refused_rather_than_relabelled(live: tuple[str, str]):
+    """The blocker of this follow-up's review. A snapshot an earlier pass wrote under `["title"]` keeps its
+    title-only documents -- inserts never overwrite -- so stamping `["title", "description"]` over it would
+    erase the only record that it is thin, and fork #96's gate reads exactly that record. Refused, with the
+    instrument and the documents left as they were."""
+    url, schema = live
+    with connect(url) as conn:
+        first = project.project(conn, youtube_schema=schema)
+    parts = "SELECT instrument -> 'text_parts' FROM corpus_snapshot WHERE snapshot_id = %s"
+    count = "SELECT count(*) FROM corpus_document WHERE snapshot_id = %s"
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE corpus_snapshot SET instrument = jsonb_set(instrument, '{text_parts}', '[\"title\"]')"
+            " WHERE snapshot_id = %s",
+            (first.snapshot_id,),
+        )
+        conn.commit()
+    before = _rows(url, count, (first.snapshot_id,))
+    assert before[0][0] > 0
+
+    with connect(url) as conn, pytest.raises(project.TextPartsChanged) as refused:
+        project.project(conn, youtube_schema=schema)
+
+    assert f"snapshot {first.snapshot_id}" in str(refused.value)
+    assert _rows(url, parts, (first.snapshot_id,)) == [(["title"],)]
+    assert _rows(url, count, (first.snapshot_id,)) == before
+
+
+@pytest.mark.postgres
 def test_nothing_to_project_is_blocked_rather_than_an_empty_run(live: tuple[str, str]):
     """The collector has not been stood up yet: there is no run to call unsuccessful, and the message
     has to name what to run instead (the same convention as `cosmai trend quarter` with no snapshot)."""
