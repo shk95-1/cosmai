@@ -1,27 +1,38 @@
-"""The price table and the LLM_BUDGET_USD hard stop. The only machine check with money on it, so a fake usage
-measures the running total and the block together."""
+"""The price table, the COSMAI_LLM_BUDGET_USD hard stop and the COSMAI_LLM_CHAIN order. The only machine
+check with money on it, so a fake usage measures the running total and the block together.
+
+Since #136 the amount is a knob, not a constant here: the `llm_knobs` fixture supplies it the way compose
+supplies it to the analyze container, and the refusal tests below take it away again on purpose."""
 
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any, cast
 
 import pytest
 
+from analysis.polarity import pricing
 from analysis.polarity.pricing import (
-    LLM_BUDGET_USD,
+    BUDGET_KEY,
+    CHAIN_KEY,
     PRICES,
     PRICES_SOURCE_DATE,
     BudgetExceeded,
+    KnobMissing,
     Reservation,
     Usage,
     UsageLedger,
     budget_remaining,
+    budget_usd,
     cost_usd,
+    llm_chain,
     price_for,
 )
 from db.seed._common import connect
 
 ONE_MILLION = 1_000_000
+
+pytestmark = pytest.mark.usefixtures("llm_knobs")
 
 
 def test_the_two_models_the_comparison_run_uses_are_priced_and_the_table_is_dated():
@@ -68,23 +79,24 @@ class TestTheLedger:
             ledger.record("claude-sonnet-5", "eval:polarity", Usage(input_tokens=ONE_MILLION))
             ledger.record("claude-sonnet-5", "eval:polarity", Usage(output_tokens=ONE_MILLION))
             assert ledger.spent() == Decimal("18.00")
-            assert ledger.remaining() == LLM_BUDGET_USD - Decimal("18.00")
+            assert ledger.remaining() == budget_usd() - Decimal("18.00")
             assert budget_remaining(conn) == ledger.remaining()
 
     def test_the_hard_stop_refuses_before_the_call_that_would_cross_the_budget(self, needs_runtime_url: str):
         with connect(needs_runtime_url) as conn:
             ledger = UsageLedger(conn)
-            # The token count is derived from the constant so that a changed LLM_BUDGET_USD cannot make this
-            # pass falsely: once spending has come to just under the budget, what is left cannot start a call
-            # of one million output tokens.
+            # The token count is derived from the knob so that a changed COSMAI_LLM_BUDGET_USD cannot make
+            # this pass falsely: once spending has come to just under the budget, what is left cannot start a
+            # call of one million output tokens.
+            budget = budget_usd()
             sonnet_output_rate = PRICES["claude-sonnet-5"].output_usd
-            tokens_just_under_budget = int(LLM_BUDGET_USD / sonnet_output_rate * ONE_MILLION) - 1
+            tokens_just_under_budget = int(budget / sonnet_output_rate * ONE_MILLION) - 1
             ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=tokens_just_under_budget))
             spent = ledger.spent()
-            assert spent < LLM_BUDGET_USD
+            assert spent < budget
             with pytest.raises(BudgetExceeded) as blocked:
                 ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=ONE_MILLION))
-            assert f"{LLM_BUDGET_USD:.2f}" in str(blocked.value)
+            assert f"{budget:.2f}" in str(blocked.value)
             # A refusal does not grow the ledger — because there was no call.
             assert ledger.spent() == spent
 
@@ -102,8 +114,7 @@ class TestTheLedger:
         """A timeout or a Ctrl-C with no response is still billed — the reservation has to stay for the next
         run to see it."""
         with connect(needs_runtime_url) as conn:
-            # A narrow budget independent of LLM_BUDGET_USD keeps the boundary check meaningful whatever that
-            # constant is.
+            # A narrow budget named outright keeps the boundary check meaningful whatever the knob says.
             ledger = UsageLedger(conn, budget=Decimal("7.00"))
             ledger.reserve("claude-sonnet-5", "eval", Usage(output_tokens=400_000))  # $6.00
             assert ledger.spent() == Decimal("6.00")
@@ -162,3 +173,87 @@ class TestTheLedger:
                 "msgbatch_x",
             )
         ]
+
+
+# ---------------------------------------------------------------------------------------------
+# #136: the hard stop and the implementation chain are environment knobs, and an absent or
+# unreadable knob stops the process instead of becoming an unlimited budget.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_this_module_no_longer_carries_the_amount(monkeypatch: pytest.MonkeyPatch):
+    # The failure #136 removes: an amount in code, a second copy in STATE.md, and a redeploy needed
+    # to change either. A constant reintroduced here would give every caller a silent default again.
+    assert not hasattr(pricing, "LLM_BUDGET_USD")
+    monkeypatch.setenv(BUDGET_KEY, "3.50")
+    assert budget_usd() == Decimal("3.50")
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "abc", "-1", "1,0", "nan", "Infinity"])
+def test_an_unreadable_hard_stop_refuses_and_names_the_key(raw: str, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(BUDGET_KEY, raw)
+    with pytest.raises(KnobMissing) as died:
+        budget_usd()
+    assert BUDGET_KEY in str(died.value)
+
+
+def test_a_missing_hard_stop_refuses_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(BUDGET_KEY, raising=False)
+    with pytest.raises(KnobMissing) as died:
+        budget_usd()
+    assert BUDGET_KEY in str(died.value)
+
+
+def test_a_ledger_built_without_the_knob_refuses_before_it_can_be_used(monkeypatch: pytest.MonkeyPatch):
+    """The point of the whole issue. No connection is opened here: __init__ has to refuse first, so
+    there is no path on which a call goes out against a budget nobody chose."""
+    monkeypatch.delenv(BUDGET_KEY, raising=False)
+    with pytest.raises(KnobMissing) as died:
+        UsageLedger(cast(Any, None))
+    assert BUDGET_KEY in str(died.value)
+
+
+def test_a_budget_passed_in_by_hand_still_wins_over_the_knob(monkeypatch: pytest.MonkeyPatch):
+    # The per-purpose caps and the tests above name their own ceiling; the knob is the default, not a
+    # cap on what a caller may ask for.
+    monkeypatch.delenv(BUDGET_KEY, raising=False)
+    assert UsageLedger(cast(Any, None), budget=Decimal("7.00")).budget == Decimal("7.00")
+
+
+def test_a_zero_hard_stop_is_a_real_setting_rather_than_an_error(monkeypatch: pytest.MonkeyPatch):
+    # "No LLM spend at all" is a position someone takes on purpose (goal #255 holds it today), so it
+    # has to be expressible in the knob rather than only by deleting the container.
+    monkeypatch.setenv(BUDGET_KEY, "0")
+    assert budget_usd() == Decimal(0)
+
+
+def test_the_chain_is_the_fallback_order_as_written(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(CHAIN_KEY, "ollama:gemma4:latest, llm:claude-sonnet-5")
+    assert llm_chain() == ("ollama:gemma4:latest", "llm:claude-sonnet-5")
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "ollama", "ollama:gemma4:latest,", ":gemma4", "ollama:"])
+def test_an_unreadable_chain_refuses_and_names_the_key(raw: str, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv(CHAIN_KEY, raw)
+    with pytest.raises(KnobMissing) as died:
+        llm_chain()
+    assert CHAIN_KEY in str(died.value)
+
+
+def test_a_missing_chain_refuses_and_names_the_key(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv(CHAIN_KEY, raising=False)
+    with pytest.raises(KnobMissing) as died:
+        llm_chain()
+    assert CHAIN_KEY in str(died.value)
+
+
+def test_the_refusal_is_the_class_every_entry_point_already_blocks_on():
+    """The regression this guards. `SystemExit` is a BaseException: it walks past `except ask.BLOCKING`
+    (cosmai/cli.py's retrieval ask), past `except (ValueError, LookupError, psycopg.Error)` (analyze and
+    eval) and out of `main()`, leaving exit 1 where contracts/entrypoints.md requires 2 -- and on `ask`
+    exit 1 already means "no evidence", so an unconfigured host would read as an empty corpus."""
+    from analysis.retrieval.ask import BLOCKING
+
+    assert issubclass(KnobMissing, LookupError)
+    assert issubclass(KnobMissing, Exception)  # an Exception, so a bare `except` for refusals sees it
+    assert any(issubclass(KnobMissing, blocked) for blocked in BLOCKING)

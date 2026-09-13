@@ -8,10 +8,17 @@ from collections.abc import Iterator
 import pytest
 
 from analysis.lexicon import load_aspects, load_lexicon
+from analysis.polarity import GENERIC_RULESET, SUNCARE_CATEGORY, SUNCARE_RULESET, ruleset_for
+from analysis.polarity.pipeline import PolarityStage
 from db import seed
 from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
+
+SHARED_RULESET = "shared"
+# The topic vocabulary of the retrieval/topic consumer, which lives in the same table
+# (analysis/retrieval/topics.py) and must never reach the need path (#126).
+TOPIC_RULESET = "retrieval-topic"
 
 
 @pytest.fixture
@@ -24,7 +31,7 @@ def seeded(needs_runtime_url: str) -> Iterator[object]:
 def test_the_active_entity_version_loads_every_surface(seeded):
     lex = load_lexicon(seeded)
     assert lex.version == 1
-    assert len(lex.surfaces) == 992
+    assert len(lex.surfaces) == 1428
     assert lex.surface_to_canonical["3CE"] == "3CE"
     assert lex.surface_to_canonical["무기자차"] == "ZINC_OXIDE"
 
@@ -76,3 +83,25 @@ def test_the_complaint_marker_regex_is_the_discourse_markers_plus_that_category(
     assert marker.search("백탁이 심해요")
     assert not p1.complaint_marker_re(None).search("백탁이 심해요")
     assert p1.wish_marker_re.search("나왔으면 좋겠어요")
+
+
+def test_the_need_path_loads_its_own_rulesets_and_never_another_consumers(seeded):
+    """#126 point 2 / formats.md §ruleset: one `aspect_lexicon` version houses one ruleset per consumer, and
+    what need extraction loads is `p1-v2.2` · `suncare-v2.2` · `shared`. The `retrieval-topic` rows sit in
+    the same table and have 0 rows in `need_mention` and `metrics_need` because of this boundary alone —
+    widen the loader and a topic key becomes a need_key with nothing to say so."""
+    with seeded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO aspect_lexicon (aspect, scope, category, pattern, version, ruleset, priority) "
+            "VALUES ('topic-probe', 'generic', '', 'topic-probe', 1, %s, 1)",
+            (TOPIC_RULESET,),
+        )
+    seeded.commit()  # PolarityStage ends its own construction with a rollback
+
+    stage = PolarityStage(seeded)
+    assert set(stage.aspects) == {SUNCARE_RULESET, GENERIC_RULESET}
+    patterns = [p for lexicon in stage.aspects.values() for p in lexicon.patterns]
+    assert {p.ruleset for p in patterns} == {SUNCARE_RULESET, GENERIC_RULESET, SHARED_RULESET}
+    assert not [p for p in patterns if p.aspect == "topic-probe"]
+    # The category axis is what picks the ruleset, and it can name no third one.
+    assert {ruleset_for(c) for c in (None, SUNCARE_CATEGORY, "cat-a")} == {SUNCARE_RULESET, GENERIC_RULESET}

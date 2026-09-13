@@ -7,7 +7,7 @@ import { NEED_QUERIES } from '../public/query.js';
 import {
   latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
-  productNameIndex, productLabel, truncateLabel, withProductNames,
+  productNameIndex, productLabel, truncateLabel, withProductNames, UNLINKED_LABEL,
   monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
 } from '../public/screens.js';
 
@@ -229,13 +229,38 @@ test('productLabel: 카탈로그에 있으면 브랜드 · 제품명이다', () 
   assert.equal(productLabel('da:9', index), '이름만 있는 제품'); // 브랜드가 없으면 이름만
 });
 
-// A mention the linker could not attach ends up with the site's original key as its ref as-is (aggregate's
-// _product: product_ref or source_product_key). Inventing a name for that spot would have the screen
-// assert a link the pipeline never made — the ref is shown as-is instead.
+// Inventing a name for a ref outside the catalogue would have the screen assert a link the pipeline never
+// made, so the ref is shown as it is. Since #128 an unattached mention carries the `unlinked:` marker
+// instead of a bare key, and these two values are what is left: a seed-era ref, and a catalogue miss.
 test('productLabel: 카탈로그에 없는 ref 는 ref 그대로다', () => {
   const index = productNameIndex(CATALOG);
   assert.equal(productLabel('A000000186166', index), 'A000000186166');
   assert.equal(productLabel('101473', new Map()), '101473');
+});
+
+// #128: metrics_need.product_ref carries `unlinked:<site>:<key>` for a mention the linker has not
+// attached. That is a machine value, and the bar slot is 20 characters, so drawing it raw truncated every
+// oliveyoung row to the same 'unlinked:oliveyoung…' — one repeated label on the axis this screen exists for.
+test('productLabel: an unattached ref reads as its own site key, not the marker', () => {
+  const index = productNameIndex(CATALOG);
+  assert.equal(productLabel('unlinked:oliveyoung:81569', index), `${UNLINKED_LABEL} · 81569`);
+  // A product key may itself contain ':' — only the site segment is taken off.
+  assert.equal(productLabel('unlinked:glowpick:g:1', index), `${UNLINKED_LABEL} · g:1`);
+  assert.ok(!productLabel('unlinked:oliveyoung:81569', index).startsWith('unlinked:'));
+});
+
+// The defect was not the length but the collision: two different products drew the same bar. This is the
+// invariant, measured at the real slot width (withProductNames' default is PRODUCT_LABEL_MAX in app.js).
+test('withProductNames: two unattached products never share a short label', () => {
+  const rows = withProductNames([
+    { product_ref: 'unlinked:oliveyoung:A000000186166', unresolved: 1 },
+    { product_ref: 'unlinked:oliveyoung:A000000155458', unresolved: 0.9 },
+    { product_ref: 'unlinked:glowpick:101473', unresolved: 0.8 },
+  ], productNameIndex(CATALOG));
+  const short = rows.map((r) => r.product_short);
+  assert.equal(new Set(short).size, short.length);
+  // The full marker stays on the row, because app.js draws product_ref as its own table column.
+  assert.equal(rows[0].product_ref, 'unlinked:oliveyoung:A000000186166');
 });
 
 test('productNameIndex: product_ref 없는 행은 담지 않는다', () => {

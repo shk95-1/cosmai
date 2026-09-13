@@ -141,11 +141,16 @@ OPEN_RUN: LiteralString = (
     "INSERT INTO analysis_run (status, versions, note) VALUES ('running', %s::jsonb, %s) RETURNING run_id"
 )
 CLOSE_RUN: LiteralString = "UPDATE analysis_run SET status = 'ok', finished_at = now() WHERE run_id = %s"
-# TODO(shk95-1/cosmai#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
-# deletes the same run's long_form rows.
+# A run that opened and produced none of its output is 'partial' -- the value analysis/pipeline.py's
+# RUN_SKIPPED already writes for a pass that ran no step, and the one analysis_health shows for a run
+# that finished without delivering (contracts/entrypoints.md). FIND_RUN resolves by note alone, so the
+# next attempt still reopens this row rather than opening a second one.
+CLOSE_EMPTY_RUN: LiteralString = (
+    "UPDATE analysis_run SET status = 'partial', finished_at = now() WHERE run_id = %s"
+)
 CLEAR: LiteralString = (
     "DELETE FROM metrics_topic_quarter "
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 INSERT: LiteralString = """
 INSERT INTO metrics_topic_quarter
@@ -304,8 +309,6 @@ def build(
     `cutoff` and `topics` in its versions (#93 D2, versioning.md). Without one the run reads every document
     and records the metric version alone, which is what the archive's run has always been.
     """
-    # TODO(shk95-1/cosmai#201): run() opens and commits the run first, so if the population is empty and run()
-    # aborts, status='running' is left behind.
     with conn.cursor() as cur:
         # There is one way to pick the active revision -- a bare `WHERE active` doubles the denominator when
         # there are two revisions.
@@ -325,6 +328,14 @@ def build(
         topics = topic_axis(conn, cur, snapshot)
         video, video_panel = _video_counts(cur, params)
         comment = _comment_counts(cur, params)
+        # Asked before a run is opened, because opening one first is what leaves a committed 'running'
+        # row behind (shk95-1/cosmai#201) -- and on a rerun it would reopen the run that last had a
+        # population, taking its 'ok' away from the archive surface for nothing.
+        if not video.documents:
+            raise NoPopulation(
+                f"the active snapshot has no {CORPUS_LONG} document in the {panel_role} panel that "
+                f"mentions {TOPIC_FILTER!r}; nothing to compute"
+            )
         extra: dict[str, Any] = {}
         if cutoff is not None:
             cur.execute(SNAPSHOT_DICTIONARY, (snapshot,))
@@ -386,13 +397,18 @@ def run(
         cutoff=cutoff,
     )
     if not made.rows:
+        # The population stands and no row came out, so the axis is empty -- build() has committed the
+        # run it opened by now, and this is the one place left that can close it.
+        with conn.cursor() as cur:
+            cur.execute(CLOSE_EMPTY_RUN, (made.run_id,))
+        conn.commit()
         raise NoPopulation(
-            f"the active snapshot has no {CORPUS_LONG} document in the {panel_role} panel that "
-            f"mentions {TOPIC_FILTER!r}; nothing to write"
+            "the population of the active snapshot produced no row: the active "
+            f"{topic_registry.RULESET} dictionary carries no trend_use topic to stand on"
         )
     with conn.cursor() as cur:
         # A rerun leaving old rows makes the grid non-dense, and the view catches that as sparse_grid.
-        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
+        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role, CONTENT_TYPE))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(CLOSE_RUN, (made.run_id,))
         # The stored rows answer, not a sentence of the contract -- is the grid dense, does the denominator

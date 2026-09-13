@@ -109,6 +109,10 @@ def video_snapshot_row(
         "video_id": payload.get("video_id") or target,
         "fetched_at": fetched_at,
         "title": payload["title"],
+        # #264 (DDL 006). `.get` with no `or ""`, so a payload stored before this issue -- which has
+        # no description key -- lands as NULL rather than claiming the uploader wrote none; the
+        # normalizer already turns a route's absent description into "".
+        "description": payload.get("description"),
         "channel": payload.get("channel"),
         "channel_id": payload.get("channel_id"),
         "duration_seconds": payload.get("duration_seconds"),

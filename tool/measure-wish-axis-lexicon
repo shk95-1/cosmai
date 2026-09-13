@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+"""Re-measures the format and attribute dictionaries against the slice-p9 rows of `needs.wish_mention`
+(#124), the only labelled sentences either axis has.
+
+The seed's precision and recall are written into `contracts/formats.md`, and a number written down
+without the way to measure it again goes quietly false the moment the dictionary or the corpus moves
+(the same place as `tool/measure-lexicon-candidates` and `tool/measure-mfds-join`).
+
+**The comparison runs on identical input.** `wish_mention.sentence` is the one sentence
+`Extractor.wishes()` hands to `_listed()`, so re-extracting over that column asks the new dictionary
+exactly what slice-p9 was asked.
+
+**Two axes are scored, because two things are read.** The *set-level* numbers (precision, recall) are
+label-level over the stored column: one (row, canonical) pair is one observation, and the `LIST_MAX`
+cap of three applies to this side as it did to that one. The *first-value* numbers describe the panel
+instead: `metrics_wish` is built with `_first(wish.format)` (`analysis/aggregate/__init__.py`), so the
+cell shows the first value alone and the other two never leave `wish_mention`. Both are counted over
+the rows where both sides produced a value.
+
+**slice-p9 is a prior rule run, not a gold standard.** It matched surfaces as plain substrings, so its
+rows carry its collisions: its packaging axis reads the word for "tube" inside the word for "YouTube"
+(55 of 61 hits) and its nail axis reads "nail" inside "thumbnail" (15 of 32). A disagreement is
+therefore an answer to read, not a failure -- the sentences behind either side are what `--extra` and
+`--misses` print. The collisions are enumerated in `contracts/formats.md` (the wish axes).
+
+    tool/measure-wish-axis-lexicon                 # the table
+    tool/measure-wish-axis-lexicon --json          # the same numbers as JSON
+    tool/measure-wish-axis-lexicon --from-db       # score the dictionary the DB holds, not the CSVs
+    tool/measure-wish-axis-lexicon --extra format --canonical <name>   # sentences the rules add
+    tool/measure-wish-axis-lexicon --misses format --canonical <name>  # sentences slice-p9 had alone
+
+The connection is `needs_runtime` and every statement is read-only (`SET TRANSACTION READ ONLY`).
+
+exit codes: 0 measured · 2 blocked (no dictionary rows, no slice-p9 rows, no database).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+EXTRACTOR = "slice-p9"
+ROWS_SQL = """
+SELECT sentence, format, attribute FROM wish_mention WHERE extractor_version = %s ORDER BY mention_id
+"""
+AXES = ("format", "attribute")
+
+
+def parts(value: str | None) -> list[str]:
+    """Both columns are `;`-joined lists -- 1,241 format rows and 429 attribute rows carry one.
+
+    Kept as a list, not a set: the order is the one `_first` reads to build the panel cell.
+    """
+    return [part.strip() for part in (value or "").split(";") if part.strip()]
+
+
+def read_rows(from_db: bool) -> list:
+    from analysis.types import EntitySurface
+
+    if not from_db:
+        from db.seed.lexicon import wish_axis_rows
+
+        return [EntitySurface(*row[:5]) for row in wish_axis_rows(ROOT / "eval")]
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute("SELECT kind, canonical, surface, tier, source FROM entity_lexicon WHERE active")
+        return [EntitySurface(*row) for row in cur.fetchall() if row[0] in AXES]
+
+
+def connect():
+    import psycopg
+
+    from db.runtime import runtime_url
+
+    conn = psycopg.connect(runtime_url().replace("postgresql+psycopg://", "postgresql://"))
+    conn.execute("SET TRANSACTION READ ONLY")
+    conn.execute("SET search_path = needs, public")
+    return conn
+
+
+def measure(patterns, sentences: list[tuple[str, str | None]]) -> dict:
+    # RuleExtractor._listed rather than a copy of it: a measurement that reimplements the rule measures
+    # the copy, and the LIST_MAX cap is exactly the part a copy would get wrong.
+    from analysis.extractor import RuleExtractor
+
+    per: dict[str, list[int]] = defaultdict(lambda: [0, 0, 0])
+    filled = both = labelled = same_first = first_in_set = 0
+    for sentence, gold_value in sentences:
+        listed = parts(RuleExtractor._listed(patterns, sentence))
+        gold_list = parts(gold_value)
+        predicted, gold = set(listed), set(gold_list)
+        filled += bool(predicted)
+        labelled += bool(gold)
+        if listed and gold_list:
+            both += 1
+            same_first += listed[0] == gold_list[0]
+            first_in_set += listed[0] in gold
+        for name in predicted & gold:
+            per[name][0] += 1
+        for name in predicted - gold:
+            per[name][1] += 1
+        for name in gold - predicted:
+            per[name][2] += 1
+    tp = sum(v[0] for v in per.values())
+    fp = sum(v[1] for v in per.values())
+    fn = sum(v[2] for v in per.values())
+    return {
+        "precision": tp / (tp + fp) if tp + fp else 0.0,
+        "recall": tp / (tp + fn) if tp + fn else 0.0,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "rows_filled": filled,
+        "rows_labelled": labelled,
+        "rows_both": both,
+        # What the panel shows: metrics_wish takes _first(...) alone, so these two count the first
+        # value against slice-p9's first value and against its whole list.
+        "first_same": same_first / both if both else 0.0,
+        "first_in_set": first_in_set / both if both else 0.0,
+        "per_canonical": {
+            name: {
+                "tp": v[0],
+                "fp": v[1],
+                "fn": v[2],
+                "precision": v[0] / (v[0] + v[1]) if v[0] + v[1] else 0.0,
+                "recall": v[0] / (v[0] + v[2]) if v[0] + v[2] else 0.0,
+            }
+            for name, v in sorted(per.items(), key=lambda kv: -(kv[1][0] + kv[1][2]))
+        },
+    }
+
+
+def report(axis: str, result: dict) -> None:
+    print(
+        f"\n{axis}: P={result['precision']:.3f} R={result['recall']:.3f} "
+        f"tp={result['tp']} fp={result['fp']} fn={result['fn']}"
+    )
+    print(
+        f"  rows filled {result['rows_filled']} · {EXTRACTOR} filled {result['rows_labelled']} · "
+        f"both {result['rows_both']}"
+    )
+    print(
+        f"  first value (what the panel shows): same as {EXTRACTOR}'s first "
+        f"{result['first_same']:.3f} · inside its list {result['first_in_set']:.3f}"
+    )
+    print(f"  {'canonical':34}{'tp':>6}{'fp':>6}{'fn':>6}{'P':>7}{'R':>7}")
+    for name, cell in result["per_canonical"].items():
+        print(
+            f"  {name:34}{cell['tp']:>6}{cell['fp']:>6}{cell['fn']:>6}"
+            f"{cell['precision']:>7.2f}{cell['recall']:>7.2f}"
+        )
+
+
+def disagreements(patterns, sentences, canonical: str, extra: bool, limit: int) -> None:
+    from analysis.extractor import RuleExtractor
+
+    shown = 0
+    for sentence, gold_value in sentences:
+        predicted = set(parts(RuleExtractor._listed(patterns, sentence)))
+        gold = set(parts(gold_value))
+        side = (predicted - gold) if extra else (gold - predicted)
+        if canonical in side and shown < limit:
+            print(f"  · {sentence[:160]}")
+            shown += 1
+    print(f"  ({shown} shown)")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--from-db", action="store_true", help="score the active DB dictionary")
+    parser.add_argument("--extra", choices=AXES, help="print sentences the rules add on this axis")
+    parser.add_argument("--misses", choices=AXES, help="print sentences slice-p9 had alone")
+    parser.add_argument("--canonical", help="the canonical --extra/--misses asks about")
+    parser.add_argument("--limit", type=int, default=20)
+    args = parser.parse_args(argv)
+    if (args.extra or args.misses) and not args.canonical:
+        parser.error("--extra/--misses needs --canonical")
+
+    from analysis.lexicon import compile_lexicon
+
+    rows = read_rows(args.from_db)
+    if not rows:
+        print("blocked: no format/attribute rows to score", file=sys.stderr)
+        return 2
+    lexicon = compile_lexicon(rows, 1)
+    patterns = {"format": lexicon.format_patterns, "attribute": lexicon.attribute_patterns}
+    with connect() as conn, conn.cursor() as cur:
+        cur.execute(ROWS_SQL, (EXTRACTOR,))
+        fetched = cur.fetchall()
+    if not fetched:
+        print(f"blocked: no {EXTRACTOR} rows in wish_mention", file=sys.stderr)
+        return 2
+    columns = {"format": 1, "attribute": 2}
+    corpus = {axis: [(row[0], row[columns[axis]]) for row in fetched] for axis in AXES}
+    if args.extra or args.misses:
+        axis = args.extra or args.misses
+        disagreements(patterns[axis], corpus[axis], args.canonical, bool(args.extra), args.limit)
+        return 0
+    results = {axis: measure(patterns[axis], corpus[axis]) for axis in AXES}
+    if args.json:
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+    else:
+        for axis in AXES:
+            report(axis, results[axis])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

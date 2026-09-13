@@ -21,6 +21,10 @@ from analysis.polarity.prompt import LABEL_CRITERIA, system_prompt, user_prompt
 from analysis.types import AspectLexicon, AspectPattern, Polarity, PolarityRequest
 from db.seed._common import connect
 
+# A ledger built with no budget of its own reads COSMAI_LLM_BUDGET_USD (#136), which a deployed analyze
+# container has and a test process does not.
+pytestmark = pytest.mark.usefixtures("llm_knobs")
+
 FORMATS = Path(__file__).resolve().parents[1] / "contracts" / "formats.md"
 
 
@@ -223,8 +227,7 @@ class TestAgainstAFakeClient:
     ):
         client = FakeClient([_answer("불만")])
         with connect(needs_runtime_url) as conn:
-            # A narrow budget independent of LLM_BUDGET_USD keeps the boundary check meaningful whatever that
-            # constant is.
+            # A narrow budget named outright keeps the boundary check meaningful whatever the knob says.
             ledger = UsageLedger(conn, budget=Decimal("7.00"))
             ledger.record("claude-sonnet-5", "earlier", Usage(output_tokens=466_600))  # $6.999, $0.001 left
             with pytest.raises(BudgetExceeded):

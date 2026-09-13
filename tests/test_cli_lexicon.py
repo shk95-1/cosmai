@@ -58,7 +58,7 @@ def test_a_loaded_version_is_inert_until_it_is_activated(seeded: str, tmp_path: 
         active = load_lexicon(conn)
     assert active.version == 2
     # ingredient 는 아직 v1 이 켜져 있다: activate 는 kind 하나만 갈아 끼운다.
-    assert {s.kind for s in active.surfaces} == {"brand", "ingredient"}
+    assert {s.kind for s in active.surfaces} == {"brand", "ingredient", "format", "attribute"}
     assert sum(1 for s in active.surfaces if s.kind == "brand") == 3
     assert active.surface_to_canonical["laneige"] == "라네즈"
     assert active.cooc_required == {"헤라"}
@@ -72,7 +72,7 @@ def test_reloading_the_same_version_changes_nothing(seeded: str, tmp_path: Path,
     assert "0 loaded, 3 already there" in capsys.readouterr().out
     with connect(seeded) as conn:
         assert len(load_lexicon(conn, version=2).surfaces) == 3
-        assert len(load_lexicon(conn, version=1).surfaces) == 992
+        assert len(load_lexicon(conn, version=1).surfaces) == 1428
 
 
 def test_an_aspect_version_loads_and_activates_by_ruleset(seeded: str, tmp_path: Path):
@@ -115,7 +115,7 @@ def test_reloading_version_1_leaves_the_seeded_dictionary_alone(seeded: str, tmp
     assert "0 loaded, 1 already there" in capsys.readouterr().out
     with connect(seeded) as conn:
         lex = load_lexicon(conn)
-    assert (lex.version, len(lex.surfaces)) == (1, 992)
+    assert (lex.version, len(lex.surfaces)) == (1, 1428)
 
 
 def test_activating_a_version_that_was_never_loaded_is_refused(seeded: str, capsys):

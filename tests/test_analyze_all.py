@@ -239,9 +239,13 @@ def test_analyze_all_writes_the_product_axis_the_product_screen_reads(
         # One product's share cannot exceed the (scope, need_key) total -- a mention with no known product
         # stays only in the total.
         assert neg <= sums[(scope, need_key)][3] and pos <= sums[(scope, need_key)][4]
-    # The rollup is one row per need_key per product -- screen 3 dedupes by that scope (screens.js).
-    rolled = [(r[1], r[2]) for r in per_product if r[0] == "all"]
-    assert rolled and len(set(rolled)) == len(rolled)
+    # The product axis is one row per (scope, need_key, product) -- screen 3 dedupes by that (screens.js).
+    keys = [(r[0], r[1], r[2]) for r in per_product]
+    assert len(set(keys)) == len(keys)
+    # #126 end to end: every aspect these reviews carry belongs to the suncare category alone
+    # (suncare-v2.2 holds no generic pattern at all), and the rollup's population is generic mentions, so
+    # scope='all' emits nothing here while the category scope keeps every one of them.
+    assert not [r for r in rows if r[0] == "all"]
 
 
 def test_analyze_all_leaves_the_owned_scope_to_its_owner(analysis_url: str, sources: tuple[str, str]):

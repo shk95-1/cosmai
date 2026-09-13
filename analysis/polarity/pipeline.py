@@ -109,6 +109,12 @@ MINE_ALREADY: LiteralString = (
     "SELECT DISTINCT ref FROM need_mention WHERE src = %s AND ref = ANY(%s::text[]) "
     "AND extractor_version = %s AND polarity_version = %s"
 )
+# #128: read once per run because the link stage that writes product_member runs before this one
+# (analysis/pipeline.py run_all) and a few hundred rows in memory beat a join per mention. It has to be in
+# the INSERT rather than a backfill afterwards: NEED_UPSERT's DO UPDATE sets product_ref = EXCLUDED, so the
+# next night overwrites any later UPDATE with NULL.
+MEMBERS: LiteralString = "SELECT source, product_key, product_ref FROM product_member"
+
 # The rules and any implementation outside the table own nothing, so 'the rows of my version' is the whole
 # rule population — the incremental run loses its meaning.
 NO_MISSING = (
@@ -322,6 +328,16 @@ def _product_facts(
     return categories, names
 
 
+def _members(conn: psycopg.Connection[Any]) -> dict[tuple[str, str], str]:
+    """Which canonical `product_ref` each site product belongs to — `needs.product_member`, the link stage's
+    output (#128)."""
+    with conn.cursor() as cur:
+        cur.execute(MEMBERS)
+        found = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+    conn.rollback()
+    return found
+
+
 def _channels(conn: psycopg.Connection[Any], schema: str) -> dict[str, tuple[str | None, int | None]]:
     if not _exists(conn, schema, "video_snapshots"):
         return {}
@@ -364,6 +380,7 @@ class PolarityStage:
         }
         self.lexicon: Lexicon = load_lexicon(conn)
         self.categories: CategoryMap = load_category_map(conn)
+        self.members: dict[tuple[str, str], str] = _members(conn)
         conn.rollback()
 
     def versions(self) -> dict[str, Any]:
@@ -458,7 +475,9 @@ class PolarityStage:
             src=unit.src,
             site=unit.site,
             ref=unit.ref,
-            product_ref=None,  # the linker of #2 fills it in analyze link
+            # #128: this was NULL on every row ever written, left to `analyze link`, which writes only the
+            # catalogue tables. A product with no member row stays NULL and is retried the next night.
+            product_ref=self.members.get((unit.site, unit.product_key)) if unit.product_key else None,
             source_product_key=unit.product_key,
             category=unit.category,
             lexicon_category=item.lexicon_category,

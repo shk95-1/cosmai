@@ -8,6 +8,7 @@
 | product_match/ | match_check40 · match_check40_v2_blind | 80쌍 | slice-p2 |
 | lexicon/ | brand_lexicon_v1 · ingredient_kr_colloquial_v1 · site_axis_map_seed | 847 / 32 / 25 | slice-p3 · slice-p4 · slice-p1 |
 | lexicon/ | aspect_lexicon_v1(+ruleset·priority) · **need_key_v1** · **category_map_v1** | 70 / 38 / 20 | slice-suncare · slice-p1 (#17 계약 보강) |
+| lexicon/ | **format_lexicon_v1** · **attribute_lexicon_v1** (the two wish axes; surfaces mined from the `slice-p9` rows of `wish_mention`, then read by hand — `tool/measure-wish-axis-lexicon` scores them back against those rows) | 271 / 165 | slice-p9 (#124) |
 | panel/ | **channels_v1**(ydc 패널 명부: product 34 · expert 9) | 43 | slice-ydc (#31 이 슬라이스 밖으로; #9 가 그 디렉터리를 지운다) |
 | mfds/ | **mfds_items_v1** (the MFDS cosmetic registration ledger, a snapshot of ydc v0.4.0; not re-collected) | 4,735 | ydc `rag/mfds_items.csv` (#55) |
 

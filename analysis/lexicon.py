@@ -42,6 +42,13 @@ NEVER = re.compile(r"(?!)")
 # The kinds that are not link targets: format/attribute go out through their own pattern fields and stopword
 # is not counted in the first place.
 NOT_LINKABLE = frozenset({"format", "attribute", "stopword"})
+# The kinds whose surface has to stand as a word rather than as the tail of a compound (_kind_patterns).
+WORD_BOUNDED_KINDS = frozenset({"format"})
+# What counts as inside a word: a Hangul syllable, a latin letter or a digit. Written as escaped
+# codepoints because the range is an operating surface rather than data, and tool/checks/lang reads a
+# staged Hangul character as a regression (#192 D12).
+WORD_CHARS = "\uac00-\ud7a3A-Za-z0-9"
+LEFT_BOUNDARY = f"(?<![{WORD_CHARS}])"
 
 # active is per row and activate switches per kind (001) -- "the current dictionary" = every active row, and
 # version labels it with the highest of those. A named version does not pick by kind and reads that version
@@ -77,11 +84,26 @@ def _alternation(surfaces: list[str]) -> str:
 
 
 def _kind_patterns(rows: Sequence[EntitySurface], kind: str) -> tuple[tuple[str, re.Pattern[str]], ...]:
+    """One pattern per canonical, in row order -- `_listed` keeps the first LIST_MAX that answer.
+
+    A format surface names the product the sentence is about, so it carries the same left boundary
+    surface_re gives a brand surface: without it the shortest listed surface answers for every longer
+    one it ends on, and the top canonical becomes the answer to half the corpus (#124, measured
+    against the slice-p9 rows: that canonical runs at precision 0.51 free, 0.98 bounded). A compound
+    a person writes is a row of its own, which is why the seed carries the word and its compounds
+    both. An attribute surface is the opposite shape -- a property riding on the tail of whatever the
+    request names ("... in a stick too") -- so it matches wherever it sits: bounding it costs recall
+    0.89 -> 0.73 at the same precision, and buys nothing back.
+
+    Case-folded like surface_re, so a surface with a latin letter in it ('vitamin C') is one row
+    rather than one per spelling.
+    """
+    bounded = LEFT_BOUNDARY if kind in WORD_BOUNDED_KINDS else ""
     by_canonical: dict[str, list[str]] = {}
     for row in rows:
         if row.kind == kind:
             by_canonical.setdefault(row.canonical, []).append(row.surface)
-    return tuple((c, re.compile(_alternation(s))) for c, s in by_canonical.items())
+    return tuple((c, re.compile(rf"{bounded}(?:{_alternation(s)})", re.I)) for c, s in by_canonical.items())
 
 
 def compile_lexicon(surfaces: Sequence[EntitySurface], version: int) -> Lexicon:
@@ -92,7 +114,7 @@ def compile_lexicon(surfaces: Sequence[EntitySurface], version: int) -> Lexicon:
     linkable = [s.surface for s in surfaces if s.kind not in NOT_LINKABLE and s.canonical not in stop]
     alt = _alternation(linkable)
     surface_re = (
-        re.compile(rf"(?<![가-힣A-Za-z0-9])({alt}){PARTICLES}(?=$|[^가-힣A-Za-z0-9]|{PRODUCT_WORDS})", re.I)
+        re.compile(rf"{LEFT_BOUNDARY}({alt}){PARTICLES}(?=$|[^{WORD_CHARS}]|{PRODUCT_WORDS})", re.I)
         if alt
         else NEVER
     )
