@@ -93,6 +93,23 @@ def test_matching_agrees_with_the_frozen_constant():
             ), text
 
 
+# Strings on which the frozen copy and the live matcher are *meant* to part since fork #97. CORPUS above
+# holds none of them, so the agreement test was green over an empty set the moment the live pattern was
+# grouped -- a comparison that preserves every property it checks while the thing it guards has moved.
+PARTING = ["CAPA", "spa pack", "papa recipe", "xUVAx"]
+
+
+def test_the_frozen_copy_and_the_live_matcher_part_exactly_where_fork_97_says():
+    """The frozen copy is deliberately left ungrouped: it is the record of the matcher the six mode x engine
+    rows of `contracts/interfaces.md` were measured under, and re-freezing it before those rows are rescored
+    would erase the reference they stand on. So the difference is asserted instead of hidden -- the frozen
+    copy still reads `SPF_PA` in text where no SPF, PA, UVA or UVB stands as a word, and the live matcher
+    reads nothing. Re-freeze this file in the change that re-measures the six rows (fork #97)."""
+    for text in PARTING:
+        assert "SPF_PA" in frozen_topics.match_topics(text, include_excluded=True), text
+        assert "SPF_PA" not in topics.match_topics(text, include_excluded=True), text
+
+
 def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():
     """The evaluation queries and the token expansion list are derived from the dictionary -- one of the three
     out of step and the query counts of the measured table (literal 61 · heldout 60) change."""
