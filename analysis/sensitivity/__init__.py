@@ -54,6 +54,36 @@ EXPERT = "expert"
 ALL_ROLES: tuple[str, ...] = (PRODUCT, EXPERT)
 ALL_ROLES_LABEL = "product+expert"
 
+# The ad-marking role split, a band rather than the archive's numbers (fork #96). On the archive
+# `has_paid_product_placement` is "True" on 5 of 2,415 expert videos (0.2%) and 2,020 of 11,564 product videos
+# (17.5%), so a collection that reports every video unsponsored is indistinguishable from a panel that stopped
+# taking sponsorships unless the split itself is asked.
+AD_MARKING_MIN_VIDEOS = 500
+AD_MARKING_PRODUCT_FLOOR = 0.05
+AD_MARKING_EXPERT_SHARE = 0.25
+
+
+def ad_marking_split(by_role: Mapping[str, tuple[int, int]]) -> str | None:
+    """A violation line when the declared ad flag stops separating the roles, else None.
+
+    `by_role` is (videos, videos declared) per panel role over one snapshot's video documents. With fewer
+    than `AD_MARKING_MIN_VIDEOS` in either role nothing is asked: a rate over a few videos says nothing.
+    """
+    if EXPERT not in by_role or PRODUCT not in by_role:
+        return None
+    (experts, expert_marked), (products, product_marked) = by_role[EXPERT], by_role[PRODUCT]
+    if min(experts, products) < AD_MARKING_MIN_VIDEOS:
+        return None
+    expert_rate, product_rate = expert_marked / experts, product_marked / products
+    if product_rate >= AD_MARKING_PRODUCT_FLOOR and expert_rate <= product_rate * AD_MARKING_EXPERT_SHARE:
+        return None
+    return (
+        f"ad_marking_role_split - declared ad rate expert {expert_marked}/{experts} ({expert_rate:.1%}) vs "
+        f"product {product_marked}/{products} ({product_rate:.1%}); the band wants product >= "
+        f"{AD_MARKING_PRODUCT_FLOOR:.0%} and expert <= {AD_MARKING_EXPERT_SHARE:.0%} of it"
+    )
+
+
 # The lengths of the two backtest windows (quarters). The window length being 4, the same as `persistence`,
 # is seasonality -- both the previous and the following window have to hold four full quarters for the summer
 # effect to cancel.

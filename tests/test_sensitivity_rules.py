@@ -289,3 +289,40 @@ def test_the_counterfactual_panel_label_has_no_seat_in_the_stored_vocabulary():
         Population((_video("v1", "2025Q1"),), ()), TOPICS, FRAME, roles=sensitivity.ALL_ROLES
     )
     assert {row.panel_role for row in made} == {sensitivity.ALL_ROLES_LABEL}
+
+
+# ---------- the ad-marking role split ----------
+# The archive's own counts (all video documents, by panel role): (videos, has_paid_product_placement "True").
+ARCHIVE_AD_MARKING = {sensitivity.EXPERT: (2415, 5), sensitivity.PRODUCT: (11564, 2020)}
+
+
+def test_the_archives_own_role_split_is_inside_the_band():
+    assert sensitivity.ad_marking_split(ARCHIVE_AD_MARKING) is None
+
+
+def test_a_collection_reporting_every_video_unsponsored_is_caught():
+    """Uniform "False" reads exactly like a panel that stopped taking sponsorships, and the declared half of
+    ad sensitivity then removes nothing with no error raised."""
+    flat = {role: (videos, 0) for role, (videos, _) in ARCHIVE_AD_MARKING.items()}
+    found = sensitivity.ad_marking_split(flat)
+    assert found is not None and found.startswith("ad_marking_role_split")
+
+
+def test_an_expert_rate_as_high_as_the_product_rate_is_caught():
+    videos, _ = ARCHIVE_AD_MARKING[sensitivity.EXPERT]
+    level = {sensitivity.EXPERT: (videos, round(videos * 0.175)), sensitivity.PRODUCT: (11564, 2020)}
+    assert sensitivity.ad_marking_split(level) is not None
+
+
+def test_the_band_is_a_band_not_the_archives_equality():
+    """Live counts differ from the archive's; a split of the same shape at other sizes still passes."""
+    other = {sensitivity.EXPERT: (1700, 12), sensitivity.PRODUCT: (8400, 900)}
+    assert sensitivity.ad_marking_split(other) is None
+
+
+def test_too_few_videos_in_either_role_asks_nothing():
+    few = sensitivity.AD_MARKING_MIN_VIDEOS - 1
+    assert (
+        sensitivity.ad_marking_split({sensitivity.EXPERT: (few, few), sensitivity.PRODUCT: (5000, 0)}) is None
+    )
+    assert sensitivity.ad_marking_split({sensitivity.PRODUCT: (5000, 0)}) is None
