@@ -117,12 +117,21 @@ def probe_databases(harness_container: str) -> Iterator[None]:
             _psql(harness_container, "fleet", f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
 
 
+#: A `needs` view that reads one of the columns this test takes back out. Since fork #95 there is
+#: one -- `needs.live_listing_route` reads `tubedepth.artifacts.fetch_route` -- and a view is not
+#: something an aged schema could have had either: the column was not there, so nothing could have
+#: been built on it. The deploy's view sweep (step (f)) puts it back on the way out, so a CASCADE
+#: here reproduces the aged state rather than losing anything, and the assertion below is what says
+#: so out loud instead of leaving it to the flag.
+DEPENDENT_VIEWS = ("needs.live_listing_route",)
+
+
 def _age_it(container: str, database: str) -> None:
     """Turn a freshly built database into production's shape: the schema is there, it carries every
     version the adoption list names, and it carries neither the ledger nor anything later."""
     _psql(container, database, f"DROP TABLE {SOURCE}.schema_migration")
     for table, column in _columns_the_deploy_still_owes():
-        _psql(container, database, f"ALTER TABLE {SOURCE}.{table} DROP COLUMN {column}")
+        _psql(container, database, f"ALTER TABLE {SOURCE}.{table} DROP COLUMN {column} CASCADE")
 
 
 def test_a_fresh_build_records_every_additive_file_it_applied(
@@ -175,6 +184,13 @@ def test_a_present_schema_applies_the_files_it_predates_exactly_once(
             " AND a.attnum > 0 AND NOT a.attisdropped",
         )
         assert [column] in columns, f"{SOURCE}.{table}.{column} has a ledger row and no column"
+
+    # The CASCADE in _age_it took these with the column. A deploy that catches the column up and
+    # leaves the view behind is a surface gone quiet, which is what this asks about rather than trusts.
+    for view in DEPENDENT_VIEWS:
+        assert _psql(harness_container, AGED_DATABASE, f"SELECT to_regclass('{view}') IS NOT NULL") == [
+            ["t"]
+        ], f"{view} depends on a caught-up column and the deploy did not put it back"
 
     second = deploy(AGED_DATABASE)
     assert second.returncode == 0, second.stderr
