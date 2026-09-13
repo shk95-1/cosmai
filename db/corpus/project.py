@@ -36,6 +36,7 @@ from typing import Any, LiteralString
 import psycopg
 from psycopg import sql as pgsql
 
+from analysis.retrieval.corpus import youtube_video_text
 from analysis.retrieval.normalize import normalize_text
 
 # The spelling of the archive's `source_metadata`, imported from the pass that writes the video half of
@@ -169,13 +170,19 @@ CLOSE_RUN: LiteralString = "UPDATE analysis_run SET status = %s, finished_at = n
 # unconditionally would freeze a video's document with an empty `source_metadata` forever -- ad marking
 # for that video would then read zero with nothing to notice it by. Such a video is left for the next
 # fetch instead, and `deferred_videos` counts them.
+#
+# `description IS NOT NULL` is the same guard for the same reason (#264, DDL tubedepth/006): NULL is a
+# row flattened before that column existed, and its document would keep a title-only text forever.
+# '' is an uploader who wrote none, an observation, and is projected. `undescribed_videos` counts the
+# deferred videos that wait on this clause alone.
 VIDEO_PAGE = pgsql.SQL("""
 SELECT DISTINCT ON (v.video_id)
        v.video_id, v.channel_id, v.title, v.published_at, v.duration_seconds,
-       v.fetched_at, v.source_metadata::text
+       v.fetched_at, v.source_metadata::text, v.description
   FROM {schema}.video_snapshots v
  WHERE v.channel_id = ANY(%(channels)s)
    AND v.source_metadata IS NOT NULL
+   AND v.description IS NOT NULL
    AND v.fetched_at <= %(cutoff)s
    AND v.video_id > %(after)s
  ORDER BY v.video_id, v.fetched_at, v.artifact_id
@@ -186,6 +193,7 @@ SELECT min(v.fetched_at)
   FROM {schema}.video_snapshots v
  WHERE v.channel_id = ANY(%(channels)s)
    AND v.source_metadata IS NOT NULL
+   AND v.description IS NOT NULL
    AND v.fetched_at <= %(cutoff)s
 """)
 DEFERRED_VIDEOS = pgsql.SQL("""
@@ -195,7 +203,19 @@ SELECT count(DISTINCT v.video_id)
    AND v.fetched_at <= %(cutoff)s
    AND NOT EXISTS (
         SELECT 1 FROM {schema}.video_snapshots w
-         WHERE w.video_id = v.video_id AND w.source_metadata IS NOT NULL AND w.fetched_at <= %(cutoff)s)
+         WHERE w.video_id = v.video_id AND w.source_metadata IS NOT NULL AND w.description IS NOT NULL
+           AND w.fetched_at <= %(cutoff)s)
+""")
+UNDESCRIBED_VIDEOS = pgsql.SQL("""
+SELECT count(DISTINCT v.video_id)
+  FROM {schema}.video_snapshots v
+ WHERE v.channel_id = ANY(%(channels)s)
+   AND v.fetched_at <= %(cutoff)s
+   AND v.source_metadata IS NOT NULL
+   AND NOT EXISTS (
+        SELECT 1 FROM {schema}.video_snapshots w
+         WHERE w.video_id = v.video_id AND w.source_metadata IS NOT NULL AND w.description IS NOT NULL
+           AND w.fetched_at <= %(cutoff)s)
 """)
 # `listing_entries` is read for this number and nothing else. A listing row carries a title, a channel
 # and a duration, so it looks like enough to write a document from -- and it is not: it has no
@@ -299,6 +319,7 @@ class Counts:
     video_rows: int = 0
     comment_rows: int = 0
     deferred_videos: int = 0
+    undescribed_videos: int = 0
     unflattened_listed: int = 0
     undated_videos: int = 0
     undated_comments: int = 0
@@ -326,7 +347,8 @@ class Outcome:
             f"project-corpus snapshot={self.snapshot_id} run={self.run_id}"
             f" cutoff={self.cutoff.isoformat()} videos={c.videos} comments={c.comments}"
             f" new_videos={c.video_rows} new_comments={c.comment_rows}"
-            f" deferred_videos={c.deferred_videos} unflattened_listed={c.unflattened_listed}"
+            f" deferred_videos={c.deferred_videos} undescribed_videos={c.undescribed_videos}"
+            f" unflattened_listed={c.unflattened_listed}"
             f" undated_videos={c.undated_videos} undated_comments={c.undated_comments}"
         )
 
@@ -398,13 +420,10 @@ def instrument(cur: psycopg.Cursor[Any]) -> dict[str, Any]:
         # column is not `source_metadata` and nothing compares it against a Python repr.
         "comment_depth": {"threads": MAX_COMMENTS_PER_VIDEO, "include_replies": COMMENT_INCLUDE_REPLIES},
         "refetch_window_days": COMMENT_REFETCH_WINDOW_DAYS,
-        # Not a knob but a limitation, recorded on the row because it is the kind of divergence that is
-        # invisible afterwards: `tubedepth.video_snapshots` has no description column and DDL 004's nine
-        # keys do not carry one, so a live video's `text` is its title alone while the archive's is
-        # title + description (the manifest's text_rule). Every mention count on the live lineage is
-        # read against a shorter text than the archive's, and #93 D0 already forbids one series
-        # spanning both.
-        "text_parts": ["title"],
+        # The parts a live video's `text` is made of, recorded because a shorter text is invisible in the
+        # rows afterwards. It holds for every row without a per-row condition: VIDEO_PAGE defers any
+        # video whose description is NULL, so every projected video has a non-NULL description.
+        "text_parts": ["title", "description"],
     }
 
 
@@ -412,8 +431,11 @@ def video_document(row: Sequence[Any], snapshot_id: int) -> tuple[Any, ...]:
     """One `video_snapshots` row as a `corpus_document` row. `metadata_json` goes in as the text it came
     out as -- it is never parsed into Python values and re-serialised, which is the step the archive's
     spelling would be lost in."""
-    video_id, channel_id, title, published_at, duration, fetched_at, metadata_json = row
-    text = normalize_text(title)
+    video_id, channel_id, title, published_at, duration, fetched_at, metadata_json, description = row
+    if description is None:
+        # VIDEO_PAGE already defers this row; a query edit that stops doing so must fail, not freeze.
+        raise ValueError(f"{VIDEO}:{video_id} has a NULL description and must be deferred, not written")
+    text = youtube_video_text(title, description)
     contract.check_author(f"{VIDEO}:{video_id}", json.loads(metadata_json), source=VIDEO)
     return (
         snapshot_id,
@@ -535,13 +557,15 @@ def project(  # noqa: PLR0913 -- every argument is a seam one test or the CLI ne
         first_seen = row[0] if row else None
         if first_seen is None:
             raise NoLivePopulation(
-                f"{youtube_schema} holds no flattened video with source_metadata for the "
+                f"{youtube_schema} holds no flattened video with source_metadata and a description for the "
                 f"{len(channels)} panel channels at or before {at.isoformat()}; run"
                 " `cosmai collect youtube` (watch -> work -> flatten) first"
             )
         live = resolve_snapshot(cur, snapshot_id=snapshot_id, label=label)
         cur.execute(DEFERRED_VIDEOS.format(**schema), scope)
         deferred = int((cur.fetchone() or (0,))[0])
+        cur.execute(UNDESCRIBED_VIDEOS.format(**schema), scope)
+        undescribed = int((cur.fetchone() or (0,))[0])
         cur.execute(UNFLATTENED_LISTED.format(**schema), scope)
         unflattened = int((cur.fetchone() or (0,))[0])
         knobs = json.dumps(instrument(cur), ensure_ascii=False)
@@ -581,6 +605,7 @@ def project(  # noqa: PLR0913 -- every argument is a seam one test or the CLI ne
         video_rows=video_rows,
         comment_rows=comment_rows,
         deferred_videos=deferred,
+        undescribed_videos=undescribed,
         unflattened_listed=unflattened,
         undated_videos=undated_videos,
         undated_comments=undated_comments,

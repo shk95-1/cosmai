@@ -12,6 +12,8 @@ way each one would be wrong rather than by the function it lives in.
   after a projection pass has run beside the archive.
 * **The author.** One hash, imported, never re-spelled -- and never hashed twice.
 * **What is never touched.** Snapshot 1, and the `collected_at` of a row already written.
+* **The video text.** #264's `youtube_video_text`, imported; a NULL description is deferred rather than
+  frozen as a title-only text, and '' is projected.
 """
 
 from __future__ import annotations
@@ -26,6 +28,9 @@ import pytest
 from psycopg import sql as pgsql
 from sqlalchemy import create_engine
 
+from analysis.retrieval import corpus as retrieval_corpus
+from analysis.retrieval.corpus import youtube_video_text
+from analysis.retrieval.normalize import normalize_text
 from analysis.sensitivity.pipeline import DECLARED
 from collectors.youtube.flatten import SOURCE_METADATA_KEYS
 from collectors.youtube.models import (
@@ -202,6 +207,37 @@ def test_the_video_side_is_copied_rather_than_rebuilt():
     assert written == [], written
 
 
+def _video_row(title: str, description: str | None) -> tuple[Any, ...]:
+    """A VIDEO_PAGE row in its column order, description last."""
+    return ("V1", PANEL_CHANNEL, title, PUBLISHED, 620, FIRST, _video_metadata(), description)
+
+
+def test_a_video_text_is_the_imported_rule_title_space_description_normalised_after_the_join():
+    """#264's `youtube_video_text` is ydc's `video_text()`; a second spelling of it here would part from
+    the archive's text in silence, so identity is asserted, then the stored value."""
+    assert project.youtube_video_text is retrieval_corpus.youtube_video_text
+    assert "v.description" in project.VIDEO_PAGE.as_string(None)
+    title = "A  long &amp; Title"
+    text = project.video_document(_video_row(title, LONG_DESCRIPTION), 2)[8]
+    assert text == youtube_video_text(title, LONG_DESCRIPTION)
+    assert text == normalize_text(f"{title} {LONG_DESCRIPTION}") == "A long & Title shop the & routine"
+    assert text != normalize_text(title)
+
+
+def test_an_empty_description_is_an_observation_and_the_title_alone_is_its_text():
+    text = project.video_document(_video_row("a short", ""), 2)[8]
+    assert text == "a short"  # no trailing space from the join
+
+
+def test_a_null_description_is_deferred_by_the_query_and_refused_by_the_row():
+    """NULL means the row was flattened before DDL 006, not that the uploader wrote nothing. Written
+    once, ON CONFLICT DO NOTHING keeps its title-only text forever."""
+    for statement in (project.VIDEO_PAGE, project.FIRST_OBSERVATION):
+        assert "v.description IS NOT NULL" in statement.as_string(None)
+    with pytest.raises(ValueError, match="description"):
+        project.video_document(_video_row("no description yet", None), 2)
+
+
 # ---------- the allow-list, and the view that mirrors it ----------
 def test_the_loader_refuses_a_comment_key_the_archive_never_carried():
     row = next(r for r in corpus.read_csv(FIXTURE / "document.csv") if r["source"] == project.COMMENT)
@@ -282,9 +318,12 @@ ARTIFACT = pgsql.SQL(
 )
 SNAPSHOT = pgsql.SQL(
     "INSERT INTO {s}.video_snapshots (artifact_id, video_id, fetched_at, title, channel_id,"
-    " duration_seconds, published_at, source_metadata)"
-    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+    " duration_seconds, published_at, source_metadata, description)"
+    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)"
 )
+# Two spaces, an entity and a trailing newline, so only a join normalised as a whole reproduces it.
+LONG_DESCRIPTION = "shop  the &amp; routine\n"
+LATE_DESCRIPTION = "a description that arrived later"
 LISTING = pgsql.SQL(
     "INSERT INTO {s}.listing_entries (artifact_id, position, kind, target, fetched_at, video_id,"
     " title, channel_id) VALUES (%s, %s, 'channel.videos', %s, %s, %s, %s, %s)"
@@ -322,6 +361,7 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
                 620,
                 PUBLISHED,
                 _video_metadata(),
+                LONG_DESCRIPTION,
             ),
             (
                 "ART_2",
@@ -332,8 +372,9 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
                 620,
                 PUBLISHED,
                 _video_metadata(view_count="99999", collected_at="2026-09-01T07:00:00Z"),
+                LONG_DESCRIPTION,
             ),
-            # Exactly on the boundary.
+            # Exactly on the boundary, and an uploader who wrote no description: '' is an observation.
             (
                 "ART_3",
                 "V_SHORT",
@@ -343,6 +384,7 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
                 60,
                 PUBLISHED,
                 _video_metadata(duration_seconds="60"),
+                "",
             ),
             # A live stream: no duration, and the null is what carries video_unknown.
             (
@@ -354,8 +396,19 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
                 None,
                 PUBLISHED,
                 _video_metadata(duration_seconds=None, like_count=None),
+                "streamed live",
             ),
-            ("ART_6", "V_UNDATED", FIRST, "no time of its own", PANEL_CHANNEL, 300, None, _video_metadata()),
+            (
+                "ART_6",
+                "V_UNDATED",
+                FIRST,
+                "no time of its own",
+                PANEL_CHANNEL,
+                300,
+                None,
+                _video_metadata(),
+                "undated",
+            ),
             # Off the panel: the projection's population is the active roster, nothing else.
             (
                 "ART_7",
@@ -366,6 +419,20 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
                 300,
                 PUBLISHED,
                 _video_metadata(),
+                "off",
+            ),
+            # Flattened before contracts/ddl/tubedepth/006: its title-only text would be frozen by
+            # ON CONFLICT DO NOTHING, so it waits for an observation that carries a description.
+            (
+                "ART_8",
+                "V_NODESC",
+                FIRST,
+                "no description yet",
+                PANEL_CHANNEL,
+                300,
+                PUBLISHED,
+                _video_metadata(),
+                None,
             ),
         ]
         for row in rows:
@@ -374,7 +441,7 @@ def _stand_up_tubedepth(url: str, schema: str) -> None:
         # written -- ON CONFLICT DO NOTHING would make that emptiness permanent.
         cur.execute(
             SNAPSHOT.format(s=pgsql.Identifier(schema)),
-            ("ART_5", "V_NOMETA", FIRST, "no metadata yet", PANEL_CHANNEL, 300, PUBLISHED, None),
+            ("ART_5", "V_NOMETA", FIRST, "no metadata yet", PANEL_CHANNEL, 300, PUBLISHED, None, "has one"),
         )
         cur.execute(
             LISTING.format(s=pgsql.Identifier(schema)),
@@ -446,9 +513,10 @@ def test_the_projection_writes_the_live_snapshot_and_nothing_else(live: tuple[st
 
     assert outcome.snapshot_id != corpus.SNAPSHOT_ID
     assert outcome.status == "ok", outcome.violations
-    # V_NOMETA is deferred, V_UNDATED has no published_at, V_OFFPANEL is not on the roster.
+    # V_NOMETA and V_NODESC are deferred, V_UNDATED has no published_at, V_OFFPANEL is not on the roster.
     assert outcome.counts.videos == 3
-    assert outcome.counts.deferred_videos == 1
+    assert outcome.counts.deferred_videos == 2
+    assert outcome.counts.undescribed_videos == 1
     assert outcome.counts.undated_videos == 1
     assert outcome.counts.unflattened_listed == 1
     # C5 has no time of its own; C6 hangs on a video that got no document.
@@ -473,20 +541,24 @@ def test_the_projection_writes_the_live_snapshot_and_nothing_else(live: tuple[st
         "threads": MAX_COMMENTS_PER_VIDEO,
         "include_replies": COMMENT_INCLUDE_REPLIES,
     }
+    # fork #96's live mention chain is gated on this exact list.
+    assert instrument["text_parts"] == ["title", "description"]
 
-    documents = dict(
-        _rows(
+    documents = {
+        item: (content_type, text)
+        for item, content_type, text in _rows(
             url,
-            "SELECT source_item_id, content_type FROM corpus_document"
+            "SELECT source_item_id, content_type, text FROM corpus_document"
             " WHERE snapshot_id = %s AND source = %s ORDER BY 1",
             (outcome.snapshot_id, project.VIDEO),
         )
-    )
-    assert documents == {
-        "V_LONG": project.VIDEO_LONG,
-        "V_SHORT": project.VIDEO_SHORT,
-        "V_UNKNOWN": project.VIDEO_UNKNOWN,
     }
+    assert documents == {
+        "V_LONG": (project.VIDEO_LONG, youtube_video_text("a long form title", LONG_DESCRIPTION)),
+        "V_SHORT": (project.VIDEO_SHORT, "a short"),
+        "V_UNKNOWN": (project.VIDEO_UNKNOWN, "a live stream streamed live"),
+    }
+    assert documents["V_LONG"][1] == "a long form title shop the & routine"
 
 
 @pytest.mark.postgres
@@ -511,6 +583,45 @@ def test_the_first_observation_is_what_is_kept_and_a_second_pass_moves_nothing(l
         (first.snapshot_id,),
     )[0]
     assert stored == (FIRST, "12000")
+
+
+@pytest.mark.postgres
+def test_a_video_without_a_description_waits_and_a_later_observation_writes_its_full_text(
+    live: tuple[str, str], needs_schema: str
+):
+    """V_NODESC was flattened before DDL 006. Written then, its title alone would be its text for good;
+    deferred, the next fetch that carries a description writes the whole text once."""
+    url, schema = live
+    item = "SELECT text, collected_at FROM corpus_document WHERE snapshot_id = %s AND source_item_id = %s"
+    with connect(url) as conn:
+        first = project.project(conn, youtube_schema=schema)
+    assert _rows(url, item, (first.snapshot_id, "V_NODESC")) == []
+    assert (first.counts.deferred_videos, first.counts.undescribed_videos) == (2, 1)
+
+    with connect(needs_schema) as conn, conn.cursor() as cur:
+        cur.execute(
+            SNAPSHOT.format(s=pgsql.Identifier(schema)),
+            (
+                "ART_9",
+                "V_NODESC",
+                LATER,
+                "no description yet",
+                PANEL_CHANNEL,
+                300,
+                PUBLISHED,
+                _video_metadata(),
+                LATE_DESCRIPTION,
+            ),
+        )
+        conn.commit()
+    with connect(url) as conn:
+        again = project.project(conn, youtube_schema=schema)
+
+    assert again.counts.video_rows == 1
+    assert (again.counts.deferred_videos, again.counts.undescribed_videos) == (1, 0)
+    assert _rows(url, item, (first.snapshot_id, "V_NODESC")) == [
+        (youtube_video_text("no description yet", LATE_DESCRIPTION), LATER)
+    ]
 
 
 @pytest.mark.postgres
