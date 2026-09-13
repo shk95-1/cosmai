@@ -7,8 +7,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, LiteralString
 
 import psycopg
 import pytest
@@ -16,7 +17,15 @@ from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION
-from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, build, note_of, run
+from analysis.trend.pipeline import (
+    PANEL_ROLE,
+    TOPIC_FILTER,
+    NoPopulation,
+    TopicAxisDrift,
+    build,
+    note_of,
+    run,
+)
 from cosmai.cli import main
 from db import corpus, seed
 from db.corpus import verify
@@ -243,6 +252,47 @@ def test_the_run_records_the_metric_version_the_rows_were_made_with(loaded: str)
     versions, note = recorded
     assert versions["metric"] == METRIC_VERSION
     assert note == note_of("선블록", outcome.snapshot_id, outcome.panel_version)
+
+
+MOVE_ONE_POPULATION_VIDEO: LiteralString = """
+UPDATE corpus_document SET collected_at = %(later)s
+ WHERE doc_id = (SELECT m.doc_id FROM corpus_mention m
+   JOIN corpus_document d USING (snapshot_id, doc_id)
+   JOIN panel_channel p ON p.channel_id = d.channel_id AND p.active AND p.panel_role = %(role)s
+  WHERE m.topic_id = %(topic)s AND d.content_type = 'video_long'
+  ORDER BY m.doc_id LIMIT 1)
+"""
+
+
+def _video_documents(conn: psycopg.Connection[Any], **kw: Any) -> int:
+    return max(row.documents for row in build(conn, **kw).rows if row.source == "youtube_video")
+
+
+def test_a_cutoff_bounds_the_population_and_is_recorded_with_the_snapshot_and_dictionary(loaded: str):
+    """#93 D2: the same cutoff gives the same answer. A video collected after the cutoff leaves the
+    population, and the run records the three versions keys of fork #94's contract."""
+    cutoff, later = datetime(2050, 1, 1, tzinfo=UTC), datetime(2100, 1, 1, tzinfo=UTC)
+    with connect(loaded) as conn:
+        everything = _video_documents(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                MOVE_ONE_POPULATION_VIDEO, {"later": later, "role": PANEL_ROLE, "topic": TOPIC_FILTER}
+            )
+            assert cur.rowcount == 1
+        conn.commit()
+        assert _video_documents(conn) == everything
+        assert _video_documents(conn, cutoff=cutoff) == everything - 1
+        outcome = run(conn, cutoff=cutoff)
+        with conn.cursor() as cur:
+            cur.execute("SELECT versions FROM analysis_run WHERE run_id = %s", (outcome.run_id,))
+            recorded = cur.fetchone()
+    assert recorded is not None
+    versions = recorded[0]
+    assert versions["metric"] == METRIC_VERSION
+    assert versions["snapshot"] == outcome.snapshot_id
+    assert datetime.fromisoformat(versions["cutoff"]) == cutoff
+    # The loader records no dictionary on the archive's snapshot, and the key says so rather than guessing.
+    assert "topics" in versions and versions["topics"] is None
 
 
 def test_a_snapshot_with_no_panel_video_is_blocked_not_silently_empty(needs_runtime_url: str):

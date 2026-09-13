@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, LiteralString
 
 import psycopg
@@ -60,6 +61,7 @@ WITH panel AS (
     JOIN panel p ON p.channel_id = d.channel_id
    WHERE d.snapshot_id = %(snapshot)s AND d.source = '{VIDEO}'
      AND d.content_type = '{CORPUS_LONG}'
+     AND (%(cutoff)s::timestamptz IS NULL OR d.collected_at <= %(cutoff)s::timestamptz)
      AND EXISTS (SELECT 1 FROM corpus_mention m
                   WHERE m.snapshot_id = d.snapshot_id AND m.doc_id = d.doc_id
                     AND m.topic_id = %(topic_filter)s)
@@ -93,6 +95,7 @@ SELECT v.quarter, count(*)
   JOIN video v ON v.source_item_id = c.parent_item_id
  WHERE c.snapshot_id = %(snapshot)s AND c.content_type = '{CORPUS_COMMENT}'
    AND c.source = '{COMMENT}' AND c.quality_flags = ''
+   AND (%(cutoff)s::timestamptz IS NULL OR c.collected_at <= %(cutoff)s::timestamptz)
  GROUP BY 1
 """
 )  # noqa: S608
@@ -108,6 +111,7 @@ SELECT m.topic_id, v.quarter, c.quality_flags = '' AS counted,
   JOIN corpus_mention m ON m.snapshot_id = %(snapshot)s AND m.doc_id = c.doc_id AND m.trend_use
  WHERE c.snapshot_id = %(snapshot)s AND c.content_type = '{CORPUS_COMMENT}'
    AND c.source = '{COMMENT}' AND c.quality_flags = ANY(%(flags)s)
+   AND (%(cutoff)s::timestamptz IS NULL OR c.collected_at <= %(cutoff)s::timestamptz)
  GROUP BY 1, 2, 3
 """
 )  # noqa: S608
@@ -122,6 +126,14 @@ OBSERVED_TOPICS: LiteralString = (
 )
 
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
+# judge and evidence find the run the same way and also read the cutoff it applied (#93 D2, fork #96):
+# evidence has to stand on the same population, and judge's quarter in progress is that cutoff's.
+RUN_CUTOFF: LiteralString = (
+    "SELECT run_id, versions->>'cutoff' FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
+)
+SNAPSHOT_DICTIONARY: LiteralString = (
+    "SELECT instrument->'dictionary_version' FROM corpus_snapshot WHERE snapshot_id = %s"
+)
 REOPEN_RUN: LiteralString = (
     "UPDATE analysis_run SET status = 'running', finished_at = NULL, versions = %s::jsonb WHERE run_id = %s"
 )
@@ -208,10 +220,15 @@ def topic_axis(conn: psycopg.Connection[Any], cur: psycopg.Cursor[Any], snapshot
     return axis
 
 
-def _run_id(cur: psycopg.Cursor[Any], note: str) -> int:
+def cutoff_of(recorded: str | None) -> datetime | None:
+    """The cutoff a run recorded in `versions.cutoff`, or None for a run that applied none (the archive's)."""
+    return datetime.fromisoformat(recorded) if recorded else None
+
+
+def _run_id(cur: psycopg.Cursor[Any], note: str, extra: Mapping[str, Any] | None = None) -> int:
     """Found by note and created only when there is none -- piling up runs on a rerun makes idempotence
     unobservable."""
-    payload = json.dumps({"metric": METRIC_VERSION}, ensure_ascii=False)
+    payload = json.dumps({"metric": METRIC_VERSION, **(extra or {})}, ensure_ascii=False)
     cur.execute(FIND_RUN, (note,))
     found = cur.fetchone()
     if found:
@@ -278,9 +295,15 @@ def build(
     panel_role: str = PANEL_ROLE,
     snapshot_id: int | None = None,
     panel_version: int | None = None,
+    cutoff: datetime | None = None,
 ) -> Built:
     """Read, close the transaction, run the formulas. That order is the only shape that avoids the 15-second
-    timeout."""
+    timeout.
+
+    With a `cutoff` only documents collected at or before it are counted, and the run records `snapshot`,
+    `cutoff` and `topics` in its versions (#93 D2, versioning.md). Without one the run reads every document
+    and records the metric version alone, which is what the archive's run has always been.
+    """
     # TODO(shk95-1/cosmai#201): run() opens and commits the run first, so if the population is empty and run()
     # aborts, status='running' is left behind.
     with conn.cursor() as cur:
@@ -297,11 +320,21 @@ def build(
             "panel_version": version,
             "panel_role": panel_role,
             "topic_filter": TOPIC_FILTER,
+            "cutoff": cutoff,
         }
         topics = topic_axis(conn, cur, snapshot)
         video, video_panel = _video_counts(cur, params)
         comment = _comment_counts(cur, params)
-        run_id = _run_id(cur, note_of(scope, snapshot, version))
+        extra: dict[str, Any] = {}
+        if cutoff is not None:
+            cur.execute(SNAPSHOT_DICTIONARY, (snapshot,))
+            recorded = cur.fetchone()
+            extra = {
+                "snapshot": snapshot,
+                "cutoff": cutoff.isoformat(),
+                "topics": recorded[0] if recorded else None,
+            }
+        run_id = _run_id(cur, note_of(scope, snapshot, version), extra)
     conn.commit()
 
     built: list[MetricsTopicQuarterRow] = []
@@ -340,11 +373,17 @@ def run(
     panel_role: str = PANEL_ROLE,
     snapshot_id: int | None = None,
     panel_version: int | None = None,
+    cutoff: datetime | None = None,
 ) -> QuarterOutcome:
     """Rewrites the quarter table of one snapshot wholesale. Not being a partial update is what keeps the
     grid dense."""
     made = build(
-        conn, scope=scope, panel_role=panel_role, snapshot_id=snapshot_id, panel_version=panel_version
+        conn,
+        scope=scope,
+        panel_role=panel_role,
+        snapshot_id=snapshot_id,
+        panel_version=panel_version,
+        cutoff=cutoff,
     )
     if not made.rows:
         raise NoPopulation(

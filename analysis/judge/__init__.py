@@ -18,6 +18,7 @@ from __future__ import annotations
 import bisect
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 from analysis.trend import MIN_MENTIONS
 from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
@@ -116,6 +117,12 @@ def previous_year_quarter(quarter: str) -> str:
     """The comparison is against the same quarter a year earlier rather than the adjacent quarter because
     suncare is a seasonal product."""
     return f"{int(quarter[:4]) - 1}Q{quarter[5]}"
+
+
+def quarter_of(instant: datetime) -> str:
+    """The UTC calendar quarter of an instant -- the clock `analysis/trend/pipeline.py`'s QUARTER reads."""
+    moment = instant.astimezone(UTC)
+    return f"{moment.year}Q{(moment.month - 1) // 3 + 1}"
 
 
 def percentile_rank(sorted_values: Sequence[int], value: int) -> float:
@@ -225,7 +232,7 @@ def _score(
         cell
         for cell in cells
         if cell.velocity_yoy is not None
-        and cell.quarter != last
+        and cell.quarter < last
         and verdicts[_key(cell)][0] not in (THIN, HELD)
     ]
     if not scored:
@@ -262,7 +269,9 @@ def _gaps(rows: Sequence[MetricsTopicQuarterRow]) -> dict[tuple[int, str, str, i
     }
 
 
-def judge(rows: Sequence[MetricsTopicQuarterRow]) -> list[TopicQuarterJudgementRow]:
+def judge(
+    rows: Sequence[MetricsTopicQuarterRow], *, in_progress: str | None = None
+) -> list[TopicQuarterJudgementRow]:
     """Takes every metric row of one run and emits judgement rows under the same key (1:1, the FK of 024).
 
     One row on its own cannot be judged -- both the evidence-count percentile and the 0-100 of the
@@ -278,6 +287,9 @@ def judge(rows: Sequence[MetricsTopicQuarterRow]) -> list[TopicQuarterJudgementR
     scores: dict[Key, float] = {}
     for cells in populations.values():
         quarters = sorted({cell.quarter for cell in cells})
+        # The calendar quarter of the run's cutoff when it recorded one; the last quarter with rows only for a
+        # run that did not (the archive's) -- on a growing snapshot the two part a few days into a quarter.
+        last = in_progress or quarters[-1]
         _refuse_sparse(cells, quarters)
         counts = sorted(cell.mentions for cell in cells)
         for cell in cells:
@@ -294,9 +306,9 @@ def judge(rows: Sequence[MetricsTopicQuarterRow]) -> list[TopicQuarterJudgementR
             history[cell.topic_key][cell.quarter] = cell
         for cell in cells:
             verdicts[_key(cell)] = _classify(
-                cell, evidence[_key(cell)], history[cell.topic_key], quarters, cell.quarter == quarters[-1]
+                cell, evidence[_key(cell)], history[cell.topic_key], quarters, cell.quarter >= last
             )
-        scores.update(_score(cells, evidence, verdicts, quarters[-1]))
+        scores.update(_score(cells, evidence, verdicts, last))
 
     gaps = _gaps(rows)
     made = [
