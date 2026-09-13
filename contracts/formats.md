@@ -278,7 +278,8 @@ as the dictionary says (manifest rule 7). `span_start` is a **0-based character 
 on all 105,358 of its mentions — and both are derived from the **same** test that decided the match: the
 lower-cased substring for `ko` terms, the compiled boundary pattern for `latin` terms. A span taken by a looser
 rule than the match can point inside a word the match rejected. The dictionary's version and fingerprint are
-merged into `instrument` (`dictionary_version`, `dictionary_fingerprint`); when either differs, that
+merged into `instrument` (`dictionary_version`, `dictionary_fingerprint`), with the matching code's
+`matcher_version` (`analysis.retrieval.topics.MATCHER_VERSION`, fork #97); when any of the three differs, that
 snapshot's mentions are deleted under the stage's own run and matched again, never mixed. An archive snapshot
 is refused before any delete is issued.
 

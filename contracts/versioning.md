@@ -51,4 +51,8 @@
   snapshot. `trend quarter` writes `snapshot` · `cutoff` · `topics` only when run with a cutoff (the live chain),
   and `judge` takes the quarter in progress from `versions.cutoff` — the UTC calendar quarter of it — when
   present, and the last quarter with rows otherwise, which is the archive's run and keeps its verdicts unchanged.
+- `corpus_snapshot.instrument.matcher_version` (fork #97) is the third key of that trigger: the fingerprint hashes
+  dictionary rows, not the matching code, so every change to how a term matches bumps
+  `analysis.retrieval.topics.MATCHER_VERSION` and re-matches live snapshots. Version 1 is the ungrouped latin
+  alternation ydc's matcher also had; 2 guards every alternative on both sides.
 - The ydc import pin is **`v0.4.0` `76db718`** of `shk95-1/cosmai-ydc-old` (formerly `slopindustries/youtube-data-collector`), the last commit of that repository — the marker for "seen up to here": every commit up to that tag carries a disposition in the ledger on goal `shk95/cosmai-import-ydc#1` (fork #52). The pin is not the promotion source. Each promoted module's header names the ydc tag its rules were copied from — `v0.1.0` `02440ab` for the v0.1.0 lineage, `v0.3.0` `e5a1b00` for `cross_source.py` · `holdout_commerce.py` · `vector_threshold.py` — and `tests/test_ydc_pin.py` checks that this line names one pin, that every header tag is one of the four ydc tags, and that none is newer than the pin. Nothing in this checkout compares the code against the ydc repository itself: `tool/compare-ydc-*` read the ydc checkout `--ydc` points at, on demand, and a change to the original after the pin is caught only by the next disposition pass.
