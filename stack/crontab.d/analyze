@@ -12,6 +12,50 @@
 # 서로 어긋나도 아무도 모른다.
 0 5 * * *   cosmai analyze all
 #
+# fork #95: the live lineage's projection (`project:corpus`, #93 D1). It belongs in this container
+# rather than in a new one for the reason this file's own first paragraph gives -- it makes no outside
+# request, so it competes for no host budget and must not be stopped along with a collector that is
+# being rolled back. Its arm in needs.pipeline_stage is `analyze` for the same reason: it writes a
+# needs.analysis_run row, not a collector_health one.
+#
+# **Why hourly is permissible: the cadence buys latency and nothing else.** Every value this stage
+# writes is read off the tubedepth row -- `collected_at` is the artifact's own fetch time, not this
+# pass's clock -- every insert is ON CONFLICT DO NOTHING, and a re-run adds only what was missing. So
+# no frequency changes what a row says; it only changes how far behind the collector the corpus is.
+# Hourly is one pass per flatten hour, and the daily analysis #96 lands then never reads a corpus more
+# than an hour old.
+#
+# **Permissible is not measured. T for this line is unknown, and the first pass is not the steady
+# state.** This file's rule is that the gap between two adjacent lines is wider than the earlier
+# line's worst-case T, and the `0 8` commentary below is what an unmeasured T already cost once
+# (#242). The two numbers here are different by orders of magnitude, because a backlog collected
+# before the 2026-08-25 cutover is sitting in tubedepth right now (measured on production
+# 2026-09-12): video_snapshots 27,318 rows / 5,908 distinct videos, 4,683 of them on the active
+# panel; listing_entries 166,957; comments 285,749, of which 239,487 hang on panel videos.
+#   T_first   one pass over that backlog -- on the order of a quarter-million corpus_document rows
+#             written in one go, paged and committed page by page.
+#   T_steady  every pass after it -- one flatten hour's increment, writing almost nothing, and re-reading
+#             the panel's videos and their comments to find that out.
+# **The procedure, before this line is trusted:** the coordinator runs the first pass by hand from the
+# upstream checkout, before the stack is recreated, and times it (T_first); then runs a second pass
+# immediately after and times that (T_steady). This interval is confirmed or moved from those two
+# numbers, and the measurement is written into this file beside #242's. Until then the hour is a
+# choice, not a result.
+# What an overrun costs is duplicated work, not data. This line takes **no** lock -- the analyze lock
+# is one global lock and letting an hourly projection hold it would push the 05:00 pass off its own
+# night -- and supercronic starts an overlapping line rather than skipping it. Two passes running at
+# once therefore read the same rows and write them under the same ON CONFLICT DO NOTHING, so the
+# second one inserts nothing and costs a second read; the snapshot row's insert and its
+# `least(collected_at, ...)` update are serialised by the row lock. The reason to measure T anyway is
+# that an overrun this line pays for every hour is a host doing the same read forever.
+#
+# :41 is the phase. The flatten line runs at :07/:22/:37/:52 (stack/crontab.d/collector-youtube-flatten,
+# phase 7), so :41 sits four minutes after a flatten tick and eleven before the next. Landing inside a
+# flatten batch is harmless rather than something to schedule around -- the projection then sees fewer
+# rows and the next hour picks up the rest -- so the phase is about not starting two statements against
+# the same tables at the same instant, not about correctness.
+41 * * * *  cosmai project corpus
+#
 # Suspended 2026-09-06 (#242): the `0 8` gemma4 line that used to stand here is gone. The Tailscale GPU
 # host it depended on no longer answers /api/tags, and this host's own ollama is CPU-only with too little
 # memory for the 9.2 GiB Q4_K_M weights -- a local CPU-only ollama cannot carry the ~2,800 calls/day steady

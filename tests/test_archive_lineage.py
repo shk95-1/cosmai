@@ -318,11 +318,23 @@ def test_every_stage_is_in_the_graph_and_every_edge_names_a_declared_stage():
 
 def test_every_store_is_a_table_this_checkout_declares():
     """The same question tests/test_pipeline_edge.py asks of upstream's edges, asked of the fork's --
-    a store key is a contract only while a table of that name exists here."""
+    a store key is a contract only while a table of that name exists here.
+
+    The source schemas are read too since fork #95: `project:corpus` reads three `tubedepth` tables,
+    and those are declared by the baseline dump under contracts/ddl/current/ rather than by a
+    `CREATE TABLE needs.` line. Left out, an edge naming a table nobody has would stay green.
+    """
     declared = {
         f"needs.{name}"
         for path in sorted((ROOT / "contracts" / "ddl" / "needs").glob("*.sql"))
         for name in re.findall(r"CREATE TABLE needs\.(\w+)", path.read_text(encoding="utf-8"))
+    }
+    declared |= {
+        name
+        for path in sorted((ROOT / "contracts" / "ddl" / "current").glob("app.*.sql"))
+        for name in re.findall(
+            r"CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][\w.]*)", path.read_text(encoding="utf-8")
+        )
     }
     assert STORES <= declared, sorted(STORES - declared)
 
@@ -336,10 +348,13 @@ def test_every_arm_is_one_the_stage_table_accepts():
     assert {s.arm for s in pipeline_corpus.STAGES} <= vocabulary
 
 
-def test_the_corpus_lineage_stages_are_all_disabled():
-    """The archive ran once and never runs again (#93 D0); the live cron is #96's. An enabled stage
-    with nothing scheduling it reads as stalled forever on the ops screen."""
-    assert not [s for s in pipeline_corpus.STAGES if s.enabled]
+def test_only_the_stage_with_a_cron_line_is_enabled():
+    """The archive ran once and never runs again (#93 D0); the three analysis crons are #96's. An
+    enabled stage with nothing scheduling it reads as stalled forever on the ops screen, and the
+    reverse -- a scheduled stage left disabled -- reads as 'disabled' while it really runs. Fork #95's
+    `project:corpus` landed its crontab line with this row, so it is the one enabled here and
+    tests/test_pipeline_stage.py is where the two are held against each other."""
+    assert {s.stage_key for s in pipeline_corpus.STAGES if s.enabled} == {"project:corpus"}
 
 
 def test_the_seed_puts_the_rows_in_and_a_second_run_changes_nothing(needs_runtime_url: str):
@@ -352,4 +367,5 @@ def test_the_seed_puts_the_rows_in_and_a_second_run_changes_nothing(needs_runtim
     assert seed.run_all(needs_runtime_url, only=groups) == first
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT stage_key FROM pipeline_stage WHERE NOT enabled ORDER BY stage_key")
-        assert {r[0] for r in cur.fetchall()} >= STAGE_KEYS
+        gated = {s.stage_key for s in pipeline_corpus.STAGES if not s.enabled}
+        assert {r[0] for r in cur.fetchall()} >= gated

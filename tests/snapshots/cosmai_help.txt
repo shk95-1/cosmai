@@ -1,13 +1,14 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,login,analyze,retrieval,trend,eval,lexicon} ...
+usage: cosmai [-h] {collect,login,analyze,retrieval,trend,project,eval,lexicon} ...
 
 positional arguments:
-  {collect,login,analyze,retrieval,trend,eval,lexicon}
+  {collect,login,analyze,retrieval,trend,project,eval,lexicon}
     collect             Run one collector's dataset for one hour.
     login               Open a visible browser so a person can authorise one source's profile.
     analyze             Run one analysis stage over the needs schema.
     retrieval           Build the search corpus and query it.
     trend               Build the panel's quarterly topic series.
+    project             Project a collector's tables into the corpus.
     eval                Score one task against needs.labeled_set.
     lexicon             Load, compare and activate a dictionary version.
 
@@ -221,6 +222,25 @@ usage: cosmai trend holdout [-h] [--url URL]
 options:
   -h, --help  show this help message and exit
   --url URL   SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai project --help
+usage: cosmai project [-h] {corpus} ...
+
+positional arguments:
+  {corpus}
+    corpus    Load needs.corpus_document from tubedepth under the live snapshot.
+
+options:
+  -h, --help  show this help message and exit
+
+$ cosmai project corpus --help
+usage: cosmai project corpus [-h] [--url URL] [--cutoff CUTOFF]
+
+options:
+  -h, --help       show this help message and exit
+  --url URL        SQLAlchemy URL; default is needs_runtime.
+  --cutoff CUTOFF  Only project rows collected at or before this instant (default: now). The same
+                   cutoff gives the same answer, which is what replaces a frozen copy (#93 D2).
 
 $ cosmai eval --help
 usage: cosmai eval [-h] [--check-baseline] [--impl IMPL] [--split {tune,holdout}] [--url URL]
