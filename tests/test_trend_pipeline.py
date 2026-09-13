@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION
+from analysis.trend import pipeline as quarter
 from analysis.trend.pipeline import SCOPE, NoPopulation, TopicAxisDrift, build, note_of, run
 from cosmai.cli import main
 from db import corpus, seed
@@ -37,6 +38,8 @@ OBSERVED = ("발림성", "백탁")
 # 관측하는 주제는 둘뿐이라, 그 13 × 1분기 × 2 source 가 이 해석이 강제되는 자리다.
 AXIS_TOPICS = 13
 ROWS = AXIS_TOPICS * 2
+# A snapshot id the fixture does not use, for the population-less snapshot below.
+EMPTY_SNAPSHOT = 9
 
 
 def _axis(conn: psycopg.Connection[Any]) -> list[str]:
@@ -78,6 +81,17 @@ def _stored(cur: psycopg.Cursor[Any]) -> dict[tuple[str, str, str], dict[str, An
     names = [c.name for c in cur.description or ()]
     rows = [dict(zip(names, row, strict=True)) for row in cur.fetchall()]
     return {(r["source"], r["topic_key"], r["quarter"]): r for r in rows}
+
+
+def _empty_active_snapshot(cur: psycopg.Cursor[Any]) -> None:
+    """The roster stays active and the snapshot stays active -- only the documents are missing, which is
+    the one state this file cannot reach by loading the fixture."""
+    cur.execute("UPDATE corpus_snapshot SET active = false WHERE active")
+    cur.execute(
+        "INSERT INTO corpus_snapshot (snapshot_id, label, source_runs, collected_at, active)"
+        " VALUES (%s, 'empty-population', ARRAY['run-empty'], now(), true)",
+        (EMPTY_SNAPSHOT,),
+    )
 
 
 def _violations(cur: psycopg.Cursor[Any]) -> list[tuple[Any, ...]]:
@@ -275,6 +289,45 @@ def test_a_snapshot_with_no_panel_video_is_blocked_not_silently_empty(needs_runt
     seed.run_all(needs_runtime_url, only=("panel",))
     with connect(needs_runtime_url) as conn, pytest.raises(NoPopulation):
         run(conn)
+
+
+def test_an_empty_population_leaves_no_run_behind(loaded: str):
+    """An active snapshot and an active roster with nothing in the population: the run row is what this
+    asks about, because whoever opens one before the population is known has to answer for it."""
+    with connect(loaded) as conn:
+        with conn.cursor() as cur:
+            _empty_active_snapshot(cur)
+        conn.commit()
+        with pytest.raises(NoPopulation):
+            run(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id, status FROM analysis_run")
+            opened = cur.fetchall()
+    assert opened == []
+
+
+def test_an_empty_axis_closes_the_run_build_had_already_committed(loaded: str, monkeypatch: Any):
+    """The population stands here, so the run is opened and committed before the axis is known to be empty.
+
+    'partial' rather than 'failed' because nothing broke, and rather than 'ok' because nothing was
+    delivered; what the second call asks is the part that would be worse than the defect -- a status
+    `_run_id()` does not reopen turns one orphan into a new run on every attempt.
+    """
+    monkeypatch.setattr(quarter, "topic_axis", lambda conn, cur, snapshot: [])
+    with connect(loaded) as conn:
+        with pytest.raises(NoPopulation):
+            run(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id, status, finished_at FROM analysis_run")
+            opened = cur.fetchall()
+        assert [(row[1], row[2] is not None) for row in opened] == [("partial", True)]
+        with pytest.raises(NoPopulation):
+            run(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id, status FROM analysis_run")
+            again = cur.fetchall()
+    assert [row[0] for row in again] == [opened[0][0]]
+    assert again[0][1] == "partial"
 
 
 def test_the_subcommand_writes_the_table_and_says_what_it_wrote(loaded: str, capsys: Any):
