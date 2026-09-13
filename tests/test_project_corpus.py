@@ -644,13 +644,40 @@ def test_a_snapshot_written_title_only_is_refused_rather_than_relabelled(live: t
         conn.commit()
     before = _rows(url, count, (first.snapshot_id,))
     assert before[0][0] > 0
+    runs = "SELECT count(*) FROM analysis_run"
+    runs_before = _rows(url, runs)
 
     with connect(url) as conn, pytest.raises(project.TextPartsChanged) as refused:
         project.project(conn, youtube_schema=schema)
 
     assert f"snapshot {first.snapshot_id}" in str(refused.value)
+    # The instrument assertion is the one that catches a relabel. The document count cannot catch a partial
+    # write on its own -- a second pass over the same rows writes nothing under ON CONFLICT DO NOTHING -- so
+    # the refused pass is also asked to have opened no run.
     assert _rows(url, parts, (first.snapshot_id,)) == [(["title"],)]
     assert _rows(url, count, (first.snapshot_id,)) == before
+    assert _rows(url, runs) == runs_before
+
+
+@pytest.mark.postgres
+def test_a_snapshot_with_documents_and_no_recorded_text_parts_is_refused(live: tuple[str, str]):
+    """The unknown-provenance branch. Documents are there, nothing says what their text was built from, and
+    stamping a record now would claim knowledge nobody has. Refused like a different record would be."""
+    url, schema = live
+    with connect(url) as conn:
+        first = project.project(conn, youtube_schema=schema)
+    with connect(url) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE corpus_snapshot SET instrument = instrument - 'text_parts' WHERE snapshot_id = %s",
+            (first.snapshot_id,),
+        )
+        conn.commit()
+
+    with connect(url) as conn, pytest.raises(project.TextPartsChanged):
+        project.project(conn, youtube_schema=schema)
+
+    parts = "SELECT instrument ? 'text_parts' FROM corpus_snapshot WHERE snapshot_id = %s"
+    assert _rows(url, parts, (first.snapshot_id,)) == [(False,)]
 
 
 @pytest.mark.postgres

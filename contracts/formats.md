@@ -268,10 +268,12 @@ from `analysis/retrieval/corpus.py` rather than restated — recorded on the sna
 `tubedepth/006`) is deferred like one without `source_metadata`, and `undescribed_videos` counts it: written
 then, the conflict clause would freeze a title-only text, which carries 915 of the archive's 3,534 topic hits
 (25.9%). `description = ''` is an observation — the uploader wrote none — and is projected. **A snapshot that
-already records different `text_parts` is refused, not relabelled** (exit 2): its documents keep the text they
-were written with, so stamping the new parts over the old would erase the only record that the snapshot is
-thin, and fork #96's gate reads that record. Recovery is a delete of that snapshot's documents and a re-run,
-cheap only while `active` is false and no mentions have been written against it.
+already records different `text_parts` is refused, not relabelled** (exit 2), and so is one that records none
+but already holds documents, whose text then has no provenance at all; an empty snapshot with no record is
+simply stamped: its documents keep the text they were written with, so stamping the new parts over the old
+would erase the only record that the snapshot is thin, and fork #96's gate reads that record. Recovery is a
+delete of that snapshot's documents and a re-run, cheap only while `active` is false and no mentions have been
+written against it.
 
 **The live lineage's mentions (fork #96).** `match:topic` writes the live snapshot's `corpus_mention` from
 `corpus_document` with `match_topics` on the active `retrieval-topic` dictionary — all 15 topics, `trend_use`
