@@ -21,7 +21,7 @@ from psycopg import sql as pgsql
 from sqlalchemy import create_engine, text
 
 from analysis.judge import THIN
-from analysis.trend.pipeline import note_of
+from analysis.trend.pipeline import SCOPE, note_of
 from db import seed
 from db.seed import pipeline, pipeline_corpus
 from db.seed._common import connect
@@ -281,6 +281,31 @@ def test_the_archive_surface_is_empty_when_no_snapshot_is_marked_archive(
         assert cur.fetchone() == (0,)
         cur.execute("SELECT count(*) FROM archive_metrics_topic_quarter")
         assert cur.fetchone() == (0,)
+
+
+def test_note_of_still_reproduces_the_note_production_carries():
+    """`FIND_RUN` reopens a run by **exact note match**, so `note_of()` must keep reproducing the
+    string run 23 was written with — byte for byte.
+
+    Production's archive run carries `trend-quarter:v0.2:<scope>:snapshot1:panel1` and always will:
+    #93 D0 says the archive is read and never recomputed, so nothing rewrites it. Add a segment to
+    `note_of()` — `content_type` is the one shk95-1/cosmai#200 raises — and the next
+    `cosmai trend quarter` against snapshot 1 does not find run 23. It opens a **new** run, and
+    `needs.archive_run`'s `strpos(':snapshot1:panel')` still matches that new note, so
+    `ORDER BY started_at DESC` hands the archive surface to a freshly computed run. The three
+    archive views then answer from a computation instead of from the observation, and **nothing
+    raises**: the row counts may even be identical.
+
+    The other fixtures here build their notes with `note_of()` so the grammar follows its writer,
+    which is right for them and blind to exactly this — they would move with the change and keep
+    passing. This one is the frozen side of the same coupling. The scope is imported rather than
+    spelled because it is Korean corpus data (`tool/checks/lang`); everything else is a literal on
+    purpose, and that is what has no room for an inserted segment.
+
+    If `note_of()` genuinely must change, this test is the place that says what else has to move:
+    run 23's identity, and `needs.archive_run`'s ordering assumption.
+    """
+    assert note_of(SCOPE, ARCHIVE, PANEL_VERSION) == "trend-quarter:v0.2:" + SCOPE + ":snapshot1:panel1"
 
 
 def test_no_archive_view_writes_anything():
