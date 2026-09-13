@@ -70,11 +70,18 @@ def test_one_extractor_version_still_gets_one_row_per_sentence(needs_runtime_url
 
 
 def test_the_natural_key_is_a_unique_index_upserts_can_name(needs_runtime_url: str):
-    """ON CONFLICT matches only the same form as the index expression -- that form is pinned down here."""
+    """ON CONFLICT matches only the same form as the index expression -- that form is pinned down here.
+
+    Anchored on the table's own OID rather than `pg_indexes` (#254): that view spans every schema, and
+    `indexdef` is `pg_get_indexdef()`, which dereferences whatever index row the scan is currently on --
+    including one a parallel worker drops mid-scan, in a suite that runs four workers wide (#216). Moving
+    this test to the `serial` phase instead would buy back #216's parallel win for a race the reader can
+    avoid on its own; joining on `'need_mention'::regclass` keeps the scan inside one table's indexes.
+    """
     definition = _rows(
         needs_runtime_url,
-        "SELECT indexdef FROM pg_indexes WHERE tablename = 'need_mention'"
-        " AND schemaname = current_schema() AND indexdef LIKE '%%md5%%'",
+        "SELECT pg_get_indexdef(i.indexrelid) FROM pg_index i"
+        " WHERE i.indrelid = 'need_mention'::regclass AND pg_get_indexdef(i.indexrelid) LIKE '%%md5%%'",
     )
     assert len(definition) == 1
     assert "UNIQUE" in definition[0][0]
