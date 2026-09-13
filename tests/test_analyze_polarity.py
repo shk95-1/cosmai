@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 
 from analysis import predictors, registry
+from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
@@ -180,7 +181,7 @@ def test_the_run_is_recorded_with_its_versions_and_the_captured_at_fallback_coun
     assert row is not None
     status, versions, note = row
     assert status == "ok"
-    assert versions["extractor"] == "rule-v2.3" and versions["polarity"] == "rule-v2.2"
+    assert versions["extractor"] == "rule-v2.4" and versions["polarity"] == "rule-v2.2"
     assert versions["lexicon"] == {"entity": 1, "aspect": 1}
     assert "captured_at_fallback=1" in note
 
@@ -380,7 +381,7 @@ def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _sche
     # UPSERT. This review is one of the 548 slice-p1 re-extracted as well, so three versions stay side by side
     # (before, it was absorbed into the single suncare row).
     assert need == [
-        ("rule-v2.3", "rule-v2.2"),
+        ("rule-v2.4", "rule-v2.2"),
         ("slice-p1", "rule-v2.2"),
         ("slice-suncare", "rule-v2.1"),
     ]
@@ -415,7 +416,7 @@ def test_the_implementation_the_run_was_given_is_the_version_it_records(loaded: 
         stamped = cur.fetchall()
     assert row is not None
     versions, note = row
-    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.3"
+    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.4"
     assert f"analyze:polarity:{StubPolarity.version}" in note
     assert stamped == [(StubPolarity.version, "중립")]
 
@@ -642,6 +643,8 @@ OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 CONTESTED = ("P1/R2", "백탁", "백탁이 너무 심해서 최악이에요")
 
 
+# The planted row has to land on the same 005 natural key the run writes, and that key carries
+# extractor_version -- a literal here would stop colliding at the next version bump.
 def _label(
     url: str,
     ref: str,
@@ -658,8 +661,18 @@ def _label(
             "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
             " observed_at, observed_at_resolution, month, sentence, extractor_version,"
             " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, %s,"
-            " 'day', %s, %s, 'rule-v2.3', %s)",
-            (ref, lexicon_category, need_key, polarity, observed_at, month, sentence, version),
+            " 'day', %s, %s, %s, %s)",
+            (
+                ref,
+                lexicon_category,
+                need_key,
+                polarity,
+                observed_at,
+                month,
+                sentence,
+                EXTRACTOR_VERSION,
+                version,
+            ),
         )
         conn.commit()
 
