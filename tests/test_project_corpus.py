@@ -122,6 +122,22 @@ def test_a_value_that_is_already_a_hash_is_not_hashed_again():
     assert project.channel_hash(None) is None
 
 
+@pytest.mark.parametrize("value", ["@some-channel", "/user/legacy", "UCtooshort", "not an id at all"])
+def test_a_value_that_is_neither_a_hash_nor_a_channel_id_is_refused(value: str):
+    """The one input shape neither regex names, and the only one that fails silently.
+
+    Hashing a handle produces a perfectly well-shaped 24-hex value: it passes the loader's
+    `AUTHOR_HASH` check and every branch of `needs.author_identifier_violation`, and matches **no**
+    archive hash -- so creator-comment marking is quietly zero for those rows and nothing anywhere
+    raises. That is worse than storing the handle, which the guard would at least catch. Refusing is
+    the only answer that is not silently wrong, so the shape is asked before the function is applied.
+    """
+    with pytest.raises(ValueError) as raised:
+        project.channel_hash(value)
+    # The refusal names the shape it wanted, never the value it got.
+    assert value not in str(raised.value)
+
+
 # ---------- the three ways a rebuilt source_metadata diverges ----------
 def _comment_metadata(**over: Any) -> dict[str, Any]:
     fields: dict[str, Any] = {

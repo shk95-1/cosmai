@@ -49,7 +49,7 @@ from collectors.youtube.models import (
     MAX_COMMENTS_PER_VIDEO,
 )
 from db.corpus import contract
-from db.corpus.author import AUTHOR_HASH, author_hash
+from db.corpus.author import AUTHOR_HASH, HASH_LENGTH, RAW_CHANNEL_ID, author_hash
 from db.seed import panel
 
 YOUTUBE_SCHEMA = "tubedepth"
@@ -141,9 +141,13 @@ DOCUMENT_COUNT: LiteralString = "SELECT count(*) FROM corpus_document WHERE snap
 # `tubedepth.comments` for the raw author id and display name the collector still writes, and those
 # rows are upstream's to fix -- a projection reporting itself partial because of them would be partial
 # on every pass and stop meaning anything. What the run answers for is what it wrote.
+# `row_key` is the document's doc_id, so the snapshot is asked of corpus_document rather than of the
+# view -- without it one bad row under *any* snapshot, including the archive's, would make every live
+# pass partial forever, which is the same "stops meaning anything" this comment is about.
 VIOLATIONS: LiteralString = (
-    "SELECT violation, row_key FROM author_identifier_violation"
-    " WHERE relation = 'needs.corpus_document' ORDER BY violation, row_key LIMIT 20"
+    "SELECT v.violation, v.row_key FROM author_identifier_violation v"
+    " JOIN corpus_document d ON d.doc_id = v.row_key AND d.snapshot_id = %(snapshot)s"
+    " WHERE v.relation = 'needs.corpus_document' ORDER BY v.violation, v.row_key LIMIT 20"
 )
 LISTING_ROUTES: LiteralString = (
     "SELECT listing_route FROM live_listing_route WHERE listing_route IS NOT NULL ORDER BY 1"
@@ -246,7 +250,19 @@ def channel_hash(author_id: str | None) -> str | None:
     """
     if not author_id:
         return None
-    return author_id if AUTHOR_HASH.fullmatch(author_id) else author_hash(author_id)
+    if AUTHOR_HASH.fullmatch(author_id):
+        return author_id
+    if RAW_CHANNEL_ID.fullmatch(author_id):
+        return author_hash(author_id)
+    # Neither a hash nor a channel id -- a handle (`@name`), a legacy `/user/` id, anything else the
+    # collector might one day put here. Hashing it would produce a perfectly well-shaped 24-hex value
+    # that passes the loader's check and the invariant view and matches **no** archive hash, so
+    # creator-comment marking would be silently zero for those rows through the one input shape
+    # neither regex names. Refusing is the only answer that is not quietly wrong.
+    raise ValueError(
+        f"author_id is neither a {HASH_LENGTH}-hex hash nor a UC channel id; refusing to hash it "
+        "(the value is not named here on purpose -- contracts/formats.md, comment rows)"
+    )
 
 
 def comment_metadata(
@@ -571,7 +587,7 @@ def project(  # noqa: PLR0913 -- every argument is a seam one test or the CLI ne
     )
     outcome = Outcome(snapshot_id=live, run_id=run_id, cutoff=at, counts=counts)
     with conn.cursor() as cur:
-        cur.execute(VIOLATIONS)
+        cur.execute(VIOLATIONS, {"snapshot": live})
         outcome.violations = [f"{violation} {row_key}" for violation, row_key in cur.fetchall()]
         cur.execute(CLOSE_RUN, (outcome.status, run_id))
     conn.commit()
