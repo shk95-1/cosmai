@@ -129,11 +129,9 @@ OPEN_RUN: LiteralString = (
     "INSERT INTO analysis_run (status, versions, note) VALUES ('running', %s::jsonb, %s) RETURNING run_id"
 )
 CLOSE_RUN: LiteralString = "UPDATE analysis_run SET status = 'ok', finished_at = now() WHERE run_id = %s"
-# TODO(shk95-1/cosmai#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
-# deletes the same run's long_form rows.
 CLEAR: LiteralString = (
     "DELETE FROM metrics_topic_quarter "
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 INSERT: LiteralString = """
 INSERT INTO metrics_topic_quarter
@@ -353,7 +351,7 @@ def run(
         )
     with conn.cursor() as cur:
         # A rerun leaving old rows makes the grid non-dense, and the view catches that as sparse_grid.
-        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
+        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role, CONTENT_TYPE))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(CLOSE_RUN, (made.run_id,))
         # The stored rows answer, not a sentence of the contract -- is the grid dense, does the denominator
