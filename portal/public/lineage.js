@@ -54,6 +54,8 @@ function inList(values) {
 }
 
 const ROLLUP_SCOPE = 'all';
+// #126: the population of a scope='all' cell (GENERIC_SCOPE in analysis/aggregate/__init__.py).
+const GENERIC_SCOPE = 'generic';
 
 // One metrics_need cell = PK (run_id, scope, need_key, month, product_ref). The filter that picks the
 // mentions that made that cell is population (extractor_version) + that cell's axes.
@@ -72,6 +74,12 @@ export function needCellFilters(cell, run) {
   // need_key would drop the whole set of synonym mentions folded under the canonical name.
   if (cell.scope === ROLLUP_SCOPE) {
     filters.push({ column: 'need_key_rollup', op: 'eq', value: cell.need_key });
+    // #126: the rollup counts generic mentions alone, so its population is an axis of the cell like the
+    // others. Without this the retrace returns the category mentions too -- a strict superset that the
+    // screen prints under the cell as its count (12 of 16 rollup rows on production run 39; the worst is
+    // 35.4% uncounted), and nothing on the screen contradicts a plausible number. A category-scope cell
+    // is NOT filtered: a category counts every mention of that category, generic aspects included.
+    filters.push({ column: 'aspect_scope', op: 'eq', value: GENERIC_SCOPE });
   } else {
     filters.push({ column: 'category', op: 'eq', value: cell.scope });
     filters.push({ column: 'need_key', op: 'eq', value: cell.need_key });

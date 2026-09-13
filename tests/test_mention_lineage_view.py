@@ -25,6 +25,9 @@ from typing import Any
 import pytest
 from sqlalchemy import create_engine, text
 
+from analysis.aggregate import NEGATIVE, ROLLUP_SCOPE, UNLINKED, RuleAggregator
+from analysis.types import NeedMentionRow
+
 pytestmark = pytest.mark.postgres
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +67,17 @@ NEED_ROWS = (
     # A mention pointing at a deleted review -- the mention exists, the original text does not.
     ("review", "glowpick", "g:1/r:404", None, None, "선케어", "백탁", "불만", "2026-07", "사라진 리뷰"),
 )
+
+GENERIC, CATEGORY = "generic", "category"
+# #126: the rollup's population axis, kept beside the rows rather than inside them so the Korean data
+# values above stay untouched. A mention not named here is generic; the two named ones are the
+# category-scope arm the rollup cell must not retrace.
+SCOPES = {"v-1/c-1": CATEGORY, "v-1/t-1": CATEGORY}
+# The rollup key these mentions fold onto (needs.need_key.canonical), the synonym that folds onto it and
+# the source category -- read off the rows rather than spelled again.
+ROLLUP_KEY = NEED_ROWS[0][6]
+CANONICAL = {NEED_ROWS[2][6]: ROLLUP_KEY}
+SOURCE_CATEGORY = NEED_ROWS[0][5]
 
 # (src, ref, video_id, wish_class, brand, format, attribute, sentence, like_count)
 WISH_ROWS = (
@@ -112,11 +126,24 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
         )
         conn.exec_driver_sql(
             f'INSERT INTO "{schema}".need_mention (src, site, ref, product_ref, source_product_key,'
-            " category, need_key, polarity, observed_at, observed_at_resolution, month, sentence,"
-            " extractor_version, polarity_version)"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'day', %s, %s, 'rule-v2.3', 'rule-v2.2')",
+            " category, need_key, aspect_scope, polarity, observed_at, observed_at_resolution, month,"
+            " sentence, extractor_version, polarity_version)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'day', %s, %s, 'rule-v2.3', 'rule-v2.2')",
             [
-                (src, site, ref, pref, spk, cat, nk, pol, date(2026, 7, 1), month, sentence)
+                (
+                    src,
+                    site,
+                    ref,
+                    pref,
+                    spk,
+                    cat,
+                    nk,
+                    SCOPES.get(ref, GENERIC),
+                    pol,
+                    date(2026, 7, 1),
+                    month,
+                    sentence,
+                )
                 for src, site, ref, pref, spk, cat, nk, pol, month, sentence in NEED_ROWS
             ],
         )
@@ -187,10 +214,11 @@ def test_the_cell_axes_are_filterable_columns(rows: dict[tuple[str, str], Any]):
     row = rows[("need", "g:1/r:1")]
     assert row["extractor_version"] == "rule-v2.3"
     assert (row["category"], row["need_key"], row["month"]) == ("선케어", "백탁", "2026-07")
-    # The product axis's value is product_ref, or source_product_key if that is absent (_product in
-    # aggregate/__init__.py).
+    # The product axis's value is the canonical ref when there is one (_product in aggregate/__init__.py).
     assert row["product_axis"] == "p:라운드랩"
-    assert rows[("need", "g:1/r:2")]["product_axis"] == "g:1"
+    # #128: the unattached arm carries the reserved marker, not the bare site key, and the site is in it
+    # because a product key is unique only inside a site.
+    assert rows[("need", "g:1/r:2")]["product_axis"] == f"{UNLINKED}glowpick:g:1"
     assert rows[("need", "v-1/c-1")]["product_axis"] == ""
 
 
@@ -308,3 +336,76 @@ def test_the_deploy_leaves_the_view_readable_by_the_screen(deployed: Any):
             text("SELECT has_table_privilege(:r, 'needs.mention_lineage', 'SELECT')"), {"r": role}
         ).scalar_one()
         assert granted, role
+
+
+def test_the_view_spells_the_product_axis_exactly_as_the_aggregator_does():
+    """The view is a second implementation of `_product`, and lineage.js joins the two by string equality
+    (it filters product_axis by a metrics_need cell's product_ref). A drift between the two spellings
+    retraces no mentions and raises nothing — the one axis this file's other assertions cannot see,
+    because they read the view alone (#128)."""
+    assert f"'{UNLINKED}'" in VIEW.read_text(encoding="utf-8")
+
+
+def _mentions() -> list[NeedMentionRow]:
+    """The fixture's rows as the aggregator's input. The cell and the retrace have to come from one set of
+    mentions, or the comparison below measures two populations and passes on both."""
+    return [
+        NeedMentionRow(
+            src=src, site=site, ref=ref, product_ref=pref, source_product_key=spk, category=cat,
+            lexicon_category=cat, need_key=nk, aspect_scope=SCOPES.get(ref, GENERIC), polarity=pol,
+            strength=None, rating=None, observed_at=date(2026, 7, 1), observed_at_resolution="day",
+            month=month, sentence=sentence, kind=None, marker=None, polarity_reason=None,
+            extractor_version="rule-v2.3", polarity_version="rule-v2.2",
+        )
+        for src, site, ref, pref, spk, cat, nk, pol, month, sentence in NEED_ROWS
+    ]  # fmt: skip
+
+
+def _cell(scope: str, need_key: str) -> Any:
+    rows = RuleAggregator(canonical=CANONICAL).need_metrics(_mentions(), [], scope)
+    return next(r for r in rows if r.need_key == need_key and not r.month and not r.product_ref)
+
+
+def _retrace(conn: Any, narrowing: str) -> list[Any]:
+    """What lineage.js asks PostgREST for one need cell, as SQL (needCellFilters in
+    portal/public/lineage.js)."""
+    return conn.execute(
+        text(
+            "SELECT ref, src, polarity FROM mention_lineage WHERE kind = 'need'"
+            f" AND extractor_version = 'rule-v2.3' {narrowing}"
+        ),
+        {"k": ROLLUP_KEY, "c": SOURCE_CATEGORY},
+    ).all()
+
+
+def test_a_rollup_cell_retraces_the_population_it_counted_and_not_a_superset(
+    view: dict[str, Any], needs_runtime_url: str
+):
+    """#126, the second axis after #128's `_product`: a scope='all' cell counts generic mentions alone, so
+    the population is one of that cell's axes and the retrace has to carry it. Filtering by
+    need_key_rollup alone returns the category mentions too -- 12 of the 16 rollup rows on production run
+    39, the worst 35.4% uncounted -- and portal/public/app.js prints the retrace's length under the cell as
+    the cell's own count. It is worse than the #128 drift it repeats: an empty retrace reads as broken, a
+    superset reads as a number nothing on the screen contradicts.
+    """
+    assert "aspect_scope" in view["columns"]
+    engine = create_engine(needs_runtime_url)
+    with engine.connect() as conn:
+        narrowed = _retrace(conn, "AND need_key_rollup = :k AND aspect_scope = 'generic'")
+        by_key_alone = _retrace(conn, "AND need_key_rollup = :k")
+        category = _retrace(conn, "AND category = :c AND need_key = :k")
+    engine.dispose()
+
+    counted = {row[2] for row in NEED_ROWS if SCOPES.get(row[2], GENERIC) == GENERIC}
+    assert {r.ref for r in narrowed} == counted
+    # Not vacuous: without the population axis the retrace is a strict superset of what the cell counted.
+    assert {r.ref for r in by_key_alone} > counted
+    rollup = _cell(ROLLUP_SCOPE, ROLLUP_KEY)
+    assert rollup.neg == sum(1 for r in narrowed if r.src == "review" and r.polarity == NEGATIVE)
+    assert rollup.aspect_scope == GENERIC
+    # A category-scope cell counts every mention of that category, generic aspects included, so lineage.js
+    # narrows the rollup branch alone and the query without the axis is the right one here.
+    assert _cell(SOURCE_CATEGORY, ROLLUP_KEY).neg == sum(
+        1 for r in category if r.src == "review" and r.polarity == NEGATIVE
+    )
+    assert {r.ref for r in category} - counted

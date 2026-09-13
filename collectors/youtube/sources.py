@@ -67,6 +67,12 @@ def normalize_video_metadata(dump: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "video_id": dump["id"],
         "title": dump["title"],
+        # #264: the archive's analysed video text is title + description, and until DDL 006 this
+        # normalizer dropped the description both routes already hand it -- the title alone is 45
+        # characters against 856 and carries a quarter of the topic mentions. `or ""` rather than
+        # `.get`: a route that answered without one told us the uploader wrote none, and the
+        # projection joins the two into one string where a None would render as "None".
+        "description": dump.get("description") or "",
         "channel": dump.get("channel"),
         "channel_id": dump.get("channel_id"),
         "duration_seconds": dump.get("duration"),
@@ -105,6 +111,10 @@ def _comment(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# No `total_reply_count` here (#264): the archive read it off the Data API's `commentThreads`
+# (`snippet.totalReplyCount`), and this collector's only comments route is yt-dlp, whose per-comment
+# dict carries no reply count at all and which `transport.comments` asks for zero replies from on
+# purpose -- so a count taken from the harvest would be 0 on every row and read as a measurement.
 def normalize_comments(dump: Mapping[str, Any]) -> dict[str, Any]:
     return {"comments": [_comment(raw) for raw in dump.get("comments") or []]}
 

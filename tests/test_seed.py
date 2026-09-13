@@ -11,8 +11,9 @@ pytestmark = pytest.mark.postgres
 
 # Expected row counts. Source: each slice's README.md output table plus eval/README.md's count column.
 EXPECTED = {
-    # brand 859 surface + 109 alias - 18 duplicate surface, ingredient 32 rows -> 42 surface
-    "entity_lexicon": 992,
+    # brand 859 surface + 109 alias - 18 duplicate surface, ingredient 32 rows -> 42 surface,
+    # format 271 surface on 36 canonicals + attribute 165 on 23 (the two wish axes, #124)
+    "entity_lexicon": 1428,
     # aspects_generic.py GENERIC 20 + polarity.py ASPECTS 15 + SPECIFIC 37 − 선블록 중복 2
     "aspect_lexicon": 70,
     # AXIS_MAP's 25 axes x the sites that actually publish that axis. oliveyoung's 25 = the topic_group
@@ -152,4 +153,4 @@ def test_the_seed_backfills_only_the_aspect_rows_that_have_no_ruleset(needs_runt
     assert by_ruleset == {"p1-v2.2": 54, "suncare-v2.2": 13, "shared": 2, SENTINEL: 1}
     assert generic_priority == (19,)
     # No other lexicon load is affected by this mutation.
-    assert entities == (992,)
+    assert entities == (1428,)

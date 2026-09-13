@@ -122,6 +122,29 @@ section_cron() {
     fi
 }
 
+# Compose substitutes ${VAR} from the shell environment first and from stack/.env second, so this reads
+# them in that same order: what it prints is what the next `up` would hand the analyze container.
+# `eval` rather than `printenv` for the same reason ${0%/*} is used above -- no coreutils needed.
+status_knob() {
+    eval "knob_value=\${$1:-}"
+    if [ -z "$knob_value" ] && [ -f "$repo_root/stack/.env" ]; then
+        knob_value=$(sed -n "s/^[[:space:]]*$1=//p" "$repo_root/stack/.env" | tail -1)
+    fi
+    [ -n "$knob_value" ] || knob_value="(unset)"
+    printf '%s: %s\n' "$1" "$knob_value"
+}
+
+section_llm() {
+    header llm
+    # #136 took the hard stop and the implementation chain out of the code constant and out of STATE.md
+    # and made them environment knobs. Environment variables keep no ledger -- who changed one and when
+    # does not survive anywhere -- so "what the limit is now, and what the chain is" has to be a computed
+    # fact instead of a hand-written one (the STATE.md §2 principle, the same one #60 applied here).
+    # "(unset)" is a real answer: it is the state in which the analyze container refuses to start.
+    status_knob COSMAI_LLM_BUDGET_USD
+    status_knob COSMAI_LLM_CHAIN
+}
+
 section_gpu() {
     header gpu
     if ! command -v nvidia-smi >/dev/null 2>&1; then
@@ -178,6 +201,7 @@ section_containers
 section_images
 section_db
 section_cron
+section_llm
 section_gpu
 section_test_leftovers
 section_ci

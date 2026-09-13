@@ -1,5 +1,5 @@
-"""Per-model rates and the $10.00 hard stop. The running total is needs.llm_usage (DDL 003) and the block is
-*before* the call.
+"""Per-model rates and the hard stop. The amount itself is the COSMAI_LLM_BUDGET_USD knob (#136), the running
+total is needs.llm_usage (DDL 003), and the block is *before* the call.
 
 Counting after the call does not bring back money that has already gone out. So reserve() locks, reads,
 writes an estimate row and commits inside one transaction: even when no response follows (timeout, Ctrl-C,
@@ -12,9 +12,10 @@ the reservation into a single line.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, LiteralString
 
 import psycopg
@@ -26,10 +27,66 @@ import psycopg
 PRICES_SOURCE_DATE = "2026-08-24"
 PER_MILLION = Decimal(1_000_000)
 BATCH_DISCOUNT = Decimal("0.5")  # The Batches API is 50% on every token
-# 선블록(lexicon_category='선블록') 9,653문장 전량이 Batches 로 캐시 없이 $17.8·캐시 있으면 $6.0
-# (2026-08-24 프로브 5회 실측 단가) — $7 은 캐시 의존 여유가 $1뿐이라 사용자가 $10 으로 승인.
-LLM_BUDGET_USD = Decimal("10.00")  # contracts/secrets.md · approved up front in #6, $10 approved 2026-08-24
 OLLAMA_PREFIX = "ollama:"
+
+# The two knobs of #136. Neither is a secret, so their values live in stack/env.example -> stack/.env and
+# compose hands them to the analyze container (contracts/secrets.md, "what is not a secret").
+BUDGET_KEY = "COSMAI_LLM_BUDGET_USD"
+CHAIN_KEY = "COSMAI_LLM_CHAIN"
+CHAIN_SEPARATOR = ","
+
+
+class KnobMissing(LookupError):
+    """A knob this module needs is absent or unreadable.
+
+    A `LookupError` and not `SystemExit`: every entry point already has one handler for "refused before
+    anything started", and all four are written around `LookupError` -- `cosmai/cli.py`'s analyze, eval and
+    retrieval paths, and `ask.BLOCKING`. A `BaseException` walks past all of them and leaves exit 1, which
+    `contracts/entrypoints.md` gives to a run that failed and, on `ask`, to a query with no evidence: a host
+    that was never configured would read as a corpus with nothing to say. `analysis/retrieval/ask.client_for`
+    converts `db/secrets.py`'s `SystemExit` for exactly this reason; this raises the right class outright."""
+
+
+def budget_usd() -> Decimal:
+    """The hard stop in USD, read from the environment every time it is needed.
+
+    There is deliberately no default. An amount that lived in this file needed a commit and a redeploy to
+    change and STATE.md carried a second copy of it that could disagree (#136); an amount defaulted *here*
+    would put both failures back one layer down, and a deployment that forgot the knob would spend against a
+    number nobody chose. Forgetting has to be loud, so an absent or unreadable knob refuses the command
+    (exit 2) before it starts."""
+    raw = os.environ.get(BUDGET_KEY, "").strip()
+    if not raw:
+        raise KnobMissing(f"{BUDGET_KEY} is not set; it carries the LLM hard stop in USD (stack/.env)")
+    try:
+        amount = Decimal(raw)
+    except InvalidOperation:
+        raise KnobMissing(f"{BUDGET_KEY}={raw!r} is not a number of USD") from None
+    # is_finite() first: NaN is a Decimal that compares to nothing, and `< 0` on it signals rather than
+    # answers. Infinity is rejected for what it means here -- an unlimited budget, spelled out.
+    if not amount.is_finite() or amount < 0:
+        raise KnobMissing(
+            f"{BUDGET_KEY}={raw!r} is not a hard stop; it must be a finite amount, zero or more"
+        )
+    return amount
+
+
+def llm_chain() -> tuple[str, ...]:
+    """The polarity implementations to try, in the order they are tried -- the fallback order #113 walks.
+
+    Same rule as the budget and for the same reason: absent means refuse, never "pick something". Only the
+    shape is checked here (`<name>:<argument>`, the spec grammar `--impl` already uses); whether a spec names
+    a registered factory is the caller's question, since the registry is loaded later than this."""
+    raw = os.environ.get(CHAIN_KEY, "").strip()
+    if not raw:
+        raise KnobMissing(
+            f"{CHAIN_KEY} is not set; it names the polarity implementations in fallback order (stack/.env)"
+        )
+    steps = tuple(step.strip() for step in raw.split(CHAIN_SEPARATOR))
+    malformed = [step for step in steps if len(parts := step.split(":", 1)) != 2 or not all(parts)]
+    if malformed:
+        raise KnobMissing(f"{CHAIN_KEY}={raw!r} is not a chain of <impl>:<argument> specs: {malformed}")
+    return steps
 
 
 @dataclass(frozen=True)
@@ -135,11 +192,13 @@ class UsageLedger:
         self,
         conn: psycopg.Connection[Any],
         *,
-        budget: Decimal = LLM_BUDGET_USD,
+        budget: Decimal | None = None,
         caps: Mapping[str, PurposeCap] | None = None,
     ) -> None:
         self.conn = conn
-        self.budget = budget
+        # Resolved here rather than at import: a caller that names no budget gets the knob's value, and a
+        # deployment that set no knob dies building the ledger -- before the first call, never after it.
+        self.budget = budget_usd() if budget is None else budget
         self.caps = dict(caps or {})
 
     def spent(self) -> Decimal:
@@ -292,5 +351,5 @@ class UsageLedger:
         return usd
 
 
-def budget_remaining(conn: psycopg.Connection[Any], budget: Decimal = LLM_BUDGET_USD) -> Decimal:
+def budget_remaining(conn: psycopg.Connection[Any], budget: Decimal | None = None) -> Decimal:
     return UsageLedger(conn, budget=budget).remaining()

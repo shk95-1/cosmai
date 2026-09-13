@@ -1,0 +1,41 @@
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
+-- Part of this schema's canonical form since #178, the same composition 004 above describes.
+--
+-- #264: the video description. `videos.list` already returns it (collectors/youtube/transport.py's
+-- `video_metadata` reads snippet.description, and a yt-dlp dump carries the same field), we already
+-- pay for it, and until this column it reached no row -- flatten had no reference to it at all.
+--
+-- What that cost is measured, not argued. The archive's analysed video text is title + description;
+-- the title alone is about a twentieth of it (average 45 characters against 856, over the 23,841
+-- rows that join needs.corpus_document to this table) and carries about a quarter of the topic
+-- mentions (3,534 hits on full text against 915 on title alone, over the 4,283 videos in both). A
+-- live snapshot built from the title alone returns rows and raises nothing, so nothing downstream
+-- would have said the corpus had thinned.
+--
+-- A REAL COLUMN, NOT A TENTH `source_metadata` KEY. DDL 004's document is the archive's nine keys
+-- verbatim, and #183's spelling pin rests on that set staying archive-identical -- a tenth key makes
+-- a projected corpus row and an archive row different documents, which is the one property 004
+-- exists to hold.
+--
+-- How the projection joins it is the archive's rule and not a new decision: ydc
+-- `to_common_schema.py:66` `video_text()` is `normalize_text(f"{title} {description}")` -- title
+-- first, one space, and the whole string normalised **after** joining rather than each part on its
+-- own. Tags are excluded and stay in `source_metadata.tags`; that exclusion is load-bearing (ydc's
+-- docstring records that including them moves the sunscreen topic's long-form count from 962 to 1,019 videos). The same
+-- sentence is already the corpus manifest's `text_rule`, carried verbatim by
+-- db/corpus/contract.py's TEXT_RULE and contracts/formats.md. analysis/retrieval/corpus.py is where
+-- this repo implements it.
+--
+-- `text` rather than varchar(n): a description has no length the API promises. `tubedepth.title` is
+-- text for the same reason.
+--
+-- Nullable, and NULL is a fact rather than a default: a row flattened before this migration was
+-- never asked for a description, while a video whose uploader wrote none stores ''. Reading NULL as
+-- "empty description" would turn the second measurement into the first one silently.
+--
+-- This table is one of the three `tubedepth` relations postgrest_anon reads
+-- (contracts/anon_exposure.md). The exposure is per table and does not change here: the column
+-- carries the uploader's own published description of a public video, the same kind of published
+-- video metadata the three open tables already hold, and the tables the narrowing closed (comments,
+-- transcripts) stay closed.
+ALTER TABLE tubedepth.video_snapshots ADD COLUMN description text;

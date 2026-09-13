@@ -245,10 +245,12 @@ def test_the_archive_surface_is_empty_while_the_archive_run_is_not_ok(
 
     `analysis/trend/pipeline.py`'s `_run_id()` finds the run **by note** and re-opens that same row
     rather than inserting another, so a re-run of `cosmai trend quarter` against the archive snapshot
-    does not add a row -- it flips the one row to `running`, and an aborted run leaves it there
-    (the marker at `analysis/trend/pipeline.py:284` names shk95-1/cosmai#201 for it). `partial` does the
-    recomputed so this should not arise, but if it does the surface has to go **empty rather than
-    wrong**, and that is the trade `archive_run`'s status filter makes. The re-run test above
+    does not add a row -- it flips the one row to `running`, and an aborted run leaves it there.
+    `partial` does the same, and since shk95-1/cosmai#201 that is what a run with nothing to write
+    closes itself as -- while a run with no population at all no longer opens one, so it no longer
+    touches this row. Under #93 D0 the archive is never recomputed so this should not arise, but if
+    it does the surface has to go **empty rather than wrong**, and that is the trade `archive_run`'s
+    status filter makes. The re-run test above
     fabricates a second run row with the same note, which is a state `_run_id()` cannot produce;
     this is the state it can.
     """

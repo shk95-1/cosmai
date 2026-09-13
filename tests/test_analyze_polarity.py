@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 
 from analysis import predictors, registry
+from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.pipeline import run_stage
 from analysis.polarity import RulePolarity
 from analysis.polarity.ollama import OllamaPolarity
@@ -180,9 +181,56 @@ def test_the_run_is_recorded_with_its_versions_and_the_captured_at_fallback_coun
     assert row is not None
     status, versions, note = row
     assert status == "ok"
-    assert versions["extractor"] == "rule-v2.3" and versions["polarity"] == "rule-v2.2"
+    assert versions["extractor"] == "rule-v2.4" and versions["polarity"] == "rule-v2.2"
     assert versions["lexicon"] == {"entity": 1, "aspect": 1}
     assert "captured_at_fallback=1" in note
+
+
+def test_a_review_carries_the_canonical_product_ref_the_linker_catalogued(loaded: str, _schema_name: str):
+    """#128: the polarity stage fills need_mention.product_ref from product_member, which the link stage
+    has just rebuilt in the same `analyze all` (analysis/pipeline.py run_all). Before this the column was
+    written NULL on every row and no other writer existed, so it held nothing but the seed."""
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO product_ref (product_ref, name_norm, name, linker_version)"
+            " VALUES ('oy:P1', 'test suncream', 'test suncream spf50', 'test')"
+        )
+        cur.execute(
+            "INSERT INTO product_member (source, product_key, product_ref, role, match_score)"
+            " VALUES ('oliveyoung', 'P1', 'oy:P1', 'primary', 1)"
+        )
+        conn.commit()
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT source_product_key, product_ref FROM need_mention"
+            " WHERE src = 'review' AND extractor_version LIKE 'rule-v%' ORDER BY source_product_key"
+        )
+        # P2 has no member row, so it stays NULL -- unattached is not the same as unwritten.
+        assert cur.fetchall() == [("P1", "oy:P1"), ("P2", None)]
+
+
+def test_the_product_ref_of_a_mention_follows_the_catalogue_of_the_latest_run(loaded: str, _schema_name: str):
+    """The daily 05:00 line runs without --missing, so a mention written before its product was catalogued
+    picks the ref up on the next run -- that is what NEED_UPSERT's DO UPDATE ... product_ref is for."""
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM need_mention WHERE product_ref IS NOT NULL")
+        assert cur.fetchone() == (0,)
+        cur.execute(
+            "INSERT INTO product_ref (product_ref, name_norm, name, linker_version)"
+            " VALUES ('oy:P1', 'test suncream', 'test suncream spf50', 'test')"
+        )
+        cur.execute(
+            "INSERT INTO product_member (source, product_key, product_ref, role, match_score)"
+            " VALUES ('oliveyoung', 'P1', 'oy:P1', 'primary', 1)"
+        )
+        conn.commit()
+    _run(loaded, _schema_name)
+    with connect(loaded) as conn, conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM need_mention WHERE product_ref = 'oy:P1'")
+        attached = cur.fetchone()
+    assert attached is not None and attached[0] > 0
 
 
 def test_a_review_gets_the_lexicon_category_the_category_map_derives(loaded: str, _schema_name: str):
@@ -333,7 +381,7 @@ def test_a_seed_row_this_run_re_derives_keeps_its_own_version(seeded: str, _sche
     # UPSERT. This review is one of the 548 slice-p1 re-extracted as well, so three versions stay side by side
     # (before, it was absorbed into the single suncare row).
     assert need == [
-        ("rule-v2.3", "rule-v2.2"),
+        ("rule-v2.4", "rule-v2.2"),
         ("slice-p1", "rule-v2.2"),
         ("slice-suncare", "rule-v2.1"),
     ]
@@ -368,7 +416,7 @@ def test_the_implementation_the_run_was_given_is_the_version_it_records(loaded: 
         stamped = cur.fetchall()
     assert row is not None
     versions, note = row
-    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.3"
+    assert versions["polarity"] == StubPolarity.version and versions["extractor"] == "rule-v2.4"
     assert f"analyze:polarity:{StubPolarity.version}" in note
     assert stamped == [(StubPolarity.version, "중립")]
 
@@ -487,12 +535,17 @@ def _probe_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_a_slow_classifier_never_waits_for_its_answer_inside_a_transaction(
-    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch, llm_knobs: None
 ):
     """ollama waits from hundreds of ms to seconds per sentence (analysis/polarity/ollama.py). When that wait
     is inside an open transaction, both the stage's connection and the classifier's ledger connection are cut
     on the first page — the compressed limits reproduce that within seconds. No ollama and no GPU are needed:
     only the round trip is stubbed.
+
+    `llm_knobs`: the free local path builds a UsageLedger too, and since #136 a ledger given no budget
+    of its own reads COSMAI_LLM_BUDGET_USD — the deployed analyze container has it, a test process
+    does not. The free path is not excused from it, because the chain #113 walks can fall back from
+    ollama to the paid model inside one run.
     """
     squeezed = _squeezed(loaded)
     # Confirm the compression actually took first — otherwise the assertions below pass for free.
@@ -525,12 +578,17 @@ UNREACHABLE = "ollama 가 응답하지 않는다"
 
 
 def test_an_unreachable_ollama_closes_the_run_instead_of_leaving_it_running(
-    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch
+    loaded: str, _schema_name: str, monkeypatch: pytest.MonkeyPatch, llm_knobs: None
 ):
     """A failed round trip (URLError · TimeoutError) is an OSError and so outside FAILURES in
     analysis/pipeline.py — unwrapped, the stage ends in a traceback and the run polarity opened stays open at
     'running' forever (analysis_health keeps reporting that run as still going). On the paid path _Blocking
     covers that place.
+
+    `llm_knobs`: the free local path builds a UsageLedger too, and since #136 a ledger given no budget
+    of its own reads COSMAI_LLM_BUDGET_USD — the deployed analyze container has it, a test process
+    does not. The free path is not excused from it, because the chain #113 walks can fall back from
+    ollama to the paid model inside one run.
     """
 
     def refuse(self: OllamaPolarity, payload: dict[str, Any]) -> dict[str, Any]:
@@ -585,6 +643,8 @@ OWNED_ONLY = ("P1/R7", "끈적유분", "gemma4 만 본 문장")
 CONTESTED = ("P1/R2", "백탁", "백탁이 너무 심해서 최악이에요")
 
 
+# The planted row has to land on the same 005 natural key the run writes, and that key carries
+# extractor_version -- a literal here would stop colliding at the next version bump.
 def _label(
     url: str,
     ref: str,
@@ -601,8 +661,18 @@ def _label(
             "INSERT INTO need_mention (src, site, ref, lexicon_category, need_key, polarity,"
             " observed_at, observed_at_resolution, month, sentence, extractor_version,"
             " polarity_version) VALUES ('review', 'oliveyoung', %s, %s, %s, %s, %s,"
-            " 'day', %s, %s, 'rule-v2.3', %s)",
-            (ref, lexicon_category, need_key, polarity, observed_at, month, sentence, version),
+            " 'day', %s, %s, %s, %s)",
+            (
+                ref,
+                lexicon_category,
+                need_key,
+                polarity,
+                observed_at,
+                month,
+                sentence,
+                EXTRACTOR_VERSION,
+                version,
+            ),
         )
         conn.commit()
 

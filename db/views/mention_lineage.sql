@@ -53,10 +53,24 @@ WITH mention AS (
         -- have to sit side by side for the raw category column and the rollup column to split apart in
         -- the same view.
         coalesce(k.canonical, m.need_key)       AS need_key_rollup,
+        -- #126: the scope='all' rollup counts generic mentions alone, so retracing a rollup cell by
+        -- need_key_rollup alone returns the category mentions too -- a strict superset the screen then
+        -- prints under the cell as if it were the cell's own count (12 of 16 rollup rows on production
+        -- run 39: the worst returns 2,052 rows for a cell of 1,325). lineage.js filters this column on
+        -- the rollup branch, and a category-scope cell does not, because a category counts both.
+        m.aspect_scope,
         m.month,
-        -- The value of the product axis (_product in analysis/aggregate/__init__.py): product_ref if
-        -- present, else source_product_key, else '' -- that '' is the category-total row.
-        coalesce(nullif(m.product_ref, ''), nullif(m.source_product_key, ''), '') AS product_axis,
+        -- The value of the product axis, and it has to be _product (analysis/aggregate/__init__.py)
+        -- character for character: lineage.js filters this column by a metrics_need cell's product_ref,
+        -- so a view spelling the axis differently retraces the wrong mentions and reports no error.
+        -- #128 moved the unattached arm off the bare site key onto the `unlinked:` marker; the two
+        -- spellings are pinned together by tests/test_mention_lineage_view.py.
+        CASE
+            WHEN nullif(m.product_ref, '') IS NOT NULL THEN m.product_ref
+            WHEN nullif(m.source_product_key, '') IS NOT NULL
+                THEN 'unlinked:' || m.site || ':' || m.source_product_key
+            ELSE ''
+        END                                     AS product_axis,
         NULL::text                              AS wish_class,
         ''::text                                AS format_first,
         ''::text                                AS attribute_first,
@@ -82,6 +96,8 @@ WITH mention AS (
         w.video_id,
         '',
         NULL,
+        NULL,
+        -- a wish has no aspect at all, so it has no aspect_scope either
         NULL,
         w.month,
         coalesce(w.product_ref, ''),
@@ -124,6 +140,7 @@ SELECT
     l.category,
     l.need_key,
     l.need_key_rollup,
+    l.aspect_scope,
     l.month,
     l.product_axis,
     l.wish_class,

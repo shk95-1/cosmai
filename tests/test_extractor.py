@@ -190,4 +190,4 @@ def test_the_rule_extractor_is_the_contract_protocol():
     """The lexicon_category of candidates is an extra argument with a default -- the Protocol call still
     matches."""
     found: Extractor = RuleExtractor()
-    assert found.version == "rule-v2.3"
+    assert found.version == "rule-v2.4"
