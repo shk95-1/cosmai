@@ -17,7 +17,13 @@ import sqlalchemy as sa
 
 from collectors.naver import cli, keywords, scope
 from collectors.naver.cli import FetchSpec, run
-from collectors.naver.storage.tables import naver_blog_post, naver_datalab_point, naver_fetch_log, naver_run
+from collectors.naver.storage.tables import (
+    naver_blog_post,
+    naver_datalab_anchor,
+    naver_datalab_point,
+    naver_fetch_log,
+    naver_run,
+)
 from collectors.naver.transport import (
     AuthBlocked,
     BudgetExhausted,
@@ -30,6 +36,7 @@ from collectors.naver.transport import (
 pytestmark = pytest.mark.postgres
 
 AT = datetime(2026, 8, 24, 6, 10, tzinfo=UTC)
+VIEW_SQL = Path(__file__).resolve().parents[3] / "db" / "views" / "naver_datalab_rescaled.sql"
 
 
 def _datalab_body(spec: FetchSpec, empty: Collection[str] = ()) -> dict[str, Any]:
@@ -585,8 +592,9 @@ def test_the_batches_grow_so_the_last_one_carries_the_most_groups():
 def test_the_anchor_rows_carry_the_request_key_of_the_batch_they_came_with(
     needs_runtime_url: str, secret_file: Path
 ):
-    # What the rescale view joins on: an anchor row exists for the last request's boundary, and the
-    # groups sent with it share that key.
+    # naver_datalab_point still gets an anchor row per #90 -- its PK (category, group_key, month)
+    # means only the last request's write survives there, unlike needs.naver_datalab_anchor (#248),
+    # which the rescale view actually joins on.
     fetcher = _FakeFetcher()
     run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
 
@@ -603,6 +611,63 @@ def test_the_anchor_rows_carry_the_request_key_of_the_batch_they_came_with(
     sent_last = {g["groupName"] for g in last.params["keywordGroups"]} - {scope.DATALAB_ANCHOR}
     assert sent_last, last.params["keywordGroups"]
     assert {by_group[g] for g in sent_last} == {anchor_key}
+
+
+def test_every_batch_leaves_its_own_anchor_row(needs_runtime_url: str, secret_file: Path):
+    """#248: needs.naver_datalab_anchor is keyed by (request_key, month), so unlike
+    naver_datalab_point's PK it does not let the second batch's write erase the first's."""
+    fetcher = _FakeFetcher()
+    run("datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT)
+    assert len(fetcher.calls) == 2  # keywords.json's one 5-group category needs two requests
+
+    engine = sa.create_engine(needs_runtime_url)
+    with engine.begin() as conn:
+        rows = conn.execute(sa.select(naver_datalab_anchor.c.request_key, naver_datalab_anchor.c.ratio)).all()
+    engine.dispose()
+
+    sent_keys = {
+        cli.parsing.datalab_request_key(spec.params) for spec in fetcher.calls if spec.kind == "datalab"
+    }
+    assert {str(r.request_key) for r in rows} == sent_keys
+    assert all(r.ratio is not None for r in rows)
+
+
+def test_a_five_group_category_collected_in_two_requests_rescales_all_five(
+    needs_runtime_url: str, secret_file: Path, database_url_for_tests: str, _schema_name: str
+):
+    """The defect this issue closes (#248): naver_datalab_point's PK (category, group_key, month)
+    let the second batch's anchor overwrite the first's, so the smallest batch's groups -- the
+    remainder, whichever `keywords.json`'s groups the remainder-first cut sends first -- rescaled
+    to NULL though their own request carried a real anchor point. With the anchor kept per request,
+    every group rescales, the smallest batch's included."""
+    fetcher = _FakeFetcher()
+    code = run(
+        "datalab", database_url=needs_runtime_url, secrets_path=secret_file, fetcher=fetcher, captured_at=AT
+    )
+    assert code == 0
+    assert len(fetcher.calls) == 2  # the one 5-group category needs two requests beside the anchor
+
+    engine = sa.create_engine(database_url_for_tests)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("SET ROLE needs_owner")
+        conn.exec_driver_sql(VIEW_SQL.read_text(encoding="utf-8").replace("needs.", f'"{_schema_name}".'))
+    engine.dispose()
+
+    reader = sa.create_engine(needs_runtime_url)
+    with reader.begin() as conn:
+        rows = conn.execute(sa.text("SELECT group_key, ratio_rescaled FROM naver_datalab_rescaled")).all()
+    reader.dispose()
+
+    by_group = {str(r.group_key): r.ratio_rescaled for r in rows}
+    declared = {group for groups in keywords.load().values() for group in groups}
+    for group in declared | {scope.DATALAB_ANCHOR}:
+        assert by_group[group] is not None, group
+
+    # The specific case #248 closes: whichever group the remainder-first cut sent in the smaller,
+    # earlier batch -- the one whose anchor an overwriting join left NULL -- also rescales.
+    batches = cli.datalab_request_batches(keywords.groups(next(iter(keywords.load()))))
+    smallest_batch_group = next(iter(min(batches, key=len)))
+    assert by_group[smallest_batch_group] is not None, smallest_batch_group
 
 
 # --- the anchor is a label over a real term, and an empty series is visible (#250) ----------------

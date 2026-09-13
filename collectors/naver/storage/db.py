@@ -13,7 +13,13 @@ from sqlalchemy import Engine
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from collectors.naver.models import BlogPost, DatalabPoint
-from collectors.naver.storage.tables import naver_blog_post, naver_datalab_point, naver_fetch_log, naver_run
+from collectors.naver.storage.tables import (
+    naver_blog_post,
+    naver_datalab_anchor,
+    naver_datalab_point,
+    naver_fetch_log,
+    naver_run,
+)
 from db.runtime import runtime_url as _needs_runtime_url
 
 COLLECTOR_VERSION = "naver-0.1"
@@ -119,6 +125,30 @@ def write_datalab_points(connection: sa.Connection, points: Sequence[DatalabPoin
     connection.execute(statement, rows)
 
 
+def write_datalab_anchors(connection: sa.Connection, anchor_points: Sequence[DatalabPoint]) -> None:
+    """Upsert on (request_key, month) -- issue #248. Unlike `write_datalab_points`'s PK
+    (category, group_key, month), a request boundary is never overwritten by a later request of the
+    same category, so every batch's anchor survives for the rescale view to join on."""
+    if not anchor_points:
+        return
+    rows = [
+        {
+            "request_key": p.request_key,
+            "month": p.month,
+            "ratio": p.ratio,
+            "captured_at": p.captured_at,
+        }
+        for p in anchor_points
+    ]
+    key = ["request_key", "month"]
+    statement = pg_insert(naver_datalab_anchor)
+    statement = statement.on_conflict_do_update(
+        index_elements=key,
+        set_={c: statement.excluded[c] for c in rows[0] if c not in key},
+    )
+    connection.execute(statement, rows)
+
+
 def write_blog_posts(connection: sa.Connection, posts: Sequence[BlogPost]) -> None:
     """Upsert on post_id -- the same post can turn up under more than one query term in one run
     (or a later run), and the newest fetch's title/excerpt/author win."""
@@ -155,6 +185,7 @@ __all__ = [
     "RunLog",
     "FetchJournal",
     "write_datalab_points",
+    "write_datalab_anchors",
     "write_blog_posts",
     "COLLECTOR_VERSION",
 ]

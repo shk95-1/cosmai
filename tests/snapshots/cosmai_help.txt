@@ -16,6 +16,7 @@ options:
 
 $ cosmai collect --help
 usage: cosmai collect [-h] --dataset DATASET [--board BOARD] [--since SINCE]
+                      [--watchlist WATCHLIST] [--no-roster]
                       {commerce,youtube,naver}
 
 positional arguments:
@@ -26,6 +27,11 @@ options:
   --dataset DATASET     Which dataset to collect.
   --board BOARD         commerce review_low only: which board to walk.
   --since SINCE         Accepted for shape; unused by every dataset today.
+  --watchlist WATCHLIST
+                        youtube watch only: read directives from this file, not
+                        collectors/youtube/watchlist.txt.
+  --no-roster           youtube watch only: do not read needs.panel_channel; watch exactly what
+                        --watchlist names.
 
 $ cosmai login --help
 usage: cosmai login [-h] --source SOURCE

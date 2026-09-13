@@ -26,6 +26,7 @@ pytestmark = pytest.mark.postgres
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 VIEW = REPO_ROOT / "db" / "views" / "naver_datalab_rescaled.sql"
+FORMATS = REPO_ROOT / "contracts" / "formats.md"
 
 AT = datetime(2026, 9, 6, 6, 10, tzinfo=UTC)
 ANCHOR = scope.DATALAB_ANCHOR
@@ -33,11 +34,12 @@ ANCHOR = scope.DATALAB_ANCHOR
 # (category, group_key, month) -- which is exactly how the collector's batches land.
 K1 = "a" * 64
 K2 = "b" * 64
-# A third boundary with no anchor row of its own: the batch whose anchor row was overwritten by a
-# later batch of the same category (contracts/formats.md).
+# A third boundary with no anchor row of its own: the batch whose anchor row was never written
+# (#248, e.g. the response carried no anchor point at all -- the case #250 guards against).
 K3 = "c" * 64
 
-# (category, group_key, month, ratio, request_key)
+# (category, group_key, month, ratio, request_key). The anchor row is still stored here too (#90's
+# readers), but since #248 the view no longer joins through it -- see ANCHORS below.
 POINTS = (
     ("sun", ANCHOR, "2016-01", 50.0, K1),
     ("sun", "haze", "2016-01", 25.0, K1),  # half the anchor
@@ -47,8 +49,16 @@ POINTS = (
     ("sun", "haze", "2016-02", 40.0, K1),  # a month the anchor has no point for
     ("sun", ANCHOR, "2016-03", 0.0, K1),
     ("sun", "haze", "2016-03", 7.0, K1),  # an anchor of 0 divides nothing
-    ("sun", "flat", "2016-01", 30.0, K3),  # a request whose anchor row did not survive
+    ("sun", "flat", "2016-01", 30.0, K3),  # a request whose anchor row was never written
     ("sun", "null", "2016-01", None, K1),  # a point the vendor gave no ratio for
+)
+
+# (request_key, month, ratio) -- needs.naver_datalab_anchor, one row per request and month (#248).
+# No row for K1/2016-02 (the month the anchor has no point for) or for K3 (no anchor at all).
+ANCHORS = (
+    (K1, "2016-01", 50.0),
+    (K1, "2016-03", 0.0),
+    (K2, "2016-01", 10.0),
 )
 
 
@@ -66,6 +76,11 @@ def rescaled(
             " (category, group_key, month, ratio, terms, request_key, captured_at)"
             " VALUES (%s, %s, %s, %s, '[]'::jsonb, %s, %s)",
             [(c, g, m, r, k, AT) for c, g, m, r, k in POINTS],
+        )
+        conn.exec_driver_sql(
+            f'INSERT INTO "{_schema_name}".naver_datalab_anchor (request_key, month, ratio, captured_at)'
+            " VALUES (%s, %s, %s, %s)",
+            [(k, m, r, AT) for k, m, r in ANCHORS],
         )
         conn.exec_driver_sql(VIEW.read_text(encoding="utf-8").replace("needs.", f'"{_schema_name}".'))
     engine.dispose()
@@ -115,8 +130,9 @@ def test_an_anchor_of_zero_is_null_rather_than_an_error(rescaled):
 
 
 def test_a_row_whose_request_left_no_anchor_is_null(rescaled):
-    # The batch case: a category with more groups than fit beside the anchor keeps only the last
-    # request's anchor row, so the earlier batch's rows have no anchor of their own boundary.
+    # #248: the NULL rule now guards a request with no naver_datalab_anchor row at all (K3), not
+    # a batch whose anchor was overwritten -- since every request's own anchor row survives, that
+    # overwrite case no longer exists.
     assert _value(rescaled[("sun", "flat", "2016-01")]) is None
 
 
@@ -131,11 +147,19 @@ def test_every_stored_point_keeps_a_row(rescaled):
     assert len(rescaled) == len(POINTS)
 
 
-def test_the_view_divides_by_the_anchor_the_collector_sends():
-    """A literal in SQL cannot import the constant, so the two are held together here: an anchor
-    changed in scope.py and not in the view would rescale every row to NULL, quietly."""
+def test_the_view_joins_the_anchor_table_on_request_key_and_month():
+    """#248: the join no longer carries a SQL literal of the anchor's name -- the collector alone
+    decides which group is the anchor and writes it into needs.naver_datalab_anchor, keyed by the
+    request boundary. A literal group_key match would be exactly the shape that caused the bug."""
     sql = VIEW.read_text(encoding="utf-8")
-    assert f"'{scope.DATALAB_ANCHOR}'" in sql
+    assert "needs.naver_datalab_anchor" in sql
+    assert f"'{scope.DATALAB_ANCHOR}'" not in sql
     # The sibling views' convention: the reading role is granted in the view's own file, because
     # db/migrate.sh drops and recreates the view on every deploy (#158).
     assert "GRANT SELECT ON needs.naver_datalab_rescaled TO needs_runtime;" in sql
+
+
+def test_the_contract_names_the_anchor_table():
+    # #248: formats.md must say which table the anchor comes from, or a reader has no way to find it.
+    text_ = FORMATS.read_text(encoding="utf-8")
+    assert "needs.naver_datalab_anchor" in text_

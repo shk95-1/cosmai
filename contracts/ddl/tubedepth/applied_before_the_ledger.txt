@@ -1,0 +1,28 @@
+# Which versions this schema already carried on the day it got a ledger (#223).
+#
+# db/migrate.sh step (0) composes a source schema from the baseline dump plus every NNN_*.sql in
+# this directory, but only when the schema is absent. Production has had tubedepth since before
+# #178, so it always took the skip, and from #178 until #223 a file added here after the schema
+# existed reached production by no path at all. The fix is a ledger per source schema
+# (<schema>.schema_migration, the same shape as needs.schema_migration) -- and a ledger created on a
+# database that predates it starts out empty, which would make every file here look unapplied and
+# re-run five ALTER TABLEs that cannot run twice.
+#
+# So this file is the one thing that could not be computed: what was already there. Read ONCE per
+# schema, by db/migrate.sh, on a schema that is present and has no ledger yet -- those versions are
+# recorded as applied and every other file in this directory is applied normally. A schema built
+# from absent never reads it: step (0) applies every file and records every file.
+#
+# Nothing is ever appended here. A file added from #223 on reaches production through the ledger,
+# which is the whole point of having one; an entry added later would mark a file applied that never
+# ran. tests/test_source_schema_ledger.py holds the list against the directory.
+#
+# Measured read-only against app.tubedepth on production, 2026-09-12:
+#   comments.published_at_resolution, comments.channel_is_brand_owner  present  -> 001
+#   jobs.started_at, jobs.elapsed_ms                                   present  -> 002
+#   jobs.dataset                                                       present  -> 003
+#   video_snapshots.source_metadata                                    ABSENT   -> 004, still owed
+#   artifacts.fetch_route                                              ABSENT   -> 005, still owed
+001_comments_columns
+002_jobs_timing
+003_jobs_dataset

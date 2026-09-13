@@ -18,7 +18,6 @@ output stands.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import statistics
 from collections import defaultdict
@@ -43,6 +42,7 @@ from analysis.types import (
     MetricsTopicQuarterRow,
     PanelSensitivityRow,
 )
+from db.corpus import author
 
 # The minimum cell width (%p) for a flip. Go by sign alone and every cell hovering around 0 is caught as a
 # flip (the contract's §Sensitivity).
@@ -93,9 +93,10 @@ PROMO_RE = re.compile(
     re.I,
 )
 # It has to be the same formula as the hash the collector attaches to a comment author -- different, and
-# operator comments quietly become 0.
-CREATOR_HASH_PREFIX = "youtube:"
-CREATOR_HASH_LENGTH = 24
+# operator comments quietly become 0. Since #92 that formula is one function for the whole repository
+# (`db/corpus/author.py`), and these two names stay as the constants this module's contract quotes.
+CREATOR_HASH_PREFIX = author.HASH_PREFIX
+CREATOR_HASH_LENGTH = author.HASH_LENGTH
 
 
 class ShortHistory(LookupError):
@@ -105,8 +106,7 @@ class ShortHistory(LookupError):
 
 def creator_hash(channel_id: str) -> str:
     """Rebuilds `author_channel_hash` from the channel id -- an exact match rather than a guess."""
-    digest = hashlib.sha256(f"{CREATOR_HASH_PREFIX}{channel_id}".encode()).hexdigest()
-    return digest[:CREATOR_HASH_LENGTH]
+    return author.author_hash(channel_id)
 
 
 @dataclass(frozen=True)

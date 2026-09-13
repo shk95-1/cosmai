@@ -66,7 +66,9 @@ def test_watch_work_flatten_lands_every_table(tubedepth_schema: str, tmp_path: P
     fetcher = _FixtureFetcher()
 
     # watch: one directive with 3 follow-ups -> 3 listing jobs (one per follow-up kind).
-    exit_watch = run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT)
+    exit_watch = run(
+        "watch", read_roster=False, database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT
+    )
     assert exit_watch == 0
 
     engine = sa.create_engine(tubedepth_schema)
@@ -115,8 +117,8 @@ def test_watch_work_flatten_lands_every_table(tubedepth_schema: str, tmp_path: P
 
 def test_watch_is_a_no_op_on_a_repeated_pass(tubedepth_schema: str, tmp_path: Path):
     watchlist = _write_watchlist(tmp_path)
-    run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT)
-    run("watch", database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT)
+    run("watch", read_roster=False, database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT)
+    run("watch", read_roster=False, database_url=tubedepth_schema, watchlist_path=watchlist, captured_at=AT)
 
     engine = sa.create_engine(tubedepth_schema)
     with engine.begin() as conn:

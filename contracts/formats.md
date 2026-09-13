@@ -196,6 +196,58 @@ not an orphan **comment**.
 - The eight limitation sentences are carried by `interfaces.md` §Limitations of the population — they are not
   a format but **how to read the numbers**, so they belong beside the formulas.
 
+### Which lineage a snapshot belongs to (fork #94, from decision #93 D0)
+A snapshot belongs to one of two lineages and the row says which: `corpus_snapshot.lineage` is `archive` or
+`live` (030). **An archive snapshot is read, never recomputed** — its rows and its run's output *are* the
+observation, and the analysis reaches them through three fixed views (`needs.archive_metrics_topic_quarter` ·
+`needs.archive_topic_quarter_judgement` · `needs.archive_topic_quarter_evidence`), each pinned to the run that
+`needs.archive_run` resolves from the archive snapshot's id and `analysis/trend/pipeline.py`'s note grammar —
+not to a run id written down anywhere. There is **exactly one** archive, carried by a partial unique index the
+way `active` is.
+
+The default is `live`, and the archive is said out loud. That is the opposite of what it looks like it should
+be, so the reason is worth keeping: every writer of this table inserts a snapshot naming no lineage, so a
+default of `archive` would make the *second* snapshot ever loaded collide with the one-archive index and no
+re-collection could land again. Special is never what a row gets by saying nothing. The cost is one production
+write to mark snapshot 1, and until it runs the three views return **no** rows — an empty answer, never
+another lineage's, which is the failure #93 D0 is about. The same is true whenever the archive's run is not
+`ok`: `analysis/trend/pipeline.py` re-opens a run by note rather than inserting a new one, so a re-run against
+the archive snapshot empties the surface for its duration rather than answering from a half-finished run.
+
+`corpus_snapshot.instrument` (jsonb) records how the observation was made — `listing_route` · `comment_depth` ·
+`refetch_window_days` · `dictionary_version` — which is what makes two snapshots comparable at all. Its keys
+carry no CHECK, because the instrument grows with the collector and a vocabulary frozen in DDL costs a
+migration per knob.
+
+### What a comment row keeps of its author (fork #92, from #91 decision 3)
+A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the
+first 24 characters, lower-case hex, of `sha256("youtube:" + channel_id)`. The function is named once, in
+`db/corpus/author.py`, and every loader and analysis stage imports that one — a second implementation that
+drifts by one character raises nothing, it matches no creator comment at all, and the evidence stops being
+consumer speech while the output stays just as plausible. No display name is stored, under that key or any
+other; a name-derived signal, if an axis wants one, is stored as a feature (contains a link, digit-run
+pattern) and never as the name.
+
+The prefix is a stored fact rather than a choice: the 247,338 comment documents of the 2026-08-19 handover
+carry that form. Measured against production 2026-09-12, over 200,000 of them joined to their parent video's
+channel — **2,942 match `sha256("youtube:" + channel_id)[:24]` and 0 match `sha256(channel_id)[:24]`** — so
+the bare form is not an alternative spelling of this rule, it is a different rule that matches nothing.
+
+Two sites ask the same question of that shape, and they have to agree:
+- `db/corpus` refuses a document carrying an `author` or `author_id` key, or an `author_channel_hash` that is
+  a raw `UC…` channel id or is not exactly 24 lower-case hex characters.
+- `needs.author_identifier_violation` (`db/views/author_identifier_violation.sql`) asks it of the stored rows
+  in `needs.corpus_document` and of `tubedepth.comments` after the cutoff `2026-08-24` — the last pre-rule
+  comment row was first seen 2026-08-23T22:55:44Z. **Empty means true.**
+
+The negative check alone is not enough, and this is the part worth keeping: `^UC[0-9A-Za-z_-]{22}$` catches an
+identifier pasted in whole and nothing else. An untruncated 64-character digest, an upper-case one, or one
+hashed without the prefix is the right kind of value with the wrong value, it passes every negative check, and
+creator-comment marking then matches zero rows with no error raised. So the shape is asserted positively,
+`^[0-9a-f]{24}$`, and the same question is asked of `tubedepth.comments.author_id` as "is it not a hash"
+rather than "is it one known raw shape" — a handle (`@name`) or a legacy id is as much an identifier as the
+one shape a predicate happens to recognise.
+
 ## MFDS registration ledger CSV (→ `needs.mfds_registration`, fork #55)
 - Source `eval/mfds/mfds_items_v1.csv`, copied verbatim from ydc `rag/mfds_items.csv` at tag v0.4.0 (`76db718`).
   Four columns map one to one: `COSMETIC_REPORT_SEQ` → `report_seq`, `ITEM_NAME` → `item_name`,
@@ -301,13 +353,14 @@ point, and `ratio_rescaled` = `ratio / anchor_ratio` rounded to 6 decimal places
   anchor whose ratio is 0, leaves `ratio_rescaled` NULL. A NULL means "not comparable across
   requests"; a filled-in number would be the plausible wrong one this whole section exists against.
 
-The anchor point is stored like any other group (`group_key` = the anchor), so it shares the source
-table's key `(category, group_key, month)`. **A category whose groups do not all fit beside the
-anchor in one request therefore keeps only its last request's anchor row**, and the rows of the
-earlier requests fall under the NULL rule above — `collectors/naver/cli.py` sends the largest batch
-last so that loss stays at its smallest (today: 4 of `keywords.json`'s 5 groups rescale, the fifth
-does not). Carrying one anchor row per request would need a key this table does not have; #90's
-report leaves that to a follow-up decision.
+The anchor point is still written into `needs.naver_datalab_point` like any other group (`group_key`
+= the anchor) — #90's readers keep reading it there. **The rescale view's join is against
+`needs.naver_datalab_anchor` instead** (`contracts/ddl/needs/009_naver_datalab_anchor.sql`, #248):
+one row per `(request_key, month)`, written by the collector alongside every batch. Unlike
+`naver_datalab_point`'s key `(category, group_key, month)` — which let a category's later request
+overwrite an earlier one's anchor row, since every batch of one category shares that key — a request
+boundary is never overwritten by a different request, so every batch keeps the anchor it was sent
+with and all of a category's groups rescale, however many requests it took.
 
 ## Lists that go into a scalar column (A12)
 `wish_mention.format` · `wish_mention.attribute` are `;`-separated, **at most 3**, and **the first is the main value**. Aggregation uses the first alone.
