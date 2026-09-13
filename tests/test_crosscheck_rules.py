@@ -53,7 +53,7 @@ def _reading(creator: float, consumer: float, comment: float = 0.0) -> str:
             crosscheck.CREATOR: creator,
             crosscheck.CONSUMER: consumer,
             crosscheck.COMMENT: comment,
-            crosscheck.VIDEO_TITLE: 0.0,
+            crosscheck.VIDEO: 0.0,
         }
     )
 

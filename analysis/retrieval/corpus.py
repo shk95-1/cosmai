@@ -17,6 +17,8 @@ from datetime import date
 import psycopg
 from psycopg import sql as pgsql
 
+from analysis.retrieval.normalize import normalize_text
+
 BATCH = 2000
 
 # The prefix of doc_id and the source of a chunk. Change the value and the chunks already stored and the new
@@ -61,11 +63,12 @@ WHERE (video_id, comment_id) > (%s, %s)
 ORDER BY video_id, comment_id LIMIT %s
 """)
 
-# video_snapshots holds the same video several times, so only the newest is used. There is no description
-# column, so only the title is used -- ydc joined title + description from the API response
-# (video_text in ydc trend.py, v0.1.0 02440ab).
+# video_snapshots holds the same video several times, so only the newest is used. Title and description
+# both, since #264 added the column (DDL 006): the title alone is 45 characters of the archive's 856 and
+# carries about a quarter of its topic mentions, so a title-only projection returns rows, raises nothing,
+# and is a corpus a twentieth the size. The join itself is `youtube_video_text` below.
 VIDEOS = pgsql.SQL("""
-SELECT DISTINCT ON (video_id) video_id, title FROM {schema}.video_snapshots
+SELECT DISTINCT ON (video_id) video_id, title, description FROM {schema}.video_snapshots
 WHERE video_id > %s AND (%s::date IS NULL OR published_at::date >= %s::date)
 ORDER BY video_id, fetched_at DESC LIMIT %s
 """)
@@ -125,10 +128,29 @@ def youtube_comments(conn: psycopg.Connection, schema: str, since: date | None =
         yield Document(f"{YOUTUBE_COMMENT}:{comment_id}", YOUTUBE_COMMENT, text)
 
 
+def youtube_video_text(title: str | None, description: str | None) -> str:
+    """The archive's rule, cited rather than re-derived: ydc `to_common_schema.py:66` `video_text()` is
+    `normalize_text(f"{title} {description}")` -- title first, one space, and the whole string
+    normalised **after** the join rather than each part on its own (pipeline.py normalises what this
+    yields). Tags are excluded and stay in `source_metadata.tags`; that exclusion is load-bearing,
+    since including them moves the sunscreen topic's long-form count from 962 to 1,019 videos and
+    shifts every `composition`, and the archive's reported numbers were produced without them.
+
+    The same sentence is the corpus manifest's own `text_rule`, carried verbatim by
+    `db/corpus/contract.py`'s TEXT_RULE and by contracts/formats.md, so a live document and an archive
+    document of the same video are one document. Kept in one function for the reason `review_doc_id`
+    is: written twice, the two copies part and nothing says so.
+
+    Normalised here rather than left to `pipeline.py` so that this is ydc's `video_text()` whole: the
+    join without it carries a trailing space for every video whose uploader wrote no description.
+    `normalize_text` is idempotent, so pipeline's later pass over the same string changes nothing."""
+    return normalize_text(f"{title or ''} {description or ''}")
+
+
 def youtube_videos(conn: psycopg.Connection, schema: str, since: date | None = None) -> Iterator[Document]:
     query = VIDEOS.format(schema=pgsql.Identifier(schema))
-    for video_id, title in _keyset(conn, query, (since, since), key_len=1):
-        yield Document(f"{YOUTUBE_VIDEO}:{video_id}", YOUTUBE_VIDEO, title)
+    for video_id, title, description in _keyset(conn, query, (since, since), key_len=1):
+        yield Document(f"{YOUTUBE_VIDEO}:{video_id}", YOUTUBE_VIDEO, youtube_video_text(title, description))
 
 
 def youtube_transcripts(

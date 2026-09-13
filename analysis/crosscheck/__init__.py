@@ -30,14 +30,15 @@ from pathlib import Path
 
 COMMENT = "youtube_comment"
 TRANSCRIPT = "youtube_transcript"
-VIDEO_TITLE = "youtube_video"
+VIDEO = "youtube_video"
 COMMERCE_REVIEW = "commerce_review"
-SOURCES = (COMMENT, TRANSCRIPT, VIDEO_TITLE, COMMERCE_REVIEW)
+SOURCES = (COMMENT, TRANSCRIPT, VIDEO, COMMERCE_REVIEW)
 
-# The creator side is the transcript. ydc's `youtube_video` was the video description, but our
-# `youtube_video` chunk is the title line alone (VIDEOS in analysis/retrieval/corpus.py) and so is no vessel
-# for creator language -- 5,908 documents carry only 1,123 topic mentions. The title column stays in the
-# table but is not asked for an interpretation rule (the contract's §Composition).
+# The creator side is the transcript, and since #264 that is a decision rather than the only option it was:
+# the `youtube_video` chunk is title + description now (youtube_video_text in analysis/retrieval/corpus.py),
+# which is ydc's own vessel for creator language, where it used to be the title line alone -- 5,908 documents
+# carrying 1,123 topic mentions. Moving the seat would change every crosscheck verdict, so it stays put until
+# somebody decides it against a measured live corpus (the contract's §Composition).
 CREATOR = TRANSCRIPT
 CONSUMER = COMMERCE_REVIEW
 
@@ -508,7 +509,7 @@ __all__ = [
     "TALK_RATIO",
     "THIN_PP",
     "TRANSCRIPT",
-    "VIDEO_TITLE",
+    "VIDEO",
     "Ingredients",
     "IngredientRow",
     "KeyAudit",
