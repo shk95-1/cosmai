@@ -62,12 +62,39 @@ COUNT_KEYS = ("table_counts", "documents_by_content_type")
 
 # The vocabulary the loader knows. Must be the same list as the DDL's CHECK (023).
 SOURCES = ("youtube_video", "youtube_comment")
+COMMENT_SOURCE = "youtube_comment"
 CONTENT_TYPES = ("video_long", "video_short", "video_unknown", "comment")
 
 
 # The two keys the YouTube API answers an author under, and the pair `collectors/youtube/flatten.py`
 # passes straight through today (upstream #183 is the change that stops it at the source).
 RAW_AUTHOR_KEYS = ("author", "author_id")
+
+# Every key a comment document's `source_metadata` may carry -- the archive's seven, measured on all
+# 247,338 comment rows of the 2026-08-19 handover and reproduced by `db/corpus/project.py`.
+#
+# An allow-list rather than one more name on RAW_AUTHOR_KEYS, because the deny-list only ever asked
+# about two keys at the top level: `author_name`, `author_channel_id`, or a whole
+# `snippet` object carrying `authorDisplayName` walked past both this refusal and
+# `needs.author_identifier_violation`. That was harmless while the only writer of these rows was a
+# frozen CSV; fork #95 is the second writer, which is what opens it. A nested scan is not needed on
+# top of this and would be the weaker answer: every key below holds a scalar, so an object can only
+# arrive as a key of its own, and this list catches it -- which is also what lets the view mirror the
+# rule exactly (`jsonb_object_keys ... EXCEPT`) instead of approximating it.
+#
+# Video documents keep the deny-list. Their nine keys are fixed by contracts/ddl/tubedepth/004 and
+# could be listed the same way, but the archive's own rows were never measured for a tenth key, and an
+# allow-list that refuses a row nobody has looked at is a loader that stops on the handover it exists
+# to read.
+COMMENT_METADATA_KEYS = (
+    "author_channel_hash",
+    "collected_at",
+    "is_reply",
+    "like_count",
+    "parent_comment_id",
+    "thread_id",
+    "total_reply_count",
+)
 
 
 class ManifestMismatch(ValueError):
@@ -81,14 +108,23 @@ class AuthorIdentifierRefused(ValueError):
     (#91 decision 3, #92)."""
 
 
-def check_author(doc_id: str, metadata: Mapping[str, Any]) -> None:
+def check_author(doc_id: str, metadata: Mapping[str, Any], source: str | None = None) -> None:
     """Whether a document's `source_metadata` keeps the author as a hash and nothing else.
 
     A row is refused **before** the insert, not cleaned up after: once a raw identifier is in the
     table it has already been written to disk, replicated and backed up, and no later UPDATE takes
     that back.
+
+    `source` is optional so that a caller with no source column in front of it still gets the
+    deny-list; naming `youtube_comment` adds the allow-list above, which is the half that catches a
+    key nobody thought to deny.
     """
     problems = [f"source_metadata.{key}" for key in RAW_AUTHOR_KEYS if key in metadata]
+    if source == COMMENT_SOURCE:
+        problems += [
+            f"source_metadata.{key} is not a comment metadata key"
+            for key in sorted(set(metadata) - set(COMMENT_METADATA_KEYS))
+        ]
     stored = metadata.get("author_channel_hash")
     if stored is not None:
         text = stored if isinstance(stored, str) else ""

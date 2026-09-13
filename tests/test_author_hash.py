@@ -204,27 +204,49 @@ def test_the_view_is_empty_on_the_rows_a_load_puts_there(loaded: tuple[str, str]
     assert _violations(url) == []
 
 
+# The allow-list branch (fork #95) fires alongside the two name branches, because `author` and
+# `author_id` are not comment metadata keys either -- so the expectation is the whole list a row
+# raises, not one name. `author_name` is the case that only the allow-list can see: it is the shape
+# that walked past both the loader and this view while branch (1) named two keys.
 @pytest.mark.postgres
 @pytest.mark.parametrize(
-    ("item_id", "metadata", "violation"),
+    ("item_id", "metadata", "violations"),
     [
-        ("RAW_NAME", '{"collected_at": "%s", "author": "Some Person"}', "corpus_author_key"),
-        ("RAW_ID", '{"collected_at": "%s", "author_id": "UCqrNqg3UgVoD3Sa-F_TxuSA"}', "corpus_author_key"),
+        (
+            "RAW_NAME",
+            '{"collected_at": "%s", "author": "Some Person"}',
+            ["corpus_author_key", "corpus_comment_metadata_key"],
+        ),
+        (
+            "RAW_ID",
+            '{"collected_at": "%s", "author_id": "UCqrNqg3UgVoD3Sa-F_TxuSA"}',
+            ["corpus_author_key", "corpus_comment_metadata_key"],
+        ),
+        (
+            "OTHER_NAME",
+            '{"collected_at": "%s", "author_name": "Some Person"}',
+            ["corpus_comment_metadata_key"],
+        ),
+        (
+            "NESTED",
+            '{"collected_at": "%s", "snippet": {"authorDisplayName": "Some Person"}}',
+            ["corpus_comment_metadata_key"],
+        ),
         (
             "RAW_HASH",
             '{"collected_at": "%s", "author_channel_hash": "UCqrNqg3UgVoD3Sa-F_TxuSA"}',
-            "corpus_raw_channel_hash",
+            ["corpus_raw_channel_hash"],
         ),
         (
             "LONG_HASH",
             '{"collected_at": "%s", "author_channel_hash":'
             ' "9b0a0a4e0e0d4c1f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f"}',
-            "corpus_hash_shape",
+            ["corpus_hash_shape"],
         ),
     ],
 )
 def test_the_view_lists_a_corpus_row_that_went_round_the_loader(
-    loaded: tuple[str, str], item_id: str, metadata: str, violation: str
+    loaded: tuple[str, str], item_id: str, metadata: str, violations: list[str]
 ):
     """A direct INSERT is the bypass the Python refusal cannot see -- the view is what stands under it."""
     url, _ = loaded
@@ -234,7 +256,7 @@ def test_the_view_lists_a_corpus_row_that_went_round_the_loader(
         with conn.cursor() as cur:
             cur.execute(DOCUMENT, (item_id, metadata % collected_at, run[collected_at]))
         conn.commit()
-    assert _violations(url) == [(violation, f"youtube_comment:{item_id}")]
+    assert _violations(url) == [(name, f"youtube_comment:{item_id}") for name in violations]
 
 
 @pytest.mark.postgres
