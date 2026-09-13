@@ -91,6 +91,10 @@ video_snapshots = Table(
     sa.Column("video_id", sa.String(500), nullable=False),
     sa.Column("fetched_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("title", sa.Text, nullable=False),
+    # #264 (contracts/ddl/tubedepth/006): the other half of the archive's analysed video text. A real
+    # column rather than a tenth source_metadata key -- #183's spelling pin holds only while that key
+    # set stays the archive's nine. NULL is "flattened before 006", '' is "the uploader wrote none".
+    sa.Column("description", sa.Text),
     sa.Column("channel", sa.Text),
     sa.Column("channel_id", sa.String(500)),
     sa.Column("duration_seconds", sa.Integer),

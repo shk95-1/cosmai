@@ -21,7 +21,7 @@ FROM (VALUES
     ('trend_radar.review_answer'),   -- p1 site_answer_raw.csv (question_name,answer) = daisomall's survey axis
     ('tubedepth.comments'),          -- p9 export_data.sh:5 · p3 (video_id,comment_id,like_count,text)
     ('tubedepth.transcripts'),       -- p3·suncare (video_id,language,full_text,segment_count)
-    ('tubedepth.video_snapshots'),   -- p9 export_data.sh:6, p3 (title,channel_id,view_count), same as #2's "videos" (T1)
+    ('tubedepth.video_snapshots'),   -- p9 export_data.sh:6, p3 (title,description,channel_id,view_count), same as #2's "videos" (T1)
     ('tubedepth.listing_entries')    -- p3 q4_trending.py:13 (kind,target,video_id,title,channel_id)
 ) v(t)
 WHERE to_regclass(t) IS NOT NULL \gexec

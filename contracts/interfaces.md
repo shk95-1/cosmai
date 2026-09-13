@@ -1066,11 +1066,14 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   putting two values from different code paths side by side leaves it undecidable whether the difference
   belongs to the source or to the path. That the four sources ride **one and the same function** is the
   whole of this block.
-- **The creator side is `youtube_transcript`.** ydc's `youtube_video` was the video description, but our
-  `youtube_video` chunk is **one line of title** (`VIDEOS` in `analysis/retrieval/corpus.py` draws `title`),
-  so it is no vessel for creator language — 5,908 documents carry only 1,123 topic mentions. So the two
-  rules ydc put in the `video` seat run over the transcripts. The title column stays in the table but bites
-  no interpretation rule.
+- **The creator side is `youtube_transcript`.** ydc's `youtube_video` was the video description, and until
+  #264 our `youtube_video` chunk was **one line of title** (`VIDEOS` in `analysis/retrieval/corpus.py` drew
+  `title` alone, there being no description column to draw), so it was no vessel for creator language — 5,908
+  documents carrying only 1,123 topic mentions. That is why the two rules ydc put in the `video` seat run over
+  the transcripts. **Since #264 the premise is gone**: `youtube_video_text` joins title and description the
+  archive's way, so the seat could hold ydc's own vessel again. It is not moved here — moving it changes every
+  crosscheck verdict, and the ground to decide it on is a live corpus collected with the column, which does not
+  exist yet. Until then the decision stands and this paragraph is why, rather than what it used to be.
 - The two interpretations are ydc's sentences as they stand: `commerce >= 5 and creator < 2` → "not
   observable from the video description · present in real-use speech alone" · `|commerce − creator| >= 5`%p
   → which side speaks of it far more. `cross_source`'s "영상은 안 다루는데 댓글·리뷰에는 있음"

@@ -182,6 +182,20 @@ not an orphan **comment**.
   this corpus they do not part — measured 2026-08-26, all 261,317 rows are already at a fixed point
   after one pass (0 rows differ), because the collector receives `textFormat=plainText` and no HTML
   comes in to begin with. A re-collection is not guaranteed this property.
+- **Where the live lineage implements this rule** (#264): `analysis/retrieval/corpus.py`'s
+  `youtube_video_text` — `normalize_text(f"{title} {description}")`, title first, one space, the whole
+  string normalised **after** the join, tags excluded — reading `tubedepth.video_snapshots.title` and
+  `.description` (DDL `tubedepth/006`). Before that column existed the projection was the title alone,
+  which is 45 characters of the archive's 856 and about a quarter of its topic mentions. Rule 11 above
+  is manifest text and stays verbatim, but the question it leaves open is answered in practice on both
+  sides: the archive's reported numbers were produced with tags **out**, and so is this projection.
+- **The entity axis, measured on descriptions** (#264): over the archive's 14,467 raw collected video
+  rows (`processed/videos.csv`, before any normalisation), **0 titles** carry an HTML entity — which
+  reproduces the 0 of 27,318 live `video_snapshots` titles measured on this side — but **1 description**
+  does (three `&amp;`), and **0** of either carries a double escape. So the two normalisers still agree
+  on this corpus, by a margin of one round rather than by there being no entities at all. Descriptions
+  are the side that has them, which is why the fixed-point loop is what keeps a live corpus from being
+  flagged un-normalised by `chunks.check_rows` for as long as its rows exist.
 - The eight limitation sentences are carried by `interfaces.md` §Limitations of the population — they are not
   a format but **how to read the numbers**, so they belong beside the formulas.
 
