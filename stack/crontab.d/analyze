@@ -56,6 +56,25 @@
 # the same tables at the same instant, not about correctness.
 41 * * * *  cosmai project corpus
 #
+# fork #96: the live analysis chain -- match:topic, then trend quarter, judge and evidence. **Gated**: the one
+# command exits 2 (blocked), naming the reason on stdout and writing nothing, unless the active snapshot's
+# lineage is `live` and its instrument.text_parts contains `description`. The analysis stages read the
+# *active* snapshot, which is the archive until the coordinator switches it, so an ungated line here would
+# re-open the archive's run and recompute it every night (#93 D0); the text_parts half waits on upstream
+# shk95-1/cosmai#264. Until both hold, this line is a nightly blocked exit and its four pipeline_stage rows
+# stay disabled.
+#
+# **T for this line is unmeasured.** Two passes settle it, both by the coordinator by hand once the gate can
+# pass and before the rows are enabled: the first match over the live snapshot's backlog with the analysis
+# behind it (T_first -- every document read, every mention written), then a second run immediately after
+# (T_steady -- the match re-reads every document that has no topic, which is most comments, and inserts
+# nothing; trend, judge and evidence rewrite their run whole). This hour is confirmed or moved from those
+# two numbers, written here beside #242's.
+# The phase: :50 is nine minutes after the :41 projection and two before the :52 flatten tick, so a pass
+# reads the hour's projection rather than racing it. 03:50 sits 70 minutes before the 05:00 `analyze all`,
+# which it shares no lock and no table with; the gap is a margin, not a measured T.
+50 3 * * *  cosmai match topic
+#
 # Suspended 2026-09-06 (#242): the `0 8` gemma4 line that used to stand here is gone. The Tailscale GPU
 # host it depended on no longer answers /api/tags, and this host's own ollama is CPU-only with too little
 # memory for the 9.2 GiB Q4_K_M weights -- a local CPU-only ollama cannot carry the ~2,800 calls/day steady

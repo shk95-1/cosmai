@@ -213,6 +213,25 @@ def _add_project(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_match(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser("match", help="Match the live corpus against a dictionary and analyse it.")
+    actions = p.add_subparsers(dest="action", required=True)
+
+    # The stage_key is `match:topic`, the chain's first stage. The whole chain is one command because none of
+    # the analysis stages takes a snapshot, and the gate that keeps them off the archive has to own them all.
+    topic = actions.add_parser(
+        "topic",
+        help="Gated live chain: match:topic, then trend quarter, judge and evidence on the live snapshot.",
+    )
+    topic.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime.")
+    topic.add_argument(
+        "--cutoff",
+        default=None,
+        help="Only read documents collected at or before this instant (default: now). One cutoff for every"
+        " stage, recorded in analysis_run.versions.cutoff (#93 D2).",
+    )
+
+
 def _add_eval(subparsers: argparse._SubParsersAction) -> None:
     p = subparsers.add_parser("eval", help="Score one task against needs.labeled_set.")
     p.add_argument("task", choices=TASKS)
@@ -263,6 +282,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_retrieval(subparsers)
     _add_trend(subparsers)
     _add_project(subparsers)
+    _add_match(subparsers)
     _add_eval(subparsers)
     _add_lexicon(subparsers)
     return parser
@@ -588,6 +608,46 @@ def _run_project(args: argparse.Namespace) -> int:
     return 0 if outcome.status == "ok" else 1
 
 
+def _run_match(args: argparse.Namespace) -> int:
+    import psycopg
+
+    from analysis.evidence.pipeline import NoEvidence
+    from analysis.judge.pipeline import NoJudgement
+    from analysis.retrieval.topics import NoDictionary
+    from analysis.trend import live
+    from analysis.trend.pipeline import NoPopulation, TopicAxisDrift
+    from db.corpus.match import NoSnapshot
+    from db.corpus.project import ArchiveSnapshotRefused
+    from db.seed._common import as_timestamp
+
+    try:
+        conn = _connect(args.url)
+    except (ValueError, LookupError, psycopg.Error) as refused:
+        print(refused)
+        return 2
+    partial = False
+
+    def report(outcome: live.StageOutcome) -> None:
+        nonlocal partial
+        print(outcome.note)
+        for violation in outcome.violations:
+            print(f"  {violation}")
+        partial = partial or outcome.status != "ok"
+
+    try:
+        with conn:
+            live.run(conn, cutoff=as_timestamp(args.cutoff) if args.cutoff else None, report=report)
+    # The gate, and every stage's own "not stood up yet", are blocked rather than failed -- the same exit the
+    # stages give on their own commands. The stages already reported keep their rows.
+    except (
+        live.LiveGateClosed, NoSnapshot, ArchiveSnapshotRefused, NoDictionary, NoPopulation, TopicAxisDrift,
+        NoJudgement, NoEvidence,
+    ) as blocked:  # fmt: skip
+        print(blocked)
+        return 2
+    return 1 if partial else 0
+
+
 def _run_eval(args: argparse.Namespace) -> int:
     from analysis import predictors, registry
     from analysis.baselines import adoption_misses
@@ -754,6 +814,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_trend(args)
     if args.command == "project":
         return _run_project(args)
+    if args.command == "match":
+        return _run_match(args)
     if args.command == "eval":
         return _run_eval(args)
     if args.command == "lexicon":

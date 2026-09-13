@@ -1756,6 +1756,22 @@ alongside as a version.
   v1 version, and a remeasurement stands on raw values that carry the `dictionary` and `store` columns
   together.
 
+
+### Matcher difference between the two lineages (fork #96, 2026-09-12, production archive read-only)
+The archive's 13,979 videos re-matched with dictionary v3 against the mentions ydc stored at collection time,
+over the 13 `trend_use` topics: **9,534 (topic, document) pairs matched by both, 0 by ydc only, 77 by ours
+only**, all 77 in `톤업_메이크업베이스` and all containing `파데프리`, a term v3 carries and ydc's dictionary did
+not; 13,902 of 13,979 documents (99.4%) carry an identical topic set.
+
+**This compares two matchers that share one defect, and it does not measure correctness.** Both ydc's
+collection-time matcher and `analysis/retrieval/topics.py` before fork #97 compiled the `latin` alternation
+ungrouped, so the word boundary guarded only its first and last term: over the same videos 101 of the 382
+documents `SPF_PA` matches are false positives (`spa pack`, `papa recipe`). `SPF_PA`'s identical sets (384 ·
+0 · 0) are that shared defect, not agreement on the truth. After #97 groups the alternation the measurement is
+re-run and `SPF_PA` is expected near 101 ydc-only — a real lineage difference. Either way the conclusion of
+#93 D0 stands and is stronger for it: the archive's mentions carry what its matcher saw, false positives
+included, and re-matching them would restate a published quarter.
+
 ## Vector floor (not added — the distributions do not part, fork #48)
 `search` in `analysis/retrieval/vectors.py` has no similarity floor — it sorts by cosine and emits the top
 k as they stand. That does not mean one should be put in on "it would be nice to have": **e5 cosines are

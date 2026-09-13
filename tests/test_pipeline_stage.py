@@ -20,11 +20,12 @@ CRONTAB_DIR = Path(__file__).resolve().parents[1] / "stack" / "crontab.d"
 # line, so leaving it out would report that line as "in cron but not declared".
 STAGES = UPSTREAM_STAGES + FORK_STAGES
 
-# Three command shapes: `cosmai collect <arm> --dataset <ds>`, `cosmai analyze <ds>` and
-# `cosmai project <ds>`.
+# Four command shapes: `cosmai collect <arm> --dataset <ds>`, `cosmai analyze <ds>`, `cosmai project <ds>`
+# and `cosmai match <ds>` (fork #96's gated live chain, named by its first stage).
 COLLECT = re.compile(r"cosmai\s+collect\s+(\S+)\s+--dataset\s+(\S+)")
 ANALYZE = re.compile(r"cosmai\s+analyze\s+(\S+)")
 PROJECT = re.compile(r"cosmai\s+project\s+(\S+)")
+MATCH = re.compile(r"cosmai\s+match\s+(\S+)")
 
 
 def cron_lines() -> list[tuple[str, str]]:
@@ -51,6 +52,8 @@ def stage_key_of(command: str) -> str:
         return f"{m.group(1)}:{m.group(2)}"
     if m := PROJECT.search(command):
         return f"project:{m.group(1)}"
+    if m := MATCH.search(command):
+        return f"match:{m.group(1)}"
     m = ANALYZE.search(command)
     assert m, f"알 수 없는 크론 명령: {command}"
     sub = m.group(1)

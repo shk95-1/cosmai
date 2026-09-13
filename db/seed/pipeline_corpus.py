@@ -62,9 +62,23 @@ STAGES: tuple[Stage, ...] = (
         True,
         "live lineage: tubedepth -> needs.corpus_document (#93 D1)",
     ),
-    Stage("analyze:trend", "analyze", "trend", "1 day", False, "live cron lands with #96"),
-    Stage("analyze:judge", "analyze", "judge", "1 day", False, "live cron lands with #96"),
-    Stage("analyze:evidence", "analyze", "evidence", "1 day", False, "live cron lands with #96"),
+    # Fork #96's gated live chain. Its cron line (`cosmai match topic`) is in stack/crontab.d/analyze, and all
+    # four rows stay disabled until the chain's gate can pass -- the active snapshot live, its text carrying a
+    # description (upstream shk95-1/cosmai#264). Until then every night's run exits blocked having written
+    # nothing, and an enabled row would read that as a stage that never ran.
+    Stage(
+        "match:topic",
+        "analyze",
+        "topic",
+        "1 day",
+        False,
+        "live lineage: corpus_document -> corpus_mention, gated on lineage and text_parts (#96)",
+    ),
+    Stage("analyze:trend", "analyze", "trend", "1 day", False, "inside `cosmai match topic`, gated (#96)"),
+    Stage("analyze:judge", "analyze", "judge", "1 day", False, "inside `cosmai match topic`, gated (#96)"),
+    Stage(
+        "analyze:evidence", "analyze", "evidence", "1 day", False, "inside `cosmai match topic`, gated (#96)"
+    ),
 )
 
 
@@ -90,6 +104,11 @@ EDGES: tuple[Edge, ...] = (
     _reads("tubedepth.listing_entries", "project:corpus", "listed videos not yet flattened"),
     _reads("needs.panel_channel", "project:corpus", "the 43 channels projected, active roster"),
     _writes("project:corpus", "needs.corpus_snapshot", "one row: the live lineage"),
+    # -- the live match (fork #96). The mentions, and the dictionary version it stamps on the snapshot.
+    _writes("match:topic", "needs.corpus_mention", "live snapshot; a dictionary change re-matches it whole"),
+    _writes("match:topic", "needs.corpus_snapshot", "instrument.dictionary_version, merged"),
+    _reads("needs.corpus_document", "match:topic", "documents with no mention row yet"),
+    _reads("needs.aspect_lexicon", "match:topic", "the active retrieval-topic dictionary"),
     # -- the three analysis stages, in the order the graph of #93 draws them.
     _writes("analyze:trend", "needs.metrics_topic_quarter", "cosmai trend quarter"),
     _writes("analyze:judge", "needs.topic_quarter_judgement", "cosmai trend judge"),

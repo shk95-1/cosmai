@@ -231,6 +231,7 @@ def test_the_candidate_query_takes_the_partial_index_the_corpus_declares(judged:
                     "panel_version": 1,
                     "panel_role": PANEL_ROLE,
                     "topic_filter": TOPIC_FILTER,
+                    "cutoff": None,
                 },
             )
             plan = "\n".join(line for (line,) in cur.fetchall())

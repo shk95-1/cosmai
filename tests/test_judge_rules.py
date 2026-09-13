@@ -9,6 +9,7 @@ DB 를 타지 않는다. 판정은 지표 행 위의 순수 함수라, 규칙이
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,7 @@ from analysis.judge import (
     evidence_strength,
     judge,
     percentile_rank,
+    quarter_of,
 )
 from analysis.types import MetricsTopicQuarterRow
 
@@ -94,6 +96,30 @@ def test_the_two_non_verdicts_are_not_types():
 def test_the_last_quarter_of_a_source_is_never_decided():
     """진행 중이라 문서 수가 덜 찼다 -- 마지막 분기를 확정하면 그 절단이 하락으로 읽힌다."""
     assert verdict(series(), quarter=QUARTERS[-1]) == RUNNING
+
+
+def test_the_quarter_in_progress_is_the_cutoffs_not_the_last_one_that_has_rows():
+    """A run a few days into a quarter has no document published in it yet, so the last quarter with rows is
+    the previous, complete one -- judging that one in progress hides a whole quarter's verdict (fork #96)."""
+    after = "2025Q2"
+    assert after > QUARTERS[-1]
+    rows = series()
+    topic = rows[0].topic_key
+    moved = {(r.topic_key, r.quarter, r.source): r.trend_type for r in judge(rows, in_progress=after)}
+    assert RUNNING not in moved.values()
+    assert moved[(topic, QUARTERS[-1], VIDEO)] == verdict(series())
+
+
+def test_naming_the_last_quarter_as_in_progress_changes_nothing():
+    """The archive's run records no cutoff, and its verdicts are the golden set's."""
+    assert judge(series(), in_progress=QUARTERS[-1]) == judge(series())
+
+
+def test_the_quarter_of_an_instant_is_its_utc_calendar_quarter():
+    assert quarter_of(datetime(2025, 4, 1, 0, 0, tzinfo=UTC)) == "2025Q2"
+    assert quarter_of(datetime(2025, 3, 31, 23, 59, tzinfo=UTC)) == "2025Q1"
+    # 01:00 on 1 April in Seoul is still March in UTC, which is the clock trend's QUARTER reads.
+    assert quarter_of(datetime(2025, 4, 1, 1, 0, tzinfo=timezone(timedelta(hours=9)))) == "2025Q1"
 
 
 def test_a_cell_under_the_evidence_floor_is_thin():
