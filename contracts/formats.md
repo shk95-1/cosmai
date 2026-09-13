@@ -271,6 +271,17 @@ text forever**: a row written before the description lands is never revised. So 
 a re-run, which is cheap only while `active` is false and no mentions have been written against it.
 Upstream shk95-1/cosmai#264 is the fix, and it gates the first live collection rather than following it.
 
+**The live lineage's mentions (fork #96).** `match:topic` writes the live snapshot's `corpus_mention` from
+`corpus_document` with `match_topics` on the active `retrieval-topic` dictionary — all 15 topics, `trend_use`
+as the dictionary says (manifest rule 7). `span_start` is a **0-based character offset into the stored
+`text`** and `matched_term` is the dictionary's own spelling of the term — the archive's convention, verified
+on all 105,358 of its mentions — and both are derived from the **same** test that decided the match: the
+lower-cased substring for `ko` terms, the compiled boundary pattern for `latin` terms. A span taken by a looser
+rule than the match can point inside a word the match rejected. The dictionary's version and fingerprint are
+merged into `instrument` (`dictionary_version`, `dictionary_fingerprint`); when either differs, that
+snapshot's mentions are deleted under the stage's own run and matched again, never mixed. An archive snapshot
+is refused before any delete is issued.
+
 ### What a comment row keeps of its author (fork #92, from #91 decision 3)
 A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the
 first 24 characters, lower-case hex, of `sha256("youtube:" + channel_id)`. The function is named once, in

@@ -31,8 +31,10 @@ from analysis.trend.pipeline import (
     CORPUS_COMMENT,
     PANEL_ROLE,
     POPULATION,
+    RUN_CUTOFF,
     SCOPE,
     TOPIC_FILTER,
+    cutoff_of,
     note_of,
 )
 from analysis.types import TopicQuarterEvidenceRow
@@ -62,6 +64,7 @@ SELECT c.doc_id, v.quarter, m.topic_id, c.source, c.channel_id,
   JOIN video v ON v.source_item_id = c.parent_item_id
   JOIN corpus_mention m ON m.snapshot_id = %(snapshot)s AND m.doc_id = c.doc_id AND m.trend_use
  WHERE c.snapshot_id = %(snapshot)s AND c.content_type = '{CORPUS_COMMENT}' AND c.source = '{COMMENT}'
+   AND (%(cutoff)s::timestamptz IS NULL OR c.collected_at <= %(cutoff)s::timestamptz)
 """
 )  # noqa: S608
 STAMP_VERSION: LiteralString = (
@@ -154,13 +157,14 @@ def build(
             raise NoEvidence("no active panel roster; run `python -m db.seed --only panel` first")
         if snapshot is None:
             raise NoEvidence("no active corpus snapshot; run `python -m db.corpus load <dir>` first")
-        cur.execute(FIND_RUN, (note_of(scope, snapshot, version),))
+        cur.execute(RUN_CUTOFF, (note_of(scope, snapshot, version),))
         found = cur.fetchone()
         if found is None:
             raise NoEvidence(
                 f"no quarter run for {scope!r} on snapshot {snapshot}; run `cosmai trend quarter`"
             )
         run_id = int(found[0])
+        cutoff = cutoff_of(found[1])
         cur.execute(CELLS, (run_id, scope, version, panel_role))
         cells = {(str(topic), str(quarter), str(source)) for topic, quarter, source in cur.fetchall()}
         if not cells:
@@ -172,6 +176,7 @@ def build(
                 "panel_version": version,
                 "panel_role": panel_role,
                 "topic_filter": TOPIC_FILTER,
+                "cutoff": cutoff,
             },
         )
         candidates = [

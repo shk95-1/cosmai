@@ -18,7 +18,7 @@ import psycopg
 import pytest
 from sqlalchemy import create_engine, text
 
-from analysis.judge import THIN
+from analysis.judge import RUNNING, THIN
 from analysis.judge.pipeline import NoJudgement, build, run
 from analysis.trend.pipeline import INSERT as INSERT_METRIC
 from analysis.trend.pipeline import OPEN_RUN, PANEL_ROLE, SCOPE, note_of
@@ -79,6 +79,28 @@ def _plant(conn: psycopg.Connection[Any]) -> int:
         )
     conn.commit()
     return run_id
+
+
+def test_the_quarter_in_progress_comes_from_the_cutoff_the_run_recorded(graded: str):
+    """A run three days into 2025Q1 whose last quarter with rows is 2024Q4: that quarter is complete and is
+    judged, not labelled in progress (fork #96)."""
+    with connect(graded) as conn:
+        run_id = _plant(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE analysis_run SET versions = versions || %s::jsonb WHERE run_id = %s",
+                ('{"cutoff": "2025-01-03T00:00:00+00:00"}', run_id),
+            )
+        conn.commit()
+        cutoff = {row.trend_type for row in build(conn, snapshot_id=SNAPSHOT, panel_version=1).rows}
+        with conn.cursor() as cur:
+            cur.execute("UPDATE analysis_run SET versions = versions - 'cutoff' WHERE run_id = %s", (run_id,))
+        conn.commit()
+        without = {
+            row.quarter: row.trend_type for row in build(conn, snapshot_id=SNAPSHOT, panel_version=1).rows
+        }
+    assert RUNNING not in cutoff
+    assert without[QUARTERS[-1]] == RUNNING
 
 
 def test_a_run_without_metric_rows_is_blocked_not_failed(graded: str):
