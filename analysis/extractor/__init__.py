@@ -1,4 +1,4 @@
-"""Rule extractor rule-v2.3 -- candidate sentences (slice-suncare · slice-p1) and the wish classes a/b/c/n
+"""Rule extractor rule-v2.4 -- candidate sentences (slice-suncare · slice-p1) and the wish classes a/b/c/n
 (slice-p9).
 
 The sentence splitting and the marker rules use the same regexes across the three slices. The wish markers
@@ -13,7 +13,9 @@ import re
 
 from analysis.types import AspectLexicon, Candidate, Lexicon, TextUnit, WishResult
 
-VERSION = "rule-v2.3"
+# v2.4: the format/attribute dictionary went from 0 rows to 436 (#124), so these rules no longer read the
+# same sentence the same way -- extractor_version is what says which rules made a row (entrypoints.md).
+VERSION = "rule-v2.4"
 # 슬라이스 셋이 같은 분할점을 쓴다: 종결 문장부호, '요/다' 뒤의 새 한글, ㅎㅎ/ㅋㅋ 뒤.
 SPLIT = re.compile(r"(?<=[.!?~ㅠㅜ])\s+|(?<=요)\s+(?=[가-힣])|(?<=다)\s+(?=[가-힣])|(?<=[ㅎㅋ]{2})\s+")
 SENTENCE_MIN = 4  # for the candidate decision (slice-suncare · slice-p1)

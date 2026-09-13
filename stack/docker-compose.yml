@@ -281,6 +281,14 @@ services:
       # happens. An unreachable night is not a quiet zero but a failed run
       # (the preflight in analysis/polarity/ollama.py).
       OLLAMA_URL: ${OLLAMA_URL:-http://100.102.193.98:11434}
+      # The LLM hard stop in USD and the implementation chain in fallback order (#136). Knobs, not
+      # secrets, so they belong here for the same reason OLLAMA_URL does -- but **deliberately without
+      # OLLAMA_URL's `:-default`**. A default here would be an amount nobody chose, applied silently to
+      # a deployment that forgot the knob, which is exactly the failure #136 removes. Unset arrives
+      # empty and analysis/polarity/pricing.py refuses the command (exit 2) naming the key. The value
+      # to copy is in stack/env.example.
+      COSMAI_LLM_BUDGET_USD: ${COSMAI_LLM_BUDGET_USD}
+      COSMAI_LLM_CHAIN: ${COSMAI_LLM_CHAIN}
 
   # --- Exposure -------------------------------------------------------------------------------------
   # No backend, no DB credential: the browser calls PostgREST (3000) directly, so this container only

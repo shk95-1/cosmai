@@ -14,6 +14,9 @@ TABLES = ("entity_lexicon", "aspect_lexicon", "site_axis_map", "need_key", "cate
 
 # stoplist.csv tier -> entity_lexicon.tier (the DDL only knows normal | cooc_required | stop).
 TIERS = {"stop": "stop", "retailer": "stop", "cooc": "cooc_required"}
+# The two wish axes (#124), one file per kind: `cosmai lexicon load --kind` refuses a mixed file and
+# `activate` turns one kind at a time, so a revision of one axis cannot disturb the other.
+WISH_AXIS_FILES = {"format": "format_lexicon_v1.csv", "attribute": "attribute_lexicon_v1.csv"}
 
 NEED_KEY_SQL: LiteralString = """
 INSERT INTO need_key (need_key, canonical, note)
@@ -65,8 +68,26 @@ def _ingredient_rows(eval_dir: Path) -> list[tuple[Any, ...]]:
     ]
 
 
+def wish_axis_rows(eval_dir: Path) -> list[tuple[Any, ...]]:
+    """The format/attribute vocabulary wish_mention takes (#124), in slice-p9 volume order.
+
+    The order is load-bearing twice: `_listed` keeps only the first three canonicals it matches
+    (`LIST_MAX`), and `ON CONFLICT (kind, surface, version) DO NOTHING` gives a surface to whichever
+    canonical claims it first, so the file is written highest volume first.
+    """
+    return [
+        (kind, r["canonical"], r["surface"], opt(r["tier"]), opt(r["source"]), opt(r["note"]))
+        for kind, name in WISH_AXIS_FILES.items()
+        for r in read_csv(eval_dir / "lexicon" / name)
+    ]
+
+
 def load(cur: psycopg.Cursor[Any], source_dir: Path) -> dict[str, int]:
-    insert_entities(cur, _brand_rows(source_dir) + _ingredient_rows(source_dir), LEXICON_VERSION)
+    insert_entities(
+        cur,
+        _brand_rows(source_dir) + _ingredient_rows(source_dir) + wish_axis_rows(source_dir),
+        LEXICON_VERSION,
+    )
     insert_aspects(
         cur,
         [

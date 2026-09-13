@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, inspect
 
-from analysis.aggregate import WISH_SCOPES, RuleAggregator
+from analysis.aggregate import UNLINKED, WISH_SCOPES, RuleAggregator
 from analysis.types import (
     DenominatorRow,
     MetricsNeedRow,
@@ -278,8 +278,13 @@ FROZEN_NEED_ROWS = (
         strength_mean=0.8, strength_low_rating_ratio=1.0, persist_months=1, persist_months_total=2,
         persist_products=1, persist_products_total=1, aspect_scope="generic",
     ),
+    # #128: the unattached axis is the reserved `unlinked:<site>:<key>` marker, not the bare site key —
+    # only that value moved, every count here is the 2026-08-27 freeze. scope and need_key are read off the
+    # input rather than repeated, because they are Korean data values and tool/checks/lang reads added
+    # lines (the rows around this one predate that rule).
     MetricsNeedRow(
-        run_id=0, scope="선블록", need_key="밀림", month="", product_ref="v", neg=0, pos=0, yt_neg=1,
+        run_id=0, scope=MENTIONS[0].category or "", need_key=MENTIONS[3].need_key, month="",
+        product_ref=f"{UNLINKED}oliveyoung:v", neg=0, pos=0, yt_neg=1,
         yt_pos=0, unresolved=None, unresolved_new=None, low_share=None, population_share_pct=None,
         low_mentioning=None, denom_low=None, denom_site=None, strength_mean=None,
         strength_low_rating_ratio=None, persist_months=0, persist_months_total=None,

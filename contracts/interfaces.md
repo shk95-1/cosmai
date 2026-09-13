@@ -587,6 +587,71 @@ class Predictor(Protocol):  # an eval implementation. Takes a batch and returns 
 - **like_cap_sum** (`metrics_wish`) = `sum(min(like_count, LIKE_CAP))`, **LIKE_CAP = 100** (A8: the slice has no cap, so the contract sets the constant). An implementation that uses no cap leaves this column NULL.
 - **low_complete** (`product_denominator`) = `(low_collected < 150) or has_3star` — if a 3-star review is mixed into the RATING_ASC sample, or there are fewer than 150 at ≤2 stars, then the ≤2-star rows are complete. 150 is the collection sample ceiling (`REVIEW_PAGES 3 x 50`) and `collectors/commerce/scope.json` (#7) and `formats.md` hold the same value.
 
+## What the `scope='all'` rollup counts (#126)
+
+**Generic mentions alone.** The population of a `scope='all'` row is the mentions whose
+`need_mention.aspect_scope` is `generic`, so a category-only aspect (`맛`·`염색결과`·`세안후건조` …) emits no
+rollup row at all and is read on its own category scope, while an aspect the lexicon states on both sides
+(`눈시림`·`백탁`·`트러블` …) enters the rollup with its generic share alone. The reason is a denominator: a
+category-only value is measured against one category's population and a generic one against every
+category's, so a ranking holding both compares two populations down one column and its top N cannot be read
+as an order. The **category** scopes are unchanged — each counts every mention of that category, the generic
+aspects included, which is where a category-only aspect's number stays readable.
+
+The population is decided from the mentions and **never from `metrics_need.aspect_scope`**: until this
+change that label was the scope of whichever mention closed the group, so the rows labelled `category` and
+the aspects that are category-only were two different sets of the same size.
+
+`metrics_need.aspect_scope` is therefore **a fact of the whole scope, not of one row**: the single
+`aspect_scope` that scope's mentions of that `need_key` carry, and NULL when they carry more than one. The
+same (`scope`, `need_key`) used to be stamped `generic` on its category total and `category` on a product
+row of the same run (12 such pairs in production run 39); now every axis of one `need_key` carries one
+value, and inside the rollup that value is always `generic`.
+
+**The population is one of the rollup cell's axes, so the lineage retrace carries it too.**
+`needs.mention_lineage` emits `aspect_scope`, and `portal/public/lineage.js` narrows by it on the
+`scope='all'` branch and only there — a category scope counts every mention of that category, generic
+aspects included. Retracing a rollup cell by `need_key_rollup` alone returns a strict superset (12 of the
+16 rollup rows on production run 39, the worst 35.4% uncounted) that the screen prints under the cell as
+its own count. It is the `_product` drift of #128 one axis over and harder to see: an empty retrace reads
+as broken, a superset reads as a plausible number. `tests/test_mention_lineage_view.py` pins the two
+together.
+
+## What `metrics_need.product_ref` holds (#128)
+
+**One namespace and two reserved sentinels, never a bare site key.** A value in that column is exactly one
+of three things:
+
+| value | meaning |
+|---|---|
+| `''` | the category total — the row measured over the whole scope, no product axis |
+| `unlinked:<site>:<product_key>` | a mention the linker has not attached to any canonical product |
+| anything else | a key of `needs.product_ref`, e.g. `oy:A000000155458` |
+
+The decision and its reason: the column used to be `mention.product_ref or mention.source_product_key or
+''` (`analysis/aggregate/__init__.py` `_product`), so canonical refs and raw site keys (`81569`) sat in one
+column with nothing to tell them apart. A join from that column to `needs.product_ref` then matched the refs,
+silently dropped the keys, and reported no error — **every join through it was half right and said so
+nowhere**. The `unlinked:` prefix cannot be mistaken for a ref, because a canonical ref is
+`<two-letter site abbreviation>:<key>` (`_ref_id`, `analysis/linker/__init__.py`); a reader that means
+canonical products filters `product_ref NOT LIKE 'unlinked:%'` and gets exactly them.
+
+The unattached rows are **kept and marked rather than dropped**, for two reasons: the product axis stays a
+partition of the category total (the mentions of one scope are split across its product rows exactly once,
+so the two add up), and how much of a category is not yet attributed is itself a number worth reading. The
+site is part of the marker because a product key is unique only inside a site (`needs.product_member`'s PK
+is `(source, product_key)`), and the bare key folded two sites' products into one row.
+
+A mention with **no product axis at all** — a YouTube comment, 51% of production `need_mention` — gets no
+product-axis row. It is not an unattached product; there is nothing to attach, and marking it would invent
+a product that does not exist.
+
+Upstream of this, `need_mention.product_ref` is filled by the **polarity** stage from `needs.product_member`
+(`analysis/polarity/pipeline.py`), not by the linker: `run_all` runs the link stage first, so the value is
+the catalogue as of that run, and `NEED_UPSERT`'s `DO UPDATE ... product_ref = EXCLUDED.product_ref` means a
+mention picks up its ref on the first nightly run after its product is catalogued. A backfill `UPDATE` after
+the polarity stage is **not** an alternative — that same `DO UPDATE` writes NULL over it the next night.
+
 ## `metrics_need`'s month rows (`month <> ''`, #129)
 
 `month <> ''` rows exist **only as the category total (`product_ref = ''`)** — the product axis has
@@ -2070,9 +2135,9 @@ lexicon the evidence stood on (the same rule `eval.run` keeps; fork #62, #68). T
 are each opened once per run and handed down to `search`.
 
 **Cost** — `analysis/polarity/pricing.UsageLedger` as it is: `reserve` before the call (estimate = prompt
-characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the $10
-total hard stop shared with polarity. The output ceiling is 4096 tokens because adaptive thinking spends the
-same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
+characters × the polarity rate + the output ceiling), `settle` after, `purpose='retrieval_ask'`, the
+`COSMAI_LLM_BUDGET_USD` total hard stop shared with polarity (#136 — the amount is a knob, not a number
+written here). The output ceiling is 4096 tokens because adaptive thinking spends the same budget; an answer the model cut off (`stop_reason == max_tokens`) or left empty is settled and logged —
 the money moved — but refused to the caller (exit 1), never printed as if complete. The per-`purpose` cap for
 `retrieval_ask` is **$0.20 per call on the reservation estimate and $1.00 per UTC day** (user decisions on fork
 #78 and #80, 2026-09-05; #74 measured $0.025 mean · $0.042 max per settled call over 17 calls, and the reservation

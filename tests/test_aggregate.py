@@ -6,7 +6,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import date
 
-from analysis.aggregate import LIKE_CAP, RuleAggregator
+from analysis.aggregate import COMMENT, LIKE_CAP, NEGATIVE, UNLINKED, RuleAggregator
 from analysis.aggregate.pipeline import scopes_for
 from analysis.types import DenominatorRow, NeedMentionRow, WishMentionRow
 
@@ -471,3 +471,101 @@ def test_one_comment_of_unknown_month_makes_that_whole_month_unknown():
     assert months(rows, "밀림")["2026-02"].yt_neg == 1
     # The whole-period row is unchanged.
     assert (by_key(rows)["밀림"].yt_neg, by_key(rows)["백탁"].yt_neg) == (2, 1)
+
+
+# The category and polarity values are data, and the repository operates in English (tool/checks/lang) —
+# read them off the helper's own defaults rather than repeating the literals.
+CATEGORY = need("any", NEGATIVE).category or ""
+
+
+def test_an_unattached_mention_is_marked_on_the_product_axis_not_passed_off_as_a_ref():
+    """#128: metrics_need.product_ref held canonical refs and raw site keys in one column, so every join
+    through it was silently half right. A mention the linker has not attached now carries the reserved
+    `unlinked:<site>:<key>` marker, which no canonical ref (`<abbr>:<key>`) can collide with."""
+    rows = RuleAggregator().need_metrics(
+        [
+            need("a", NEGATIVE, ref="a/1", product="oy:a"),
+            need("a", NEGATIVE, ref="b/1", product=None),
+        ],
+        [],
+        CATEGORY,
+    )
+    per = products(rows, "a")
+    assert set(per) == {"oy:a", f"{UNLINKED}oliveyoung:b"}
+    # The raw site key never stands on its own in that column — that was the defect.
+    assert "b" not in per
+
+
+def test_the_unattached_marker_keeps_two_sites_sharing_a_product_key_apart():
+    """A product key is unique only inside a site (001), so the bare key folded two sites into one row."""
+    rows = RuleAggregator().need_metrics(
+        [
+            need("a", NEGATIVE, ref="k/1", product=None),
+            replace(need("a", NEGATIVE, ref="k/2", product=None), site="glowpick"),
+        ],
+        [],
+        CATEGORY,
+    )
+    assert set(products(rows, "a")) == {f"{UNLINKED}oliveyoung:k", f"{UNLINKED}glowpick:k"}
+
+
+def test_a_mention_with_no_product_axis_at_all_still_gets_no_product_row():
+    """YouTube comments carry no source_product_key (51% of production need_mention) — they are not
+    unattached products, they have no product axis, and marking them would invent one."""
+    rows = RuleAggregator().need_metrics(
+        [replace(need("a", NEGATIVE, src=COMMENT, ref="v/1", product=None), source_product_key=None)],
+        [],
+        CATEGORY,
+    )
+    assert products(rows, "a") == {}
+
+
+# The synthetic keys of the two #126 tests are ASCII on purpose: tool/checks/lang bars a new Korean literal
+# in tests, and what these two measure is the aspect_scope axis, which no need_key spelling touches.
+CATEGORY_ONLY = "aspect-of-one-category"
+BOTH_SIDES = "aspect-on-both-sides"
+ONE_CATEGORY = "cat-a"
+
+
+def test_the_rollup_counts_generic_mentions_only():
+    """#126: a category-only aspect is measured against its own category's population, a generic one against
+    every category's. Standing them in one ranking compares two denominators, so the rollup takes the generic
+    mentions alone — a category-only aspect emits no scope='all' row and a both-sides aspect enters with its
+    generic share."""
+    mentions = [
+        need(CATEGORY_ONLY, NEGATIVE, category=ONE_CATEGORY, ref="a/1", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="b/1", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="c/1", scope="generic"),
+    ]
+    rollup = by_key(RuleAggregator().need_metrics(mentions, [], "all"))
+    assert CATEGORY_ONLY not in rollup
+    assert rollup[BOTH_SIDES].neg == 1
+    # The month and product axes answer to the same population, or the axes stop adding up — and each is
+    # one row per (need_key, month, product_ref), which is what screen 3 dedupes by.
+    rolled = RuleAggregator().need_metrics(mentions, [], "all")
+    assert {r.need_key for r in rolled} == {BOTH_SIDES}
+    assert [r.product_ref for r in rolled if r.product_ref] == ["oy:p"]
+    assert len({(r.need_key, r.month, r.product_ref) for r in rolled}) == len(rolled)
+    # The category scope is untouched — it is where a category-only aspect is read.
+    category = by_key(RuleAggregator().need_metrics(mentions, [], ONE_CATEGORY))
+    assert (category[CATEGORY_ONLY].neg, category[BOTH_SIDES].neg) == (1, 2)
+
+
+def test_the_aspect_scope_label_does_not_depend_on_which_mention_came_last():
+    """#126: the label was scopes[-1], the scope of whichever mention closed the group, so one (scope,
+    need_key) was stamped `generic` on its category total and `category` on a product row of the same run —
+    12 such pairs in production run 39. It is now decided once over the scope, and a need_key whose mentions
+    disagree carries no label rather than one of the two at random."""
+    mentions = [
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="a/1", product="oy:a", scope="category"),
+        need(BOTH_SIDES, NEGATIVE, category=ONE_CATEGORY, ref="b/1", product="oy:b", scope="generic"),
+    ]
+    rows = RuleAggregator().need_metrics(mentions, [], ONE_CATEGORY)
+    assert {r.aspect_scope for r in rows} == {None}
+    # A need_key its mentions agree on keeps its label, on every axis.
+    agreed = RuleAggregator().need_metrics(
+        [replace(m, aspect_scope="category") for m in mentions], [], ONE_CATEGORY
+    )
+    assert {r.aspect_scope for r in agreed} == {"category"}
+    # The rollup population is generic alone, so a rollup row is always labelled generic.
+    assert {r.aspect_scope for r in RuleAggregator().need_metrics(mentions, [], "all")} == {"generic"}
