@@ -85,6 +85,7 @@ extend-include = [
     "tool/measure-evidence-fixture",
     "tool/measure-source-mix",
     "tool/measure-transcript-bimodal",
+    "tool/measure-wish-axis-lexicon",
     "tool/measure-trend-sample",
     "tool/measure-mfds-join",
 ]

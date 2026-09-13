@@ -31,7 +31,7 @@ def seeded(needs_runtime_url: str) -> Iterator[object]:
 def test_the_active_entity_version_loads_every_surface(seeded):
     lex = load_lexicon(seeded)
     assert lex.version == 1
-    assert len(lex.surfaces) == 992
+    assert len(lex.surfaces) == 1428
     assert lex.surface_to_canonical["3CE"] == "3CE"
     assert lex.surface_to_canonical["무기자차"] == "ZINC_OXIDE"
 

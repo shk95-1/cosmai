@@ -112,10 +112,10 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     assert "analysis.predictors" in registry.IMPLEMENTATIONS
     registry.load_implementations()
     found = {task: registry.get(task) for task in ("polarity", "wish_class")}
-    # The two tasks report their own rule versions — only the extractor went up to rule-v2.3.
+    # The two tasks report their own rule versions — only the extractor went up to rule-v2.4.
     assert {task: impl.version if impl else None for task, impl in found.items()} == {
         "polarity": "rule-v2.2",
-        "wish_class": "rule-v2.3",
+        "wish_class": "rule-v2.4",
     }
 
     seed.run_all(needs_runtime_url, only=("lexicon", "labeled"))
@@ -131,7 +131,7 @@ def test_the_one_registry_line_carries_both_of_this_units_tasks(needs_runtime_ur
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT note, versions FROM analysis_run ORDER BY run_id")
         rows = cur.fetchall()
-    assert [note for note, _ in rows] == ["eval:polarity:rule-v2.2", "eval:wish_class:rule-v2.3"]
+    assert [note for note, _ in rows] == ["eval:polarity:rule-v2.2", "eval:wish_class:rule-v2.4"]
     scores = rows[0][1]["scores"]
     assert scores["sun holdout 100"]["acc"] > 0.77
     assert rows[1][1]["scores"]["P9 blind60_v2"]["P:a"] > 0
