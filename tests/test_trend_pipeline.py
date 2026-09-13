@@ -16,6 +16,7 @@ from sqlalchemy import create_engine, text
 
 from analysis.retrieval import topics as topic_registry
 from analysis.trend import METRIC_VERSION
+from analysis.trend import pipeline as quarter
 from analysis.trend.pipeline import NoPopulation, TopicAxisDrift, build, note_of, run
 from cosmai.cli import main
 from db import corpus, seed
@@ -278,6 +279,30 @@ def test_an_empty_population_leaves_no_run_behind(loaded: str):
             cur.execute("SELECT run_id, status FROM analysis_run")
             opened = cur.fetchall()
     assert opened == []
+
+
+def test_an_empty_axis_closes_the_run_build_had_already_committed(loaded: str, monkeypatch: Any):
+    """The population stands here, so the run is opened and committed before the axis is known to be empty.
+
+    'partial' rather than 'failed' because nothing broke, and rather than 'ok' because nothing was
+    delivered; what the second call asks is the part that would be worse than the defect -- a status
+    `_run_id()` does not reopen turns one orphan into a new run on every attempt.
+    """
+    monkeypatch.setattr(quarter, "topic_axis", lambda conn, cur, snapshot: [])
+    with connect(loaded) as conn:
+        with pytest.raises(NoPopulation):
+            run(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id, status, finished_at FROM analysis_run")
+            opened = cur.fetchall()
+        assert [(row[1], row[2] is not None) for row in opened] == [("partial", True)]
+        with pytest.raises(NoPopulation):
+            run(conn)
+        with conn.cursor() as cur:
+            cur.execute("SELECT run_id, status FROM analysis_run")
+            again = cur.fetchall()
+    assert [row[0] for row in again] == [opened[0][0]]
+    assert again[0][1] == "partial"
 
 
 def test_the_subcommand_writes_the_table_and_says_what_it_wrote(loaded: str, capsys: Any):
