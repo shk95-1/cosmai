@@ -261,6 +261,26 @@ def test_a_second_pass_adds_nothing_and_a_dictionary_change_rematches_the_whole_
 
 
 @pytest.mark.postgres
+def test_a_matcher_version_bump_rematches_the_whole_snapshot(lineages: str, monkeypatch: pytest.MonkeyPatch):
+    """The dictionary fingerprint hashes rows, not the matching code, so a code change moves only this key."""
+    url = lineages
+    with connect(url) as conn:
+        first = stage.match(conn, snapshot_id=LIVE)
+    instrument = _one(url, "SELECT instrument FROM corpus_snapshot WHERE snapshot_id = %s", (LIVE,))
+    assert instrument[stage.MATCHER_VERSION] == topic_registry.MATCHER_VERSION
+
+    _execute(url, "UPDATE corpus_mention SET matched_term = 'stale' WHERE snapshot_id = %s", (LIVE,))
+    monkeypatch.setattr(topic_registry, "MATCHER_VERSION", topic_registry.MATCHER_VERSION + 1)
+    with connect(url) as conn:
+        redone = stage.match(conn, snapshot_id=LIVE)
+    assert redone.rematched is True
+    assert redone.cleared == first.mentions == redone.mentions
+    assert _one(url, "SELECT count(*) FROM corpus_mention WHERE matched_term = 'stale'") == 0
+    instrument = _one(url, "SELECT instrument FROM corpus_snapshot WHERE snapshot_id = %s", (LIVE,))
+    assert instrument[stage.MATCHER_VERSION] == topic_registry.MATCHER_VERSION
+
+
+@pytest.mark.postgres
 def test_a_document_collected_after_the_cutoff_is_not_matched(lineages: str):
     with connect(lineages) as conn:
         outcome = stage.match(conn, snapshot_id=LIVE, cutoff=datetime(2000, 1, 1, tzinfo=UTC))

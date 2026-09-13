@@ -15,7 +15,8 @@ it, and each one fails by returning rows rather than by raising:
    and fingerprint are recorded in `corpus_snapshot.instrument`; when either differs from the active
    dictionary, this snapshot's mention rows are deleted under this stage's own run and matched again.
    The fingerprint rides along because rows can be added to a version that is already active without its
-   number moving (`analysis/retrieval/topics.py`, `Topics.stamp`).
+   number moving (`analysis/retrieval/topics.py`, `Topics.stamp`). `MATCHER_VERSION` rides as the third key
+   because the fingerprint hashes the dictionary's rows, not the code that matches them (fork #97).
 3. **The archive is never written.** An archive snapshot is refused before anything is read, the same way
    `db/corpus/project.py` refuses it; its mentions are ydc's observation (#93 D0).
 """
@@ -69,6 +70,7 @@ ON CONFLICT (snapshot_id, doc_id, topic_id) DO NOTHING
 
 DICTIONARY_VERSION = "dictionary_version"
 DICTIONARY_FINGERPRINT = "dictionary_fingerprint"
+MATCHER_VERSION = "matcher_version"
 
 
 class NoSnapshot(LookupError):
@@ -212,9 +214,19 @@ def match(
         )
     # `load` commits after reading, so it runs before the transaction that deletes and stamps.
     dictionary = topic_registry.load(conn)
-    recorded = (instrument.get(DICTIONARY_VERSION), instrument.get(DICTIONARY_FINGERPRINT))
-    rematched = recorded != (dictionary.version, dictionary.fingerprint)
-    stamp = {DICTIONARY_VERSION: dictionary.version, DICTIONARY_FINGERPRINT: dictionary.fingerprint}
+    # Read at call time, not imported by name, so a bump is seen without reloading this module.
+    matcher = topic_registry.MATCHER_VERSION
+    recorded = (
+        instrument.get(DICTIONARY_VERSION),
+        instrument.get(DICTIONARY_FINGERPRINT),
+        instrument.get(MATCHER_VERSION),
+    )
+    rematched = recorded != (dictionary.version, dictionary.fingerprint, matcher)
+    stamp = {
+        DICTIONARY_VERSION: dictionary.version,
+        DICTIONARY_FINGERPRINT: dictionary.fingerprint,
+        MATCHER_VERSION: matcher,
+    }
     versions = {"snapshot": snapshot_id, "cutoff": at.isoformat(), "topics": dictionary.version}
     cleared = 0
     with conn.cursor() as cur:
