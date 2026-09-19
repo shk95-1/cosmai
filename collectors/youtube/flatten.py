@@ -295,8 +295,9 @@ def flatten_one(
     except (OSError, ValueError) as error:
         # The same pair #274 catches, and for the same reasons: a file that is not there, one that
         # cannot be read, and JSON or UTF-8 that will not parse. Named here so that the caller can
-        # tell "the payload is gone" from "the payload is there and flatten could not shape it".
-        raise PayloadUnreadable(f"{kind} {target!r}: the stored payload could not be read") from error
+        # tell "the payload is gone" from "the payload is there and flatten could not shape it";
+        # the kind and the target are the caller's to add, which is where the record is written.
+        raise PayloadUnreadable("no readable payload under the artifact's digest") from error
     if kind in ("channel.videos", "search.videos", "playlist.items", "trending.videos"):
         _upsert_listing_entries(conn, listing_entry_rows(artifact_id, kind, target, fetched_at, payload))
     elif kind == "video.metadata":
