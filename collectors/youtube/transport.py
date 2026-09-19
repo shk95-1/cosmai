@@ -15,12 +15,14 @@ confirms or flips that (Work 6); until it has run, the Shorts claim is Google's 
 the archive's 697-vs-474, not ours.
 
 **Every route annotates its dump** with `fetch_route` and, for the kinds that can come back short,
-`expected_count` · `returned_count` · `truncated`. `cli._collect_one` writes the route onto the
-artifact row (`artifacts.fetch_route`, DDL 005) so an analysis axis can declare which routes it
-accepts -- the population model of shk95/cosmai-import-ydc#91, option D -- and turns a short listing
-into a partial run. That last part is the lesson of #90: a fetch that quietly returns less than the
-source holds looks exactly like a successful one, and the suite that only ever asked a fake built
-out of the request could not tell them apart.
+`expected_count` · `returned_count` · `truncated`; a Data API listing walk adds `request_count`, the
+requests it actually sent (#272), so the day's bound charges a long walk what it spent instead of
+the estimate of what a walk usually costs. `cli._collect_one` writes both onto the artifact row
+(`artifacts.fetch_route`, DDL 005; `artifacts.request_count`, DDL 007) so an analysis axis can
+declare which routes it accepts -- the population model of shk95/cosmai-import-ydc#91, option D --
+and turns a short listing into a partial run. That last part is the lesson of #90: a fetch that
+quietly returns less than the source holds looks exactly like a successful one, and the suite that
+only ever asked a fake built out of the request could not tell them apart.
 
 Shaped after `collectors/naver/transport.py` (#182): one client per run, an injectable
 `httpx.BaseTransport` so tests drive whole runs without a socket, a per-source request budget, and
@@ -384,6 +386,10 @@ class DataApiClient:
         #: Video ids whose `videos.list` had to be retried without the owner-only part. Counted
         #: rather than inferred from: `notes()` is what puts it in the run's output.
         self.part_drops: list[str] = []
+        #: Every request this client has sent, charged the way `RequestBudget` charges them -- a
+        #: retry included, because a retry is another request Google served. `listing` reads the
+        #: delta across one walk and that is what reaches `artifacts.request_count` (#272).
+        self.requests_made = 0
         self._client = httpx.Client(
             base_url=DATA_API_HOST.rsplit("/youtube/v3", 1)[0],
             timeout=float(ROUTES[Route.DATA_API]["timeout_s"]),
@@ -408,6 +414,22 @@ class DataApiClient:
     # -- the listing routes ------------------------------------------------------------------------
 
     def listing(
+        self, kind: str, target: str, *, max_items: int | None = None, since: str | None = None
+    ) -> dict[str, Any]:
+        """The walk, and what the walk cost (#272).
+
+        The count is the delta of this client's own request counter, so it holds whatever the walk
+        happened to do -- the `channels.list` that resolves an uploads playlist and no more than
+        that for a `playlist.items` target, one per page however many pages there were, and a retry
+        if one was needed. Derived from the requests that went out rather than from the entries that
+        came back: a page that returned nothing still cost a unit, and the flat charge this replaces
+        was wrong in exactly that direction."""
+        before = self.requests_made
+        dump = self._listing(kind, target, max_items=max_items, since=since)
+        dump["request_count"] = self.requests_made - before
+        return dump
+
+    def _listing(
         self, kind: str, target: str, *, max_items: int | None = None, since: str | None = None
     ) -> dict[str, Any]:
         cap = MAX_LISTING_ITEMS if max_items is None else max_items
@@ -648,6 +670,10 @@ class DataApiClient:
 
     def _get(self, path: str, params: Mapping[str, Any]) -> dict[str, Any]:
         self._budget.charge(Route.DATA_API)
+        # After the charge and before the send: a request the budget refused never went out, and one
+        # that timed out did. The two counters therefore move together, which is what lets the day's
+        # bound and the run's budget speak about the same requests.
+        self.requests_made += 1
         try:
             response = self._client.get(path, params={**params, "key": self._key})
         except httpx.TimeoutException:

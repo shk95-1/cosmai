@@ -549,6 +549,7 @@ def _collect_one(
     payload: Any = _cached_payload(payloads, job, cached) if cached is not None else _MISS
     short: str | None = None
     route: str | None = None
+    request_count: int | None = None
     # A fresh artifact already answers this question -- no fetch, no new artifact row. This is what
     # keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in one
     # watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
@@ -563,6 +564,7 @@ def _collect_one(
             dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
             payload = _normalize(job.kind, dump)
             route = dump.get("fetch_route")
+            request_count = dump.get("request_count")
             short = _shortfall(dump) if job.kind in LISTING_KINDS else None
         except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
             code = _classify_error(error)
@@ -591,6 +593,10 @@ def _collect_one(
                     # #183: which source answered. Written here, from what the transport reported,
                     # and not guessed from the kind -- `video.metadata` takes either route.
                     fetch_route=route,
+                    # #272: what that fetch spent, when the route counted it. NULL where it did not,
+                    # which `quota.py` reads as "never asked" and falls back on -- writing 0 would
+                    # tell the day's bound this fetch sent no request at all.
+                    request_count=request_count,
                 )
             )
 
