@@ -960,7 +960,13 @@ youtube's `work` was added to this table on 2026-08-24 (before that there were t
 drained the queue). It is cron rather than a resident daemon because
 `collectors/youtube/cli.py:_run_work` is a batch that claims `DEFAULT_WORK_BATCH` at a time and stops —
 the repetition comes from outside. Overlapping runs are safe: `_claim` takes rows with a single
-`FOR UPDATE SKIP LOCKED` statement.
+`FOR UPDATE SKIP LOCKED` statement. Because that repetition is outside the process, **the Data API's
+daily bound cannot live inside one** (#259): `ROUTES.data_api.max_requests_per_run` bounds one of the
+288 invocations a day, and the day's own bound (`max_requests_per_day`) is read back out of
+`tubedepth.artifacts` at the start of every run (`collectors/youtube/quota.py`), against Google's
+quota day, which begins at midnight Pacific. A run that finds the day spent gets a Data API budget of
+zero, so its Data API jobs end `error_code='budget'` while the yt-dlp and timedtext jobs claimed
+beside them still run.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
 10 2 * * *  cosmai collect commerce --dataset product

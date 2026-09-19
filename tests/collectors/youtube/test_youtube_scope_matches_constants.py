@@ -58,6 +58,20 @@ def test_the_transport_constants_are_scope_json_verbatim():
     assert models.VIDEO_METADATA_ROUTE == on_disk["VIDEO_METADATA_ROUTE"]
     assert list(models.VIDEO_PARTS) == on_disk["VIDEO_PARTS"]
     assert models.ROUTES == on_disk["ROUTES"]
+    assert models.LISTING_REQUESTS_PER_WALK == on_disk["LISTING_REQUESTS_PER_WALK"]
+
+
+def test_the_data_api_declares_a_day_as_well_as_a_run():
+    """#259: `max_requests_per_run` bounds one cron invocation of `work` and there are 288 of them
+    in a day, so the one metered route needs a second number -- and the walk charge that the day's
+    spend is reconstructed with has to be a positive whole number of requests."""
+    from collectors.youtube.transport import Route
+
+    on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
+    data_api = on_disk["ROUTES"][Route.DATA_API.value]
+    assert data_api["max_requests_per_day"] > data_api["max_requests_per_run"]
+    walk = on_disk["LISTING_REQUESTS_PER_WALK"]
+    assert isinstance(walk, int) and not isinstance(walk, bool) and walk > 0
 
 
 def test_the_comment_window_is_a_positive_number_of_days_and_says_it_is_provisional():

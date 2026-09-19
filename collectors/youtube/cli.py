@@ -23,10 +23,11 @@ from typing import Any, Protocol
 import sqlalchemy as sa
 from sqlalchemy import Connection
 
-from collectors.youtube import flatten, queue, roster, sources, transport
+from collectors.youtube import flatten, queue, quota, roster, sources, transport
 from collectors.youtube.models import (
     COMMENT_REFETCH_WINDOW_DAYS,
     FRESHNESS,
+    VIDEO_METADATA_KIND,
     Dataset,
     JobState,
 )
@@ -535,11 +536,79 @@ def _collect_one(
     return _Collected(ok=True)
 
 
+def _bound_the_day(conn: Connection, fetcher: Fetcher, *, now: datetime) -> None:
+    """Hand this run what is left of the Data API's day before it claims anything (#259).
+
+    `max_requests_per_run` bounds one invocation and `work` is a cron line every five minutes, so
+    nothing in a process outlives the bound it kept. The day's spend is read from `artifacts` --
+    the row a fetch already writes -- and the run's Data API budget is lowered to what remains.
+    A run that finds the day spent gets a budget of zero, so its Data API jobs end as
+    `BudgetExhausted` (`error_code='budget'`), exactly as the per-run budget already ends them,
+    while the yt-dlp and timedtext jobs in the same batch are untouched."""
+    restrict = getattr(fetcher, "restrict_data_api", None)
+    if not callable(restrict):
+        # A fixture-backed fake spends no quota and needs no bound.
+        return
+    remaining = quota.remaining_requests(conn, now=now)
+    if remaining < int(transport.ROUTES[transport.Route.DATA_API]["max_requests_per_run"]):
+        # Only when the day is the binding number: printing it every run would bury the run that
+        # actually stopped.
+        print(
+            f"data_api: {remaining} request(s) left of the day's "
+            f"{quota.MAX_REQUESTS_PER_DAY} (since {quota.day_start(now).isoformat()})"
+        )
+    restrict(remaining)
+
+
+def _fresh_targets(conn: Connection, *, kind: str, targets: Sequence[str], now: datetime) -> set[str]:
+    """Which of these targets a fresh artifact already answers -- one set query, not one per job."""
+    if not targets:
+        return set()
+    return set(
+        conn.execute(
+            sa.select(artifacts.c.target).where(
+                artifacts.c.kind == kind,
+                artifacts.c.target.in_(list(targets)),
+                artifacts.c.fresh_until > now,
+            )
+        ).scalars()
+    )
+
+
+def _prefetch(conn: Connection, fetcher: Fetcher, claimed: Sequence[Any], *, now: datetime) -> None:
+    """Ask the fetcher for this batch's `video.metadata` targets in one go (#259).
+
+    The coalescing is here and not in the job model: one `videos.list` call takes up to 50 ids, and
+    the port issued one call per video -- 13,979 requests for a panel pass instead of 280, which is
+    5.6x the Data API's whole daily quota. The jobs stay one per video (`queue.py`'s claim, dedupe
+    and depth cap are per video, `payloads.put` stores one dump per job and
+    `sources.normalize_video_metadata` reads one `dump["id"]`), so what changes is only where the
+    request is made. A target already answered by a fresh artifact is left out: it spends no fetch,
+    and including it would cost the batch a slot that a video which does need one could have had.
+
+    Optional on the fetcher, the way `notes` is: a fixture-backed fake in the tests neither batches
+    nor needs to."""
+    prefetch = getattr(fetcher, "prefetch", None)
+    if not callable(prefetch):
+        return
+    targets = [job.target for job in claimed if job.kind == VIDEO_METADATA_KIND]
+    fresh = _fresh_targets(conn, kind=VIDEO_METADATA_KIND, targets=targets, now=now)
+    specs = [
+        FetchSpec(kind=VIDEO_METADATA_KIND, target=target)
+        for target in dict.fromkeys(targets)
+        if target not in fresh
+    ]
+    if specs:
+        prefetch(specs)
+
+
 def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
+    _bound_the_day(conn, fetcher, now=now)
     claimed = _claim(conn, limit=DEFAULT_WORK_BATCH, now=now)
     if not claimed:
         print("no queued jobs")
         return 0
+    _prefetch(conn, fetcher, claimed, now=now)
     outcomes: list[_Collected] = []
     blocked = False
     for index, job in enumerate(claimed):
