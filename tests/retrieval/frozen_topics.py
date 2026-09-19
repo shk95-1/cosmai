@@ -1,10 +1,15 @@
 """A **frozen copy** of the topic dictionary (2026-08-26, `analysis/retrieval/topics.py` as it stood just
-before the move).
+before the move), with the latin boundary re-frozen grouped (2026-09-19, fork #97).
 
 The literals here and `match_topics` are not touched. That there are **the same 15 topics, the same aliases
 and the same match results** after the source of topic expansion moved from constants to
 `needs.aspect_lexicon` is proved by `test_topics.py` against this copy -- because the measured search table
 of `contracts/interfaces.md` (six mode x engine lines) stands on that equivalence.
+
+`_latin_pattern` below is the **one** thing that moved since. It is the record of the matcher those six rows
+were scored under, so it was left ungrouped while they still stood on the ungrouped answer key; the rows
+were rescored with the grouped matcher on 2026-09-19, and this copy was re-frozen with them in the same
+change. The dictionary literals stay v1 -- the alias axis is `test_lexicon_v3.py`'s ledger, not this one.
 """
 
 from __future__ import annotations
@@ -181,7 +186,8 @@ def _latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
     if not terms:
         return None
     alts = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
-    return re.compile(rf"(?<![A-Za-z]){alts}(?![A-Za-z])", re.IGNORECASE)
+    # Grouped, or the lookbehind binds only the first term and the lookahead only the last (fork #97).
+    return re.compile(rf"(?<![A-Za-z])(?:{alts})(?![A-Za-z])", re.IGNORECASE)
 
 
 _LATIN = {t["topic"]: _latin_pattern(t["latin"]) for t in TOPICS}

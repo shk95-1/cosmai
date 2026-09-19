@@ -9,6 +9,9 @@ quietly becomes an old table.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import psycopg
 import pytest
 from sqlalchemy.engine import make_url
@@ -93,21 +96,40 @@ def test_matching_agrees_with_the_frozen_constant():
             ), text
 
 
-# Strings on which the frozen copy and the live matcher are *meant* to part since fork #97. CORPUS above
-# holds none of them, so the agreement test was green over an empty set the moment the live pattern was
-# grouped -- a comparison that preserves every property it checks while the thing it guards has moved.
-PARTING = ["CAPA", "spa pack", "papa recipe", "xUVAx"]
+# Text in which no SPF, PA, UVA or UVB stands as a word. CORPUS above holds none of it, so the agreement
+# test cannot see the latin boundary at all -- it stayed green through both the grouping of the live pattern
+# and the re-freeze of the copy.
+GUARDED = ["CAPA", "spa pack", "papa recipe", "xUVAx"]
+# The same terms standing as words. Without this half, a frozen copy re-frozen to a pattern that matches
+# nothing would satisfy the half above.
+STANDALONE = ["SPF50+ PA++++", "UVA/UVB", "pa rating", "(uvb)"]
+# The one axis on which the two still part, so the agreement above is not read as "the two are one thing":
+# three of the aliases fork #56 added, whose ledger is `test_lexicon_v3.py`. They are kept as data under
+# `fixtures/`, and only ones the frozen copy does not already catch on a shorter alias are listed.
+LEDGER: dict[str, str] = json.loads(
+    (Path(__file__).parent / "fixtures" / "frozen_live_ledger.json").read_text(encoding="utf-8")
+)
 
 
-def test_the_frozen_copy_and_the_live_matcher_part_exactly_where_fork_97_says():
-    """The frozen copy is deliberately left ungrouped: it is the record of the matcher the six mode x engine
-    rows of `contracts/interfaces.md` were measured under, and re-freezing it before those rows are rescored
-    would erase the reference they stand on. So the difference is asserted instead of hidden -- the frozen
-    copy still reads `SPF_PA` in text where no SPF, PA, UVA or UVB stands as a word, and the live matcher
-    reads nothing. Re-freeze this file in the change that re-measures the six rows (fork #97)."""
-    for text in PARTING:
-        assert "SPF_PA" in frozen_topics.match_topics(text, include_excluded=True), text
+def test_the_frozen_copy_reads_the_latin_boundary_the_way_the_six_rows_were_rescored():
+    """The copy was left ungrouped while the six mode x engine rows of `contracts/interfaces.md` still stood
+    on the ungrouped answer key -- it is the record of the matcher they were scored under. They were rescored
+    with the grouped matcher (fork #97, 2026-09-19) and this copy was re-frozen in the same change, so the
+    two now read the boundary alike: neither finds `SPF_PA` inside a word, both find it beside one."""
+    for text in GUARDED:
+        assert "SPF_PA" not in frozen_topics.match_topics(text, include_excluded=True), text
         assert "SPF_PA" not in topics.match_topics(text, include_excluded=True), text
+    for text in STANDALONE:
+        assert "SPF_PA" in frozen_topics.match_topics(text, include_excluded=True), text
+        assert "SPF_PA" in topics.match_topics(text, include_excluded=True), text
+
+
+def test_the_frozen_copy_and_the_live_matcher_still_part_on_the_aliases_fork_56_added():
+    """The re-freeze left exactly one difference standing. Asserting it keeps the agreement above from
+    becoming a comparison of the copy with itself -- the dictionary literals here are still v1."""
+    for text, topic in LEDGER.items():
+        assert topic in topics.match_topics(text, include_excluded=True), text
+        assert topic not in frozen_topics.match_topics(text, include_excluded=True), text
 
 
 def test_the_queries_and_the_expansion_words_are_the_ones_the_constant_gave():

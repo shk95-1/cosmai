@@ -602,7 +602,7 @@ cosmai retrieval ask    --query <q> [--engine <e>] [--source <s>]... [--top <n>]
   the run's note.
 - **`--vectors` means the same thing in all three subcommands** (the vector store path). `--out` is used by `eval` alone and means the score CSV.
 - **The default `--engine bm25` is the criterion for the literal purpose** — in heldout, bm25 is P@10 0.000
-  and Hit 0% while vector is 0.062 and 25%, but in literal bm25 is the highest at P@10 0.864 (all six lines
+  and Hit 0% while vector is 0.058 and 21.7%, but in literal bm25 is the highest at P@10 0.864 (all six lines
   are `contracts/interfaces.md` §Retrieval measurements). The default for the exploratory purpose is decided
   in fork issue #11.
 - **`ask` summarizes retrieval results; it is not a verdict** (fork #73, ydc `rag/generate.py`). The same
