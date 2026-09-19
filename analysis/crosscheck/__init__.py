@@ -212,12 +212,19 @@ class KeyAudit:
     products: int
     names: tuple[tuple[str, int], ...] = ()
     denied: tuple[str, ...] = ()
+    denied_run_on: tuple[tuple[str, str], ...] = ()
 
     @property
     def suspect(self) -> bool:
         """Did it catch an ingredient name a person checked once and forbade. 0 rows is absence rather than a
         mismatch, so it passes."""
         return bool(self.denied)
+
+    @property
+    def unparsed(self) -> bool:
+        """Did the forbidden substance arrive only inside a run-on lump. Then it is the parse that failed
+        and not the key, and `run_on_list` says so in the key's place (fork #103)."""
+        return bool(self.denied_run_on)
 
 
 @dataclass(frozen=True)
@@ -251,6 +258,10 @@ class Ingredients:
     @property
     def suspects(self) -> tuple[KeyAudit, ...]:
         return tuple(audit for audit in self.audits if audit.suspect)
+
+    @property
+    def unparsed(self) -> tuple[KeyAudit, ...]:
+        return tuple(audit for audit in self.audits if audit.unparsed)
 
 
 def ranks(values: Mapping[str, float]) -> dict[str, int]:
@@ -462,6 +473,22 @@ def audit(
     for key, terms in table.items():
         hit = [(product, name) for product, name in rows if matches(name, terms)]
         names = Counter(name for _product, name in hit)
+        # **The gate must be as wide as the matcher.** Asked as an exact match it would not see the
+        # suffixed forms the matcher caught as a substring (`... (1%)` · `...(0.04 ppm)`), and 4 of the
+        # production table's 7 rows of the substance DENIED_FOR names are already that suffixed form.
+        #
+        # The same width, asked of ingredient **names** only. A run-on lump is a whole list of
+        # substances in one string, so a forbidden substance inside it says nothing about what this key
+        # catches -- both can be there without the key having caught the forbidden one. That case is
+        # carried by `denied_run_on` against the product, not by this key's `denied` (fork #103).
+        denied = denied_in(key, [name for name in names if not run_on(name)])
+        lumps = {
+            (bad, product)
+            for product, name in hit
+            if run_on(name)
+            for bad in denied_in(key, (name,))
+            if bad not in denied
+        }
         made.append(
             KeyAudit(
                 key=key,
@@ -469,10 +496,8 @@ def audit(
                 rows=len(hit),
                 products=len({product for product, _name in hit}),
                 names=tuple(names.most_common(top)),
-                # **게이트는 매처와 같은 폭이어야 한다.** 완전 일치로 물으면 매처가 부분문자열로
-                # 잡은 `트라이에톡시카프릴릴실레인 (1%)` 나 `레티놀(0.04 ppm)` 을 게이트가 못 본다 --
-                # 운영 표의 `레티놀` 7행 중 4행이 이미 그런 접미사형이다.
-                denied=denied_in(key, names),
+                denied=denied,
+                denied_run_on=tuple(sorted(lumps)),
             )
         )
     return tuple(made)

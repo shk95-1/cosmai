@@ -429,6 +429,15 @@ def build(
         f"{crosscheck.denial_reason(audit.key, audit.denied[0])}"
         for audit in ingredients.suspects
     ]
+    # Still a violation, and still exit 1: a value printed in the ingredient-name column is not an
+    # ingredient name, so the ingredient block is not whole. What it must not do is blame the key --
+    # the substance and the key term merely share one unsplit list (fork #103).
+    violations += [
+        f"run_on_list {audit.key} caught {bad} inside {product} -- that ingredient list is separated by "
+        f"whitespace alone, so the lump is a list rather than a name and the parse is what failed"
+        for audit in ingredients.unparsed
+        for bad, product in audit.denied_run_on
+    ]
     violations += [
         f"group_map_drift {group} -> {topic} is not on the active topic axis"
         for group, topic in crosscheck.GROUP_MAP.items()

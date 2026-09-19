@@ -1,0 +1,12 @@
+{
+  "_source": "trend_radar.product oliveyoung A000000232098, read-only 2026-09-19: a 3,224-character ingredient string with 8 commas, so one parsed 'name' is a whole shade's list. The value below is an abridged excerpt of that lump, word order preserved (fork #103).",
+  "run_on_list": "2-헥산다이올 합성플루오르플로고파이트 피이지-10다이메티콘 병풀잎추출물 마그네슘설페이트 스테아릭애씨드 알루미나 알루미늄하이드록사이드 트라이에톡시카프릴릴실레인 옥틸도데칸올 토코페롤 향료 마이카 정제수 티타늄디옥사이드 다이메티콘 다이카프릴릴카보네이트 나이아신아마이드",
+  "product_key": "A000000232098",
+  "cica_key": "시카센텔라",
+  "niacinamide_key": "나이아신아마이드",
+  "denied": "트라이에톡시카프릴릴실레인",
+  "cica_alias": "시카",
+  "plain_denied_name": "트라이에톡시카프릴릴실레인 (1%)",
+  "plain_cica_name": "병풀추출물",
+  "comma_list": "정제수, 트라이에톡시카프릴릴실레인 (1%), 병풀추출물, 나이아신아마이드(20,000 ppm)"
+}

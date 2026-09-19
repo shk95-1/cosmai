@@ -8,9 +8,19 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from analysis import crosscheck
 
 ANY_REASON = crosscheck.DENIED_FOR["레티날"]["레티놀"]
+# The Korean strings of fork #103 live in a fixture because tool/checks/lang rejects an added Hangul
+# line outside tests/**/fixtures/. The values are the production lump, abridged (see its `_source`).
+RUN_ON = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "crosscheck" / "run_on_list.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 # 우리 표에서 그대로 뜬 성분명들. 오매칭을 재현하는 데 필요한 만큼만 든다.
 OURS = (
@@ -181,6 +191,50 @@ def test_talk_is_matched_on_the_raw_text_not_on_folded_words():
     assert crosscheck.matches("나이아신아마이드 (20,000 ppm)", ("나이아신아마이드",))
     assert not crosscheck.mentions_term("선크림 콜라 겐 없이", ("콜라겐",))
     assert crosscheck.mentions_term("콜라겐 좋아요", ("콜라겐",))
+
+
+def test_a_run_on_lump_is_not_blamed_on_the_key_that_caught_it():
+    """One production product's whole ingredient string is separated by whitespace, so a parsed "name"
+    is a list of dozens of substances. Both the key term and the forbidden substance sit inside that one
+    lump, and the key is not what is wrong -- the parse is (fork #103)."""
+    lump = RUN_ON["run_on_list"]
+    assert crosscheck.run_on(lump), "the fixture has to be a lump or this test asks nothing"
+    keys = {key: crosscheck.INGREDIENT_KEYS[key] for key in (RUN_ON["cica_key"], RUN_ON["niacinamide_key"])}
+    audits = crosscheck.audit([(RUN_ON["product_key"], lump)], keys=keys)
+    for row in audits:
+        assert row.rows == 1, row.key
+        assert not row.suspect, "a lump is not an ingredient name, so it is not this key's mismatch"
+        assert row.denied == ()
+        assert row.denied_run_on == ((RUN_ON["denied"], RUN_ON["product_key"]),), row.key
+
+
+def test_a_genuinely_wrong_key_is_still_a_key_mismatch_beside_a_run_on_lump():
+    """Re-adding the two-character alias must still be caught. The lump standing beside the real name
+    must not quiet it -- that is the accident this gate exists for."""
+    alias = RUN_ON["cica_alias"]
+    rows = [
+        (RUN_ON["product_key"], RUN_ON["run_on_list"]),
+        ("p1", RUN_ON["plain_denied_name"]),
+    ]
+    (bad,) = crosscheck.audit(rows, keys={alias: (alias,)})
+    assert bad.rows == 2 and bad.suspect
+    assert bad.denied == (RUN_ON["denied"],)
+    assert bad.denied_run_on == (), "the substance is already named by key_mismatch, so it is not said twice"
+
+
+def test_nothing_the_matcher_brings_in_escapes_the_gate():
+    """**The gate stays as wide as the matcher.** Splitting the report in two must not drop a substance
+    on the floor: every forbidden name the matcher's own width finds is in one of the two lists."""
+    rows = [
+        (RUN_ON["product_key"], RUN_ON["run_on_list"]),
+        ("p1", RUN_ON["plain_denied_name"]),
+        ("p1", RUN_ON["plain_cica_name"]),
+    ]
+    for row in crosscheck.audit(rows):
+        caught = [name for _product, name in rows if crosscheck.matches(name, row.terms)]
+        assert set(crosscheck.denied_in(row.key, caught)) == set(row.denied) | {
+            bad for bad, _product in row.denied_run_on
+        }, row.key
 
 
 def test_the_audited_catch_list_is_self_consistent():
