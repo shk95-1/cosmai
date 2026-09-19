@@ -47,6 +47,25 @@ FINISHED_STATES = (JobState.SUCCEEDED.value, JobState.FAILED.value, JobState.CAN
 # the data (a month of history is what artifacts.fresh_until ever needed), not reinvented here.
 PRUNE_MAX_AGE_DAYS = 30
 
+#: Rows per table in one prune batch, and one batch is one transaction (#279).
+#:
+#: 500 is `flatten.DEFAULT_BATCH_SIZE`, and for the same reason: it is the size at which the work in
+#: one transaction is measured in hundreds of milliseconds. A batch costs two statements -- the paired
+#: delete, and one anti-join that hashes ~42k artifacts and ~335k jobs once -- so the number that
+#: matters is not how many rows it deletes but how long the transaction holds their locks. At 500 the
+#: transaction is an order of magnitude inside `statement_timeout=15s` and two inside
+#: `transaction_timeout=60s`, which is where the old whole-backlog transaction died.
+PRUNE_BATCH_SIZE = 500
+
+#: How many batches one pass may run before it leaves the rest to tomorrow's pass (#279).
+#:
+#: 40 x 500 is 20,000 artifacts and 20,000 finished jobs a night. Production's first real backlog is
+#: 5,457 expired artifacts, so tonight drains in one pass with room to spare; the cap is for the
+#: pathological case (a backfill multiplying the payload volume), where an uncapped pass would run
+#: for hours and still be running when the next cron tick arrives. Nothing is lost by stopping: the
+#: rows and their files are still there, and the next pass starts where this one left off.
+PRUNE_MAX_BATCHES = 40
+
 #: How long a claim may sit `running` before the next pass takes it back (#277). Since the claim is
 #: now committed before the first fetch, a worker killed outright leaves its jobs `running` and
 #: nothing else was coming for them.
@@ -131,7 +150,11 @@ def run(
             # batch. The role kills a transaction at 60s and an idle-in-transaction session at 30s,
             # and a connection is idle in transaction for exactly as long as a fetch takes.
             return _run_work(engine, payloads, fetcher, now=now)
-        prune_result: PruneResult | None = None
+        if wanted is Dataset.PRUNE:
+            # The engine, not a connection: #279, and the same reasoning as `work` above. One
+            # transaction per batch keeps every one of them far inside `transaction_timeout=60s`,
+            # where a single transaction over the whole backlog crossed it and rolled the pass back.
+            return _run_prune(engine, payloads, now=now)
         with engine.begin() as conn:
             if wanted is Dataset.WATCH:
                 return _run_watch(
@@ -141,18 +164,7 @@ def run(
                     roster_url=roster_url,
                     read_roster=read_roster,
                 )
-            if wanted is Dataset.FLATTEN:
-                return _run_flatten(conn, payloads, now=now)
-            prune_result = _run_prune(conn, now=now)
-        # Row deletes just committed above (the `with` block exited); only now is it safe to unlink
-        # files -- a file delete can't roll back, so doing it before commit would strand rows over an
-        # orphan file on any later failure in the same transaction.
-        removed_files = sum(payloads.delete(kind, digest) for kind, digest in prune_result.orphaned)
-        print(
-            f"pruned {prune_result.removed_artifacts} artifact(s), "
-            f"{prune_result.removed_jobs} finished job(s), {removed_files} payload file(s)"
-        )
-        return 0
+            return _run_flatten(conn, payloads, now=now)
     finally:
         engine.dispose()
 
@@ -814,54 +826,115 @@ def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> 
     return 1 if report.errors else 0
 
 
-@dataclass
-class PruneResult:
+@dataclass(frozen=True, slots=True)
+class PruneBatch:
     removed_artifacts: int
     removed_jobs: int
     orphaned: list[tuple[str, str]]
 
 
-def _run_prune(conn: Connection, *, now: datetime) -> PruneResult:
-    # `payloads.put(job.kind, payload)` (see _collect_one) means an `artifacts` row and a `jobs` row
-    # can name the *same* file by the same (kind, digest) pair -- a cached artifact is reused across
-    # several jobs' payload_digest. So "still referenced" has to check both tables, not just the one
-    # whose row this prune pass is deleting.
+def _run_prune(engine: Engine, payloads: PayloadStore, *, now: datetime) -> int:
     cutoff = now - timedelta(days=PRUNE_MAX_AGE_DAYS)
-    stale_artifacts = conn.execute(
-        sa.select(artifacts.c.kind, artifacts.c.digest).where(artifacts.c.fetched_at < cutoff)
-    ).all()
-    stale_jobs = conn.execute(
-        sa.select(jobs.c.kind, jobs.c.payload_digest).where(
-            jobs.c.state.in_(FINISHED_STATES),
-            jobs.c.finished_at < cutoff,
-            jobs.c.payload_digest.is_not(None),
+    removed_artifacts = removed_jobs = removed_files = 0
+    drained = False
+    for _ in range(PRUNE_MAX_BATCHES):
+        with engine.begin() as conn:
+            batch = _prune_one_batch(conn, cutoff=cutoff)
+        # The batch's transaction just committed (the `with` block exited); only now is it safe to
+        # unlink -- a file delete can't roll back, so doing it first would strand rows over an orphan
+        # file on any later failure in the same transaction.
+        removed_files += sum(payloads.delete(kind, digest) for kind, digest in batch.orphaned)
+        removed_artifacts += batch.removed_artifacts
+        removed_jobs += batch.removed_jobs
+        if not batch.removed_artifacts and not batch.removed_jobs:
+            drained = True
+            break
+    print(
+        f"pruned {removed_artifacts} artifact(s), {removed_jobs} finished job(s), "
+        f"{removed_files} payload file(s)"
+    )
+    if not drained:
+        print(f"the per-pass cap of {PRUNE_MAX_BATCHES} batches stopped this pass; the next one continues")
+    return 0
+
+
+def _prune_one_batch(conn: Connection, *, cutoff: datetime) -> PruneBatch:
+    """Two statements, whatever the batch holds. The pair is what makes the pass's cost a property of
+    the number of batches rather than of the candidate count: the deletes name their own candidates
+    back, and one anti-join then asks the whole set at once which of them nothing names any more."""
+    deleted = conn.execute(_delete_a_batch(cutoff)).all()
+    removed_artifacts = sum(1 for row in deleted if row.from_artifacts)
+    candidates = sorted({(row.kind, row.digest) for row in deleted if row.digest is not None})
+    orphaned: list[tuple[str, str]] = []
+    if candidates:
+        orphaned = [(row.kind, row.digest) for row in conn.execute(_orphans_among(candidates)).all()]
+    return PruneBatch(
+        removed_artifacts=removed_artifacts,
+        removed_jobs=len(deleted) - removed_artifacts,
+        orphaned=orphaned,
+    )
+
+
+def _delete_a_batch(cutoff: datetime) -> sa.CompoundSelect:
+    """One statement: both deletes, capped at PRUNE_BATCH_SIZE rows each, handing back the (kind,
+    digest) pairs they removed. RETURNING is what replaces the two full scans the old pass ran up
+    front to collect its candidates."""
+    doomed_artifacts = (
+        sa.delete(artifacts)
+        .where(
+            artifacts.c.identifier.in_(
+                sa.select(artifacts.c.identifier)
+                .where(artifacts.c.fetched_at < cutoff)
+                .limit(PRUNE_BATCH_SIZE)
+            )
         )
-    ).all()
-    candidates = {(row.kind, row.digest) for row in stale_artifacts} | {
-        (row.kind, row.payload_digest) for row in stale_jobs
-    }
+        .returning(artifacts.c.kind, artifacts.c.digest)
+        .cte("doomed_artifacts")
+    )
+    doomed_jobs = (
+        sa.delete(jobs)
+        .where(
+            jobs.c.identifier.in_(
+                sa.select(jobs.c.identifier)
+                .where(jobs.c.state.in_(FINISHED_STATES), jobs.c.finished_at < cutoff)
+                .limit(PRUNE_BATCH_SIZE)
+            )
+        )
+        .returning(jobs.c.kind, jobs.c.payload_digest)
+        .cte("doomed_jobs")
+    )
+    return sa.union_all(
+        sa.select(sa.true().label("from_artifacts"), doomed_artifacts.c.kind, doomed_artifacts.c.digest),
+        sa.select(sa.false(), doomed_jobs.c.kind, doomed_jobs.c.payload_digest),
+    )
 
-    removed_artifacts = conn.execute(sa.delete(artifacts).where(artifacts.c.fetched_at < cutoff)).rowcount
-    removed_jobs = conn.execute(
-        sa.delete(jobs).where(jobs.c.state.in_(FINISHED_STATES), jobs.c.finished_at < cutoff)
-    ).rowcount
 
-    orphaned = [(kind, digest) for kind, digest in candidates if not _still_referenced(conn, kind, digest)]
-    return PruneResult(removed_artifacts=removed_artifacts, removed_jobs=removed_jobs, orphaned=orphaned)
+def _orphans_among(candidates: list[tuple[str, str]]) -> sa.Select[tuple[str, str]]:
+    """The batch's pairs that no surviving row names any more.
 
+    `payloads.put(job.kind, payload)` (see _collect_one) means an `artifacts` row and a `jobs` row can
+    name the *same* file by the same (kind, digest) pair -- a cached artifact is reused across several
+    jobs' payload_digest -- so both tables are asked, on both columns. The pair is the unit and always
+    has been: one body stored under two kinds is one digest and two files, and only the kind whose
+    last row just went away loses its file.
 
-def _still_referenced(conn: Connection, kind: str, digest: str) -> bool:
-    """Same transaction as the deletes above, so this sees post-delete state -- a survivor row (a
-    different job/artifact that happens to name the same payload) is exactly what must keep the file."""
-    in_artifacts = conn.execute(
-        sa.select(sa.literal(1)).where(artifacts.c.kind == kind, artifacts.c.digest == digest).limit(1)
-    ).first()
-    if in_artifacts is not None:
-        return True
-    in_jobs = conn.execute(
-        sa.select(sa.literal(1)).where(jobs.c.kind == kind, jobs.c.payload_digest == digest).limit(1)
-    ).first()
-    return in_jobs is not None
+    A separate statement rather than another CTE beside the deletes: every part of one statement reads
+    the same snapshot, so an anti-join sitting next to the deletes would still see the rows they are
+    removing. Here it runs after them, in the same transaction, and sees what actually survives.
+    """
+    candidate = sa.values(
+        sa.column("kind", sa.String), sa.column("digest", sa.String), name="candidate"
+    ).data(candidates)
+    return sa.select(candidate.c.kind, candidate.c.digest).where(
+        ~sa.select(sa.literal(1))
+        .where(artifacts.c.kind == candidate.c.kind, artifacts.c.digest == candidate.c.digest)
+        .exists()
+        .correlate(candidate),
+        ~sa.select(sa.literal(1))
+        .where(jobs.c.kind == candidate.c.kind, jobs.c.payload_digest == candidate.c.digest)
+        .exists()
+        .correlate(candidate),
+    )
 
 
 __all__ = ["run", "Fetcher", "FetchSpec"]
