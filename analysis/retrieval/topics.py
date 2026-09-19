@@ -29,6 +29,9 @@ RULESET = "retrieval-topic"
 # MFDS ingredient name) is not used for matching -- its spellings do not overlap YouTube speech (0 measured),
 # so including it grows noise rather than matches.
 KINDS = ("ko", "latin", "mfds_inci")
+# The matching code's revision, which the dictionary fingerprint cannot see; bump it on every change to how a
+# term matches (1 = the ungrouped latin alternation ydc also had, 2 = grouped, fork #97).
+MATCHER_VERSION = 2
 DICTIONARY_CSV = Path(__file__).resolve().parent / "dict" / "topics_v1.csv"
 FIX = f"`cosmai lexicon load --kind aspect --version <n> {DICTIONARY_CSV.name}` 뒤 `activate`"
 
@@ -92,7 +95,8 @@ def latin_pattern(terms: Sequence[str]) -> re.Pattern[str] | None:
     if not terms:
         return None
     alts = "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True))
-    return re.compile(rf"(?<![A-Za-z]){alts}(?![A-Za-z])", re.IGNORECASE)
+    # Grouped, or the lookbehind binds only the first term and the lookahead only the last (fork #97).
+    return re.compile(rf"(?<![A-Za-z])(?:{alts})(?![A-Za-z])", re.IGNORECASE)
 
 
 def _flag(value: Any, where: str) -> bool:

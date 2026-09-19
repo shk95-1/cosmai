@@ -1757,6 +1757,12 @@ alongside as a version.
   together.
 
 
+**Fork #97's latin grouping moves the answer key the six rows above were scored against.** Over all 386,685
+chunks (2026-09-12) the `SPF_PA` key is 789 documents ungrouped and 706 grouped, none lost; the six rows
+score each engine against a per-engine scope (`analysis/retrieval/eval.py`), so this bounds the change
+rather than stating it per row. **The six rows remain a record of the ungrouped matcher** until they are
+measured again, and `tests/retrieval/frozen_topics.py` stays ungrouped with them.
+
 ### Matcher difference between the two lineages (fork #96, 2026-09-12, production archive read-only)
 The archive's 13,979 videos re-matched with dictionary v3 against the mentions ydc stored at collection time,
 over the 13 `trend_use` topics: **9,534 (topic, document) pairs matched by both, 0 by ydc only, 77 by ours
@@ -1767,8 +1773,9 @@ not; 13,902 of 13,979 documents (99.4%) carry an identical topic set.
 collection-time matcher and `analysis/retrieval/topics.py` before fork #97 compiled the `latin` alternation
 ungrouped, so the word boundary guarded only its first and last term: over the same videos 101 of the 382
 documents `SPF_PA` matches are false positives (`spa pack`, `papa recipe`). `SPF_PA`'s identical sets (384 ·
-0 · 0) are that shared defect, not agreement on the truth. After #97 groups the alternation the measurement is
-re-run and `SPF_PA` is expected near 101 ydc-only — a real lineage difference. Either way the conclusion of
+0 · 0) are that shared defect, not agreement on the truth. Re-run after fork #97 grouped the alternation (2026-09-12, `MATCHER_VERSION` 2): **9,433 by both, 101
+by ydc only, 77 by ours only** — all 101 are `SPF_PA` (283 · 101 · 0), the false positives ydc's matcher
+carried, and no other topic moved. Either way the conclusion of
 #93 D0 stands and is stronger for it: the archive's mentions carry what its matcher saw, false positives
 included, and re-matching them would restate a published quarter.
 
