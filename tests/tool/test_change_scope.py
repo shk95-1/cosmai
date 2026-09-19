@@ -24,12 +24,22 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLASSIFIER = REPO_ROOT / "tool" / "change_scope.py"
+UNREACHABLE_CHECK = REPO_ROOT / "tool" / "checks" / "unreachable-tests"
 CARRIED = (
     "tests/scope.toml",
     "tool/invariants.py",
     "tool/checks/invariants",
     "tool/checks/prerequisite",
 )
+
+# The single definition of "unreachable on purpose" (#261). `tool/change_scope.py --unreachable
+# --check` reads this constant out of this file by name, so the sweep that runs on every push and
+# the guard below cannot drift apart -- and the sweep does not restate three filenames in shell.
+ALLOWED_UNREACHABLE = {
+    "tests/test_conftest_guard.py",
+    "tests/test_lineage_reader_grants.py",
+    "tests/test_no_orphaned_test_files.py",
+}
 
 
 @pytest.fixture
@@ -649,9 +659,66 @@ def test_an_ordinary_basename_still_matches_by_name_not_only_path():
 def test_unreachable_names_no_more_than_the_three_files_it_named_before():
     module = _load_real_module()
     unreachable = set(module.unreachable_tests(REPO_ROOT))
-    before = {
-        "tests/test_conftest_guard.py",
-        "tests/test_lineage_reader_grants.py",
-        "tests/test_no_orphaned_test_files.py",
-    }
-    assert unreachable <= before, unreachable
+    assert unreachable <= ALLOWED_UNREACHABLE, unreachable
+
+
+# ---------------------------------------------------------------------------------------------
+# #261: the guard above could not run on the commit that breaks it -- a commit that only adds a
+# test file earns class B or C, and neither class selects this file. `tool/checks/unreachable-tests`
+# is the same sweep as a check that runs in every class, and these two cases drive that real
+# entrypoint against a throwaway repository.
+# ---------------------------------------------------------------------------------------------
+
+
+def seed_allowlist(repo: Path) -> None:
+    """The fixture carries the allowlist the way this checkout does -- as the module constant the
+    check reads by name -- so both cases below measure the real reader and not a stand-in.
+    """
+    write(repo, "tests/tool/test_change_scope.py", f"ALLOWED_UNREACHABLE = {sorted(ALLOWED_UNREACHABLE)!r}\n")
+
+
+def sweep(repo: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(UNREACHABLE_CHECK)],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+    )
+
+
+def test_the_gate_runs_the_sweep_outside_the_class_dispatch():
+    # The whole point is that no class can skip it, so where the call sits IS the invariant: at the
+    # left margin (inside no branch) and above the case that picks what this class runs. Moved into
+    # an arm, it would be back to the hole #261 closed -- B and C are the classes that never reach
+    # tests/tool/test_change_scope.py, and they are the classes a test-only commit earns.
+    lines = (REPO_ROOT / "tool" / "checks" / "test").read_text(encoding="utf-8").splitlines()
+    call = [i for i, line in enumerate(lines) if line == "tool/checks/unreachable-tests"]
+    assert call, "tool/checks/test no longer runs the sweep"
+    dispatch = [i for i, line in enumerate(lines) if line == 'case "$change_class" in']
+    assert dispatch, "tool/checks/test no longer contains the expected anchor: the class dispatch"
+    assert call[0] < dispatch[0], lines[dispatch[0] : call[0] + 1]
+
+
+def test_a_commit_that_only_adds_an_unmapped_test_file_fails_the_sweep(repo: Path):
+    seed_allowlist(repo)
+    write(repo, "tests/test_x.py", "def test_x():\n    assert 1\n")
+    commit(repo, "a test nothing maps")
+    done = sweep(repo)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "tests/test_x.py" in done.stderr, done.stderr
+    assert "tests/scope.toml" in done.stderr, done.stderr
+
+
+def test_the_same_commit_with_the_mapping_added_passes_the_sweep(repo: Path):
+    seed_allowlist(repo)
+    write(repo, "tests/test_x.py", "def test_x():\n    assert 1\n")
+    scope = repo / "tests" / "scope.toml"
+    mapped = scope.read_text(encoding="utf-8").replace(
+        "\n[map]\n", '\n[map]\n"x/" = ["tests/test_x.py"]\n', 1
+    )
+    scope.write_text(mapped, encoding="utf-8")
+    commit(repo, "the same test, mapped")
+    done = sweep(repo)
+    assert done.returncode == 0, done.stdout + done.stderr
