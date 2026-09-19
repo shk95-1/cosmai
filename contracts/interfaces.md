@@ -1661,15 +1661,15 @@ alongside as a version.
 | mode | engine | queries | P@10 | MRR@10 | Hit@10 |
 |---|---|---|---|---|---|
 | literal | bm25 | 61 | .864 | .893 | 91.8% |
-| literal | vector | 61 | .618 | .785 | 91.8% |
+| literal | vector | 61 | .615 | .770 | 90.2% |
 | literal | hybrid | 61 | .839 | .911 | 95.1% |
 | heldout | bm25 | 60 | .000 | .000 | 0.0% |
-| heldout | vector | 60 | .062 | .114 | 25.0% |
-| heldout | hybrid | 60 | .025 | .029 | 8.3% |
+| heldout | vector | 60 | .058 | .095 | 21.7% |
+| heldout | hybrid | 60 | .023 | .027 | 6.7% |
 - **The adoption condition is heldout's bm25 row: P@10 > .000.** The answer key in heldout is a document of
   the same topic that carries not one query token, so lexical search is structurally 0, and that 0 is the
   line the vector side has to clear (the two modes are defined in `analysis/retrieval/eval.py`). vector
-  cleared it at .062 · Hit 25.0% and hybrid at .025 · 8.3% — **the grounds for adopting the vector side are
+  cleared it at .058 · Hit 21.7% and hybrid at .023 · 6.7% — **the grounds for adopting the vector side are
   this one row, and this table is where that number lives.**
 - literal is not performance but **fault detection**. The answer key itself was made by string matching, so
   bm25 winning is normal (.864), and if this collapses the tokenisation is broken (the dictionary not
@@ -1715,7 +1715,7 @@ alongside as a version.
 - **The two bm25 rows are not values on that version.** bm25 does not open the vector store — what literal
   `.864` and heldout `.000` stand on is the corpus of 381,950 chunks and the active topic dictionary, and
   being on a different axis from the vector version they must not be read side by side. Only the heldout
-  vector `.062` that becomes the adoption criterion is a value on the store above.
+  vector `.058` that becomes the adoption criterion is a value on the store above.
 - This version **was not written by the rows themselves** — the six raw-value CSVs of the time had no
   version column at all (that is the place fork #49 fixed), and what is recorded here was tied by the
   comparison that the manifest's `count` equals the chunk count in the table's header. From the next
@@ -1755,13 +1755,22 @@ alongside as a version.
   needed. **Measuring this table again is not something this issue did** — the six rows stay a record of the
   v1 version, and a remeasurement stands on raw values that carry the `dictionary` and `store` columns
   together.
+  Fork #97 later rescored the rows on the same v1 footing with the grouped matcher (2026-09-19, the
+  paragraph below); the dictionary they record is still v1.
 
 
-**Fork #97's latin grouping moves the answer key the six rows above were scored against.** Over all 386,685
-chunks (2026-09-12) the `SPF_PA` key is 789 documents ungrouped and 706 grouped, none lost; the six rows
-score each engine against a per-engine scope (`analysis/retrieval/eval.py`), so this bounds the change
-rather than stating it per row. **The six rows remain a record of the ungrouped matcher** until they are
-measured again, and `tests/retrieval/frozen_topics.py` stays ungrouped with them.
+**Fork #97's latin grouping moved the answer key the six rows above are scored against, and the rows were
+rescored under it (2026-09-19).** Same footing as before: the v1 dictionary, the four encoded sources'
+381,950 chunks, the same store (`intfloat/multilingual-e5-base`, 381,950 vectors). On that scope the `SPF_PA`
+key is 637 documents ungrouped and 554 grouped (789 and 706 over all 386,685 chunks), the same 83 documents,
+none lost. With the ungrouped matcher the earlier rows reproduce (365 of 366 score rows identical); grouped,
+**only `SPF_PA`'s five query rows move, in every engine**: literal/vector was .618 · .785 · 91.8%,
+heldout/vector .062 · .114 · 25.0%, heldout/hybrid .025 · .029 · 8.3%. The bm25 rows keep their scores
+because `bm25.tokenize` never reads the topic pattern, and literal/hybrid moves below its third digit. The
+adoption condition holds: heldout bm25 is still .000 and the vector side still clears it.
+`tests/retrieval/frozen_topics.py` is re-frozen grouped with the rows. Crosscheck and holdout were
+re-measured with both matchers on the same day: holdout moves in neither arm, and in crosscheck `SPF_PA`
+alone moves (comments 0.55% → 0.39%, transcripts 2.12% → 2.05%), so no number either section quotes changes.
 
 ### Matcher difference between the two lineages (fork #96, 2026-09-12, production archive read-only)
 The archive's 13,979 videos re-matched with dictionary v3 against the mentions ydc stored at collection time,
