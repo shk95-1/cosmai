@@ -1268,7 +1268,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   keys both catch counts under each, 392 in all): the confirmed list's full 190 are still caught (0 `gone`),
   202 are `new` (164 plain names, 38 run-on lists), 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
   means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool (fork #107).
-  Re-measured 2026-09-20 with fork #105's bound: of 3,403 distinct names the same 368 are caught and every
+  Re-measured the same day with fork #105's bound: of 3,403 distinct names the same 368 are caught and every
   per-key line is unchanged — the 500 recovered names are caught by no key.
 - **Three rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
@@ -1282,7 +1282,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   into one. Production had exactly one such list of 372 — a colourant written with a truncated CI number at
   the end of its line — and it cost 500 names, 6,360 characters standing as a single name. An unclosed `(`
   now costs at most the name it sits in; a `)` with no `(` costs nothing, as it already did (7 lists carry
-  at least one, up to 15). Measured 2026-09-20: all 364 balanced lists parse byte-identically and only that one list moves. A
+  at least one, up to 15). Measured 2026-09-19: all 364 balanced lists parse byte-identically and only that one list moves. A
   length threshold was not used: the longest real name holding a parenthesis is 67 characters, but 35
   balanced run-on lists carry parentheses too, up to 473, so no length separates the two.
 - **A discourse count must not be read as "sunscreen discourse".** Counted over the whole index, it holds
@@ -1327,7 +1327,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   the audit has 0 suspicions, and reviving the bare cica alias on today's table still catches 890 rows, 882 of
   them plain names, so `key_mismatch` still fires on a wrong key. The commerce side has grown since the block
   below: 372 products with an ingredient list (was 180) · 62,834 ingredient rows (was 22,705) · 3,403
-  distinct names (was 2,051) — these two re-measured 2026-09-20 with fork #105's bound, 62,334 and 3,402
+  distinct names (was 2,051) — these two re-measured later the same day with fork #105's bound, 62,334 and 3,402
   before it. One run is 27.3 seconds · 154MB peak resident.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
@@ -1339,8 +1339,8 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
 - Ingredients: **0** audit suspicions (on the corrected keys, no key catches the forbidden list). The values
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
-  **On 2026-09-20, with fork #105's bound in place, that is 150 rows of 62,834 (125 distinct names, 43
-  products)** — one of the 151 rows of 2026-09-19 was the list an unclosed `(` had swallowed. The count grows with the
+  **On 2026-09-19, with fork #105's bound in place, that is 150 rows of 62,834 (125 distinct names, 43
+  products)** — one of the 151 rows measured earlier that day was the list an unclosed `(` had swallowed. The count grows with the
   collection, which is why such a list is counted rather than split.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
