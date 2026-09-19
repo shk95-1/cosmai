@@ -1225,6 +1225,16 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   looks at the original text, so all it can really catch is a folding artefact (`pdrn` against `PDRN`).
   `시카` in fact **satisfies** that rule — 트라이에톡시카프릴릴실레인 really does contain `시카` inside it.
   What caught it was not a rule but **a person reading the names it printed**.
+- **A forbidden substance found only inside a run-on list is not that key's mismatch (fork #103).** A list
+  separated by whitespace alone stays one lump (it is not split: real names carry spaces, and a split would
+  manufacture fragment names and break the blending order `FORMULA_HOLD` is kept for), and a lump holds
+  dozens of substances — a key term and a forbidden substance sharing a lump says nothing about what the key
+  caught. The gate below is still asked at the matcher's width, but of ingredient **names**: a forbidden
+  substance that arrives only inside a lump is reported as **`run_on_list`**, naming the key, the substance
+  and the product, and it is still exit code 1, because a value in the ingredient-name column that is not a
+  name means the block is not whole. Everything the matcher brings in lands in one of the two
+  (`denied` or `denied_run_on`), and a test holds that. It is scoped this narrowly on purpose: on the
+  2026-08-27 table it produces 0 lines, so that record's exit code 0 stands.
 - **So the machine gate is a list a person read once and forbade.** Catching on that list is `key_mismatch`
   and exit code 1 (§entrypoints). Catching 0 rows is an absence rather than a mismatch, so it passes —
   `레티날`·`PDRN`·`엑소좀`·`트라넥삼산` are in that seat in our table. The forbidding has two layers:
@@ -1287,12 +1297,17 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   **11.3 seconds** (keyset pages of 20,000 rows with a commit per page — the same method as
   `gold_from_chunks` in `analysis/retrieval/eval.py`, and for the same reason). The three commerce-side
   queries are each under 0.4 seconds.
-- **Current state (2026-09-19, read-only, topic dictionary v3, fork #102):** the document counts are the
-  same (comments 285,735 · transcripts 5,303 · titles 5,908 · reviews 6,349) and the two composition rows
-  this section quotes read commerce **9.74%** against comments **1.54%** — still sixfold. **The run is
-  `partial` (exit code 1)**: the ingredient audit reports two `key_mismatch` lines where this record has 0,
-  and a `partial` output is not to be trusted as a whole. The cause is tracked in fork issue #103; the block
-  below stays the last trusted full measurement until that closes.
+- **Current state (2026-09-19, read-only, topic dictionary v3, fork #102 · #103):** the document counts are
+  the same (comments 285,735 · transcripts 5,303 · titles 5,908 · reviews 6,349) and the two composition rows
+  this section quotes read commerce **9.74%** against comments **1.54%** — still sixfold. The run is
+  **`partial` (exit code 1)** on two `run_on_list` lines, both from one product: `oliveyoung`
+  `A000000232098` writes a 3,224-character ingredient list whose only 8 commas sit inside one diol's name, so
+  each parsed "name" is a whole shade's list, and the cica/centella key and the niacinamide key each find
+  their term in the same lump as the forbidden silane dispersant. **No key is mismatched**: without the lumps
+  the audit has 0 suspicions, and reviving the bare cica alias on today's table still catches 890 rows, 882 of
+  them plain names, so `key_mismatch` still fires on a wrong key. The commerce side has grown since the block
+  below: 372 products with an ingredient list (was 180) · 62,334 ingredient rows (was 22,705) · 3,402
+  distinct names (was 2,051). One run is 27.3 seconds · 154MB peak resident.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
   **9.80%** against comments 1.55%.
@@ -1303,6 +1318,8 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
 - Ingredients: **0** audit suspicions (on the corrected keys, no key catches the forbidden list). The values
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
+  **On 2026-09-19 that is 151 rows of 62,334 (126 distinct names, 43 products)** — the count grows with the
+  collection, which is why such a list is counted rather than split.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
 **The promoted source is not the import pin** (`v0.4.0` `76db718`, `versioning.md`) — `cross_source.py` had its

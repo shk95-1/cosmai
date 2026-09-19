@@ -834,6 +834,9 @@ cosmai trend crosscheck [--url <url>]
   suncare product in the ranking (`cosmai collect commerce`) are the same place — there is no source to
   crosscheck yet). **All eight branches** are one of the code's `NoPopulation`·`NoCrosscheck`·`NoDictionary`,
   and the message says which.
+- `partial` has a third line since fork #103: **`run_on_list`** — the forbidden substance was found only
+  inside an ingredient list written with whitespace and no commas, so the "name" is a whole list and what
+  failed is the parse, not the key. It names the product and is exit code 1 like the other two.
 - **"The sources disagree" is not a 1.** That is the **finding** this command exists to give, not a failure
   of the run, and in the common convention at the top of this file a 1 means "the output is not whole" —
   **the same place and the same sentence** as "shaking is not a 1" in §Sensitivity and backtest above and
