@@ -55,6 +55,16 @@ does to the run, in the exit codes above:
 - **a blog `start` past 1000** — never requested (#110): the ceiling is the vendor's own and
   independent of `total`, so the walk stops there rather than spending budget on an error.
 
+**The vendor's quota is not what binds naver collection (#110).** NAVER's own ceilings, confirmed by
+the user 2026-08-26 — **Search API (blog) 25,000/day** (`scope.BLOG_DAILY_QUOTA`; 775,000/month
+converted) and **DataLab family 50,000/month each** (`scope.DATALAB_MONTHLY_QUOTA`) — match the
+search-APIs (775,000/month) and search-trend (50,000/month) figures the API Hub docs give further
+below, and sit far above today's use (`keywords.json`: 2 datalab requests, 45 blog requests a run).
+What actually binds is the `start` ceiling in the bullet above:
+**`BLOG_START_MAX` (1000)** is a vendor hard limit independent of `total`, so one query cannot see
+past 1,000 results no matter how much quota is left. Widening blog collection therefore means
+**splitting the query** (period, sort, keyword granularity), not calling more.
+
 Two gaps this transport still has, recorded here because a reader of `collector_health` would
 otherwise mis-read the numbers: a **charged retry writes no `naver_fetch_log` row** today (one row
 per request, with a hard-coded 200 and no `elapsed_ms`), so `requests` under-reports and `p90_ms`
