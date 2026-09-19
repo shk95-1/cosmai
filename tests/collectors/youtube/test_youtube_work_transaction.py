@@ -30,6 +30,7 @@ from sqlalchemy.engine import make_url
 from collectors.youtube import cli, transport
 from collectors.youtube.cli import FetchSpec, run
 from collectors.youtube.models import ROUTES, JobState
+from collectors.youtube.storage import db as storage_db
 from collectors.youtube.storage.tables import artifacts, jobs
 from collectors.youtube.transport import Route
 
@@ -89,32 +90,57 @@ class _SlowDumps:
             raise transport.Unavailable(f"nothing saved for {spec.target}", route=Route.DATA_API) from None
 
 
+#: Every backend of this collector's that holds an open transaction **on this test's own schema**.
+#:
+#: `application_name` alone is cluster-wide, and under `-n 4` it also answers for whatever another
+#: worker's youtube test is doing: `flatten` runs one transaction per batch with a SAVEPOINT per
+#: artifact and reads a payload file from disk inside it, so a backend of somebody else's sits idle
+#: in transaction for seconds at a time. Measured 2026-09-19 on main at 0a6fcbe, before #272 was
+#: written: this file beside test_youtube_pg_load.py and test_youtube_flatten_cursor.py under `-n 3`
+#: failed 1 run in 5 that way, and the whole suite failed it on some orderings and not others (#272).
+#:
+#: `pg_locks` is what narrows it, because a relation oid belongs to one schema and each test has its
+#: own: a transaction that claimed a job holds a lock on *this* schema's `jobs`, and another
+#: worker's pass holds locks on its own. The defect under test is a transaction held across the
+#: fetch *after* the claim, so it always holds one; the test below proves this query can still see
+#: one rather than leaving that to the flag.
+_OPEN_TRANSACTIONS = """
+SELECT DISTINCT activity.state
+FROM pg_stat_activity activity
+JOIN pg_locks lock_row ON lock_row.pid = activity.pid
+JOIN pg_class relation ON relation.oid = lock_row.relation
+JOIN pg_namespace namespace ON namespace.oid = relation.relnamespace
+WHERE activity.application_name = :app
+  AND activity.xact_start IS NOT NULL
+  AND namespace.nspname = :schema
+"""
+
+
+def _open_transactions(probe_url: str, schema: str) -> list[str]:
+    engine = sa.create_engine(probe_url)
+    try:
+        with engine.connect() as conn:
+            return list(
+                conn.execute(
+                    sa.text(_OPEN_TRANSACTIONS), {"app": APPLICATION_NAME, "schema": schema}
+                ).scalars()
+            )
+    finally:
+        engine.dispose()
+
+
 class _AsksWhatTheServerSees:
     """Instant, but it asks `pg_stat_activity` from a connection of its own at the moment a route
     would be on the network -- both in `prefetch` (#259's batched `videos.list`) and in `fetch`."""
 
-    def __init__(self, dumps: dict[tuple[str, str], dict[str, Any]], *, probe_url: str) -> None:
+    def __init__(self, dumps: dict[tuple[str, str], dict[str, Any]], *, probe_url: str, schema: str) -> None:
         self._dumps = dict(dumps)
         self._probe_url = probe_url
+        self._schema = schema
         self.open_transactions: list[list[str]] = []
 
     def _probe(self) -> None:
-        engine = sa.create_engine(self._probe_url)
-        try:
-            with engine.connect() as conn:
-                self.open_transactions.append(
-                    list(
-                        conn.execute(
-                            sa.text(
-                                "SELECT state FROM pg_stat_activity "
-                                "WHERE application_name = :app AND xact_start IS NOT NULL"
-                            ),
-                            {"app": APPLICATION_NAME},
-                        ).scalars()
-                    )
-                )
-        finally:
-            engine.dispose()
+        self.open_transactions.append(_open_transactions(self._probe_url, self._schema))
 
     def prefetch(self, specs: list[FetchSpec]) -> None:
         del specs
@@ -234,13 +260,29 @@ def test_one_slow_job_does_not_cost_the_batch_the_jobs_behind_it(tubedepth_schem
     assert all(state == "succeeded" for state, _code in rows.values()), rows
 
 
+def test_the_probe_still_sees_a_transaction_this_schema_does_hold(tubedepth_schema: str, _schema_name: str):
+    """What makes the empty answer below mean anything (#272). The probe is scoped to one schema so
+    that another worker's pass is not read as this collector's, and a scope that had gone too narrow
+    would answer "no transaction is open" to every question, including the one this file exists to
+    ask."""
+    engine = storage_db.create_engine(tubedepth_schema)
+    try:
+        with engine.begin() as conn:
+            conn.execute(sa.select(sa.func.count()).select_from(jobs))
+            assert _open_transactions(tubedepth_schema, _schema_name) == ["idle in transaction"]
+    finally:
+        engine.dispose()
+
+
 def test_the_server_sees_no_transaction_of_this_collectors_while_a_route_is_on_the_network(
-    tubedepth_schema: str, tmp_path: Path
+    tubedepth_schema: str, _schema_name: str, tmp_path: Path
 ):
     """Asked of `pg_stat_activity` rather than of the code: at the moment `prefetch` (#259's batched
     `videos.list`) and `fetch` are called, no backend of this collector's holds a transaction."""
     _queue(tubedepth_schema, tmp_path, SLOW, NEIGHBOUR)
-    fetcher = _AsksWhatTheServerSees(_metadata_dumps(SLOW, NEIGHBOUR), probe_url=tubedepth_schema)
+    fetcher = _AsksWhatTheServerSees(
+        _metadata_dumps(SLOW, NEIGHBOUR), probe_url=tubedepth_schema, schema=_schema_name
+    )
 
     assert _work(tubedepth_schema, tmp_path, fetcher) == 0
 
