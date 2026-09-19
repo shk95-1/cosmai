@@ -9,13 +9,23 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from db.seed.pipeline import STAGES
+from db.seed.pipeline import STAGES as UPSTREAM_STAGES
+from db.seed.pipeline_corpus import STAGES as FORK_STAGES
 
 CRONTAB_DIR = Path(__file__).resolve().parents[1] / "stack" / "crontab.d"
 
-# There are only the two shapes `cosmai collect <arm> --dataset <ds>` and `cosmai analyze <ds>`.
+# Both declaration modules, because the crontab is one file set and cannot be held against half of it.
+# `pipeline_corpus.py` is the fork's share of the same two tables (fork #94) and stayed out of this
+# test while every row in it was `enabled=False` with no cron line; fork #95's `project:corpus` has a
+# line, so leaving it out would report that line as "in cron but not declared".
+STAGES = UPSTREAM_STAGES + FORK_STAGES
+
+# Four command shapes: `cosmai collect <arm> --dataset <ds>`, `cosmai analyze <ds>`, `cosmai project <ds>`
+# and `cosmai match <ds>` (fork #96's gated live chain, named by its first stage).
 COLLECT = re.compile(r"cosmai\s+collect\s+(\S+)\s+--dataset\s+(\S+)")
 ANALYZE = re.compile(r"cosmai\s+analyze\s+(\S+)")
+PROJECT = re.compile(r"cosmai\s+project\s+(\S+)")
+MATCH = re.compile(r"cosmai\s+match\s+(\S+)")
 
 
 def cron_lines() -> list[tuple[str, str]]:
@@ -40,6 +50,10 @@ def stage_key_of(command: str) -> str:
     """
     if m := COLLECT.search(command):
         return f"{m.group(1)}:{m.group(2)}"
+    if m := PROJECT.search(command):
+        return f"project:{m.group(1)}"
+    if m := MATCH.search(command):
+        return f"match:{m.group(1)}"
     m = ANALYZE.search(command)
     assert m, f"알 수 없는 크론 명령: {command}"
     sub = m.group(1)
@@ -81,8 +95,9 @@ def test_declared_interval_matches_the_cron_expression():
 
 
 def test_the_only_disabled_stage_is_the_one_a_gate_names():
-    # One stage is off on purpose: youtube:watch, behind a compose profile (STATE.md §2, restored by
-    # #39). naver:datalab came back with #90's anchor -- its cron line is live again. Another stage
-    # going quiet without an issue behind it is met here.
-    off = {s.stage_key for s in STAGES if not s.enabled}
+    # One upstream stage is off on purpose: youtube:watch, behind a compose profile (STATE.md §2,
+    # restored by #39). naver:datalab came back with #90's anchor -- its cron line is live again.
+    # Another stage going quiet without an issue behind it is met here. The fork's disabled rows are
+    # answered by tests/test_archive_lineage.py, which knows which issue each one waits on.
+    off = {s.stage_key for s in UPSTREAM_STAGES if not s.enabled}
     assert off == {"youtube:watch"}, off

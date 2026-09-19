@@ -20,7 +20,8 @@ seconds.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any, LiteralString
 
 import psycopg
@@ -113,6 +114,16 @@ SELECT c.parent_item_id, md5(c.text) AS digest, m.topic_id
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
 
 DECLARED = "True"  # the corpus carried a Python bool as a string (source_metadata)
+# Every video document of the snapshot, not the population above: the role split is a property of the
+# collection, and a topic-filtered long-form subset is too small to ask it of (fork #96).
+AD_MARKING: LiteralString = f"""
+SELECT p.panel_role, count(*),
+       count(*) FILTER (WHERE d.source_metadata ->> 'has_paid_product_placement' = %(declared)s)
+  FROM corpus_document d
+  JOIN panel_channel p ON p.channel_id = d.channel_id AND p.version = %(panel_version)s AND p.active
+ WHERE d.snapshot_id = %(snapshot)s AND d.source = '{VIDEO}'
+ GROUP BY 1
+"""  # noqa: S608
 
 
 class NoBaseline(LookupError):
@@ -127,6 +138,7 @@ class Loaded:
     frame: Frame
     snapshot_id: int
     stored: tuple[MetricsTopicQuarterRow, ...]
+    ad_marking: Mapping[str, tuple[int, int]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -302,6 +314,8 @@ def load(
         videos = _videos(cur, params)
         reactions = _reactions(cur, params)
         stored = _stored(cur, run_id, version)
+        cur.execute(AD_MARKING, {"snapshot": snapshot, "panel_version": version, "declared": DECLARED})
+        ad_marking = {str(role): (int(videos), int(marked)) for role, videos, marked in cur.fetchall()}
     conn.commit()
     if not stored:
         raise NoBaseline(f"run {run_id} has no metrics_topic_quarter row to be sensitive about")
@@ -311,6 +325,7 @@ def load(
         frame=Frame(run_id=run_id, scope=scope, content_type=CONTENT_TYPE, panel_version=version),
         snapshot_id=snapshot,
         stored=tuple(stored),
+        ad_marking=ad_marking,
     )
 
 
@@ -352,6 +367,8 @@ def build(
             f"thin_backtest - {len(back.rows)} directional cell(s) over {len(back.cutoffs)} cutoff(s); "
             f"fewer than {MIN_CASES} is not a backtest"
         )
+    if split := sensitivity.ad_marking_split(read.ad_marking):
+        violations.append(split)
     return Built(
         run_id=read.frame.run_id,
         snapshot_id=read.snapshot_id,

@@ -233,6 +233,60 @@ the archive snapshot empties the surface for its duration rather than answering 
 carry no CHECK, because the instrument grows with the collector and a vocabulary frozen in DDL costs a
 migration per knob.
 
+### The long/short rule (fork #95, from ydc v0.4.0 `76db718`)
+`content_type` is derived from the video's duration by one rule shared by the archive path and the live
+path: a blank or unparseable `duration_seconds` is `video_unknown`, `seconds <= 60` is `video_short`, and
+anything longer is `video_long`. **The comparison is inclusive.** 611 of the archive's 13,979 videos have a
+duration of exactly 60, so an exclusive `< 60` moves every one of them out of `video_short`, changes every
+`composition`, and fails to reproduce the reported split of `video_long` 7,085 · `video_short` 6,888 ·
+`video_unknown` 6 — a split the rule was verified against 13,979/13,979 before it was used. The unparseable
+branch is kept although `tubedepth.video_snapshots.duration_seconds` is `integer NULL` and can never take
+it: without it `video_unknown` quietly becomes "NULL only", and the 6 archive rows it names are live streams
+the agreement excludes from both series.
+
+### The live lineage's documents (fork #95, from #93 D1 · D2)
+`project:corpus` projects `tubedepth.video_snapshots` and `tubedepth.comments` for the active panel roster
+into `needs.corpus_document` under the live snapshot, `ON CONFLICT DO NOTHING` on
+`(snapshot_id, source, source_item_id)`, so `collected_at` is the first observation that carries both `source_metadata` and a description, and never moves; current
+view and like counts stay in `tubedepth`, where they are current.
+
+**`source_metadata` is copied, not rebuilt.** The video side is the upstream column read as text and handed
+back to jsonb without being parsed into Python values, because re-assembly is the step the archive's
+spelling is lost in. The comment side has no column to copy and is built from the archive's seven keys in
+the archive's spelling — a Python-repr boolean (`is_reply` is the string `"False"`), jsonb `null` for a
+value nobody could tell us (never the string `"None"`), and a key that is always null kept present
+(`parent_comment_id`, while the reply relationship lives in the `parent_item_id` column). Each of those
+three is a way a rebuilt object diverges with no error raised and a measurement changed.
+
+A video is projected only once its `source_metadata` is present: a listing row has none, and the conflict
+clause would make that emptiness permanent. `quality_flags` carries exactly one value, `empty_text` before
+`duplicate_in_parent`, because every consumer matches the column exactly.
+
+**The live video `text` is `youtube_video_text(title, description)`** — ydc's `video_text()` rule, imported
+from `analysis/retrieval/corpus.py` rather than restated — recorded on the snapshot as `instrument.text_parts
+= ["title", "description"]`. A video whose only flattened rows have a NULL `description` (flattened before DDL
+`tubedepth/006`) is deferred like one without `source_metadata`, and `undescribed_videos` counts it: written
+then, the conflict clause would freeze a title-only text, which carries 915 of the archive's 3,534 topic hits
+(25.9%). `description = ''` is an observation — the uploader wrote none — and is projected. **A snapshot that
+already records different `text_parts` is refused, not relabelled** (exit 2), and so is one that records none
+but already holds documents, whose text then has no provenance at all; an empty snapshot with no record is
+simply stamped: its documents keep the text they were written with, so stamping the new parts over the old
+would erase the only record that the snapshot is thin, and fork #96's gate reads that record. Recovery is a
+delete of that snapshot's documents and a re-run, cheap only while `active` is false and no mentions have been
+written against it.
+
+**The live lineage's mentions (fork #96).** `match:topic` writes the live snapshot's `corpus_mention` from
+`corpus_document` with `match_topics` on the active `retrieval-topic` dictionary — all 15 topics, `trend_use`
+as the dictionary says (manifest rule 7). `span_start` is a **0-based character offset into the stored
+`text`** and `matched_term` is the dictionary's own spelling of the term — the archive's convention, verified
+on all 105,358 of its mentions — and both are derived from the **same** test that decided the match: the
+lower-cased substring for `ko` terms, the compiled boundary pattern for `latin` terms. A span taken by a looser
+rule than the match can point inside a word the match rejected. The dictionary's version and fingerprint are
+merged into `instrument` (`dictionary_version`, `dictionary_fingerprint`), with the matching code's
+`matcher_version` (`analysis.retrieval.topics.MATCHER_VERSION`, fork #97); when any of the three differs, that
+snapshot's mentions are deleted under the stage's own run and matched again, never mixed. An archive snapshot
+is refused before any delete is issued.
+
 ### What a comment row keeps of its author (fork #92, from #91 decision 3)
 A comment row stores the author's channel identifier **only** as `source_metadata.author_channel_hash`: the
 first 24 characters, lower-case hex, of `sha256("youtube:" + channel_id)`. The function is named once, in

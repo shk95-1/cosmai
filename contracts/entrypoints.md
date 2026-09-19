@@ -425,6 +425,36 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   to run the owner's pass over that month again, and until then the evidence that stays is the `rewriting=`
   marker still attached to the dead run's note.
 
+### `cosmai project corpus` — the live lineage's documents (fork #95)
+```
+cosmai project corpus [--cutoff <instant>] [--url <url>]
+```
+It reads `tubedepth.video_snapshots` · `listing_entries` · `comments` for the active panel roster and writes
+`needs.corpus_document` and one `needs.corpus_snapshot` row under the live lineage. **Neither the snapshot
+nor the roster is an argument** — the live snapshot is resolved from its label and the roster is the active
+version, for the same reason `trend quarter` takes neither. `--cutoff` defaults to now and is recorded in
+`analysis_run.versions.cutoff`; the same cutoff gives the same answer, which is what replaces a frozen copy
+(#93 D2). It never writes `corpus_snapshot.active`, and it refuses an archive snapshot outright.
+
+Exit codes: **0** ok · **1** partial — `needs.author_identifier_violation` says something about the rows
+*this run* wrote; they stand, but their meaning differs from the contract · **2** blocked — connection
+refused, no active roster, nothing flattened to project yet, or an archive snapshot named. Exit 1 and exit 2
+are indistinguishable to supercronic, so the operator's signal for blocked is the stdout line.
+
+### `cosmai match topic` — the gated live analysis chain (fork #96)
+```
+cosmai match topic [--cutoff <instant>] [--url <url>]
+```
+Runs `match:topic` → `trend quarter` → `judge` → `evidence` on the active snapshot's id with one cutoff (default
+now, recorded in `analysis_run.versions.cutoff`); every stage is handed that id and none re-reads `active`.
+**It is gated**: exit **2** (blocked, the reason on stdout, nothing written) unless the active snapshot's
+`lineage = 'live'` **and** its `instrument.text_parts` contains `description`. The first condition exists
+because `trend quarter` reads the active snapshot, which is the archive until the coordinator switches it —
+ungated, a nightly line would reopen the archive's run and recompute it. The second is upstream
+shk95-1/cosmai#264: a title-only live text carries 25.9% of the archive's topic hits. Also exit 2 when a stage
+is blocked, with the stages already reported keeping their rows; **1** partial · **0** ok. `trend quarter`
+run by hand is unchanged.
+
 ## Search (#28 → fork cosmai-import-ydc, upstream PR #59)
 ```
 cosmai retrieval chunk  [--since <date>] [--source <s>]...
@@ -867,6 +897,13 @@ cosmai trend holdout [--url <url>]
   answer on the issue.
 
 ## Schedule (stack/crontab.d/, UTC)
+- `match:topic` runs nightly at `50 3 * * *` (`stack/crontab.d/analyze`) as `cosmai match topic`, and exits 2 every night until its gate passes — that is the gate working, and since exit 1 and exit 2 look alike to supercronic the stdout line is the signal. **Its T is unmeasured**; a first and a second run are timed by hand once the gate passes, together with one dictionary re-match.
+- `project:corpus` runs hourly at `:41` (`stack/crontab.d/analyze`). **Its T is unmeasured**: the first pass
+  runs over the pre-cutover backlog and every pass after it over one flatten hour's increment, and those are
+  not the same number. Each pass re-reads every panel video and comment and re-issues the no-op inserts the
+  conflict clause discards, so "almost nothing" describes what is *written*, not what is *read*. The
+  coordinator times the first two passes by hand before the stack is recreated and the interval is confirmed
+  or moved from those numbers.
 The rule for the commerce lines is not "avoid minute 0" but **the gap between two adjacent lines is wider
 than the earlier line takes**. That duration is not written here as a number — it comes out of the code.
 `engine.collect` runs the sources that declare that dataset (and `--board`) **concurrently, one lane per

@@ -57,6 +57,10 @@ STAGES = (
     ("youtube:watch", "youtube", "watch", "1 hour", False),  # disabled -- even with a recent success
     ("analyze:all", "analyze", "all", "1 hour", True),
     ("analyze:polarity_missing", "analyze", "polarity_missing", "1 hour", True),
+    # fork #95's projection. Its run note carries the snapshot id, so the view folds a prefix rather
+    # than an exact stage name -- without that branch this row would read 'never' for as long as the
+    # stage ran correctly, which is the one answer a health view must not give.
+    ("project:corpus", "analyze", "corpus", "1 hour", True),
 )
 
 # (collector, dataset, started, finished, status, requests, ok, blocked, failed, queued, p90)
@@ -93,6 +97,9 @@ ANALYSIS_ROWS = (
     ("trend-quarter:v0.2:선블록", ago(minutes=2), ago(minutes=2), "ok", "trend-quarter:v0.2"),
     # A polarity run without missing= is not an incremental pass.
     ("analyze:polarity:rule-v2.2", ago(minutes=3), ago(minutes=3), "ok", "analyze:polarity:rule-v2.2"),
+    # The projection of a snapshot other than 1 -- the id is part of the stage name and must not stop
+    # it reaching its declared stage_key.
+    ("project-corpus:snapshot2", ago(minutes=10), ago(minutes=9), "ok", "project-corpus:snapshot2"),
 )
 
 COLUMNS = (
@@ -236,6 +243,15 @@ def test_the_two_analyze_lines_are_told_apart_by_the_note_not_the_stage(health: 
     incremental = health["analyze:polarity_missing"]
     assert incremental["freshness"] == "stalled"  # a success 3 hours ago, a period of 1 hour
     assert incremental["requests"] is None  # the analysis arm has no external fetch statistics
+
+
+def test_the_projection_reaches_its_stage_whatever_snapshot_its_note_names(health: dict[str, Any]):
+    """The note is 'project-corpus:snapshot<id>', so an exact match would answer for snapshot 2 alone
+    and the row would go quiet the day the live lineage got a second snapshot."""
+    projected = health["project:corpus"]
+    assert projected["freshness"] == "ok"  # a success 9 minutes ago against a period of an hour
+    assert projected["last_run_status"] == "ok"
+    assert projected["requests"] is None  # no external fetch, the same as the other analysis rows
 
 
 def test_runs_that_are_not_cron_stages_are_ignored(health: dict[str, Any]):

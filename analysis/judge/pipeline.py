@@ -18,8 +18,8 @@ from typing import Any, LiteralString
 
 import psycopg
 
-from analysis.judge import JUDGEMENT_VERSION, UNJUDGED, judge
-from analysis.trend.pipeline import CONTENT_TYPE, PANEL_ROLE, SCOPE, note_of
+from analysis.judge import JUDGEMENT_VERSION, UNJUDGED, judge, quarter_of
+from analysis.trend.pipeline import CONTENT_TYPE, PANEL_ROLE, RUN_CUTOFF, SCOPE, cutoff_of, note_of
 from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
 from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
@@ -135,19 +135,21 @@ def build(
             raise NoJudgement("no active panel roster; run `python -m db.seed --only panel` first")
         if snapshot is None:
             raise NoJudgement("no active corpus snapshot; run `python -m db.corpus load <dir>` first")
-        cur.execute(FIND_RUN, (note_of(scope, snapshot, version),))
+        cur.execute(RUN_CUTOFF, (note_of(scope, snapshot, version),))
         found = cur.fetchone()
         if found is None:
             raise NoJudgement(
                 f"no quarter run for {scope!r} on snapshot {snapshot}; run `cosmai trend quarter`"
             )
         run_id = int(found[0])
+        cutoff = cutoff_of(found[1])
         metrics = _metric_rows(cur, run_id, scope, version, panel_role)
     conn.commit()
 
     if not metrics:
         raise NoJudgement(f"run {run_id} has no metrics_topic_quarter row to judge")
-    return Built(run_id, snapshot, version, judge(metrics))
+    in_progress = quarter_of(cutoff) if cutoff is not None else None
+    return Built(run_id, snapshot, version, judge(metrics, in_progress=in_progress))
 
 
 def _values(row: TopicQuarterJudgementRow) -> tuple[Any, ...]:

@@ -21,7 +21,7 @@ from psycopg import sql as pgsql
 from sqlalchemy import create_engine, text
 
 from analysis.judge import THIN
-from analysis.trend.pipeline import note_of
+from analysis.trend.pipeline import SCOPE, note_of
 from db import seed
 from db.seed import pipeline, pipeline_corpus
 from db.seed._common import connect
@@ -285,6 +285,31 @@ def test_the_archive_surface_is_empty_when_no_snapshot_is_marked_archive(
         assert cur.fetchone() == (0,)
 
 
+def test_note_of_still_reproduces_the_note_production_carries():
+    """`FIND_RUN` reopens a run by **exact note match**, so `note_of()` must keep reproducing the
+    string run 23 was written with — byte for byte.
+
+    Production's archive run carries `trend-quarter:v0.2:<scope>:snapshot1:panel1` and always will:
+    #93 D0 says the archive is read and never recomputed, so nothing rewrites it. Add a segment to
+    `note_of()` — `content_type` is the one shk95-1/cosmai#200 raises — and the next
+    `cosmai trend quarter` against snapshot 1 does not find run 23. It opens a **new** run, and
+    `needs.archive_run`'s `strpos(':snapshot1:panel')` still matches that new note, so
+    `ORDER BY started_at DESC` hands the archive surface to a freshly computed run. The three
+    archive views then answer from a computation instead of from the observation, and **nothing
+    raises**: the row counts may even be identical.
+
+    The other fixtures here build their notes with `note_of()` so the grammar follows its writer,
+    which is right for them and blind to exactly this — they would move with the change and keep
+    passing. This one is the frozen side of the same coupling. The scope is imported rather than
+    spelled because it is Korean corpus data (`tool/checks/lang`); everything else is a literal on
+    purpose, and that is what has no room for an inserted segment.
+
+    If `note_of()` genuinely must change, this test is the place that says what else has to move:
+    run 23's identity, and `needs.archive_run`'s ordering assumption.
+    """
+    assert note_of(SCOPE, ARCHIVE, PANEL_VERSION) == "trend-quarter:v0.2:" + SCOPE + ":snapshot1:panel1"
+
+
 def test_no_archive_view_writes_anything():
     """`#94`'s must-hold: the views read. A view cannot write, so what is asked is that none of these
     files carries a statement that would."""
@@ -320,11 +345,23 @@ def test_every_stage_is_in_the_graph_and_every_edge_names_a_declared_stage():
 
 def test_every_store_is_a_table_this_checkout_declares():
     """The same question tests/test_pipeline_edge.py asks of upstream's edges, asked of the fork's --
-    a store key is a contract only while a table of that name exists here."""
+    a store key is a contract only while a table of that name exists here.
+
+    The source schemas are read too since fork #95: `project:corpus` reads three `tubedepth` tables,
+    and those are declared by the baseline dump under contracts/ddl/current/ rather than by a
+    `CREATE TABLE needs.` line. Left out, an edge naming a table nobody has would stay green.
+    """
     declared = {
         f"needs.{name}"
         for path in sorted((ROOT / "contracts" / "ddl" / "needs").glob("*.sql"))
         for name in re.findall(r"CREATE TABLE needs\.(\w+)", path.read_text(encoding="utf-8"))
+    }
+    declared |= {
+        name
+        for path in sorted((ROOT / "contracts" / "ddl" / "current").glob("app.*.sql"))
+        for name in re.findall(
+            r"CREATE TABLE (?:IF NOT EXISTS )?([A-Za-z_][\w.]*)", path.read_text(encoding="utf-8")
+        )
     }
     assert STORES <= declared, sorted(STORES - declared)
 
@@ -338,10 +375,14 @@ def test_every_arm_is_one_the_stage_table_accepts():
     assert {s.arm for s in pipeline_corpus.STAGES} <= vocabulary
 
 
-def test_the_corpus_lineage_stages_are_all_disabled():
-    """The archive ran once and never runs again (#93 D0); the live cron is #96's. An enabled stage
-    with nothing scheduling it reads as stalled forever on the ops screen."""
-    assert not [s for s in pipeline_corpus.STAGES if s.enabled]
+def test_only_the_stage_with_a_cron_line_is_enabled():
+    """The archive ran once and never runs again (#93 D0); the three analysis stages and match:topic run
+    inside fork #96's gated chain, which stays disabled until its gate can pass. An
+    enabled stage with nothing scheduling it reads as stalled forever on the ops screen, and the
+    reverse -- a scheduled stage left disabled -- reads as 'disabled' while it really runs. Fork #95's
+    `project:corpus` landed its crontab line with this row, so it is the one enabled here and
+    tests/test_pipeline_stage.py is where the two are held against each other."""
+    assert {s.stage_key for s in pipeline_corpus.STAGES if s.enabled} == {"project:corpus"}
 
 
 def test_the_seed_puts_the_rows_in_and_a_second_run_changes_nothing(needs_runtime_url: str):
@@ -354,4 +395,5 @@ def test_the_seed_puts_the_rows_in_and_a_second_run_changes_nothing(needs_runtim
     assert seed.run_all(needs_runtime_url, only=groups) == first
     with connect(needs_runtime_url) as conn, conn.cursor() as cur:
         cur.execute("SELECT stage_key FROM pipeline_stage WHERE NOT enabled ORDER BY stage_key")
-        assert {r[0] for r in cur.fetchall()} >= STAGE_KEYS
+        gated = {s.stage_key for s in pipeline_corpus.STAGES if not s.enabled}
+        assert {r[0] for r in cur.fetchall()} >= gated

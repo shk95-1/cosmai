@@ -203,6 +203,9 @@ none = [
 "collectors/youtube/" = [
     "tests/collectors/youtube",
     "tests/test_runtime_dsn.py",
+    # fork #95: db/corpus/project.py imports this package's archive spelling (flatten._repr_str) and
+    # its comment-instrument constants, so a change here moves what the live corpus rows say.
+    "tests/test_project_corpus.py",
 ]
 "contracts/" = [
     "tests/test_contract_ddl.py",
@@ -218,6 +221,7 @@ none = [
 ]
 "cosmai/" = [
     "tests/test_cli_help.py",
+    "tests/test_project_corpus.py",
     "tests/test_cli_analyze.py",
     "tests/test_cli_eval.py",
     "tests/test_cli_lexicon.py",
@@ -241,6 +245,10 @@ none = [
     "tests/test_collection_lineage_view.py",
     "tests/test_mention_lineage_view.py",
     "tests/test_pipeline_health_view.py",
+    "tests/test_project_corpus.py",
+    "tests/test_archive_lineage.py",
+    "tests/test_author_hash.py",
+    "tests/test_corpus_import.py",
 ]
 "eval/" = [
     "tests/test_cli_eval.py",
