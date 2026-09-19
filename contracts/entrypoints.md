@@ -178,18 +178,39 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
   for a failure on the way to the source, so a failure on our side does not borrow that word. Also
   `failed`, never `blocked` — nothing refused us.
 
-**No single job takes the batch down** (#274). Everything one job does, not only its fetch, runs
-inside a savepoint: whatever is raised ends that job `failed` with one of the codes above and the
-batch goes on to the next job. Before this, an artifact row whose payload file was missing from the
-store raised out of `_run_work`, rolled the transaction back and left every claimed job `queued` — so
-the next five-minute tick met the same row and died the same way. A fresh artifact whose payload
-cannot be read is a **cache miss**, not a failure: `work` re-fetches it and the newer row it writes
-is the one the freshness cache serves from the next pass on.
+**No single job takes the batch down** (#274). Everything one job does, not only its fetch, is
+isolated from the rest of the batch: whatever is raised ends that job `failed` with one of the codes
+above and the batch goes on to the next job. Before this, an artifact row whose payload file was
+missing from the store raised out of `_run_work`, rolled the transaction back and left every claimed
+job `queued` — so the next five-minute tick met the same row and died the same way. A fresh artifact
+whose payload cannot be read is a **cache miss**, not a failure: `work` re-fetches it and the newer
+row it writes is the one the freshness cache serves from the next pass on. The isolation was a
+savepoint inside the pass's one transaction until #277 and is that job's own transaction since.
+
+**`work` holds no transaction open while it is on the network** (#277). The claim is one short
+transaction that commits before the first request; the batched `videos.list` prefetch and every
+fetch go out with nothing open; each job's artifact row, fan-out and final state are one short
+transaction of their own. The shape before it — claim, prefetch, up to `DEFAULT_WORK_BATCH` fetches
+and every write inside one `engine.begin()` — could not survive the role the collector runs as:
+`tubedepth_runtime` carries `transaction_timeout=60s` and `idle_in_transaction_session_timeout=30s`
+(the family `db/bootstrap_source.sql` sets), and a connection is *idle in transaction* for exactly
+as long as a fetch takes. Every pass that met a slow kind was terminated by the server at 60s and
+lost the whole batch, transcripts already fetched included.
+
+Because the claim is committed rather than held, handing it back is `work`'s own job in two places:
+what this process claimed and did not finish goes back to `queued` on the way out (a block, an
+error, a signal), and a claim older than `STALE_CLAIM_AFTER` = **2 hours** is returned to the queue
+by the next pass before it claims. Two hours sits clear of any pass that is merely slow — a full
+batch on the slowest route is 50 × (60s timeout + 0.75s pause) ≈ 51 minutes, and yt-dlp's comment
+extraction has no wall-clock bound at all — because reclaiming a batch a live worker still holds
+costs a second fetch and a second artifact row, while waiting only delays a dead worker's jobs.
+No column was added: `_claim` is the only writer of `running` and stamps `started_at` in the same
+statement, so the age of a claim is already on the row.
 
 **`youtube work` exits 2 on a block** (#183): when a job fails with one of the four codes the view
 counts as `blocked` above, the pass stops rather than sending the rest of the batch into the same
-refusal, and the jobs it had claimed but not yet attempted go back to `queued` — nothing here
-reclaims a job whose worker stopped, so leaving them `running` would strand them. The exit-2 set is
+refusal, and the jobs it had claimed but not yet attempted go back to `queued` — leaving them
+`running` would strand them until the #277 bound above takes them back. The exit-2 set is
 `collectors/youtube/cli.py`'s `BLOCKED_CODES` and is held equal to this view's list by a test, so the
 exit code and `collector_health` can never call one run two different things.
 
@@ -982,7 +1003,11 @@ youtube's `work` was added to this table on 2026-08-24 (before that there were t
 drained the queue). It is cron rather than a resident daemon because
 `collectors/youtube/cli.py:_run_work` is a batch that claims `DEFAULT_WORK_BATCH` at a time and stops —
 the repetition comes from outside. Overlapping runs are safe: `_claim` takes rows with a single
-`FOR UPDATE SKIP LOCKED` statement. Because that repetition is outside the process, **the Data API's
+`FOR UPDATE SKIP LOCKED` statement, and since #277 it commits at once, so a second pass reads the
+first's claims as `running` rather than as rows to skip. The one case the two passes can meet on a
+job is a claim older than `STALE_CLAIM_AFTER`, where the later pass assumes the earlier one is dead:
+that costs a second fetch and a second artifact row (legal since #274, newest `fetched_at` wins) and
+loses nothing. Because that repetition is outside the process, **the Data API's
 daily bound cannot live inside one** (#259): `ROUTES.data_api.max_requests_per_run` bounds one of the
 288 invocations a day, and the day's own bound (`max_requests_per_day`) is read back out of
 `tubedepth.artifacts` at the start of every run (`collectors/youtube/quota.py`), against Google's

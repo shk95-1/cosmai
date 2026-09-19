@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import sqlalchemy as sa
-from sqlalchemy import Connection
+from sqlalchemy import Connection, Engine
 
 from collectors.youtube import flatten, queue, quota, roster, sources, transport
 from collectors.youtube.models import (
@@ -46,6 +46,18 @@ FINISHED_STATES = (JobState.SUCCEEDED.value, JobState.FAILED.value, JobState.CAN
 # 30 days: matches the archived RetentionPolicy.DEFAULT_MAXIMUM_AGE (retention.py) -- one property of
 # the data (a month of history is what artifacts.fresh_until ever needed), not reinvented here.
 PRUNE_MAX_AGE_DAYS = 30
+
+#: How long a claim may sit `running` before the next pass takes it back (#277). Since the claim is
+#: now committed before the first fetch, a worker killed outright leaves its jobs `running` and
+#: nothing else was coming for them.
+#:
+#: Two hours, and the two ways of being wrong are not symmetric. Too short reclaims a batch a live
+#: worker still holds: the pass would be fetched twice, which costs requests and writes a second
+#: artifact row (legal since #274) but loses nothing. Too long only delays a dead worker's jobs. So
+#: the number sits clear of any pass that is merely slow -- a full batch on the slowest route is
+#: 50 x (60s timeout + 0.75s pause) = 51 minutes, and yt-dlp's comment extraction pages inside one
+#: request with no wall-clock bound at all -- rather than as close to a live pass as it can get.
+STALE_CLAIM_AFTER = timedelta(hours=2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +124,13 @@ def run(
     engine = storage_db.create_engine(database_url or storage_db.runtime_url())
     payloads = PayloadStore(payload_root or Path("var") / "youtube-payloads")
     try:
+        if wanted is Dataset.WORK:
+            assert fetcher is not None  # noqa: S101 - set just above when the caller passed none
+            # The engine, not a connection: #277: `work` is the one dataset that goes on the
+            # network, and it opens a short transaction per step instead of holding one across the
+            # batch. The role kills a transaction at 60s and an idle-in-transaction session at 30s,
+            # and a connection is idle in transaction for exactly as long as a fetch takes.
+            return _run_work(engine, payloads, fetcher, now=now)
         prune_result: PruneResult | None = None
         with engine.begin() as conn:
             if wanted is Dataset.WATCH:
@@ -122,9 +141,6 @@ def run(
                     roster_url=roster_url,
                     read_roster=read_roster,
                 )
-            if wanted is Dataset.WORK:
-                assert fetcher is not None  # noqa: S101 - set just above when the caller passed none
-                return _run_work(conn, payloads, fetcher, now=now)
             if wanted is Dataset.FLATTEN:
                 return _run_flatten(conn, payloads, now=now)
             prune_result = _run_prune(conn, now=now)
@@ -488,21 +504,49 @@ def _cached_payload(payloads: PayloadStore, job: Any, cached: Any) -> Any:
         return _MISS
 
 
+def _fail(conn: Connection, job: Any, *, code: str, message: str, now: datetime) -> None:
+    """This job `failed`, in whatever transaction the caller opened for it."""
+    conn.execute(
+        sa.update(jobs)
+        .where(jobs.c.identifier == job.identifier)
+        .values(
+            state=JobState.FAILED.value,
+            finished_at=now,
+            elapsed_ms=_elapsed_ms(job.started_at, now),
+            error_code=code,
+            error_message=message,
+        )
+    )
+
+
 def _collect_one(
-    conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
+    engine: Engine, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
 ) -> _Collected:
-    cached = _fresh_artifact(conn, kind=job.kind, target=job.target, now=now)
+    """One job in three phases, with no transaction open across the network (#277).
+
+      read   the freshness cache, one short transaction that ends before anything else happens.
+      fetch  the stored payload and, on a miss, the source -- the part that can take a minute, and
+             the part that must find the connection idle *outside* a transaction rather than in one.
+      write  the artifact row, the fan-out and the job's state, in one short transaction: this
+             job's whole outcome, so a failure anywhere in it leaves none of it behind.
+
+    That last transaction is what #274's savepoint used to be. A savepoint could only ever isolate a
+    job from its neighbours inside the one transaction the server was already killing."""
+    with engine.begin() as conn:
+        cached = _fresh_artifact(conn, kind=job.kind, target=job.target, now=now)
     payload: Any = _cached_payload(payloads, job, cached) if cached is not None else _MISS
     short: str | None = None
+    route: str | None = None
+    # A fresh artifact already answers this question -- no fetch, no new artifact row. This is what
+    # keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in one
+    # watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
     if cached is not None and payload is not _MISS:
-        # A fresh artifact already answers this question -- no fetch, no new artifact row. This is
-        # what keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in
-        # one watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
-        digest, byte_count = cached.digest, cached.byte_count
+        hit = True
         # No new artifact row, so no route to write: the cached row already carries the one that
         # fetched it, and a cache hit is not a second observation of the source.
-        route = None
+        digest, byte_count = cached.digest, cached.byte_count
     else:
+        hit = False
         try:
             dump = fetcher.fetch(FetchSpec(kind=job.kind, target=job.target))
             payload = _normalize(job.kind, dump)
@@ -510,61 +554,57 @@ def _collect_one(
             short = _shortfall(dump) if job.kind in LISTING_KINDS else None
         except Exception as error:  # noqa: BLE001 - one job's failure must not stop the batch
             code = _classify_error(error)
-            conn.execute(
-                sa.update(jobs)
-                .where(jobs.c.identifier == job.identifier)
-                .values(
-                    state=JobState.FAILED.value,
-                    finished_at=now,
-                    elapsed_ms=_elapsed_ms(job.started_at, now),
-                    error_code=code,
-                    error_message=str(error),
-                )
-            )
+            with engine.begin() as conn:
+                _fail(conn, job, code=code, message=str(error), now=now)
             return _Collected(ok=False, blocked=code in BLOCKED_CODES)
 
+        # Outside the write transaction on purpose: a file write cannot roll back, and holding the
+        # transaction open over it would put our own disk back inside the timeouts this fix is about.
         stored = payloads.put(job.kind, payload)
         digest, byte_count = stored.digest, stored.byte_count
+
+    with engine.begin() as conn:
+        if not hit:
+            conn.execute(
+                sa.insert(artifacts).values(
+                    identifier=uuid.uuid4().hex,
+                    kind=job.kind,
+                    target=job.target,
+                    fingerprint=f"{job.kind}:{job.target}",
+                    digest=digest,
+                    byte_count=byte_count,
+                    fetched_at=now,
+                    fresh_until=now + FRESHNESS.get(job.kind, timedelta(0)),
+                    schema_version="1",
+                    # #183: which source answered. Written here, from what the transport reported,
+                    # and not guessed from the kind -- `video.metadata` takes either route.
+                    fetch_route=route,
+                )
+            )
+
+        if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
+            videos = payload["videos"]
+            if job.follow_up_kind == "video.comments":
+                video_ids = _comment_follow_ups(conn, videos, now=now)
+            else:
+                video_ids = [video["video_id"] for video in videos]
+            # #102: the fanned-out job inherits the listing job's own dataset -- it exists only
+            # because that job's follow_up_kind named it, not because of anything `work` decided.
+            queue.fan_out_follow_up(
+                conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, dataset=job.dataset, now=now
+            )
+
         conn.execute(
-            sa.insert(artifacts).values(
-                identifier=uuid.uuid4().hex,
-                kind=job.kind,
-                target=job.target,
-                fingerprint=f"{job.kind}:{job.target}",
-                digest=digest,
-                byte_count=byte_count,
-                fetched_at=now,
-                fresh_until=now + FRESHNESS.get(job.kind, timedelta(0)),
-                schema_version="1",
-                # #183: which source answered. Written here, from what the transport reported, and
-                # not guessed from the kind -- `video.metadata` takes either route.
-                fetch_route=route,
+            sa.update(jobs)
+            .where(jobs.c.identifier == job.identifier)
+            .values(
+                state=JobState.SUCCEEDED.value,
+                finished_at=now,
+                elapsed_ms=_elapsed_ms(job.started_at, now),
+                payload_digest=digest,
+                payload_bytes=byte_count,
             )
         )
-
-    if job.follow_up_kind is not None and job.kind in LISTING_KINDS:
-        videos = payload["videos"]
-        if job.follow_up_kind == "video.comments":
-            video_ids = _comment_follow_ups(conn, videos, now=now)
-        else:
-            video_ids = [video["video_id"] for video in videos]
-        # #102: the fanned-out job inherits the listing job's own dataset -- it exists only because
-        # that job's follow_up_kind named it, not because of anything `work` itself decided.
-        queue.fan_out_follow_up(
-            conn, video_ids=video_ids, follow_up_kind=job.follow_up_kind, dataset=job.dataset, now=now
-        )
-
-    conn.execute(
-        sa.update(jobs)
-        .where(jobs.c.identifier == job.identifier)
-        .values(
-            state=JobState.SUCCEEDED.value,
-            finished_at=now,
-            elapsed_ms=_elapsed_ms(job.started_at, now),
-            payload_digest=digest,
-            payload_bytes=byte_count,
-        )
-    )
     if short is not None:
         print(f"{job.kind} {job.target!r}: {short}")
         return _Collected(ok=True, short=True)
@@ -572,7 +612,7 @@ def _collect_one(
 
 
 def _collect_one_guarded(
-    conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
+    engine: Engine, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
 ) -> _Collected:
     """`_collect_one`, with the batch held apart from any one job's death (#274).
 
@@ -580,32 +620,23 @@ def _collect_one_guarded(
     from the payload store took down a whole `work` tick. Whatever is raised here ends this job
     `failed` with a code and the loop goes on to the next.
 
-    The savepoint is what makes that `failed` row writable. A DBAPI error aborts the whole
-    transaction, so without rolling back to a savepoint first the UPDATE recording the failure would
-    be refused too and the run would still die -- and it also undoes the half of this job that did
-    land (a fanned-out follow-up, a payload's artifact row) rather than leaving it beside a job that
-    says it failed."""
+    #277: the `failed` row is written in a transaction of its own. A DBAPI error aborts the
+    transaction it happened in, so the UPDATE recording the failure has to be somewhere else --
+    which used to mean rolling back to a savepoint first and is now simply the next transaction. The
+    half of this job that had already landed (a fanned-out follow-up, a payload's artifact row) went
+    back with the write transaction that raised, rather than being left beside a job that says it
+    failed."""
     try:
-        with conn.begin_nested():
-            return _collect_one(conn, payloads, fetcher, job, now=now)
+        return _collect_one(engine, payloads, fetcher, job, now=now)
     except Exception as error:  # noqa: BLE001 - no single job may take the batch down
         # A transport error can only have come from the fetch, which classifies its own; anything
         # else reached here because something on our side broke, and saying `transport` would put
         # that on the source.
         code = _classify_error(error) if isinstance(error, transport.TransportError) else UNEXPECTED_CODE
-        conn.execute(
-            sa.update(jobs)
-            .where(jobs.c.identifier == job.identifier)
-            .values(
-                state=JobState.FAILED.value,
-                finished_at=now,
-                elapsed_ms=_elapsed_ms(job.started_at, now),
-                error_code=code,
-                # The class name too: for an unexpected failure it is half the evidence, and
-                # `str(KeyError('videos'))` alone is a bare quoted word on the row.
-                error_message=f"{type(error).__name__}: {error}",
-            )
-        )
+        with engine.begin() as conn:
+            # The class name too: for an unexpected failure it is half the evidence, and
+            # `str(KeyError('videos'))` alone is a bare quoted word on the row.
+            _fail(conn, job, code=code, message=f"{type(error).__name__}: {error}", now=now)
         return _Collected(ok=False, blocked=code in BLOCKED_CODES)
 
 
@@ -648,53 +679,95 @@ def _fresh_targets(conn: Connection, *, kind: str, targets: Sequence[str], now: 
     )
 
 
-def _prefetch(conn: Connection, fetcher: Fetcher, claimed: Sequence[Any], *, now: datetime) -> None:
-    """Ask the fetcher for this batch's `video.metadata` targets in one go (#259).
+def _prefetch_specs(
+    conn: Connection, fetcher: Fetcher, claimed: Sequence[Any], *, now: datetime
+) -> list[FetchSpec]:
+    """Which of this batch's `video.metadata` targets the batched call should carry (#259).
 
-    The coalescing is here and not in the job model: one `videos.list` call takes up to 50 ids, and
-    the port issued one call per video -- 13,979 requests for a panel pass instead of 280, which is
-    5.6x the Data API's whole daily quota. The jobs stay one per video (`queue.py`'s claim, dedupe
-    and depth cap are per video, `payloads.put` stores one dump per job and
-    `sources.normalize_video_metadata` reads one `dump["id"]`), so what changes is only where the
-    request is made. A target already answered by a fresh artifact is left out: it spends no fetch,
-    and including it would cost the batch a slot that a video which does need one could have had.
+    The database half of the coalescing, and it is all of the database half: #277 splits it from
+    `_prefetch` so this read rides in the claim's transaction and the call itself goes out with
+    nothing open. One `videos.list` call takes up to 50 ids, and the port issued one call per video
+    -- 13,979 requests for a panel pass instead of 280, which is 5.6x the Data API's whole daily
+    quota. The jobs stay one per video (`queue.py`'s claim, dedupe and depth cap are per video,
+    `payloads.put` stores one dump per job and `sources.normalize_video_metadata` reads one
+    `dump["id"]`), so what changes is only where the request is made. A target already answered by a
+    fresh artifact is left out: it spends no fetch, and including it would cost the batch a slot
+    that a video which does need one could have had.
 
     Optional on the fetcher, the way `notes` is: a fixture-backed fake in the tests neither batches
     nor needs to."""
-    prefetch = getattr(fetcher, "prefetch", None)
-    if not callable(prefetch):
-        return
+    if not callable(getattr(fetcher, "prefetch", None)):
+        return []
     targets = [job.target for job in claimed if job.kind == VIDEO_METADATA_KIND]
     fresh = _fresh_targets(conn, kind=VIDEO_METADATA_KIND, targets=targets, now=now)
-    specs = [
+    return [
         FetchSpec(kind=VIDEO_METADATA_KIND, target=target)
         for target in dict.fromkeys(targets)
         if target not in fresh
     ]
-    if specs:
-        prefetch(specs)
 
 
-def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
-    _bound_the_day(conn, fetcher, now=now)
-    claimed = _claim(conn, limit=DEFAULT_WORK_BATCH, now=now)
+def _prefetch(fetcher: Fetcher, specs: Sequence[FetchSpec]) -> None:
+    """The network half of #259's coalescing, called with no transaction open (#277)."""
+    prefetch = getattr(fetcher, "prefetch", None)
+    if specs and callable(prefetch):
+        prefetch(list(specs))
+
+
+def _reclaim_stale(conn: Connection, *, now: datetime) -> int:
+    """Claims older than `STALE_CLAIM_AFTER` go back to the queue (#277).
+
+    The claim commits before the first fetch now, so a worker killed outright -- a container
+    stopped, the machine gone -- leaves its jobs `running` with nobody coming for them. `_claim` is
+    the only writer of RUNNING and it stamps `started_at` in the same statement, so the age of the
+    claim is on the row and no lease column is needed."""
+    return conn.execute(
+        sa.update(jobs)
+        .where(jobs.c.state == JobState.RUNNING.value, jobs.c.started_at < now - STALE_CLAIM_AFTER)
+        .values(state=JobState.QUEUED.value, started_at=None)
+    ).rowcount
+
+
+def _run_work(engine: Engine, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
+    """#277: one short transaction to claim, then one or two per job, and none of them open while a
+    route is on the network. The role kills a transaction at 60s and an idle-in-transaction session
+    at 30s, and a `work` pass that met a slow kind spent longer than either inside one."""
+    with engine.begin() as conn:
+        _bound_the_day(conn, fetcher, now=now)
+        reclaimed = _reclaim_stale(conn, now=now)
+        claimed = _claim(conn, limit=DEFAULT_WORK_BATCH, now=now)
+        # Read here, sent below: the read belongs to the claim's transaction and the call does not.
+        specs = _prefetch_specs(conn, fetcher, claimed, now=now)
+    if reclaimed:
+        print(f"reclaimed {reclaimed} job(s) whose claim was older than {STALE_CLAIM_AFTER}")
     if not claimed:
         print("no queued jobs")
         return 0
-    _prefetch(conn, fetcher, claimed, now=now)
+
+    # What this process holds and has not finished. A claim is committed, so handing it back is this
+    # process's own job -- on the way out of a block, and on the way out of anything else.
+    unfinished = {row.identifier for row in claimed}
     outcomes: list[_Collected] = []
     blocked = False
-    for index, job in enumerate(claimed):
-        outcome = _collect_one_guarded(conn, payloads, fetcher, job, now=now)
-        outcomes.append(outcome)
-        if outcome.blocked:
-            # Work 3: a block is the whole source refusing us, so every later request in this batch
-            # would be refused the same way and would only deepen it. The jobs already claimed but
-            # not yet attempted go back to QUEUED -- leaving them RUNNING would strand them, since
-            # nothing here reclaims a job whose worker stopped (the lease machinery is out of scope).
-            blocked = True
-            _requeue(conn, [row.identifier for row in claimed[index + 1 :]])
-            break
+    try:
+        _prefetch(fetcher, specs)
+        for job in claimed:
+            outcome = _collect_one_guarded(engine, payloads, fetcher, job, now=now)
+            unfinished.discard(job.identifier)
+            outcomes.append(outcome)
+            if outcome.blocked:
+                # Work 3: a block is the whole source refusing us, so every later request in this
+                # batch would be refused the same way and would only deepen it. The jobs already
+                # claimed but not yet attempted go back to QUEUED below.
+                blocked = True
+                break
+    finally:
+        # Only when there is something to hand back: an empty transaction here would be a round trip
+        # every pass, and on the way out of a failure it is one more thing that can raise over the
+        # exception that caused it.
+        if unfinished:
+            with engine.begin() as conn:
+                _requeue(conn, sorted(unfinished))
 
     failures = sum(not outcome.ok for outcome in outcomes)
     short = sum(outcome.short for outcome in outcomes)
@@ -711,11 +784,14 @@ def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now
 
 
 def _requeue(conn: Connection, identifiers: Sequence[str]) -> None:
+    """#277: only a job still RUNNING is this process's to hand back. Two `work` passes can overlap
+    by design, so by the time this runs a job may already have been reclaimed and finished by
+    another -- and writing `queued` over that would undo someone else's work."""
     if not identifiers:
         return
     conn.execute(
         sa.update(jobs)
-        .where(jobs.c.identifier.in_(identifiers))
+        .where(jobs.c.identifier.in_(identifiers), jobs.c.state == JobState.RUNNING.value)
         .values(state=JobState.QUEUED.value, started_at=None)
     )
 
