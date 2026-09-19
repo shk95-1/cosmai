@@ -1755,6 +1755,8 @@ alongside as a version.
   needed. **Measuring this table again is not something this issue did** — the six rows stay a record of the
   v1 version, and a remeasurement stands on raw values that carry the `dictionary` and `store` columns
   together.
+  Fork #97 later rescored the rows on the same v1 footing with the grouped matcher (2026-09-19, the
+  paragraph below); the dictionary they record is still v1.
 
 
 **Fork #97's latin grouping moved the answer key the six rows above are scored against, and the rows were
