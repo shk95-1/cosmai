@@ -1287,6 +1287,12 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   **11.3 seconds** (keyset pages of 20,000 rows with a commit per page — the same method as
   `gold_from_chunks` in `analysis/retrieval/eval.py`, and for the same reason). The three commerce-side
   queries are each under 0.4 seconds.
+- **Current state (2026-09-19, read-only, topic dictionary v3, fork #102):** the document counts are the
+  same (comments 285,735 · transcripts 5,303 · titles 5,908 · reviews 6,349) and the two composition rows
+  this section quotes read commerce **9.74%** against comments **1.54%** — still sixfold. **The run is
+  `partial` (exit code 1)**: the ingredient audit reports two `key_mismatch` lines where this record has 0,
+  and a `partial` output is not to be trusted as a whole. The cause is tracked in fork issue #103; the block
+  below stays the last trusted full measurement until that closes.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
   **9.80%** against comments 1.55%.
@@ -1537,6 +1543,22 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
 - Whether the extraction rules really moved into the DB was measured alongside: `SUN_JOIN`'s
   `SELECT DISTINCT` means no fan-out (population 7,324 = 7,324 after the join) · no paging ·
   `review_pkey` exists.
+
+### Current measurement (2026-09-19, production DB read-only — `cosmai trend holdout`, fork #102)
+```
+seen=6,349 holdout=8,245 empty=0 topics=13 ranked=13 reproduced=9/13 scale=1.42→1.30
+verdict and window as on 2026-08-27 · basket_shared=30   (exit code 0)
+```
+- **The block above is a dated record and stays.** The holdout arm is everything collected after the seen
+  arm's end, so it grows with every collection pass: 975 reviews over 18 shared products then, 8,245 over 30
+  now (61 products in the arm). The seen arm is fixed by the cutoff and has not moved — 6,349 reviews, 9,027
+  topic mentions, 1.4218 mentions per review.
+- The verdict, the window and the idle platform mechanism are the same; four topics part instead of six.
+- **Both of the lowest topics now have mentions in the holdout arm** (`SPF_PA` 0.41%, the one below it
+  0.17%), so the stable-sort remark above describes the 2026-08-27 arm, not this one. The rule it defends is
+  unchanged: the lowest rank is still not part of the verdict.
+- This block is refreshed when §Holdout is next touched or when the verdict is quoted elsewhere; nothing
+  reads these numbers in code.
 
 ### Comparison against ydc (run 2026-08-27, 9 lines, **difference 0**)
 `tool/compare-ydc-holdout` takes `holdout_commerce.py` out of the tag (`v0.3.0`), runs it **untouched**
