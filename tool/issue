@@ -611,6 +611,15 @@ AUDIT='
        needs_user: ($waiting[(.channel // "(no channel)")] // 0)}],
   stale_in_progress: [$all[] | select((.assignees | length) > 0 and ($now - (.updatedAt | fromdateiso8601)) > ($stale_hours * 3600))
     | {key: .key, assignee: .assignees[0], hours: ((($now - (.updatedAt | fromdateiso8601)) / 3600) | floor)}],
+  # #263: the 24h "Started but idle" case below is sized for an abandoned issue, not for a
+  # coordinator that stops dispatching -- a plain zero-started-while-ready-is-non-empty read, with
+  # no time threshold, catches that instead. "started" is any issue with an assignee, the one signal
+  # audit already reads; a subagent working an issue is invisible to it either way.
+  idle_coordinator: (
+    ($all | map(select((.assignees | length) > 0)) | length) as $in_progress
+    | ([ready_channels($all; false)[] | .items[] | select(.status == "ready")] | length) as $startable
+    | {in_progress: $in_progress, startable: $startable, warn: ($in_progress == 0 and $startable > 0)}
+  ),
   old_memos: ([$all[] | select(tagged("memo") and ($now - (.updatedAt | fromdateiso8601)) > ($memo_days * 86400)) | .key]),
   stale_open: [$all[] | select(.short == $primary) | . as $i
     | ($merged | map(select(test("/" + ($i.number | tostring) + "-")))) as $branches
@@ -685,6 +694,12 @@ def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  no
       + (if .needs_user > 0 then " · needs-user " + (.needs_user | tostring) else "" end)
       + " · head " + (.head // "none")])
 + block("Started but idle (no change for 24h+)"; [.stale_in_progress[] | "  " + .key + " · " + .assignee + " · " + (.hours | tostring) + "h"])
++ (if .idle_coordinator.warn then
+     ["", "Idle coordinator",
+      "  0 issues in progress while ready names " + (.idle_coordinator.startable | tostring)
+      + " startable issue(s) -- a snapshot at audit time, not proof the run is advancing: this"
+      + " catches the state at the next look, not a stall as it happens"]
+   else [] end)
 + block("memo older than 14 days (" + (.old_memos | length | tostring) + ")"; [.old_memos[] | "  " + .])
 + block("stale-open (a merged branch exists but the issue is open)"; [.stale_open[] | "  " + .key + " ← " + (.branches | join(", "))])
 + block("TODO(#n) marker with no open when-touched issue"; [.todo_without_issue[] | "  " + .])
