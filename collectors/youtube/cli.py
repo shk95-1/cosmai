@@ -822,7 +822,12 @@ def _notes_of(fetcher: Fetcher) -> list[str]:
 
 def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> int:
     report = flatten.run(conn, payloads, now=now)
-    print(f"flattened {report.flattened} artifact(s), {report.errors} error(s)")
+    # The two kinds of error apart (#275): an artifact skipped for good and one the next pass tries
+    # again both used to print the same number, and the cron log was the only place either appeared.
+    print(
+        f"flattened {report.flattened} artifact(s), {report.errors} error(s) "
+        f"({report.skipped} recorded unflattenable, {report.deferred} to retry)"
+    )
     return 1 if report.errors else 0
 
 
