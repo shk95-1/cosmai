@@ -549,19 +549,53 @@ class DataApiClient:
         return outcome
 
     def video_metadata_many(self, video_ids: Sequence[str]) -> dict[str, VideoMetadataOutcome]:
-        """SKELETON (#259): one call per id, which is the shape this issue exists to end."""
+        """Every one of these videos, `PAGE_SIZE` ids to a call (#259).
+
+        `videos.list` takes up to 50 comma-joined ids and costs **one unit a call** whatever `part`
+        asks for and however many ids ride on it, so a panel pass of 13,979 videos is 280 requests
+        here and was 13,979 before -- 5.6x the whole daily quota, which is what this exists to fix.
+
+        An outcome per id rather than a raise, because one call now carries up to 50 jobs:
+
+          the id came back      its dump.
+          the id did not        `Unavailable`, the same error a single-id call raises for an empty
+                                `items` -- a deleted, private or mistyped video is one job's fact
+                                and must not end the 49 beside it.
+          the call failed       that error, on every id the call carried, so each job is classified
+                                and finished on its own terms.
+
+        A refusal (`Blocked`) or a rate limit stops the remaining calls instead of spending a
+        request each to be told the same thing: the ids that never went out get that same error, so
+        every id asked for is answered either way. Ids are de-duplicated and their order is kept --
+        the order is what makes a run's requests readable against the queue that produced them.
+        """
         outcomes: dict[str, VideoMetadataOutcome] = {}
-        for video_id in video_ids:
+        wanted = list(dict.fromkeys(video_ids))
+        refused: TransportError | None = None
+        for start in range(0, len(wanted), PAGE_SIZE):
+            chunk = wanted[start : start + PAGE_SIZE]
+            if refused is not None:
+                outcomes.update(dict.fromkeys(chunk, refused))
+                continue
             try:
-                body = self._videos_list([video_id])
+                body = self._videos_list(chunk)
             except TransportError as error:
-                outcomes[video_id] = error
+                if isinstance(error, Blocked | RateLimited | BudgetExhausted):
+                    refused = error
+                outcomes.update(dict.fromkeys(chunk, error))
                 continue
-            items = body.get("items") or []
-            if not items:
-                outcomes[video_id] = Unavailable(f"no video answers to {video_id!r}", route=Route.DATA_API)
-                continue
-            outcomes[video_id] = _video_metadata_dump(items[0], video_id)
+            items = {
+                item.get("id"): item
+                for item in body.get("items") or []
+                if isinstance(item, Mapping) and item.get("id")
+            }
+            for video_id in chunk:
+                item = items.get(video_id)
+                outcomes[video_id] = (
+                    _video_metadata_dump(item, video_id)
+                    if item is not None
+                    else Unavailable(f"no video answers to {video_id!r}", route=Route.DATA_API)
+                )
         return outcomes
 
     def _videos_list(self, video_ids: Sequence[str]) -> dict[str, Any]:
@@ -1115,7 +1149,26 @@ class LiveFetcher:
             self._data_api.restrict_budget(limit)
 
     def prefetch(self, specs: Sequence[FetchSpec]) -> None:
-        """SKELETON (#259): coalesce nothing, so every `fetch` still goes out on its own."""
+        """Ask for a whole batch's `video.metadata` in `ceil(n / 50)` calls, before the jobs that
+        need them are collected one at a time (#259).
+
+        This is the coalescing step: the queue keeps one job per video and only the request is
+        shared, so `queue.py`'s claim, dedupe and depth cap, `payloads.put`'s one dump per job and
+        `sources.normalize_video_metadata`'s single `dump["id"]` all stay as they are. `fetch` then
+        finds each id already answered and takes the dump, or raises the error that stands in for
+        it, exactly where it would have raised its own.
+
+        Silent on every other kind: a listing pages on a token that only the previous page carries
+        and `commentThreads` takes one `videoId` by the API's own shape, so neither can be asked for
+        many targets at once. A run with no Data API key does nothing here either -- those jobs fail
+        one at a time in `fetch`, naming the key, as they did before."""
+        if self._metadata_route is not Route.DATA_API or self._data_api is None:
+            return
+        targets = [spec.target for spec in specs if spec.kind == "video.metadata"]
+        if not targets:
+            return
+        for target, outcome in self._data_api.video_metadata_many(targets).items():
+            self._primed[("video.metadata", target)] = outcome
 
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
         primed = self._primed.pop((spec.kind, spec.target), None)

@@ -12,7 +12,10 @@
     longer trending only). Every listing kind goes over the Data API: a channel's uploads playlist
     (`channels.list` + `playlistItems.list`, 1 unit a page), `videos.list` for `video.metadata` and
     for trending, `search.list` for an operator's one-off query (100 units a page, which is why no
-    panel directive uses it). The listing moved off yt-dlp because the yt-dlp videos tab excludes
+    panel directive uses it). `videos.list` takes **up to 50 ids in one call** and costs 1 unit a
+    call whatever `part` and however many ids ride on it (#259), so a panel pass of 13,979 videos is
+    about 280 units and not 13,979; what the key may spend in a day is bounded by
+    `ROUTES.data_api.max_requests_per_day`. The listing moved off yt-dlp because the yt-dlp videos tab excludes
     Shorts and the production corpus is half short-form, so a videos-tab listing stops the
     denominator being closed. Comments and captions need no key at all — yt-dlp and timedtext —
     so a host without this one still collects those, and only the Data API jobs fail.
