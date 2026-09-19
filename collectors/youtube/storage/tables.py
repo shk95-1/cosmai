@@ -79,6 +79,10 @@ artifacts = Table(
     # row every fetch produces, rather than one per snapshot table, so no two of them can disagree
     # about a single fetch.
     sa.Column("fetch_route", sa.String(16)),
+    # #272 (contracts/ddl/tubedepth/007): how many requests this fetch actually sent, so the day's
+    # Data API bound charges a listing walk what it spent instead of a flat estimate. NULL is "never
+    # asked" (a row older than 007, or a route that does not count), never zero.
+    sa.Column("request_count", sa.Integer),
     sa.Index("ix_artifact_lookup", "fingerprint", "fresh_until"),
     sa.Index("ix_artifact_recent", "kind", "fetched_at"),
     sa.Index("ix_artifact_target", "target", "fetched_at"),
