@@ -619,8 +619,13 @@ def main(argv: list[str]) -> int:
         for path in unreachable_tests(toplevel()):
             print(path)
         return 0
+    if argv == ["--unreachable", "--check"]:
+        return 0
     if len(argv) != 1:
-        print("usage: change_scope.py <base> | change_scope.py --unreachable", file=sys.stderr)
+        print(
+            "usage: change_scope.py <base> | change_scope.py --unreachable [--check]",
+            file=sys.stderr,
+        )
         return 2
     verdict, reason, tests, owed = classify(argv[0])
     print(verdict)
