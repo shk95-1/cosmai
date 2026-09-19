@@ -20,6 +20,12 @@
 # it has no dump baseline because db/migrate.sh IS its expected state, and production carries
 # objects a fork put there whose files are not in this checkout (contracts/ddl/needs/foreign.txt).
 #
+# needs_verify is a fourth schema and is in none of the pairs (#258). Every dump below is taken with
+# `-n <schema>`, so a contracts/ddl/needs/*.sql file that creates a table in needs_verify is outside
+# both sides of every comparison: it cannot drift here, and it needs no foreign.txt line either --
+# the declared-object query is `nspname = 'needs'` too. A comparison of that schema would be a fifth
+# pair, and the day one is wanted it is that, not an entry in the list.
+#
 # Reads nothing secret: pg_dump runs inside the production container as the superuser via docker
 # exec, the same access path db/migrate.sh already uses.
 set -e
