@@ -1662,7 +1662,7 @@ alongside as a version.
 |---|---|---|---|---|---|
 | literal | bm25 | 61 | .864 | .893 | 91.8% |
 | literal | vector | 61 | .615 | .770 | 90.2% |
-| literal | hybrid | 61 | .839 | .911 | 95.1% |
+| literal | hybrid | 61 | .838 | .911 | 95.1% |
 | heldout | bm25 | 60 | .000 | .000 | 0.0% |
 | heldout | vector | 60 | .058 | .095 | 21.7% |
 | heldout | hybrid | 60 | .023 | .027 | 6.7% |
@@ -1771,6 +1771,15 @@ adoption condition holds: heldout bm25 is still .000 and the vector side still c
 `tests/retrieval/frozen_topics.py` is re-frozen grouped with the rows. Crosscheck and holdout were
 re-measured with both matchers on the same day: holdout moves in neither arm, and in crosscheck `SPF_PA`
 alone moves (comments 0.55% → 0.39%, transcripts 2.12% → 2.05%), so no number either section quotes changes.
+
+**The vector arm's top-k is a total order since fork #101 (2026-09-19): `(-similarity, row index)`.** Before
+it, `argpartition` chose among rows of equal similarity at the boundary and the choice belonged to the numpy
+build, so the hybrid rows reproduced per host and not across hosts — #97's rescore met it as one score row of
+366 (literal/hybrid read .8410 on the ungrouped baseline against the published .839). The four vector and
+hybrid rows were rescored under the total order on the same footing: literal/vector .6148 · .7704 · 90.2%,
+heldout/vector .0583 · .0947 · 21.7% and heldout/hybrid .0233 · .0269 · 6.7% keep every published digit, and
+**literal/hybrid is .8377 · .9112 · 95.1%, so its P@10 reads .838 where it read .839.** The bm25 rows never
+open the store. No conclusion the table carries moves.
 
 ### Matcher difference between the two lineages (fork #96, 2026-09-12, production archive read-only)
 The archive's 13,979 videos re-matched with dictionary v3 against the mentions ydc stored at collection time,

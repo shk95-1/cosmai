@@ -203,6 +203,14 @@ def search(
     take = min(top, len(similarity))
     if take == 0:
         return []
-    top_idx = np.argpartition(-similarity, take - 1)[:take]
-    top_idx = top_idx[np.argsort(-similarity[top_idx], kind="stable")]
+    # argpartition only guarantees the *set* of the top `take` values, not which of several rows tied at the
+    # boundary land in it -- that pick, and the stable sort's order for them, both depend on the numpy build.
+    # The boundary value is read back and ties are broken by row index (the store's own order), so the same
+    # rows come out in the same order on any build (fork #101).
+    partitioned = np.argpartition(-similarity, take - 1)[:take]
+    boundary = similarity[partitioned].min()
+    above = np.flatnonzero(similarity > boundary)
+    tied = np.flatnonzero(similarity == boundary)[: take - len(above)]
+    top_idx = np.concatenate([above, tied])
+    top_idx = top_idx[np.lexsort((top_idx, -similarity[top_idx]))]
     return [(store.chunk_ids[i], float(1.0 - similarity[i])) for i in top_idx if np.isfinite(similarity[i])]

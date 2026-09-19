@@ -165,6 +165,119 @@ def test_search_on_an_empty_store_returns_nothing(tmp_path):
     assert vectors.search(vectors.load(out), _unit(0)) == []
 
 
+def test_top_zero_returns_nothing_even_with_ties(store):
+    # The take == 0 path returns before the partition runs at all -- nothing to break a tie on.
+    assert vectors.search(vectors.load(store), _unit(0), top=0) == []
+
+
+def _tied_vector() -> list[float]:
+    """A unit vector at a fixed, non-axis-aligned angle to `_unit(0)` -- every row built from it gets the
+    exact same float32 cosine similarity against that query, so duplicating it makes a real tie rather than
+    two rows that only look equal."""
+    vector = [0.0] * vectors.DIM
+    vector[0] = 0.6
+    vector[1] = 0.8
+    return vector
+
+
+def _store_with_rows(tmp_path: Path, name: str, rows_and_vectors: list[tuple[str, str, list[float]]]) -> Path:
+    """A store whose rows are exactly the caller's `(chunk_id, source, vector)` triples, in that order -- lets
+    a test place tied rows at chosen indices instead of trusting how a fixture happens to lay them out."""
+    out = tmp_path / name
+    matrix = np.array([v for _, _, v in rows_and_vectors], dtype="float32")
+    ids = [(chunk_id, source) for chunk_id, source, _ in rows_and_vectors]
+    vectors.save(out, matrix, ids, MANIFEST)
+    return out
+
+
+def test_a_boundary_tie_is_won_by_the_lowest_row_index(tmp_path):
+    """`argpartition` decides which of several equal-similarity rows crosses the top-k boundary, and on an
+    unpatched build that pick is not index order (see `test_old_argpartition_can_pick_the_tie_out_of_order`
+    below) -- the fix makes the store's own row order the tiebreaker, so which chunk_id sits at the lower
+    index decides, not the numpy build."""
+    tie = _tied_vector()
+    filler = _unit(2)  # orthogonal to the query, similarity 0 -- never a contender for take=2
+    # Store A: "first" occupies the lower index of the tied pair.
+    a = _store_with_rows(
+        tmp_path,
+        "a",
+        [("top#0", "s", _unit(0)), ("first", "s", tie), ("second", "s", tie), ("filler", "s", filler)],
+    )
+    # Store B: the same two tied chunks, same similarity values, but the low index now belongs to "second".
+    b = _store_with_rows(
+        tmp_path,
+        "b",
+        [("top#0", "s", _unit(0)), ("second", "s", tie), ("first", "s", tie), ("filler", "s", filler)],
+    )
+    hits_a = vectors.search(vectors.load(a), _unit(0), top=2)
+    hits_b = vectors.search(vectors.load(b), _unit(0), top=2)
+    assert [h[0] for h in hits_a] == ["top#0", "first"]
+    assert [h[0] for h in hits_b] == ["top#0", "second"]
+
+
+def test_ties_inside_the_kept_set_come_out_in_ascending_row_index(tmp_path):
+    tie = _tied_vector()
+    filler = _unit(2)
+    store = _store_with_rows(
+        tmp_path,
+        "ordered",
+        [
+            ("top#0", "s", _unit(0)),
+            ("d0", "s", tie),
+            ("d1", "s", tie),
+            ("d2", "s", tie),
+            ("filler", "s", filler),
+        ],
+    )
+    # take=4 keeps the top row plus all three tied duplicates -- their only defined order is row index.
+    hits = vectors.search(vectors.load(store), _unit(0), top=4)
+    assert [h[0] for h in hits] == ["top#0", "d0", "d1", "d2"]
+
+
+def test_a_masked_row_never_wins_a_tie_it_would_otherwise_share(tmp_path):
+    """A row excluded by `sources` is set to -inf before the boundary is found, so it can never be mistaken
+    for one of the finite ties even though its raw similarity matches them."""
+    tie = _tied_vector()
+    store = _store_with_rows(
+        tmp_path,
+        "masked",
+        [
+            ("top#0", "youtube_comment", _unit(0)),
+            ("excluded", "commerce_review", tie),
+            ("kept", "youtube_comment", tie),
+        ],
+    )
+    hits = vectors.search(vectors.load(store), _unit(0), top=2, sources=("youtube_comment",))
+    assert [h[0] for h in hits] == ["top#0", "kept"]
+
+
+def test_a_large_tie_block_is_kept_in_ascending_row_index(tmp_path):
+    """Teeth: on the two-line pre-fix selection, this is the test that goes red -- on this numpy build the
+    small hand-built stores above happen to come out in index order anyway (introselect on 3-4 rows has
+    nowhere else to go), so only a tie block far bigger than `take` makes the old build-dependent pick
+    visible through `vectors.search` itself, not just through raw `argpartition`."""
+    rng = np.random.default_rng(0)
+    n, dim, tie_start, tie_count, take = 20_000, vectors.DIM, 5_000, 3_000, 1_000
+    matrix = (rng.random((n, dim)) * 0.01).astype("float32")
+    query = np.zeros(dim, dtype="float32")
+    query[0] = 1.0
+    matrix[0] = query  # a clear top row, outside the tie block
+    tie = np.zeros(dim, dtype="float32")
+    tie[0], tie[1] = 0.6, 0.8
+    matrix[tie_start : tie_start + tie_count] = tie  # far more tied rows than `take - 1` slots for them
+    rows = [("top#0", "s")] + [(f"row#{i}", "s") for i in range(1, n)]
+    out = tmp_path / "big"
+    vectors.save(out, matrix, rows, MANIFEST)
+
+    hits = vectors.search(vectors.load(out), query, top=take)
+    kept_from_tie = sorted(
+        int(chunk_id.split("#")[1])
+        for chunk_id, _ in hits
+        if chunk_id.startswith("row#") and tie_start <= int(chunk_id.split("#")[1]) < tie_start + tie_count
+    )
+    assert kept_from_tie == list(range(tie_start, tie_start + len(kept_from_tie)))
+
+
 def test_chunked_at_max_is_not_a_required_key(store):
     """A production store (encoded 2026-08-24) does not have this key -- raised to a required key, every
     vector and hybrid search running today becomes StoreMissing. It is a place to say it is missing when the
