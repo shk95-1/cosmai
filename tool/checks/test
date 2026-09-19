@@ -10,6 +10,9 @@
 #   B  the computed set     mapped tests + the readers map + the import closure + smoke (#231)
 #   C  format·lint·lang + the snapshot tests   prose, or code tool/checks/invariants proves is unmoved
 #   N  format·lint, recorded nowhere           a tree identical to the base: there is nothing to verify
+#
+# tool/checks/unreachable-tests runs ahead of all four: the guard on tests/scope.toml's own reach is
+# the one thing no way of splitting a commit may route around (#261).
 set -e
 . tool/checks/prerequisite
 . tool/checks/suite-lock
@@ -71,6 +74,15 @@ if [ "$change_class" = C ] || [ "$change_class" = N ]; then
 else
     require_command uv docker pg_isready
 fi
+
+# #261: outside the class dispatch below, because this is the one check no class may skip. The guard
+# that keeps tests/scope.toml able to reach every test file lived inside the suite, where the commit
+# that breaks it never arrives: a commit that only adds a test file earns class B or C, and neither
+# class runs tests/tool/test_change_scope.py. A single pass over the map and the tracked test files,
+# ~3s measured over five runs, stdlib only -- cheap enough that no class has to be exempted, and it
+# runs here, before anything that would need cleaning up.
+printf '→ unreachable\n'
+tool/checks/unreachable-tests
 
 # Before anything runs: what the suite proves is the tree it started against, not whatever HEAD has
 # become seventeen minutes later, and not a tree plus uncommitted edits (#214).
