@@ -11,7 +11,10 @@ from typing import Any, LiteralString
 
 import psycopg
 from psycopg import sql as pgsql
-from sqlalchemy.engine import make_url
+
+# Re-exported: db.runtime is the documented connector now, and this name stays importable so its
+# existing callers (analysis/predictors.py, cosmai/cli.py) do not move.
+from db.runtime import connect as connect
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_DIR = REPO_ROOT / "eval"
@@ -25,23 +28,6 @@ LABELED_AT = date(2026, 8, 23)
 CAPTURED_AT = date(2026, 8, 23)
 # formats.md: YouTube published_at is restored from relative time, so only recent ones are month-precise.
 YOUTUBE_MONTH_FROM = date(2025, 9, 1)
-
-
-def connect(url: str) -> psycopg.Connection[Any]:
-    u = make_url(url)
-    kwargs: dict[str, Any] = {
-        k: v
-        for k, v in (
-            ("host", u.host),
-            ("port", u.port),
-            ("user", u.username),
-            ("password", u.password),
-            ("dbname", u.database),
-        )
-        if v is not None
-    }
-    kwargs.update({k: v for k, v in u.query.items() if isinstance(v, str)})
-    return psycopg.connect(**kwargs)
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:

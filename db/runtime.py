@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import os
+from typing import Any
 from urllib.parse import quote
+
+import psycopg
+from sqlalchemy.engine import make_url
 
 from db import secrets
 
@@ -35,6 +39,31 @@ def host_and_port(host: str | None = None, port: int | str | None = None) -> tup
 
 
 def runtime_url() -> str:
+    """The SQLAlchemy `create_engine` form (`+psycopg` in the scheme). Never hand this to
+    `psycopg.connect()`: it takes a conninfo string, the `+psycopg` prefix makes that conninfo
+    malformed, and the resulting error message is the whole string -- password included. Use
+    `connect()` below, or `create_engine(runtime_url())`.
+    """
     password = quote(secrets.require([RUNTIME_KEY])[RUNTIME_KEY], safe="")
     host, port = host_and_port()
     return RUNTIME_DSN.format(password=password, host=host, port=port)
+
+
+def connect(url: str) -> psycopg.Connection[Any]:
+    """Open a psycopg connection from a SQLAlchemy-form URL without ever building a conninfo
+    string: `make_url` parses it and each part is passed to `psycopg.connect()` as a keyword
+    argument, so a malformed conninfo can never happen and can never echo the password."""
+    u = make_url(url)
+    kwargs: dict[str, Any] = {
+        k: v
+        for k, v in (
+            ("host", u.host),
+            ("port", u.port),
+            ("user", u.username),
+            ("password", u.password),
+            ("dbname", u.database),
+        )
+        if v is not None
+    }
+    kwargs.update({k: v for k, v in u.query.items() if isinstance(v, str)})
+    return psycopg.connect(**kwargs)
