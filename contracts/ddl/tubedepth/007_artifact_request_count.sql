@@ -1,0 +1,35 @@
+-- Additive only (epic #16 pre-approval 2: DROP, type changes and other schema changes are excluded).
+-- Part of this schema's canonical form since #178, the same composition 004 above describes.
+--
+-- #272: what the fetch that produced this row actually cost, in requests.
+--
+-- The day's Data API bound (#259, collectors/youtube/quota.py) is read back out of this table
+-- because the row is the only thing a fetch leaves behind, and #259 could add no column -- so it
+-- reconstructed each fetch's cost from the row's `kind`. That works for `video.metadata`, where the
+-- rows of one run divide exactly by the 50 ids a `videos.list` call carries, and it does not work
+-- for a listing walk: the walk pages until the source runs out, our item cap or the publication
+-- window stops it, so its cost is between 1 and MAX_LISTING_ITEMS / 50 + 1 = 41 requests and the
+-- row said nothing about which. It was charged a flat LISTING_REQUESTS_PER_WALK = 9, and a channel
+-- with more than about 350 videos in the window was therefore undercharged -- a day of long walks
+-- could stay under max_requests_per_day while the real spend passed Google's 10,000-unit ceiling.
+--
+-- A request, not a quota unit, for the reason collectors/youtube/scope.json's ROUTES_note gives:
+-- `playlistItems.list`, `channels.list` and `videos.list` all cost one unit a call, so on the
+-- routes this collector takes the two coincide. `search.list` is the exception and no panel
+-- directive takes it, so no row this bound counts has a unit cost the request count misstates.
+--
+-- Every attempt, a retry included, the same rule transport.RequestBudget charges by: a retry is
+-- another request the source served.
+--
+-- On `artifacts` and not on a table of its own for the reason 005 gives: the artifact is the row
+-- every fetch produces, exactly one per fetch, so one column is joinable from every snapshot table
+-- and no pair of them can disagree about what a single fetch spent.
+--
+-- Nullable, and NULL is a fact rather than a zero: a row written before this migration was never
+-- asked what it spent, while a fetch that sent no request at all writes 0. `quota.py` sums the
+-- column where it is present and falls back to the kind's estimate for the rows that have none, so
+-- the old rows keep the reading they were counted with and no backfill is guessed at.
+--
+-- integer, matching `byte_count` beside it: the count is bounded by the per-run budget
+-- (ROUTES.data_api.max_requests_per_run = 1200), which is four orders of magnitude inside int4.
+ALTER TABLE tubedepth.artifacts ADD COLUMN request_count integer;
