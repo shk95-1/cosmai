@@ -177,6 +177,10 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
   that could not be written, a normalizer meeting a shape nobody has seen. `transport` is reserved
   for a failure on the way to the source, so a failure on our side does not borrow that word. Also
   `failed`, never `blocked` — nothing refused us.
+- `payload_unreadable` (#275) — an artifact's stored payload could not be read back when `flatten`
+  came for it: no file under that digest, or bytes that are not the JSON written there. Written by
+  `flatten` alone; on the `work` side the same absence is a cache miss, because `work` can fetch
+  those bytes again and `flatten` cannot. Also `failed`, never `blocked`.
 
 **No single job takes the batch down** (#274). Everything one job does, not only its fetch, is
 isolated from the rest of the batch: whatever is raised ends that job `failed` with one of the codes
@@ -206,6 +210,29 @@ extraction has no wall-clock bound at all — because reclaiming a batch a live 
 costs a second fetch and a second artifact row, while waiting only delays a dead worker's jobs.
 No column was added: `_claim` is the only writer of `running` and stamps `started_at` in the same
 statement, so the age of a claim is already on the row.
+
+**`flatten` advances over an artifact it cannot flatten, and writes down that it did** (#275). The
+pass keeps one cursor (`tubedepth.flatten_progress`) and used to move it onto the last artifact that
+flattened: a batch in which everything failed left it where it stood, so the next tick read the same
+500 rows and nothing newer was ever reached, and a mixed batch carried it past the failures with the
+successes around them, so those artifacts were never flattened again and nothing said so. The cursor
+now advances over every artifact the pass examined, and what remembers a failure instead is one row
+in `tubedepth.jobs`: `kind = 'flatten.artifact'`, `dataset = 'flatten'`, `target` the artifact's
+identifier, the reason in `error_code`·`error_message` and the moment in `finished_at`. No column
+and no table were added, nothing claims those rows (`work` claims `queued` alone, and these are
+`failed`), and `collector_health` counts them under dataset `flatten` with no change to the view.
+
+A failure the payload's own bytes decide — nothing under that digest, or a payload flatten has no
+handler for — is final on its first attempt (`max_attempts = 1`): a payload file is
+content-addressed and never rewritten, and since #274 `work` re-fetches such a target under a **new**
+artifact row ahead of the cursor, so passing the old one by loses nothing. A refusal from the
+database says nothing about the artifact and is attempted again by the next pass, bounded at
+`FLATTEN_MAX_ATTEMPTS` = **3** attempts counted on the record — bounded because an artifact retried
+without end would be a second way to pin the pass. Retries are taken out of the same batch of 500
+rather than added to it, so a pass never grows past the size the role's `transaction_timeout=60s`
+was measured against. One artifact's failure is isolated by a SAVEPOINT for the reason #274 gives on
+the `work` side: a DBAPI error otherwise leaves the pass's transaction aborted and every statement
+after it — the next artifact, the record, the cursor write — is refused.
 
 **`youtube work` exits 2 on a block** (#183): when a job fails with one of the four codes the view
 counts as `blocked` above, the pass stops rather than sending the rest of the batch into the same
