@@ -9,9 +9,25 @@
 from __future__ import annotations
 
 import json
+from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 
 from analysis import crosscheck
+
+ROOT = Path(__file__).resolve().parents[1]
+TOOL = ROOT / "tool" / "measure-crosscheck-keys"
+
+
+def _measure_tool():
+    """`tool/measure-crosscheck-keys` loaded as a module -- it has no `.py` suffix, so a plain import does
+    not reach it (fork #104, the same load `tests/retrieval/test_source_mix.py` uses)."""
+    spec = spec_from_loader("measure_crosscheck_keys", SourceFileLoader("measure_crosscheck_keys", str(TOOL)))
+    assert spec is not None and spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 
 ANY_REASON = crosscheck.DENIED_FOR["레티날"]["레티놀"]
 # The Korean strings of fork #103 live in a fixture because tool/checks/lang rejects an added Hangul
@@ -220,6 +236,41 @@ def test_a_genuinely_wrong_key_is_still_a_key_mismatch_beside_a_run_on_lump():
     assert bad.rows == 2 and bad.suspect
     assert bad.denied == (RUN_ON["denied"],)
     assert bad.denied_run_on == (), "the substance is already named by key_mismatch, so it is not said twice"
+
+
+def test_the_measure_tool_reports_a_run_on_lump_as_run_on_not_denied():
+    """The tool must ask `audit()` for the split rather than re-deriving it -- before fork #104 it called
+    `denied_in` over every caught name and blamed the key for a substance that only shares a run-on lump."""
+    tool = _measure_tool()
+    lump = RUN_ON["run_on_list"]
+    keys = {RUN_ON["cica_key"]: crosscheck.INGREDIENT_KEYS[RUN_ON["cica_key"]]}
+    (audit,) = crosscheck.audit([(RUN_ON["product_key"], lump)], keys=keys)
+    # `known` = every name this audit caught, so `new`/`gone` stay empty and `bad` isolates run_on.
+    entry, bad = key_report_of(tool, audit, known=frozenset(name for name, _count in audit.names))
+    assert entry["denied"] == []
+    assert entry["run_on"] == [{"substance": RUN_ON["denied"], "product": RUN_ON["product_key"]}]
+    assert bad == 1, "a run-on lump is still red, just not as `denied`"
+
+
+def test_the_measure_tool_still_reports_a_genuine_key_mismatch_as_denied():
+    """Re-adding the two-character alias must still come out under `denied`, beside a run-on lump that
+    must not quiet it."""
+    tool = _measure_tool()
+    alias = RUN_ON["cica_alias"]
+    rows = [
+        (RUN_ON["product_key"], RUN_ON["run_on_list"]),
+        ("p1", RUN_ON["plain_denied_name"]),
+    ]
+    (audit,) = crosscheck.audit(rows, keys={alias: (alias,)})
+    entry, bad = key_report_of(tool, audit, known=frozenset(name for name, _count in audit.names))
+    assert entry["denied"] == [RUN_ON["denied"]]
+    assert entry["run_on"] == [], "the substance is already named by `denied`, so it is not said twice"
+    assert bad == 1
+
+
+def key_report_of(tool, audit, known):
+    names = dict(audit.names)
+    return tool.key_report(audit, names, known)
 
 
 def test_nothing_the_matcher_brings_in_escapes_the_gate():
