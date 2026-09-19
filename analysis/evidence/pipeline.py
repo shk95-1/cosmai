@@ -43,9 +43,12 @@ from db.seed import panel as panel_seed
 
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
 # Where the evidence attaches. Reading only judged cells is how no row the FK of 025 would refuse is made.
+# content_type is fixed to the same constant this run writes with -- without it, a judged cell of another
+# content_type would offer a topic/quarter/source combination this run has no matching judgement row for,
+# and the write below would then refuse it (the FK of 025), not merely skip it.
 CELLS: LiteralString = (
     "SELECT DISTINCT topic_key, quarter, source FROM topic_quarter_judgement "
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 # The two predicates sit side by side because the contract does not guarantee they are equivalent, and the
 # partial index of 023 is chosen by `content_type` so the plan is unchanged -- with `source` alone it scans
@@ -70,12 +73,11 @@ SELECT c.doc_id, v.quarter, m.topic_id, c.source, c.channel_id,
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
-# TODO(shk95-1/cosmai#200): `content_type` is in neither this predicate nor note_of(), so a short_form run
-# deletes the same run's long_form evidence -- the same four columns as
-# `analysis/trend/pipeline.py`·`analysis/judge/pipeline.py`.
+# The same fix as `analysis/trend/pipeline.py` 1b11d90: without content_type a short_form clear would
+# also take the same run's long_form evidence.
 CLEAR: LiteralString = (
     "DELETE FROM topic_quarter_evidence "
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 INSERT: LiteralString = """
 INSERT INTO topic_quarter_evidence
@@ -165,7 +167,7 @@ def build(
             )
         run_id = int(found[0])
         cutoff = cutoff_of(found[1])
-        cur.execute(CELLS, (run_id, scope, version, panel_role))
+        cur.execute(CELLS, (run_id, scope, version, panel_role, CONTENT_TYPE))
         cells = {(str(topic), str(quarter), str(source)) for topic, quarter, source in cur.fetchall()}
         if not cells:
             raise NoEvidence(f"run {run_id} has no topic_quarter_judgement row; run `cosmai trend judge`")
@@ -247,7 +249,7 @@ def run(
     )
     payload = json.dumps({"evidence": EVIDENCE_VERSION}, ensure_ascii=False)
     with conn.cursor() as cur:
-        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
+        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role, CONTENT_TYPE))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(STAMP_VERSION, (payload, made.run_id))
         # The stored rows answer, not a sentence of the contract -- do the ranks run on from 1, does the

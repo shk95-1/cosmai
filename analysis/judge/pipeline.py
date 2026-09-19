@@ -19,7 +19,7 @@ from typing import Any, LiteralString
 import psycopg
 
 from analysis.judge import JUDGEMENT_VERSION, UNJUDGED, judge, quarter_of
-from analysis.trend.pipeline import PANEL_ROLE, RUN_CUTOFF, SCOPE, cutoff_of, note_of
+from analysis.trend.pipeline import CONTENT_TYPE, PANEL_ROLE, RUN_CUTOFF, SCOPE, cutoff_of, note_of
 from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
 from db.corpus import active_snapshot
 from db.seed import panel as panel_seed
@@ -30,9 +30,12 @@ METRIC_COLUMNS = (
     "velocity_yoy", "persistence", "persist_quarters", "window_quarters", "unique_ratio",
     "channel_count", "channel_diffusion", "sample_ok",
 )  # fmt: skip
+# content_type is fixed here for the same reason CLEAR needs it: without it, a metric row of another
+# content_type under the same run would be read, judged and then collide with CLEAR's own content_type
+# scoping on the next INSERT (a duplicate key, not silence -- caught writing this fix's own test).
 SELECT_METRICS: LiteralString = (
     f"SELECT {', '.join(METRIC_COLUMNS)} FROM metrics_topic_quarter "  # noqa: S608
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER BY run_id LIMIT 1"
 # A judgement row lives in the same run as the metric row (the FK includes run_id). So its revision is
@@ -41,10 +44,11 @@ FIND_RUN: LiteralString = "SELECT run_id FROM analysis_run WHERE note = %s ORDER
 STAMP_VERSION: LiteralString = (
     "UPDATE analysis_run SET versions = coalesce(versions, '{}'::jsonb) || %s::jsonb WHERE run_id = %s"
 )
-# TODO(shk95-1/cosmai#200): same four-column predicate as trend/evidence, missing content_type here too.
+# The same fix as `analysis/trend/pipeline.py` 1b11d90: without content_type a short_form clear would
+# also take the same run's long_form judgement.
 CLEAR: LiteralString = (
     "DELETE FROM topic_quarter_judgement "
-    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s"
+    "WHERE run_id = %s AND scope = %s AND panel_version = %s AND panel_role = %s AND content_type = %s"
 )
 INSERT: LiteralString = """
 INSERT INTO topic_quarter_judgement
@@ -104,7 +108,7 @@ def _metric_rows(
 ) -> list[MetricsTopicQuarterRow]:
     """numeric comes back as Decimal -- the contract's dataclass is float, and the judgement formulas run on
     float too."""
-    cur.execute(SELECT_METRICS, (run_id, scope, version, role))
+    cur.execute(SELECT_METRICS, (run_id, scope, version, role, CONTENT_TYPE))
     made: list[MetricsTopicQuarterRow] = []
     for row in cur.fetchall():
         fields = dict(zip(METRIC_COLUMNS, row, strict=True))
@@ -174,7 +178,7 @@ def run(
     for row in made.rows:
         by_type[row.trend_type] = by_type.get(row.trend_type, 0) + 1
     with conn.cursor() as cur:
-        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role))
+        cur.execute(CLEAR, (made.run_id, scope, made.panel_version, panel_role, CONTENT_TYPE))
         cur.executemany(INSERT, [_values(row) for row in made.rows])
         cur.execute(STAMP_VERSION, (payload, made.run_id))
         # The stored rows answer, not a sentence of the contract -- is it 1:1 with the metric rows, is gap_pp

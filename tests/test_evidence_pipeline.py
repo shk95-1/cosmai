@@ -94,6 +94,73 @@ def test_the_evidence_lands_on_the_run_the_judgement_already_has(judged: str):
             assert cur.fetchone() == ("rule-v0.1",)
 
 
+def test_clear_does_not_touch_a_sibling_content_type_under_the_same_run(judged: str):
+    """Without content_type in CLEAR's delete key, a short_form clear would also take the run's
+    long_form evidence (#200) -- a sibling row is planted by hand (cloned from a real row so every
+    FK is already satisfied) to ask whether it survives a rerun of the (long_form) pipeline."""
+    with connect(judged) as conn:
+        judge_run(conn)
+        outcome = run(conn)
+        with conn.cursor() as cur:
+            # The clone has to be the same cell in every table -- an evidence row for a cell that has no
+            # matching judgement row of the same content_type refuses at its own FK, not at CLEAR.
+            cur.execute(
+                "SELECT j.topic_key, j.quarter, j.source FROM topic_quarter_judgement j"
+                " JOIN topic_quarter_evidence e ON e.run_id = j.run_id AND e.topic_key = j.topic_key"
+                "  AND e.quarter = j.quarter AND e.source = j.source"
+                " WHERE j.run_id = %s LIMIT 1",
+                (outcome.run_id,),
+            )
+            cell = cur.fetchone()
+            assert cell is not None
+            cell_args = (outcome.run_id, *cell)
+            cur.execute(
+                "INSERT INTO metrics_topic_quarter"
+                " (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role,"
+                "  mentions, documents, quarter_mentions, denom_channels, composition, velocity_yoy,"
+                "  persistence, persist_quarters, window_quarters, unique_ratio, channel_count,"
+                "  channel_diffusion, sample_ok)"
+                " SELECT run_id, scope, topic_key, quarter, source, 'short_form', panel_version,"
+                "  panel_role, mentions, documents, quarter_mentions, denom_channels, composition,"
+                "  velocity_yoy, persistence, persist_quarters, window_quarters, unique_ratio,"
+                "  channel_count, channel_diffusion, sample_ok"
+                " FROM metrics_topic_quarter"
+                " WHERE run_id = %s AND topic_key = %s AND quarter = %s AND source = %s LIMIT 1",
+                cell_args,
+            )
+            cur.execute(
+                "INSERT INTO topic_quarter_judgement"
+                " (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role,"
+                "  trend_type, judged, evidence_strength, opportunity_score, gap_pp, hold_reason,"
+                "  single_source)"
+                " SELECT run_id, scope, topic_key, quarter, source, 'short_form', panel_version,"
+                "  panel_role, trend_type, judged, evidence_strength, opportunity_score, gap_pp,"
+                "  hold_reason, single_source"
+                " FROM topic_quarter_judgement"
+                " WHERE run_id = %s AND topic_key = %s AND quarter = %s AND source = %s LIMIT 1",
+                cell_args,
+            )
+            cur.execute(
+                "INSERT INTO topic_quarter_evidence"
+                " (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role,"
+                "  rank, snapshot_id, doc_id, like_count, matched_term)"
+                " SELECT run_id, scope, topic_key, quarter, source, 'short_form', panel_version,"
+                "  panel_role, rank, snapshot_id, doc_id, like_count, matched_term"
+                " FROM topic_quarter_evidence"
+                " WHERE run_id = %s AND topic_key = %s AND quarter = %s AND source = %s LIMIT 1",
+                cell_args,
+            )
+        conn.commit()
+        run(conn)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM topic_quarter_evidence"
+                " WHERE run_id = %s AND content_type = 'short_form'",
+                (outcome.run_id,),
+            )
+            assert cur.fetchone() == (1,)
+
+
 def test_running_twice_rewrites_the_same_rows(judged: str):
     """A partial update puts a quiet hole in the ladder of ranks."""
     with connect(judged) as conn:

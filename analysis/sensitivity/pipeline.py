@@ -276,7 +276,7 @@ def _reactions(cur: psycopg.Cursor[Any], params: dict[str, Any]) -> list[Reactio
 
 
 def _stored(cur: psycopg.Cursor[Any], run_id: int, version: int) -> list[MetricsTopicQuarterRow]:
-    cur.execute(SELECT_METRICS, (run_id, SCOPE, version, PANEL_ROLE))
+    cur.execute(SELECT_METRICS, (run_id, SCOPE, version, PANEL_ROLE, CONTENT_TYPE))
     made: list[MetricsTopicQuarterRow] = []
     for row in cur.fetchall():
         fields = dict(zip(METRIC_COLUMNS, row, strict=True))

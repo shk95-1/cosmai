@@ -132,6 +132,49 @@ def test_running_twice_rewrites_the_same_rows(graded: str):
             assert cur.fetchone() == (8,)
 
 
+def test_clear_does_not_touch_a_sibling_content_type_under_the_same_run(graded: str):
+    """Without content_type in CLEAR's delete key, a short_form clear would also take the run's
+    long_form judgement (#200) -- a sibling row is planted by hand (cloned from a real row so the FK
+    to metrics_topic_quarter is already satisfied) to ask whether it survives a rerun."""
+    with connect(graded) as conn:
+        run_id = _plant(conn)
+        run(conn, snapshot_id=SNAPSHOT, panel_version=1)
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO metrics_topic_quarter"
+                " (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role,"
+                "  mentions, documents, quarter_mentions, denom_channels, composition, velocity_yoy,"
+                "  persistence, persist_quarters, window_quarters, unique_ratio, channel_count,"
+                "  channel_diffusion, sample_ok)"
+                " SELECT run_id, scope, topic_key, quarter, source, 'short_form', panel_version,"
+                "  panel_role, mentions, documents, quarter_mentions, denom_channels, composition,"
+                "  velocity_yoy, persistence, persist_quarters, window_quarters, unique_ratio,"
+                "  channel_count, channel_diffusion, sample_ok"
+                " FROM metrics_topic_quarter WHERE run_id = %s LIMIT 1",
+                (run_id,),
+            )
+            cur.execute(
+                "INSERT INTO topic_quarter_judgement"
+                " (run_id, scope, topic_key, quarter, source, content_type, panel_version, panel_role,"
+                "  trend_type, judged, evidence_strength, opportunity_score, gap_pp, hold_reason,"
+                "  single_source)"
+                " SELECT run_id, scope, topic_key, quarter, source, 'short_form', panel_version,"
+                "  panel_role, trend_type, judged, evidence_strength, opportunity_score, gap_pp,"
+                "  hold_reason, single_source"
+                " FROM topic_quarter_judgement WHERE run_id = %s LIMIT 1",
+                (run_id,),
+            )
+        conn.commit()
+        run(conn, snapshot_id=SNAPSHOT, panel_version=1)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) FROM topic_quarter_judgement"
+                " WHERE run_id = %s AND content_type = 'short_form'",
+                (run_id,),
+            )
+            assert cur.fetchone() == (1,)
+
+
 def test_a_judgement_row_cannot_stand_without_its_metric_row(graded: str):
     """This FK is the mechanical form of "derived" -- as a sentence alone, a judgement with no metric lives
     quietly."""
