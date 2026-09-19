@@ -106,13 +106,25 @@ outside this decision's scope; they stay as they are -- whether to narrow them i
 
 ## needs_verify
 Zero, and that is the point. `needs_verify` is closed by name: it holds the re-identification sample that
-maps an author hash back to the channel id it was made from (fork #92, DDL 029), so `needs_runtime`,
-`needs_runtime_reader` and `postgrest_anon` are granted nothing in it — not schema USAGE, not a table
-privilege — and `needs_verify_reader` (NOLOGIN, SELECT only, through `db/bootstrap_needs_verify.sql`'s
-`ALTER DEFAULT PRIVILEGES`) is the one role that reads it. It is outside the 23 above and adds none to them.
-PostgREST never sees the schema: it is not in `PGRST_DB_SCHEMAS`, and without USAGE the anonymous role
-could not read it if it were. The rows are destroyed with the schema and the role within 30 days of the
-retroactive hash pass being verified, so this section is expected to go with them.
+maps an author hash back to the channel id it was made from (fork #92, DDL 029), so `needs_runtime` and
+`postgrest_anon` are granted nothing in it — not schema USAGE, not a table privilege — and
+`needs_verify_reader` (NOLOGIN, SELECT only, through `db/bootstrap_needs_verify.sql`'s
+`ALTER DEFAULT PRIVILEGES`) is the only role the sample is *granted* to. There is no role
+`needs_runtime_reader`: the name is a grants file (`db/grants/needs_runtime_reader.sql`) whose grants go to
+`needs_runtime` and `needs_owner`, so `needs_runtime` answers for it here.
+
+Two roles reach the sample without a grant, and naming them is where the boundary actually ends.
+`needs_owner` owns the schema and the table. `needs_migrator` — the deploy's LOGIN credential — is a member
+of `needs_owner` (`db/bootstrap.sql`) and can `SET ROLE` to it, which is the path `db/migrate.sh` uses to
+create the table in the first place. It is `NOINHERIT`, so every `has_*_privilege` answer for it reads false
+and a privilege matrix alone would call it closed. The schema is closed against the application and the
+screen, not against the deploy.
+
+It is outside the 23 above and adds none to them. PostgREST never sees the schema: it is not in
+`PGRST_DB_SCHEMAS` — that value is recorded in this document's intro and in no config file this repository
+carries, since the PostgREST container is the old stack's — and without USAGE the anonymous role could not
+read it if it were. The rows are destroyed with the schema and the role within 30 days of the retroactive
+hash pass being verified, so this section is expected to go with them.
 
 ## trend_radar
 

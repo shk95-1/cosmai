@@ -389,7 +389,7 @@ def test_the_sample_is_the_three_columns_029_declares_and_the_schema_holds_nothi
 
 
 @pytest.mark.postgres
-def test_needs_verify_reader_reads_the_sample_and_no_other_role_can(harness_container: str):
+def test_needs_verify_reader_reads_the_sample_and_the_roles_that_read_needs_cannot(harness_container: str):
     """The privilege matrix `contracts/anon_exposure.md` states, measured on the real table.
 
     Both halves of "visible" are asked of every closed role, because either one alone would open
@@ -421,6 +421,19 @@ def test_needs_verify_reader_reads_the_sample_and_no_other_role_can(harness_cont
         )
         == "0"
     ), "the sample is granted to PUBLIC"
+    # needs_migrator is refused on its own privileges above and reaches the sample anyway: it is a
+    # NOINHERIT member of needs_owner, which owns the table -- the DDL loop's own SET ROLE. Asked of
+    # the catalogue because this helper's session is a superuser, for whom any SET ROLE succeeds.
+    # Pinned so contracts/anon_exposure.md's "not against the deploy" and the server cannot drift apart.
+    assert (
+        _verify_value(harness_container, "SELECT pg_has_role('needs_migrator', 'needs_owner', 'SET')") == "t"
+    )
+    assert (
+        _verify_value(
+            harness_container, f"SELECT relowner::regrole FROM pg_class WHERE oid = '{SAMPLE}'::regclass"
+        )
+        == "needs_owner"
+    )
     # `needs_runtime_reader` is a grants file (db/grants/needs_runtime_reader.sql) and not a role
     # here, so it is absent from the loop above rather than passing it silently. The day it becomes
     # a role, this says so and the list is short by one.

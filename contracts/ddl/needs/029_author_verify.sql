@@ -51,8 +51,10 @@ CREATE TABLE IF NOT EXISTS needs_verify.author_sample (
 -- explanation attached is a schema nobody dares remove.
 COMMENT ON TABLE needs_verify.author_sample IS
     'Verification sample for the author hash (fork issue #92): tens of rows mapping author_hash '
-    'back to the channel id it was made from. Re-identifying by construction, so only '
-    'needs_verify_reader may read it. Destroyed with the schema and the role within 30 days of the '
+    'back to the channel id it was made from. Re-identifying by construction: '
+    'needs_verify_reader is the only role granted SELECT. needs_owner owns it, and needs_migrator '
+    'reaches it by SET ROLE needs_owner, so it is closed against the application and the screen, '
+    'not against the deploy. Destroyed with the schema and the role within 30 days of the '
     'retroactive hash pass being verified; the statements are in '
     'contracts/ddl/needs/029_author_verify.sql.';
 COMMENT ON COLUMN needs_verify.author_sample.author_hash IS
