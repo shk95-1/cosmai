@@ -104,6 +104,16 @@ sentences, so they are outside the whitelist. `corpus_*` · `*_mention` · `retr
 zero references across `portal/`). They are rule dictionaries, so sensitivity is low and they are
 outside this decision's scope; they stay as they are -- whether to narrow them is a separate matter.
 
+## needs_verify
+Zero, and that is the point. `needs_verify` is closed by name: it holds the re-identification sample that
+maps an author hash back to the channel id it was made from (fork #92, DDL 029), so `needs_runtime`,
+`needs_runtime_reader` and `postgrest_anon` are granted nothing in it — not schema USAGE, not a table
+privilege — and `needs_verify_reader` (NOLOGIN, SELECT only, through `db/bootstrap_needs_verify.sql`'s
+`ALTER DEFAULT PRIVILEGES`) is the one role that reads it. It is outside the 23 above and adds none to them.
+PostgREST never sees the schema: it is not in `PGRST_DB_SCHEMAS`, and without USAGE the anonymous role
+could not read it if it were. The rows are destroyed with the schema and the role within 30 days of the
+retroactive hash pass being verified, so this section is expected to go with them.
+
 ## trend_radar
 
 Nine. Only aggregated facts remain. This schema alone also receives `GRANT USAGE ON SCHEMA` --
