@@ -1,0 +1,24 @@
+{
+  "_source": "trend_radar.product oliveyoung A000000150361, read-only 2026-09-20: a 67,797-character ingredient list with 1,190 '(' and 1,198 ')'. One '(' never closes -- a colourant written with a truncated CI number at the end of its line -- so the depth stays above 0 and the next 6,360 characters (479 commas, 51 newlines) become one 'name' and 500 names are lost. The values below are an abridged excerpt of that list, word order preserved (fork #105).",
+  "unclosed": "흑색산화철 (CI 77499), 황색4호 (CI 19140), 망가니즈바이올렛 (CI 7774\n \n탤크, 마이카 (CI 77019), 실리카, 티타늄디옥사이드 (CI 77891), 칼슘카보네이트",
+  "unclosed_names": [
+    "흑색산화철 (CI 77499)",
+    "황색4호 (CI 19140)",
+    "망가니즈바이올렛 (CI 7774",
+    "탤크",
+    "마이카 (CI 77019)",
+    "실리카",
+    "티타늄디옥사이드 (CI 77891)",
+    "칼슘카보네이트"
+  ],
+  "unclosed_own_name": "망가니즈바이올렛 (CI 7774",
+  "balanced": "흑색산화철 (CI 77499), 나이아신아마이드(20,000 ppm)\n탤크, 마이카 (CI 77019)",
+  "balanced_names": [
+    "흑색산화철 (CI 77499)",
+    "나이아신아마이드(20,000 ppm)",
+    "탤크",
+    "마이카 (CI 77019)"
+  ],
+  "stray_close": "탤크), 실리카",
+  "stray_close_names": ["탤크)", "실리카"]
+}

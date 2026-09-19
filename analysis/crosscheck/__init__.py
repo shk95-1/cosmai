@@ -192,7 +192,8 @@ READ_NOT_SUNCARE = "선크림 담론이 아니다"
 # `tool/measure-crosscheck-keys` 이고, CI 는 그 일을 할 수 없다(운영 표에 닿지 못한다).
 KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.csv"
 
-# Two rules that split an ingredient list into ingredient names. A trap our source alone has, so ydc has no
+# The rules that split an ingredient list into ingredient names (the third, the unclosed `(`, is in
+# parse_ingredients). A trap our source alone has, so ydc has no
 # counterpart (the contract's §Ingredients).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 STAR_NOTE_RE = re.compile(r"^[^\S\n]*\*.*$", re.MULTILINE)
@@ -401,14 +402,31 @@ def ratings(
     return tuple(made)
 
 
+def closing_opens(body: str) -> frozenset[int]:
+    """Where every `(` that a later `)` closes sits. A `)` closes the nearest `(` still open, which is the
+    same pairing the depth counter below walks, so on a list whose parentheses all pair up this names every
+    `(` and the two rules cannot part."""
+    open_at: list[int] = []
+    closed: set[int] = set()
+    for index, char in enumerate(body):
+        if char == "(":
+            open_at.append(index)
+        elif char == ")" and open_at:
+            closed.add(open_at.pop())
+    return frozenset(closed)
+
+
 def parse_ingredients(text: str) -> list[str]:
     """One ingredient list into ingredient names. A bracketed section marker is dropped and a comma inside
-    parentheses is not cut."""
+    parentheses is not cut. An unclosed `(` costs at most the name it sits in."""
     body = BRACKET_RE.sub(" ", STAR_NOTE_RE.sub(" ", text or ""))
+    # A `(` that never closes must not open a depth: left to do so it holds the depth above 0 to the end of
+    # the list and swallows every name after it into one (fork #105). A `)` with no `(` is already floored.
+    closing = closing_opens(body)
     out: list[str] = []
     depth, current = 0, []
-    for char in body:
-        if char == "(":
+    for index, char in enumerate(body):
+        if char == "(" and index in closing:
             depth += 1
         elif char == ")":
             depth = max(0, depth - 1)
@@ -542,6 +560,7 @@ __all__ = [
     "RatingRow",
     "SourceShare",
     "audit",
+    "closing_opens",
     "composition",
     "confirmed_polarity",
     "denial_reason",

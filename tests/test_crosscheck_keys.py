@@ -37,6 +37,13 @@ RUN_ON = json.loads(
         encoding="utf-8"
     )
 )
+# The same reason for fork #105's strings: an abridged excerpt of the one production list whose `(` never
+# closes, and the two shapes the bound on it must leave alone.
+UNBALANCED = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "crosscheck" / "unbalanced_paren.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 # 우리 표에서 그대로 뜬 성분명들. 오매칭을 재현하는 데 필요한 만큼만 든다.
 OURS = (
@@ -179,6 +186,29 @@ def test_a_comma_inside_a_percentage_does_not_split_an_ingredient():
 
 def test_a_star_note_is_dropped_and_newlines_split():
     assert crosscheck.parse_ingredients("* 퍼스트 에센스\n정제수,\n글리세린") == ["정제수", "글리세린"]
+
+
+def test_an_unclosed_parenthesis_costs_at_most_its_own_name():
+    """One production list writes a colourant with a truncated CI number and never closes the parenthesis,
+    so the depth stays above 0 and the rest of the list -- 6,360 characters, 500 names -- becomes one
+    "name". An unclosed `(` is ordinary text, so only the name it sits in carries the damage (fork #105)."""
+    names = crosscheck.parse_ingredients(UNBALANCED["unclosed"])
+    assert names == UNBALANCED["unclosed_names"]
+    assert UNBALANCED["unclosed_own_name"] in names, "the damaged name keeps the text the vendor wrote"
+    assert not any(crosscheck.run_on(name) for name in names), "no name is a swallowed list any more"
+
+
+def test_a_comma_inside_balanced_parentheses_still_does_not_split():
+    """The bound must not be paid for by the rule it bounds: where a `(` does close, a comma inside it is
+    still not a split, across a newline and a percentage alike."""
+    assert crosscheck.parse_ingredients(UNBALANCED["balanced"]) == UNBALANCED["balanced_names"]
+
+
+def test_a_stray_closing_parenthesis_stays_ordinary_text():
+    """Seven production lists carry a `)` with no `(` before it (15 · 13 · 10 · 4 · 2 · 2 · 2 of them). The
+    depth is floored at 0, so they cost no split -- and the bound on the unclosed `(` must not change
+    that."""
+    assert crosscheck.parse_ingredients(UNBALANCED["stray_close"]) == UNBALANCED["stray_close_names"]
 
 
 def test_the_sun_context_rule_names_what_the_talk_count_is_not():
