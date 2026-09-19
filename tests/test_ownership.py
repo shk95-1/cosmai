@@ -87,13 +87,33 @@ def test_no_path_is_both_the_forks_and_upstreams(lists):
 def test_a_shared_surface_is_never_claimed_as_fork_owned(lists):
     # The third list is the fork's outbox, not its property: a file that exists on both sides is
     # changed only with the change going upstream in the same wave.
+    #
+    # One narrowing is allowed, and only this one: a *file* here under a *directory* there. The
+    # fork owns analysis/retrieval/, upstream #264 edited analysis/retrieval/corpus.py, and fork
+    # #95 imports what it added -- so that one file is shared while the directory stays the fork's
+    # (#258 Work 5). The narrower statement is the true one, and the reverse is still a
+    # contradiction: a pattern here that swallows a file listed there would tell the fork it owns
+    # something outright and must send it upstream in the same breath.
     claimed = [
         (shared, owned)
         for shared in lists["shared-surface"]
         for owned in lists["fork-owned"]
-        if _matches(owned, shared)
+        if _matches(owned, shared) and not (owned.endswith("/") and not shared.endswith("/"))
     ]
     assert not claimed, f"a shared surface cannot also be fork-owned: {claimed}"
+
+
+def test_a_narrowed_shared_surface_names_a_file_and_not_a_second_directory(lists):
+    # The exception above is worth exactly one file. A directory narrowing another directory would
+    # hand a whole subtree back with no line naming what moved, which is the unregistered state this
+    # file exists to end.
+    narrowed = [
+        shared
+        for shared in lists["shared-surface"]
+        if not shared.endswith("/") and any(_matches(owned, shared) for owned in lists["fork-owned"])
+    ]
+    for shared in narrowed:
+        assert (REPO_ROOT / shared).is_file(), f"{shared} narrows a fork-owned directory but is not a file"
 
 
 def test_needs_ddl_is_split_at_020(lists):
