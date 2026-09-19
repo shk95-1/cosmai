@@ -1264,8 +1264,9 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   mismatch, not the key. Both are red, as in the pipeline. The tool had not run since 2026-08-27: a helper it
   imports from `analysis/crosscheck/pipeline.py` was renamed that day and nothing imports a script under
   `tool/`, so no test saw it; a test now loads the tool. **Measured 2026-09-19 (read-only): of 3,402 distinct
-  ingredient names, 368 are caught by some key; 166 of those are on the confirmed list, 202 are `new`
-  (164 plain names, 38 run-on lists), 0 `gone`, 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
+  ingredient names, 368 are caught by some key. Counted per key, the way the tool reports it (a name two
+  keys both catch counts under each, 392 in all): the confirmed list's full 190 are still caught (0 `gone`),
+  202 are `new` (164 plain names, 38 run-on lists), 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
   means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool.
 - **Two rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
