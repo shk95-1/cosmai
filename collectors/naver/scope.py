@@ -32,6 +32,15 @@ BLOG_SORT = "date"
 #: `[확인 사실]` vendor-documented hard ceiling on `start`, independent of `total` -- not a scope.json
 #: knob, since no configuration of ours can move it.
 BLOG_START_MAX = 1000
+#: `[확인 사실]` NAVER's own daily ceiling on the Search API (blog), user-confirmed 2026-08-26 (#110)
+#: -- not a scope.json knob, since no configuration of ours can move it. 775,000/month converted,
+#: matching the search-APIs figure the API Hub docs give (`contracts/entrypoints.md`, read
+#: 2026-09-06). Far above today's use; `BLOG_START_MAX` is what actually binds a run.
+BLOG_DAILY_QUOTA = 25_000
+#: `[확인 사실]` NAVER's own monthly ceiling on each DataLab family endpoint, user-confirmed
+#: 2026-08-26 (#110) -- not a scope.json knob. Far above today's use; `BLOG_START_MAX` is what
+#: actually binds a run, not this quota.
+DATALAB_MONTHLY_QUOTA = 50_000
 
 #: The live transport (#182). REQUEST_TIMEOUT_S is `collectors/commerce/contract.py`'s house default
 #: for an HTTP source; a JSON API answering slower than that is not answering.
@@ -57,6 +66,8 @@ __all__ = [
     "BLOG_PAGES_MAX",
     "BLOG_SORT",
     "BLOG_START_MAX",
+    "BLOG_DAILY_QUOTA",
+    "DATALAB_MONTHLY_QUOTA",
     "REQUEST_TIMEOUT_S",
     "RETRY_MAX_ATTEMPTS",
     "RETRY_BACKOFF_S",

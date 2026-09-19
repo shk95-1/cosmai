@@ -55,6 +55,16 @@ does to the run, in the exit codes above:
 - **a blog `start` past 1000** — never requested (#110): the ceiling is the vendor's own and
   independent of `total`, so the walk stops there rather than spending budget on an error.
 
+**The vendor's quota is not what binds naver collection (#110).** NAVER's own ceilings, confirmed by
+the user 2026-08-26 — **Search API (blog) 25,000/day** (`scope.BLOG_DAILY_QUOTA`; 775,000/month
+converted) and **DataLab family 50,000/month each** (`scope.DATALAB_MONTHLY_QUOTA`) — match the
+search-APIs (775,000/month) and search-trend (50,000/month) figures the API Hub docs give further
+below, and sit far above today's use (`keywords.json`: 2 datalab requests, 45 blog requests a run).
+What actually binds is the `start` ceiling in the bullet above:
+**`BLOG_START_MAX` (1000)** is a vendor hard limit independent of `total`, so one query cannot see
+past 1,000 results no matter how much quota is left. Widening blog collection therefore means
+**splitting the query** (period, sort, keyword granularity), not calling more.
+
 Two gaps this transport still has, recorded here because a reader of `collector_health` would
 otherwise mis-read the numbers: a **charged retry writes no `naver_fetch_log` row** today (one row
 per request, with a hard-coded 200 and no `elapsed_ms`), so `requests` under-reports and `p90_ms`
@@ -163,6 +173,18 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
   `blocked`: one channel's access policy is not the collector being refused.
 - `budget` (#183) — the run spent its own `scope.json` request budget for that route. Also `failed`:
   it is our cap, and putting it in `blocked` would make a self-limited run look throttled by YouTube.
+- `internal` (#274) — the job died of something that is not the source's answer: a stored payload
+  that could not be written, a normalizer meeting a shape nobody has seen. `transport` is reserved
+  for a failure on the way to the source, so a failure on our side does not borrow that word. Also
+  `failed`, never `blocked` — nothing refused us.
+
+**No single job takes the batch down** (#274). Everything one job does, not only its fetch, runs
+inside a savepoint: whatever is raised ends that job `failed` with one of the codes above and the
+batch goes on to the next job. Before this, an artifact row whose payload file was missing from the
+store raised out of `_run_work`, rolled the transaction back and left every claimed job `queued` — so
+the next five-minute tick met the same row and died the same way. A fresh artifact whose payload
+cannot be read is a **cache miss**, not a failure: `work` re-fetches it and the newer row it writes
+is the one the freshness cache serves from the next pass on.
 
 **`youtube work` exits 2 on a block** (#183): when a job fails with one of the four codes the view
 counts as `blocked` above, the pass stops rather than sending the rest of the batch into the same

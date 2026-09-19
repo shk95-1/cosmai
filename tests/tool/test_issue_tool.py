@@ -739,6 +739,61 @@ def test_audit_reports_drift_without_failing(run):
 
 
 # ---------------------------------------------------------------------------------------------
+# #263: an idle coordinator (nothing started) while `ready` names a startable issue is a silent
+# stall no existing check reaches -- the 24h "Started but idle" section is sized for an abandoned
+# issue, not for a coordinator that simply stopped dispatching.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_audit_reports_an_idle_coordinator_when_nothing_is_started(run):
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "startable", labels=("ch:tool",), parent=10),
+        ],
+        fork_labels=["channel"],
+    )
+    assert done.returncode == 0, done.stderr
+    assert "Idle coordinator" in done.stdout, done.stdout
+    assert "not proof the run is advancing" in done.stdout, done.stdout
+
+
+def test_audit_stays_silent_when_an_issue_is_in_progress(run):
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(11, "being worked", labels=("ch:tool",), parent=10, assignees=("shk95",)),
+        ],
+        fork_labels=["channel"],
+    )
+    assert done.returncode == 0, done.stderr
+    assert "Idle coordinator" not in done.stdout, done.stdout
+
+
+def test_audit_stays_silent_when_nothing_is_startable_either(run):
+    # Nothing started, but nothing to start -- the blocked issue never became ready, so silence
+    # here is the true state, not the stall #263 reports on.
+    done = run(
+        "audit",
+        upstream=[
+            epic(10, "tool", subs=(11,)),
+            issue(
+                11,
+                "blocked",
+                labels=("ch:tool",),
+                parent=10,
+                blocked_by=((UPSTREAM, 9, "OPEN"),),
+            ),
+        ],
+        fork_labels=["channel"],
+    )
+    assert done.returncode == 0, done.stderr
+    assert "Idle coordinator" not in done.stdout, done.stdout
+
+
+# ---------------------------------------------------------------------------------------------
 # #232 Work 3: `audit`'s first section is the last nightly (scheduled) run of suite.yml.
 # ---------------------------------------------------------------------------------------------
 
