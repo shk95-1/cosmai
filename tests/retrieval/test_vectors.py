@@ -251,6 +251,24 @@ def test_a_masked_row_never_wins_a_tie_it_would_otherwise_share(tmp_path):
     assert [h[0] for h in hits] == ["top#0", "kept"]
 
 
+def test_a_nan_row_costs_only_itself(tmp_path):
+    """The boundary is one scalar read off the partition. With fewer clean rows than `top`, a NaN similarity
+    reaches it, and every comparison against NaN is false -- the whole result would come back empty. The row
+    is dropped like a masked one instead, and the finite rows keep their order (fork #101 review)."""
+    broken = [float("nan")] * vectors.DIM
+    store = _store_with_rows(
+        tmp_path,
+        "nan",
+        [
+            ("top#0", "youtube_comment", _unit(0)),
+            ("broken", "youtube_comment", broken),
+            ("second", "youtube_comment", _tied_vector()),
+        ],
+    )
+    hits = vectors.search(vectors.load(store), _unit(0), top=3)
+    assert [h[0] for h in hits] == ["top#0", "second"]
+
+
 def test_a_large_tie_block_is_kept_in_ascending_row_index(tmp_path):
     """Teeth: on the two-line pre-fix selection, this is the test that goes red -- on this numpy build the
     small hand-built stores above happen to come out in index order anyway (introselect on 3-4 rows has

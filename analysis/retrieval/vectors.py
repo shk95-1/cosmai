@@ -200,6 +200,9 @@ def search(
         # Exclusions go to -inf. Filtering rows out shifts the indexes and breaks the chunk_id correspondence.
         mask = np.array([s in wanted for s in store.sources])
         similarity = np.where(mask, similarity, -np.inf)
+    # A NaN row is dropped like a masked one. Left in, it would turn the boundary below into NaN and every
+    # comparison against it false -- one bad row would empty the whole result instead of costing itself.
+    similarity = np.where(np.isnan(similarity), -np.inf, similarity)
     take = min(top, len(similarity))
     if take == 0:
         return []
