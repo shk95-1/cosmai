@@ -58,8 +58,14 @@ COMMENT_INCLUDE_REPLIES: bool = _SCOPE["COMMENT_INCLUDE_REPLIES"]
 VIDEO_METADATA_ROUTE: str = _SCOPE["VIDEO_METADATA_ROUTE"]
 #: The `part` string `videos.list` is asked for -- one quota unit however wide it is.
 VIDEO_PARTS: tuple[str, ...] = tuple(_SCOPE["VIDEO_PARTS"])
-#: Per-source request budget, pause and timeout, keyed by route name (transport.Route).
+#: Per-source request budget, pause and timeout, keyed by route name (transport.Route). Since #259
+#: the data_api entry also carries `max_requests_per_day`, which `collectors/youtube/quota.py` reads
+#: the day's spend against -- `max_requests_per_run` bounds one cron invocation of `work`, and there
+#: are 288 of those in a day.
 ROUTES: dict[str, dict[str, float]] = _SCOPE["ROUTES"]
+#: #259: what one listing walk is charged when the day's Data API spend is reconstructed from
+#: `artifacts`. An estimate, and scope.json records why it is one and what being wrong costs.
+LISTING_REQUESTS_PER_WALK: int = _SCOPE["LISTING_REQUESTS_PER_WALK"]
 
 
 class Dataset(StrEnum):
@@ -96,4 +102,5 @@ __all__ = [
     "VIDEO_METADATA_ROUTE",
     "VIDEO_PARTS",
     "ROUTES",
+    "LISTING_REQUESTS_PER_WALK",
 ]

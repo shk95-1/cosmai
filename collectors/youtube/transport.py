@@ -202,6 +202,14 @@ class RequestBudget:
                 self._sleep(pause)
         self.spent[route] = spent + 1
 
+    def restrict(self, route: str, limit: int) -> None:
+        """Lower one route's budget for the rest of this run -- never raise it (#259).
+
+        What lowers it is the day's bound (`collectors/youtube/quota.py`), read from the database at
+        the start of a run: the per-run budget is what one invocation may spend and the daily one is
+        what is left of the day, so the binding number is the smaller of the two."""
+        self.limits[route] = min(self.limits.get(route, 0), max(limit, 0))
+
     @classmethod
     def from_scope(cls, *, sleep: Callable[[float], None] = time.sleep) -> RequestBudget:
         return cls(
@@ -314,25 +322,47 @@ def _video_item_entry(item: Mapping[str, Any]) -> dict[str, Any]:
     )
 
 
-def _archive_bool(value: Any) -> str | None:
-    """`"True"`/`"False"`, capitalised -- a Python `repr`, not JSON.
+def _video_metadata_dump(item: Mapping[str, Any], video_id: str) -> dict[str, Any]:
+    """One `videos.list` item in the shape `sources.normalize_video_metadata` reads off a yt-dlp
+    dump, so either route lands in the same row.
 
-    This is not a style choice and it must not be tidied. `analysis/sensitivity/pipeline.py` reads
-    `source_metadata ->> 'has_paid_product_placement'` and compares it against its `DECLARED`
-    constant, which is the string `"True"`; the archive's 13,979 video rows are stored that way
-    (2,025 True / 11,954 False, measured). Writing JSON's `true` here makes that comparison false for
-    every live row and the declared half of ad marking silently becomes zero -- no error, rows still
-    returned. `tests/collectors/youtube/test_youtube_source_metadata.py` asserts this against
-    `analysis.sensitivity.pipeline.DECLARED` itself rather than against a literal, so normalising
-    either side fails a test instead of a measurement.
+    A free function since #259: one call carries up to 50 items and each of them becomes its own
+    job's payload, so this can no longer be part of a method that fetches one video."""
+    snippet = item.get("snippet") or {}
+    statistics = item.get("statistics") or {}
+    details = item.get("contentDetails") or {}
+    placement = item.get("paidProductPlacementDetails")
+    published = _instant(snippet.get("publishedAt"))
+    return {
+        "id": item.get("id") or video_id,
+        "title": snippet.get("title"),
+        "description": snippet.get("description") or "",
+        "channel": snippet.get("channelTitle"),
+        "channel_id": snippet.get("channelId"),
+        "duration": parse_iso_duration(details.get("duration")),
+        "view_count": _as_int(statistics.get("viewCount")),
+        "like_count": _as_int(statistics.get("likeCount")),
+        "comment_count": _as_int(statistics.get("commentCount")),
+        "timestamp": int(published.timestamp()) if published is not None else None,
+        "upload_date": published.strftime("%Y%m%d") if published is not None else None,
+        "tags": list(snippet.get("tags") or []),
+        "category_id": snippet.get("categoryId"),
+        "caption_available": details.get("caption"),
+        # Absent rather than False when the part came back empty: "this route could not tell us" and
+        # "the uploader said no" are different facts, and `flatten._repr_str` keeps them apart (it
+        # writes the archive's capitalised `"True"`/`"False"` and leaves None alone).
+        "has_paid_product_placement": (
+            (placement or {}).get("hasPaidProductPlacement") if placement is not None else None
+        ),
+        "fetch_route": Route.DATA_API,
+    }
 
-    `None` stays `None`: "the route could not tell us" is not "the uploader said no".
-    """
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return "True" if value.strip().lower() == "true" else "False"
-    return "True" if value else "False"
+
+#: What one batched `videos.list` produced for one video id: the dump, or the error that stands in
+#: its place. An error as a *value* rather than a raise, because one call now carries up to 50 jobs
+#: and every one of them has to end in its own state -- a raise would end the first and strand the
+#: other 49 (#259).
+VideoMetadataOutcome = dict[str, Any] | TransportError
 
 
 class DataApiClient:
@@ -509,67 +539,64 @@ class DataApiClient:
     # -- video.metadata -----------------------------------------------------------------------------
 
     def video_metadata(self, video_id: str) -> dict[str, Any]:
-        """`videos.list` in the shape `sources.normalize_video_metadata` reads off a yt-dlp dump, so
-        either route lands in the same row. One unit whatever parts are asked for."""
-        body = self._videos_list(video_id)
-        items = body.get("items") or []
-        if not items:
-            raise Unavailable(f"no video answers to {video_id!r}", route=Route.DATA_API)
-        item = items[0]
-        snippet = item.get("snippet") or {}
-        statistics = item.get("statistics") or {}
-        details = item.get("contentDetails") or {}
-        placement = item.get("paidProductPlacementDetails")
-        published = _instant(snippet.get("publishedAt"))
-        return {
-            "id": item.get("id") or video_id,
-            "title": snippet.get("title"),
-            "description": snippet.get("description") or "",
-            "channel": snippet.get("channelTitle"),
-            "channel_id": snippet.get("channelId"),
-            "duration": parse_iso_duration(details.get("duration")),
-            "view_count": _as_int(statistics.get("viewCount")),
-            "like_count": _as_int(statistics.get("likeCount")),
-            "comment_count": _as_int(statistics.get("commentCount")),
-            "timestamp": int(published.timestamp()) if published is not None else None,
-            "upload_date": published.strftime("%Y%m%d") if published is not None else None,
-            "tags": list(snippet.get("tags") or []),
-            "category_id": snippet.get("categoryId"),
-            "caption_available": details.get("caption"),
-            # Absent rather than False when the part came back empty: "this route could not tell us"
-            # and "the uploader said no" are different facts, and `_archive_bool` keeps them apart.
-            "has_paid_product_placement": (
-                (placement or {}).get("hasPaidProductPlacement") if placement is not None else None
-            ),
-            "fetch_route": Route.DATA_API,
-        }
+        """One video, raising the way every caller before #259 expected it to.
 
-    def _videos_list(self, video_id: str) -> dict[str, Any]:
-        """One retry without `paidProductPlacementDetails`, for this video only, and only for an
-        error that names `part` as the thing being refused.
+        The batched call is what actually goes out (`video_metadata_many`); this asks it for one id
+        and turns that id's outcome back into a return or a raise."""
+        outcome = self.video_metadata_many([video_id])[video_id]
+        if isinstance(outcome, TransportError):
+            raise outcome
+        return outcome
+
+    def video_metadata_many(self, video_ids: Sequence[str]) -> dict[str, VideoMetadataOutcome]:
+        """SKELETON (#259): one call per id, which is the shape this issue exists to end."""
+        outcomes: dict[str, VideoMetadataOutcome] = {}
+        for video_id in video_ids:
+            try:
+                body = self._videos_list([video_id])
+            except TransportError as error:
+                outcomes[video_id] = error
+                continue
+            items = body.get("items") or []
+            if not items:
+                outcomes[video_id] = Unavailable(f"no video answers to {video_id!r}", route=Route.DATA_API)
+                continue
+            outcomes[video_id] = _video_metadata_dump(items[0], video_id)
+        return outcomes
+
+    def _videos_list(self, video_ids: Sequence[str]) -> dict[str, Any]:
+        """**One call**, for up to `PAGE_SIZE` comma-joined ids (#259), and one retry of that call
+        without `paidProductPlacementDetails` -- only for an error that names `part` as the thing
+        being refused.
 
         Google documents that field as retrievable by the video's owner and this collector's key is
         not an owner's. If that restriction is enforced as a refused part, the whole `videos.list`
         call fails and every `video.metadata` job in the run fails with it -- over a field that three
         of the nine `source_metadata` keys do not need.
 
-        **Per video, not per client.** An earlier round of this dropped the part from
+        **Per call, not per client.** An earlier round of this dropped the part from
         `self._video_parts` for the life of the client, so one unrelated 400 on one video silently
         removed the field from every remaining job in the run -- an inference from a single response,
         made permanent, with nothing printed. The cost of not being sticky is one extra unit on each
-        video that really does refuse, which the route budget already bounds and `part_drops` now
-        counts. If the live run shows the key simply cannot have this part, the fix is to take it out
-        of `scope.json`'s `VIDEO_PARTS` -- a configuration change somebody made and can read, not an
-        inference this client drew at three in the morning.
+        call that really is refused, which the route budget already bounds and `part_drops` now
+        counts -- one entry per id the refused call carried, because the field is null on all of
+        their rows. If the live run shows the key simply cannot have this part, the fix is to take it
+        out of `scope.json`'s `VIDEO_PARTS` -- a configuration change somebody made and can read, not
+        an inference this client drew at three in the morning.
         """
+        ids = ",".join(video_ids)
         try:
-            return self._get(VIDEOS_PATH, {"part": ",".join(self._video_parts), "id": video_id})
+            return self._get(VIDEOS_PATH, {"part": ",".join(self._video_parts), "id": ids})
         except TransportError as error:
             reduced = [part for part in self._video_parts if part != OWNER_ONLY_PART]
             if len(reduced) == len(self._video_parts) or not _is_part_refusal(error):
                 raise
-            self.part_drops.append(video_id)
-            return self._get(VIDEOS_PATH, {"part": ",".join(reduced), "id": video_id})
+            self.part_drops.extend(video_ids)
+            return self._get(VIDEOS_PATH, {"part": ",".join(reduced), "id": ids})
+
+    def restrict_budget(self, limit: int) -> None:
+        """Lower this client's Data API budget -- what the day's bound does to a run (#259)."""
+        self._budget.restrict(Route.DATA_API, limit)
 
     def notes(self) -> list[str]:
         """What a run should say out loud about this client. Read by `cli._run_work`, which prints
@@ -1057,6 +1084,8 @@ class LiveFetcher:
             timedtext if timedtext is not None else TimedtextRoute(ytdlp=self._ytdlp, budget=self._budget)
         )
         self._metadata_route = Route(metadata_route)
+        #: What `prefetch` already asked for, keyed by (kind, target) and consumed by `fetch`.
+        self._primed: dict[tuple[str, str], VideoMetadataOutcome] = {}
 
     def close(self) -> None:
         if self._data_api is not None:
@@ -1078,7 +1107,25 @@ class LiveFetcher:
         somebody notices as null three weeks later."""
         return self._data_api.notes() if self._data_api is not None else []
 
+    def restrict_data_api(self, limit: int) -> None:
+        """The day's bound, applied to this run (#259). Called by `cli._run_work` before it claims
+        anything, from the spend `collectors/youtube/quota.py` reads out of the database."""
+        self._budget.restrict(Route.DATA_API, limit)
+        if self._data_api is not None:
+            self._data_api.restrict_budget(limit)
+
+    def prefetch(self, specs: Sequence[FetchSpec]) -> None:
+        """SKELETON (#259): coalesce nothing, so every `fetch` still goes out on its own."""
+
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
+        primed = self._primed.pop((spec.kind, spec.target), None)
+        if primed is not None:
+            # One shot: a second job for the same target re-fetches rather than quietly reusing a
+            # dump fetched for somebody else. `artifacts.fresh_until` is this package's cache, not
+            # this dict.
+            if isinstance(primed, TransportError):
+                raise primed
+            return primed
         if spec.kind in LISTING_KINDS:
             return self._api().listing(spec.kind, spec.target)
         if spec.kind == "video.comments":
@@ -1114,6 +1161,7 @@ __all__ = [
     "video_language",
     "parse_iso_duration",
     "DataApiClient",
+    "VideoMetadataOutcome",
     "LibraryYtdlpRuntime",
     "YtdlpRoute",
     "TimedtextRoute",
