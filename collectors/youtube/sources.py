@@ -15,6 +15,8 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from db.corpus.author import AUTHOR_HASH, author_hash
+
 VIDEO_IDENTIFIER_LENGTH = 11
 
 
@@ -96,14 +98,33 @@ def normalize_video_metadata(dump: Mapping[str, Any]) -> dict[str, Any]:
 _ROOT_SENTINEL = "root"
 
 
+def hashed_author_id(value: str | None) -> str | None:
+    """The only form of a comment author's identifier that may be written down (#267, fork #92).
+
+    Anything non-null that is not already a hash is hashed, rather than only what looks like a
+    `UC…` channel id: a handle and a legacy `/user/` path are identifiers too, and a predicate that
+    names one shape waves the others through (`db/views/author_identifier_violation.sql` branch 4
+    asks the same question the same way). A value that is already a hash passes through, because
+    `flatten` re-reads payloads normalized both before and after this rule and hashing a hash twice
+    would make the two disagree on the same author.
+    """
+    if not value:
+        return None
+    if AUTHOR_HASH.fullmatch(value):
+        return value
+    return author_hash(value)
+
+
 def _comment(raw: Mapping[str, Any]) -> dict[str, Any]:
     parent = raw.get("parent")
     return {
         "comment_id": raw["id"],
         "parent_id": None if parent in (None, _ROOT_SENTINEL) else parent,
         "text": raw.get("text", ""),
-        "author": raw.get("author"),
-        "author_id": raw.get("author_id"),
+        # #267: no `author` key at all and no raw id, dropped here rather than only at the write.
+        # A job's payload sits on disk for weeks before `flatten` reads it back, so an identifier
+        # that reaches the payload is an identifier at rest.
+        "author_id": hashed_author_id(raw.get("author_id")),
         "like_count": raw.get("like_count"),
         "is_hearted_by_uploader": bool(raw.get("is_favorited")),
         "is_pinned": bool(raw.get("is_pinned")),
@@ -144,6 +165,7 @@ def parse_json3_transcript(
 
 
 __all__ = [
+    "hashed_author_id",
     "normalize_listing",
     "normalize_video_metadata",
     "normalize_comments",
