@@ -599,7 +599,11 @@ def test_the_drop_is_per_video_and_does_not_outlive_the_one_that_caused_it():
     removed the field from every remaining job -- an inference from a single response, made
     permanent, printing nothing. The cost of not being sticky is one extra unit on each video that
     really refuses; the cost of being sticky is a silently truncated column."""
-    handler, seen = _videos_handler((403, PART_FORBIDDEN), (200, VIDEOS), (200, VIDEOS))
+    # #259: the second body has to name the second video. Since one call carries up to 50 ids, a
+    # response is read by matching `items[].id` against what was asked for rather than by taking
+    # `items[0]` whatever it holds -- so a body for another video is now a miss, not an answer.
+    other = dict(VIDEOS, items=[dict(VIDEOS["items"][0], id="9bZkp7q19f0")])
+    handler, seen = _videos_handler((403, PART_FORBIDDEN), (200, VIDEOS), (200, other))
     client = _client(handler)
     client.video_metadata("dQw4w9WgXcQ")
     client.video_metadata("9bZkp7q19f0")
