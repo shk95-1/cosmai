@@ -56,6 +56,9 @@ def day_start(now: datetime) -> datetime:
 
 def requests_spent_today(conn: Connection, *, now: datetime) -> int:
     """How many Data API requests the artifacts of this quota day account for."""
+    # No index covers (fetch_route, fetched_at) and this runs at the head of every five-minute
+    # `work`, so it is `ix_artifact_recent` plus a filter until an index exists -- which is DDL and
+    # belongs to a follow-up issue, not to #259.
     rows = conn.execute(
         sa.select(artifacts.c.kind, sa.func.count())
         .where(
@@ -79,6 +82,9 @@ def requests_spent_today(conn: Connection, *, now: datetime) -> int:
 
 def remaining_requests(conn: Connection, *, now: datetime) -> int:
     """What is left of the day, floored at zero -- never a negative budget."""
+    # Two `work` processes overlapping each read this before either commits its artifacts, so each
+    # may spend the same remainder once: the overshoot is bounded by `max_requests_per_run` per
+    # process, not by zero.
     return max(MAX_REQUESTS_PER_DAY - requests_spent_today(conn, now=now), 0)
 
 
