@@ -238,6 +238,7 @@ none = [
     "tests/test_panel_seed.py",
     "tests/test_migrate_ledger_and_grants.py",
     "tests/test_migrate_view_sweep.py",
+    "tests/test_needs_verify_closure.py",
     "tests/test_source_schema_ledger.py",
     "tests/test_grants_reader.py",
     "tests/test_runtime_role_cannot_ddl.py",
