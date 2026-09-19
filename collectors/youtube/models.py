@@ -68,6 +68,12 @@ ROUTES: dict[str, dict[str, float]] = _SCOPE["ROUTES"]
 LISTING_REQUESTS_PER_WALK: int = _SCOPE["LISTING_REQUESTS_PER_WALK"]
 
 
+#: The one job kind whose route takes many targets in one request (#259) -- named here, in the
+#: vocabulary module, because `cli` batches it and `quota` counts it and the two must mean the same
+#: kind.
+VIDEO_METADATA_KIND = "video.metadata"
+
+
 class Dataset(StrEnum):
     WATCH = "watch"
     WORK = "work"
@@ -103,4 +109,5 @@ __all__ = [
     "VIDEO_PARTS",
     "ROUTES",
     "LISTING_REQUESTS_PER_WALK",
+    "VIDEO_METADATA_KIND",
 ]

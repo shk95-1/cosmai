@@ -56,6 +56,7 @@ from collectors.youtube.models import (
     MAX_COMMENTS_PER_VIDEO,
     MAX_LISTING_ITEMS,
     ROUTES,
+    VIDEO_METADATA_KIND,
     VIDEO_METADATA_ROUTE,
     VIDEO_PARTS,
 )
@@ -1164,11 +1165,11 @@ class LiveFetcher:
         one at a time in `fetch`, naming the key, as they did before."""
         if self._metadata_route is not Route.DATA_API or self._data_api is None:
             return
-        targets = [spec.target for spec in specs if spec.kind == "video.metadata"]
+        targets = [spec.target for spec in specs if spec.kind == VIDEO_METADATA_KIND]
         if not targets:
             return
         for target, outcome in self._data_api.video_metadata_many(targets).items():
-            self._primed[("video.metadata", target)] = outcome
+            self._primed[(VIDEO_METADATA_KIND, target)] = outcome
 
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
         primed = self._primed.pop((spec.kind, spec.target), None)
@@ -1185,7 +1186,7 @@ class LiveFetcher:
             return self._ytdlp.comments(spec.target)
         if spec.kind == "video.transcript":
             return self._timedtext.transcript(spec.target)
-        if spec.kind == "video.metadata":
+        if spec.kind == VIDEO_METADATA_KIND:
             if self._metadata_route is Route.DATA_API:
                 return self._api().video_metadata(spec.target)
             return self._ytdlp.video_metadata(spec.target)

@@ -27,6 +27,7 @@ from collectors.youtube import flatten, queue, quota, roster, sources, transport
 from collectors.youtube.models import (
     COMMENT_REFETCH_WINDOW_DAYS,
     FRESHNESS,
+    VIDEO_METADATA_KIND,
     Dataset,
     JobState,
 )
@@ -533,9 +534,6 @@ def _collect_one(
         print(f"{job.kind} {job.target!r}: {short}")
         return _Collected(ok=True, short=True)
     return _Collected(ok=True)
-
-
-VIDEO_METADATA_KIND = "video.metadata"
 
 
 def _bound_the_day(conn: Connection, fetcher: Fetcher, *, now: datetime) -> None:

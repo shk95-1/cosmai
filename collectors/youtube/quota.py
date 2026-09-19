@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 from sqlalchemy import Connection
 
-from collectors.youtube.models import LISTING_REQUESTS_PER_WALK, ROUTES
+from collectors.youtube.models import LISTING_REQUESTS_PER_WALK, ROUTES, VIDEO_METADATA_KIND
 from collectors.youtube.storage.tables import artifacts
 from collectors.youtube.transport import LISTING_KINDS, PAGE_SIZE, Route
 
@@ -43,8 +43,6 @@ from collectors.youtube.transport import LISTING_KINDS, PAGE_SIZE, Route
 #: reset nine hours away from where Google puts it, which on a Korean cadence is most of a working
 #: evening on the wrong side of the boundary.
 QUOTA_RESET_ZONE = ZoneInfo("America/Los_Angeles")
-
-VIDEO_METADATA_KIND = "video.metadata"
 
 #: Beside `max_requests_per_run`, never instead of it: that one is the per-invocation circuit
 #: breaker and this one is the day's ceiling.
