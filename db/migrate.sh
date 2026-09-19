@@ -1,7 +1,7 @@
 #!/bin/sh
-# Applies db/bootstrap_source.sql + the two collector dumps, then db/bootstrap.sql and
-# contracts/ddl/needs/*.sql, to $container/$db -- the one path production, the test harness and
-# tool/checks/ddl-drift all use to create the three schemas.
+# Applies db/bootstrap_source.sql + the two collector dumps, then db/bootstrap.sql,
+# db/bootstrap_needs_verify.sql and contracts/ddl/needs/*.sql, to $container/$db -- the one path
+# production, the test harness and tool/checks/ddl-drift all use to create the four schemas.
 set -eu
 
 container=cosmai-postgres
@@ -15,8 +15,9 @@ usage: db/migrate.sh [--container NAME] [--db NAME] [--superuser NAME]
 
 Stands up trend_radar and tubedepth when they are absent and brings each one's
 contracts/ddl/<schema>/NNN_*.sql up to date when it is already there, then applies db/bootstrap.sql,
-contracts/ddl/needs/*.sql, the two named grants files (db/grants/postgrest_anon_needs.sql,
-db/grants/needs_runtime_reader.sql) and db/views/*.sql to $container/$db through `docker exec`.
+db/bootstrap_needs_verify.sql, contracts/ddl/needs/*.sql, the two named grants files
+(db/grants/postgrest_anon_needs.sql, db/grants/needs_runtime_reader.sql) and db/views/*.sql to
+$container/$db through `docker exec`.
 Every path is repo-relative: run it from the repo root (the image's WORKDIR is that root --
 stack/Dockerfile).
 
@@ -341,6 +342,23 @@ runtime_password=$(read_secret NEEDS_DB_RUNTIME)
   cat db/bootstrap.sql
 } | superuser_psql -v schema=needs -v database="$db"
 
+# a2. needs_verify: the closed schema for the re-identification sample, and the one role that reads
+# it (#258, for the fork's DDL 029). Not renumbered into (b)(c)(d): the later letters are quoted by
+# name elsewhere (db/views/collector_health.sql, tests/test_lineage_reader_grants.py), and moving
+# them would make those references point at something else without a word.
+#
+# Its position carries two independent requirements, not one:
+#   - the schema and the role must exist before the DDL loop at (c), because that loop runs as
+#     needs_migrator under SET ROLE needs_owner, and needs_owner has neither CREATE on the database
+#     nor CREATEROLE -- a migration creating them fails with "permission denied"; and
+#   - ALTER DEFAULT PRIVILEGES reaches only objects created *after* it runs, so the same file
+#     applied down with the grants files at (d)/(e) would leave needs_verify_reader with no SELECT
+#     on a table (c) had already created. Measured 2026-09-19: the deploy exits 0, every "cannot
+#     read" assertion still passes, and the one role that must read gets "permission denied for
+#     table". (Found by the fork's reviewer-deep round on fork #92;
+#     tests/test_needs_verify_closure.py is where it stays found.)
+superuser_psql < db/bootstrap_needs_verify.sql
+
 migrator_psql() { psql_as needs_migrator "$migrator_password" "$@"; }
 
 # b. migration ledger, owner-owned.
@@ -386,6 +404,11 @@ superuser_psql < db/grants/needs_runtime_reader.sql
 
 # f. operational views, owner-owned. Each file drops and recreates its own view, so re-applying a
 # deploy is a no-op and a view whose columns changed still deploys (CREATE OR REPLACE would not).
+#
+# The schema is not read out of the file: a basename becomes needs.<name>, so db/views/ *is* the
+# needs schema by construction. A view of needs_verify's (#258) cannot be dropped here by any
+# filename -- the DROP would name needs.<name>, miss, and the second deploy would fail on "already
+# exists" -- so it would need a step of its own the day one exists. None does today.
 #
 # The sweep first: a view that reads another view (needs.pipeline_health reads collector_health and
 # analysis_health, #138) makes the per-file DROP fail on the *second* deploy -- "cannot drop view
