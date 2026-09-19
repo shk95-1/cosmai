@@ -23,6 +23,7 @@ from sqlalchemy import Connection
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from collectors.youtube.payload_store import PayloadStore
+from collectors.youtube.sources import hashed_author_id
 from collectors.youtube.storage.tables import (
     artifacts,
     comments,
@@ -163,8 +164,13 @@ def comment_rows(target: str, fetched_at: datetime, payload: Mapping[str, Any]) 
             "comment_id": comment_id,
             "parent_id": comment.get("parent_id"),
             "text": comment.get("text") or "",
-            "author": comment.get("author"),
-            "author_id": comment.get("author_id"),
+            # #267: the payload is not trusted for either of these. `sources` already drops the name
+            # and hashes the id, but a payload stored before that change is still on disk and is
+            # flattened after it, so this is the last place a raw value can be stopped. The name is
+            # written as NULL rather than left out of the row, so that the on-conflict update of a
+            # pre-rule row clears it too -- a row this collector touches carries no display name.
+            "author": None,
+            "author_id": hashed_author_id(comment.get("author_id")),
             "like_count": comment.get("like_count"),
             "is_hearted_by_uploader": bool(comment.get("is_hearted_by_uploader", False)),
             "is_pinned": bool(comment.get("is_pinned", False)),
