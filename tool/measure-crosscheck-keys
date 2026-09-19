@@ -15,6 +15,10 @@ self-consistency.
 What is red.
 
   denied  어느 키든 `DENIED_NAMES` 를 잡았다. 이미 아는 오매칭이 되살아난 것이다 (`시카` 사고).
+  run_on  a forbidden substance turned up only inside a run-on lump (no commas, so a whole list parsed as
+          one "name"). The mismatch is the **list**, not the key that happens to sit beside it in the same
+          lump (fork #103) -- but a value in the name column that is not a name still means the block is
+          not whole, so this is exit 1 too, same as `denied`.
   new     an ingredient name that is not in the confirmed list entered that key. **It may or may not
           be a mismatch** -- telling the two apart is what a person reading this output does, and once
           read a line is added to the CSV.
@@ -37,29 +41,28 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from analysis import crosscheck  # noqa: E402
-from analysis.crosscheck.pipeline import COMMERCE_SCHEMA, FORMULA, _commerce  # noqa: E402
+from analysis.crosscheck.pipeline import COMMERCE_SCHEMA, FORMULA, commerce_sql  # noqa: E402
 from db.runtime import runtime_url  # noqa: E402
 from db.seed._common import connect  # noqa: E402
 
 
-def measure(url: str, schema: str) -> dict[str, dict[str, int]]:
+def measure(url: str, schema: str) -> tuple[dict[str, dict[str, int]], tuple[crosscheck.KeyAudit, ...]]:
     """Reads the (product, ingredient name) rows and gives, per key, the distinct names it catches and
-    how many products carry each."""
+    how many products carry each, alongside `audit()`'s own denied/run_on split over the same rows --
+    this tool asks `audit()` rather than re-deriving the split it already made (fork #104)."""
     with connect(url) as conn, conn.cursor() as cur:
-        cur.execute(_commerce(schema, FORMULA), ())
+        cur.execute(commerce_sql(schema, FORMULA), ())
         rows = [
             (f"{source}:{product}", name)
             for source, product, ingredients in cur.fetchall()
             for name in crosscheck.parse_ingredients(ingredients)
         ]
         conn.commit()
-    found: dict[str, dict[str, set[str]]] = {key: {} for key in crosscheck.INGREDIENT_KEYS}
-    for product, name in rows:
-        for key, terms in crosscheck.INGREDIENT_KEYS.items():
-            if crosscheck.matches(name, terms):
-                found[key].setdefault(name, set()).add(product)
+    # `top` wide enough that `.names` is never truncated -- this tool needs every distinct name, not
+    # `audit()`'s human-report top 5.
+    audits = crosscheck.audit(rows, top=len(rows) + 1)
     print(f"{len(rows):,} rows · {len({name for _p, name in rows}):,} distinct names", file=sys.stderr)
-    return {key: {name: len(products) for name, products in names.items()} for key, names in found.items()}
+    return {audit.key: dict(audit.names) for audit in audits}, audits
 
 
 VOCABULARY = """
@@ -77,7 +80,7 @@ def polarity_drift(url: str, schema: str) -> list[tuple[str, str, int, str, str]
     건조해요` · `예상보다 짧아요` 둘 · `날림이 없어요`). 그래서 표에 없는 문구는 전부 사람이 읽어야 한다.
     """
     with connect(url) as conn, conn.cursor() as cur:
-        cur.execute(_commerce(schema, VOCABULARY), {"groups": list(crosscheck.GROUP_MAP)})
+        cur.execute(commerce_sql(schema, VOCABULARY), {"groups": list(crosscheck.GROUP_MAP)})
         rows = cur.fetchall()
         conn.commit()
     known = crosscheck.confirmed_polarity()
@@ -86,6 +89,16 @@ def polarity_drift(url: str, schema: str) -> list[tuple[str, str, int, str, str]
         for group, name, count in rows
         if (group, name) not in known
     ]
+
+
+def key_report(audit: crosscheck.KeyAudit, names: dict[str, int], known: frozenset[str]) -> tuple[dict, int]:
+    """One key's report entry (denied/run_on/new/gone) and how many of its lines are red -- the shape both
+    `--json` and the human-readable report share, and what a test can call without a DB (fork #104)."""
+    new = sorted(set(names) - known)
+    gone = sorted(known - set(names))
+    run_on = [{"substance": bad, "product": product} for bad, product in audit.denied_run_on]
+    entry = {"denied": list(audit.denied), "run_on": run_on, "new": new, "gone": gone}
+    return entry, len(audit.denied) + len(run_on) + len(new)
 
 
 def main() -> int:
@@ -97,24 +110,28 @@ def main() -> int:
     parser.add_argument("--json", action="store_true", help="Print only in the machine-readable form.")
     args = parser.parse_args()
 
-    now = measure(args.url or runtime_url(), args.schema)
+    now, audits = measure(args.url or runtime_url(), args.schema)
     known = crosscheck.known_names()
-    report: dict[str, dict[str, list[str]]] = {}
+    report: dict[str, dict[str, list]] = {}
     bad = 0
-    for key, names in now.items():
-        denied = crosscheck.denied_in(key, names)
-        new = sorted(set(names) - known[key])
-        gone = sorted(known[key] - set(names))
-        report[key] = {"denied": list(denied), "new": new, "gone": gone}
-        bad += len(denied) + len(new)
+    for audit in audits:
+        key, names = audit.key, now[audit.key]
+        entry, entry_bad = key_report(audit, names, known[key])
+        report[key] = entry
+        bad += entry_bad
         if args.json:
             continue
         print(f"{key}  {len(names)} kinds / {len(known[key])} confirmed")
-        for name in denied:
+        for name in audit.denied:
             print(f"  [denied] {name} -- {crosscheck.denial_reason(key, name)}")
-        for name in new:
+        for bad_name, product in audit.denied_run_on:
+            print(
+                f"  [run_on] {bad_name} inside {product} -- caught only inside a run-on list, so the "
+                f"list is the mismatch, not this key. still red"
+            )
+        for name in entry["new"]:
             print(f"  [new] {name} ({names[name]} products) -- read it, judge it and add it to the list")
-        for name in gone:
+        for name in entry["gone"]:
             print(f"   (gone) {name}")
     drift = polarity_drift(args.url or runtime_url(), args.schema)
     report["_polarity"] = {"unconfirmed": [f"{group}/{name}" for group, name, *_rest in drift]}

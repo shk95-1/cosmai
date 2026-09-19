@@ -1258,6 +1258,15 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   It was confirmed by measurement: put `"세라마이드": ("세라",)` into `INGREDIENT_KEYS` and that tool prints
   **카프릴릭/카프릭 트라이글리세라이드 (59 products, an emollient)** and exits 1 — a reproduction of the
   `시카` accident.
+- **That tool asks `audit()` for the split fork #103 made, rather than re-deriving it (fork #104).** A
+  forbidden substance in a plain name prints under `denied`; one caught only inside a run-on list prints
+  under its own `run_on` heading with the key, the substance and the product, and says the list is the
+  mismatch, not the key. Both are red, as in the pipeline. The tool had not run since 2026-08-27: a helper it
+  imports from `analysis/crosscheck/pipeline.py` was renamed that day and nothing imports a script under
+  `tool/`, so no test saw it; a test now loads the tool. **Measured 2026-09-19 (read-only): of 3,402 distinct
+  ingredient names, 368 are caught by some key; 166 of those are on the confirmed list, 202 are `new`
+  (164 plain names, 38 run-on lists), 0 `gone`, 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
+  means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool.
 - **Two rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
   being the name of a component of a gift set rather than an ingredient name (`콜라겐` 72→64 rows ·
