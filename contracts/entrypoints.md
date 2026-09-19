@@ -163,6 +163,18 @@ not quotaExceeded)·`http_429` combined, which joins up with the 403/429 definit
   `blocked`: one channel's access policy is not the collector being refused.
 - `budget` (#183) — the run spent its own `scope.json` request budget for that route. Also `failed`:
   it is our cap, and putting it in `blocked` would make a self-limited run look throttled by YouTube.
+- `internal` (#274) — the job died of something that is not the source's answer: a stored payload
+  that could not be written, a normalizer meeting a shape nobody has seen. `transport` is reserved
+  for a failure on the way to the source, so a failure on our side does not borrow that word. Also
+  `failed`, never `blocked` — nothing refused us.
+
+**No single job takes the batch down** (#274). Everything one job does, not only its fetch, runs
+inside a savepoint: whatever is raised ends that job `failed` with one of the codes above and the
+batch goes on to the next job. Before this, an artifact row whose payload file was missing from the
+store raised out of `_run_work`, rolled the transaction back and left every claimed job `queued` — so
+the next five-minute tick met the same row and died the same way. A fresh artifact whose payload
+cannot be read is a **cache miss**, not a failure: `work` re-fetches it and the newer row it writes
+is the one the freshness cache serves from the next pass on.
 
 **`youtube work` exits 2 on a block** (#183): when a job fails with one of the four codes the view
 counts as `blocked` above, the pass stops rather than sending the rest of the batch into the same

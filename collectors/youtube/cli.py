@@ -251,7 +251,13 @@ def _claim(conn: Connection, *, limit: int, now: datetime) -> Sequence[Any]:
 def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) -> Any | None:
     """The newest artifact for (kind, target) still inside its freshness window, or None -- the
     cache `_collect_one` consults before spending a request. `fresh_until` is stamped at write time
-    (`now + FRESHNESS.get(kind)`), so this is one indexed comparison, not a per-row calculation."""
+    (`now + FRESHNESS.get(kind)`), so this is one indexed comparison, not a per-row calculation.
+
+    #274: several rows for one (kind, target) can be fresh at once, because a row whose payload file
+    cannot be read is re-fetched and the new row lands beside it rather than replacing it. Newest
+    `fetched_at` first is what lets the readable row win from the next pass on; `identifier` breaks a
+    tie so two jobs for the same target inside one pass (one `now`) read the same row rather than
+    whichever the planner happened to hand back."""
     return conn.execute(
         sa.select(
             artifacts.c.identifier,
@@ -260,7 +266,7 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
             artifacts.c.fetch_route,
         )
         .where(artifacts.c.kind == kind, artifacts.c.target == target, artifacts.c.fresh_until > now)
-        .order_by(artifacts.c.fetched_at.desc())
+        .order_by(artifacts.c.fetched_at.desc(), artifacts.c.identifier.desc())
         .limit(1)
     ).first()
 
@@ -270,6 +276,12 @@ def _fresh_artifact(conn: Connection, *, kind: str, target: str, now: datetime) 
 #: purpose, so the exit code and the view can never call the same run two different things (the
 #: mismatch contracts/entrypoints.md already records for NAVER's 401, #182 M2).
 BLOCKED_CODES = frozenset({"quota", "rate_limited", "http_403", "http_429"})
+
+#: #274: the code for a job that died of something that is not the source's answer -- a stored
+#: payload that could not be written, a normalizer meeting a shape nobody has seen. Not `transport`,
+#: which contracts/entrypoints.md defines as a failure with no HTTP status *on the way to the
+#: source*; and `failed`, never `blocked`, because nothing refused us.
+UNEXPECTED_CODE = "internal"
 
 _QUOTA_EXCEEDED_REASON = "quotaExceeded"
 
@@ -453,16 +465,39 @@ def _comment_follow_ups(conn: Connection, videos: Sequence[Mapping[str, Any]], *
     return inside + [video_id for video_id in outside if video_id not in already]
 
 
+#: What `_cached_payload` returns instead of a payload. A sentinel rather than None, because None is
+#: a value a stored payload could in principle hold and "no answer" must not be one of them.
+_MISS = object()
+
+
+def _cached_payload(payloads: PayloadStore, job: Any, cached: Any) -> Any:
+    """The fresh artifact's stored payload, or `_MISS` when the file behind the row cannot be read.
+
+    #274: an artifact row whose file is not in the store is real -- production holds 3,707 of them,
+    written by a fleet whose volume did not come with them. Read outside a try this raised out of
+    the whole batch, rolled the transaction back and left every claimed job `queued`, so the next
+    five-minute tick met the same row and died the same way. A row we cannot read answers nothing,
+    which is a cache miss: the caller fetches, and the newer row it writes is the one
+    `_fresh_artifact` hands back from the next pass on."""
+    try:
+        return payloads.get(job.kind, cached.digest)
+    except (OSError, ValueError):
+        # Kind and target, never the payload: this line exists to name which target re-fetched, and
+        # a payload in a log is a harvest in a log.
+        print(f"{job.kind} {job.target!r}: the fresh artifact's payload could not be read, re-fetching")
+        return _MISS
+
+
 def _collect_one(
     conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
 ) -> _Collected:
     cached = _fresh_artifact(conn, kind=job.kind, target=job.target, now=now)
+    payload: Any = _cached_payload(payloads, job, cached) if cached is not None else _MISS
     short: str | None = None
-    if cached is not None:
+    if cached is not None and payload is not _MISS:
         # A fresh artifact already answers this question -- no fetch, no new artifact row. This is
         # what keeps a directive naming 3 follow-up kinds from re-walking the same listing 3 times in
         # one watch pass (#8 fix round 2 report): jobs 2 and 3 land here and reuse job 1's artifact.
-        payload = payloads.get(job.kind, cached.digest)
         digest, byte_count = cached.digest, cached.byte_count
         # No new artifact row, so no route to write: the cached row already carries the one that
         # fetched it, and a cache hit is not a second observation of the source.
@@ -534,6 +569,44 @@ def _collect_one(
         print(f"{job.kind} {job.target!r}: {short}")
         return _Collected(ok=True, short=True)
     return _Collected(ok=True)
+
+
+def _collect_one_guarded(
+    conn: Connection, payloads: PayloadStore, fetcher: Fetcher, job: Any, *, now: datetime
+) -> _Collected:
+    """`_collect_one`, with the batch held apart from any one job's death (#274).
+
+    The fetch already fails one job at a time; everything around it did not, and a `FileNotFoundError`
+    from the payload store took down a whole `work` tick. Whatever is raised here ends this job
+    `failed` with a code and the loop goes on to the next.
+
+    The savepoint is what makes that `failed` row writable. A DBAPI error aborts the whole
+    transaction, so without rolling back to a savepoint first the UPDATE recording the failure would
+    be refused too and the run would still die -- and it also undoes the half of this job that did
+    land (a fanned-out follow-up, a payload's artifact row) rather than leaving it beside a job that
+    says it failed."""
+    try:
+        with conn.begin_nested():
+            return _collect_one(conn, payloads, fetcher, job, now=now)
+    except Exception as error:  # noqa: BLE001 - no single job may take the batch down
+        # A transport error can only have come from the fetch, which classifies its own; anything
+        # else reached here because something on our side broke, and saying `transport` would put
+        # that on the source.
+        code = _classify_error(error) if isinstance(error, transport.TransportError) else UNEXPECTED_CODE
+        conn.execute(
+            sa.update(jobs)
+            .where(jobs.c.identifier == job.identifier)
+            .values(
+                state=JobState.FAILED.value,
+                finished_at=now,
+                elapsed_ms=_elapsed_ms(job.started_at, now),
+                error_code=code,
+                # The class name too: for an unexpected failure it is half the evidence, and
+                # `str(KeyError('videos'))` alone is a bare quoted word on the row.
+                error_message=f"{type(error).__name__}: {error}",
+            )
+        )
+        return _Collected(ok=False, blocked=code in BLOCKED_CODES)
 
 
 def _bound_the_day(conn: Connection, fetcher: Fetcher, *, now: datetime) -> None:
@@ -612,7 +685,7 @@ def _run_work(conn: Connection, payloads: PayloadStore, fetcher: Fetcher, *, now
     outcomes: list[_Collected] = []
     blocked = False
     for index, job in enumerate(claimed):
-        outcome = _collect_one(conn, payloads, fetcher, job, now=now)
+        outcome = _collect_one_guarded(conn, payloads, fetcher, job, now=now)
         outcomes.append(outcome)
         if outcome.blocked:
             # Work 3: a block is the whole source refusing us, so every later request in this batch
