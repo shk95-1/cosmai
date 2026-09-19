@@ -192,7 +192,8 @@ READ_NOT_SUNCARE = "선크림 담론이 아니다"
 # `tool/measure-crosscheck-keys` 이고, CI 는 그 일을 할 수 없다(운영 표에 닿지 못한다).
 KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.csv"
 
-# Two rules that split an ingredient list into ingredient names. A trap our source alone has, so ydc has no
+# The rules that split an ingredient list into ingredient names (the third, the unclosed `(`, is in
+# parse_ingredients). A trap our source alone has, so ydc has no
 # counterpart (the contract's §Ingredients).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 STAR_NOTE_RE = re.compile(r"^[^\S\n]*\*.*$", re.MULTILINE)

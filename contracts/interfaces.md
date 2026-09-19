@@ -1282,7 +1282,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   into one. Production had exactly one such list of 372 — a colourant written with a truncated CI number at
   the end of its line — and it cost 500 names, 6,360 characters standing as a single name. An unclosed `(`
   now costs at most the name it sits in; a `)` with no `(` costs nothing, as it already did (7 lists carry
-  one). Measured 2026-09-20: all 364 balanced lists parse byte-identically and only that one list moves. A
+  at least one, up to 15). Measured 2026-09-20: all 364 balanced lists parse byte-identically and only that one list moves. A
   length threshold was not used: the longest real name holding a parenthesis is 67 characters, but 35
   balanced run-on lists carry parentheses too, up to 473, so no length separates the two.
 - **A discourse count must not be read as "sunscreen discourse".** Counted over the whole index, it holds
@@ -1326,8 +1326,9 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   their term in the same lump as the forbidden silane dispersant. **No key is mismatched**: without the lumps
   the audit has 0 suspicions, and reviving the bare cica alias on today's table still catches 890 rows, 882 of
   them plain names, so `key_mismatch` still fires on a wrong key. The commerce side has grown since the block
-  below: 372 products with an ingredient list (was 180) · 62,834 ingredient rows (was 22,705; 62,334 before fork #105's bound) · 3,403
-  distinct names (was 2,051). One run is 27.3 seconds · 154MB peak resident.
+  below: 372 products with an ingredient list (was 180) · 62,834 ingredient rows (was 22,705) · 3,403
+  distinct names (was 2,051) — these two re-measured 2026-09-20 with fork #105's bound, 62,334 and 3,402
+  before it. One run is 27.3 seconds · 154MB peak resident.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
   **9.80%** against comments 1.55%.
@@ -1339,7 +1340,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
   **On 2026-09-20, with fork #105's bound in place, that is 150 rows of 62,834 (125 distinct names, 43
-  products)** — one of the 151 rows of 2026-09-19 was the list an unclosed `(` had swallowed — the count grows with the
+  products)** — one of the 151 rows of 2026-09-19 was the list an unclosed `(` had swallowed. The count grows with the
   collection, which is why such a list is counted rather than split.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
