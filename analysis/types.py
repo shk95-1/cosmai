@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 
@@ -156,6 +156,39 @@ class ProductMatch:  # B2: one union-find emits four things at once
     members: tuple[ProductMemberRow, ...]
     variants: tuple[ProductVariantRow, ...] = ()
     candidates: tuple[ProductCandidateRow, ...] = ()
+
+
+# ---------- launch evidence ----------
+@dataclass(frozen=True)
+class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
+    product_ref: str
+    axis: str
+    direction: str  # not_before | not_after | at
+    claimed_on: date
+    claimed_precision: str  # day | month
+    source_ref: str
+    match_strength: str  # exact | partial -- how sure the join from the source row to the product is
+    axis_version: str
+    observed_at: datetime
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdict is read from
+    product_ref: str
+    earliest: date | None
+    earliest_match: str | None  # the match_strength of the claim that set `earliest`
+    latest: date | None  # the evidence's own upper bound; the reference date clamps it in the verdict
+    claims: int
+    lower_claims: int
+    upper_claims: int
+    excluded_claims: int
+
+
+@dataclass(frozen=True)
+class LaunchVerdict:  # analysis/launch's answer; stored in no table (§Launch evidence)
+    verdict: str  # new_3m | new_6m | new_12m | not_new | unknown | conflict
+    basis: str  # corroborated | single_axis
 
 
 # ---------- extraction ----------
