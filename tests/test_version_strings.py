@@ -12,6 +12,7 @@ import pytest
 
 from analysis.aggregate import AGGREGATE_VERSION
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
+from analysis.launch import LAUNCH_VERSION
 from analysis.linker import LINKER_VERSION
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
@@ -25,6 +26,8 @@ VERSIONS = (
     ("analysis.extractor.VERSION", EXTRACTOR_VERSION),
     ("analysis.polarity.VERSION", POLARITY_VERSION),
     ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
+    # The rule table's version, stamped as `versions.launch` (#282, contracts/versioning.md).
+    ("analysis.launch.LAUNCH_VERSION", LAUNCH_VERSION),
     ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
     # OllamaPolarity(...).version is an instance attribute, so the constant cannot be imported
     # (analysis/polarity/ollama.py) -- the value production stamps is _GEMMA4_2026_08_24, the

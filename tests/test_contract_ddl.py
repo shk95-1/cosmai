@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_forty_contract_tables():
+def test_the_ddl_declares_the_forty_one_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: declaring a pipeline stage's expected interval)
@@ -55,8 +55,12 @@ def test_the_ddl_declares_the_forty_contract_tables():
     # it this is and that it is not updated). 027 adds no table: it is a constraint trigger.
     # + 1 from 009_naver_datalab_anchor.sql (issue #248: naver_datalab_anchor, the anchor kept per
     # request instead of per (category, group_key, month)).
+    # + 1 from 010_product_launch_evidence.sql (issue #282: product_launch_evidence, the launch
+    # claims the axes write. The interval and the verdict are not tables -- the interval is the
+    # `product_launch` view and the verdict is a rule table in analysis/launch, so a rule change is
+    # never a migration).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 40
+    assert len(declared_tables()) == 41
 
 
 def test_every_declared_table_exists_in_the_database():

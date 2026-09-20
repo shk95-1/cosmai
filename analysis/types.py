@@ -3,7 +3,7 @@
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 
@@ -156,6 +156,31 @@ class ProductMatch:  # B2: one union-find emits four things at once
     members: tuple[ProductMemberRow, ...]
     variants: tuple[ProductVariantRow, ...] = ()
     candidates: tuple[ProductCandidateRow, ...] = ()
+
+
+# ---------- launch evidence ----------
+@dataclass(frozen=True)
+class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
+    product_ref: str
+    axis: str
+    direction: str  # not_before | not_after | at
+    claimed_on: date
+    claimed_precision: str  # day | month
+    source_ref: str
+    axis_version: str
+    observed_at: datetime
+    note: str | None = None
+
+
+@dataclass(frozen=True)
+class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdict is read from
+    product_ref: str
+    earliest: date | None
+    latest: date | None
+    claims: int
+    lower_claims: int
+    upper_claims: int
+    excluded_claims: int
 
 
 # ---------- extraction ----------
