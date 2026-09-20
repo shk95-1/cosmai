@@ -33,12 +33,12 @@ FORBIDDEN = re.compile(
 SANCTIONED_DESTRUCTIVE = {
     # 사용자 승인 2026-08-24 — #5 운영 실패(btree 2704B 상한) + #12 안 A(키에 extractor_version).
     "needs/005_need_mention_natural_key.sql": ("DROP CONSTRAINT",),
-    # #285: widening needs.naver_run.dataset's CHECK for the third dataset of the same collector
-    # (`launch_onset`, one run row and one fetch journal like `datalab` and `blog`). Every existing
-    # value stays legal under the replacement and no row changes -- what pre-approval 2 prices here
-    # is the **vocabulary**, which is exactly the price 010 and 028 name for their own CHECKs. It
-    # touches contracts/ddl/, so AGENTS.md routes it to the user's evaluation before main; that
-    # evaluation is this entry's approval and nothing is applied to production before it.
+    # user approval 2026-09-20 — widens needs.naver_run.dataset's CHECK from ('datalab','blog') to
+    # add 'launch_onset': DROP and ADD of the same-named constraint in one transaction, the new
+    # value set a superset of the old, no existing row changes (5 rows at approval), reverse is one
+    # ALTER. #285, the third dataset of the same collector -- one run row and one fetch journal like
+    # `datalab` and `blog`. The approval is this file's alone: teaching the guard that a same-named
+    # CHECK whose value list only grows is additive is its own issue, not an edit here.
     "needs/011_naver_launch_onset.sql": ("DROP CONSTRAINT",),
 }
 

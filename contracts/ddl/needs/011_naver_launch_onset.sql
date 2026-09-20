@@ -58,7 +58,14 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON needs.naver_launch_series TO needs_runti
 -- CONSTRAINT (the same sentence 010 and 028 write about their own CHECKs), which is why this is
 -- registered in tests/test_ddl_additive_only.py's SANCTIONED_DESTRUCTIVE rather than slipped past
 -- it. Nothing is dropped but the constraint itself and no row changes: every existing value stays
--- legal under the replacement.
+-- legal under the replacement. **User approval 2026-09-20.**
+--
+-- When not to apply it: not on the 1st of a month between 06:10 and 07:20 UTC, which is when
+-- stack/crontab.d/collector-naver runs the three naver passes and each of them holds a
+-- needs.naver_run row open. The ALTER takes ACCESS EXCLUSIVE on that table, and db/migrate.sh
+-- step (c) sets lock_timeout = 5s, so a collision rolls the migration back cleanly for a retry
+-- rather than blocking a collector -- but the retry is avoidable by not deploying in that hour.
+-- (The crontab's own times are UTC; its header says so.)
 ALTER TABLE needs.naver_run DROP CONSTRAINT naver_run_dataset_check;
 ALTER TABLE needs.naver_run
   ADD CONSTRAINT naver_run_dataset_check CHECK (dataset IN ('datalab', 'blog', 'launch_onset'));

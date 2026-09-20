@@ -79,6 +79,10 @@ def test_an_allowlisted_path_passes(repo: Path):
         "contracts/entrypoints.md",
         "contracts/formats.md",
         "contracts/anon_exposure.md",
+        # The naver collector's keyword data (user approval 2026-09-20, #285): every value in these
+        # two is a term sent to the vendor, and a translated one searches what nobody types.
+        "collectors/naver/keywords.json",
+        "collectors/naver/launch_terms.json",
     ):
         stage(repo, path, KOREAN)
     done = run_check(repo)
