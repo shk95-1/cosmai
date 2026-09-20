@@ -33,7 +33,7 @@ from collectors.youtube.models import (
 )
 from collectors.youtube.payload_store import PayloadStore
 from collectors.youtube.storage import db as storage_db
-from collectors.youtube.storage.tables import artifacts, comments, jobs
+from collectors.youtube.storage.tables import artifacts, collector_runs, comments, jobs
 from collectors.youtube.watchlist import WatchlistError, read_watchlist
 from db import runtime as needs_runtime
 from db import secrets
@@ -155,16 +155,21 @@ def run(
             # transaction per batch keeps every one of them far inside `transaction_timeout=60s`,
             # where a single transaction over the whole backlog crossed it and rolled the pass back.
             return _run_prune(engine, payloads, now=now)
+        if wanted is Dataset.FLATTEN:
+            # The engine, not a connection (#280). The pass itself is still exactly one transaction
+            # across one batch -- that shape is unchanged and measured in
+            # tests/collectors/youtube/test_youtube_flatten_transaction.py -- but the run row is
+            # written in a transaction of its own *after* it, which is the only way a pass the
+            # server killed can still leave a row saying so.
+            return _run_flatten(engine, payloads, now=now)
         with engine.begin() as conn:
-            if wanted is Dataset.WATCH:
-                return _run_watch(
-                    conn,
-                    watchlist_path or DEFAULT_WATCHLIST,
-                    now=now,
-                    roster_url=roster_url,
-                    read_roster=read_roster,
-                )
-            return _run_flatten(conn, payloads, now=now)
+            return _run_watch(
+                conn,
+                watchlist_path or DEFAULT_WATCHLIST,
+                now=now,
+                roster_url=roster_url,
+                read_roster=read_roster,
+            )
     finally:
         engine.dispose()
 
@@ -826,15 +831,112 @@ def _notes_of(fetcher: Fetcher) -> list[str]:
     return [str(note) for note in produced] if isinstance(produced, list) else []
 
 
-def _run_flatten(conn: Connection, payloads: PayloadStore, *, now: datetime) -> int:
-    report = flatten.run(conn, payloads, now=now)
+#: How much of a pass's own line the run row keeps. The line is built here, so nothing longer than
+#: a sentence can reach it; the cap is for the failure note, which carries a driver's message.
+RUN_NOTE_LIMIT = 500
+
+
+def _record_run(
+    engine: Engine,
+    *,
+    dataset: str,
+    status: str,
+    attempted: int,
+    succeeded: int,
+    failed: int,
+    skipped: int,
+    note: str,
+    now: datetime,
+) -> None:
+    """One row per pass, in a transaction of its own (#280).
+
+    Its own transaction because the pass's transaction may be the thing that died: a `flatten` batch
+    the server ended leaves an aborted transaction in which no row can be written, and a run row
+    that could only be written by a healthy pass would say nothing on exactly the night it matters.
+
+    `started_at` and `finished_at` are both the pass's injected clock, the same `now` every other
+    row this collector writes in a pass is stamped with (`_elapsed_ms` records that choice for a
+    job). So the wall clock of a pass is not measured here; what the health views ask of this row is
+    when it ran and how it ended, and both come from that one reading.
+    """
+    with engine.begin() as conn:
+        conn.execute(
+            sa.insert(collector_runs).values(
+                identifier=uuid.uuid4().hex,
+                dataset=dataset,
+                status=status,
+                started_at=now,
+                finished_at=now,
+                attempted=attempted,
+                succeeded=succeeded,
+                failed=failed,
+                skipped=skipped,
+                note=note[:RUN_NOTE_LIMIT] or None,
+            )
+        )
+
+
+def _pass_failed_note(error: Exception) -> str:
+    """One line about a pass that could not finish, with no SQL and no payload in it -- the same
+    rule flatten's `_reason` follows: `str()` of a SQLAlchemy DBAPIError appends the statement and
+    its bound parameters."""
+    original = getattr(error, "orig", None)
+    text = str(original if original is not None else error).strip()
+    first_line = text.splitlines()[0] if text else ""
+    return f"{type(error).__name__}: {first_line}"
+
+
+def _run_flatten(engine: Engine, payloads: PayloadStore, *, now: datetime) -> int:
+    try:
+        with engine.begin() as conn:
+            report = flatten.run(conn, payloads, now=now)
+    except Exception as error:  # noqa: BLE001 - a pass that died must still say that it died
+        # Without this row the stage simply goes quiet, which `pipeline_health` reads as `never` or
+        # as an old success -- the one answer a health view must not give (#280).
+        note = f"the pass could not finish: {_pass_failed_note(error)}"
+        print(f"flatten: {note}")
+        _record_run(
+            engine,
+            dataset=Dataset.FLATTEN.value,
+            status="failed",
+            attempted=0,
+            succeeded=0,
+            failed=0,
+            skipped=0,
+            note=note,
+            now=now,
+        )
+        return 1
+
     # The two kinds of error apart (#275): an artifact skipped for good and one the next pass tries
     # again both used to print the same number, and the cron log was the only place either appeared.
-    print(
+    note = (
         f"flattened {report.flattened} artifact(s), {report.errors} error(s) "
         f"({report.skipped} recorded unflattenable, {report.deferred} to retry)"
     )
+    print(note)
+    # N1 of #275's review: the failure records in `jobs` are a count with no denominator -- one
+    # failure in five hundred read as 0 percent ok. `attempted` is that denominator.
+    _record_run(
+        engine,
+        dataset=Dataset.FLATTEN.value,
+        status=_flatten_status(report),
+        attempted=report.flattened + report.errors,
+        succeeded=report.flattened,
+        failed=report.deferred,
+        skipped=report.skipped,
+        note=note,
+        now=now,
+    )
     return 1 if report.errors else 0
+
+
+def _flatten_status(report: flatten.FlattenReport) -> str:
+    """A pass that examined nothing still ran, and reads `ok`: the stage's question is whether the
+    cron line fired, and an empty backlog is the healthy answer to it every fifteen minutes."""
+    if not report.errors:
+        return "ok"
+    return "partial" if report.flattened else "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -844,29 +946,81 @@ class PruneBatch:
     orphaned: list[tuple[str, str]]
 
 
+#: Why a pass stopped short of draining the backlog. Printed and kept on the run row, because the
+#: cron log was the only place it appeared before #280.
+#:
+#: A `prune` pass counts its units of work in batches: #279 made the pass's cost a property of the
+#: number of batches rather than of the candidates in one, so that is what the run row and
+#: `collector_health`'s `requests` carry -- the rows removed go in the row's `note` instead.
+_CAP_NOTE = "the per-pass cap of {cap} batches stopped this pass; the next one continues"
+
+
+def _prune_status(*, succeeded: int, failed: int, capped: bool) -> str:
+    """`partial` where the pass did some of its work and left the rest: a hit cap, or a batch that
+    could not finish beside batches that could. `failed` only where not one batch landed -- that is
+    the night `pipeline_health` has to stop counting as "it ran" (#154's line), and a capped pass is
+    not it."""
+    if failed and not succeeded:
+        return "failed"
+    return "partial" if (failed or capped) else "ok"
+
+
 def _run_prune(engine: Engine, payloads: PayloadStore, *, now: datetime) -> int:
     cutoff = now - timedelta(days=PRUNE_MAX_AGE_DAYS)
     removed_artifacts = removed_jobs = removed_files = 0
+    succeeded = failed = 0
     drained = False
     for _ in range(PRUNE_MAX_BATCHES):
-        with engine.begin() as conn:
-            batch = _prune_one_batch(conn, cutoff=cutoff)
-        # The batch's transaction just committed (the `with` block exited); only now is it safe to
-        # unlink -- a file delete can't roll back, so doing it first would strand rows over an orphan
-        # file on any later failure in the same transaction.
-        removed_files += sum(payloads.delete(kind, digest) for kind, digest in batch.orphaned)
+        try:
+            with engine.begin() as conn:
+                batch = _prune_one_batch(conn, cutoff=cutoff)
+            # The batch's transaction just committed (the `with` block exited); only now is it safe
+            # to unlink -- a file delete can't roll back, so doing it first would strand rows over an
+            # orphan file on any later failure in the same transaction.
+            removed_files += sum(payloads.delete(kind, digest) for kind, digest in batch.orphaned)
+        except Exception as error:  # noqa: BLE001 - the pass reports what it did, never a traceback
+            # One batch at a time is exactly what #279 bought, so a batch that cannot finish costs
+            # this batch and not the pass -- but it is not retried either: a lock this pass lost or a
+            # statement the server cancelled would meet the same candidates again, and spending the
+            # remaining batches on it only delays the report.
+            failed += 1
+            print(f"prune: a batch could not finish: {_pass_failed_note(error)}")
+            break
+        succeeded += 1
         removed_artifacts += batch.removed_artifacts
         removed_jobs += batch.removed_jobs
         if not batch.removed_artifacts and not batch.removed_jobs:
             drained = True
             break
-    print(
+    note = (
         f"pruned {removed_artifacts} artifact(s), {removed_jobs} finished job(s), "
         f"{removed_files} payload file(s)"
     )
-    if not drained:
-        print(f"the per-pass cap of {PRUNE_MAX_BATCHES} batches stopped this pass; the next one continues")
-    return 0
+    print(note)
+    capped = not drained and not failed
+    if capped:
+        cap_note = _CAP_NOTE.format(cap=PRUNE_MAX_BATCHES)
+        print(cap_note)
+        note = f"{note}; {cap_note}"
+    status = _prune_status(succeeded=succeeded, failed=failed, capped=capped)
+    # #280: without this row a prune that dies every night and one that succeeds every night read
+    # the same on the ops screen -- the cap's line above lived in the cron log alone, and the pass
+    # exited 0 either way.
+    _record_run(
+        engine,
+        dataset=Dataset.PRUNE.value,
+        status=status,
+        attempted=succeeded + failed,
+        succeeded=succeeded,
+        failed=failed,
+        skipped=0,
+        note=note,
+        now=now,
+    )
+    # contracts/entrypoints.md's exit codes: 1 is "some failed or were truncated", which is both a
+    # capped pass and one whose batch could not finish. 2 is reserved for a refusal, and nothing
+    # refuses a prune -- it goes nowhere near a source.
+    return 0 if status == "ok" else 1
 
 
 def _prune_one_batch(conn: Connection, *, cutoff: datetime) -> PruneBatch:

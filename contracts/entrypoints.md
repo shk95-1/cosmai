@@ -117,8 +117,9 @@ COSMAI_DB_PORT   default 5434
 
 ## Common operations view (the minimum shape every collector must provide)
 ```sql
--- db/views/collector_health.sql UNIONs three arms: commerce (trend_radar.run+fetch_log),
--- naver (needs.naver_run+naver_fetch_log) and youtube (tubedepth.jobs)
+-- db/views/collector_health.sql UNIONs four arms: commerce (trend_radar.run+fetch_log),
+-- naver (needs.naver_run+naver_fetch_log), youtube's job queue (tubedepth.jobs) and
+-- youtube's passes that are not a queue (tubedepth.collector_runs, #280)
 collector text, dataset text, run_id text, started_at timestamptz, finished_at timestamptz,
 status text,          -- ok | partial | blocked | failed | running
 requests int, ok int, blocked int, failed int, queued int, p90_ms int
@@ -141,6 +142,25 @@ last 1h`) because commerce leaves every past run behind as a row: with a window,
 rests for an hour the youtube arm disappears from the table. A job that was never claimed (waiting, or
 an old row from before #101) has no `started_at` and sits on `created_at`.
 
+**A youtube dataset that is not a queue of jobs writes a run row instead** (#280,
+`tubedepth.collector_runs`, DDL 008). `prune` wrote nothing at all — no `jobs` row of that dataset
+has ever existed — so no row of this view ever carried dataset `prune`, `needs.pipeline_health` kept
+`youtube:prune` at `never`, and a prune that died every night read exactly like one that succeeded.
+`flatten` had the mirror problem: since #275 it writes a `jobs` row for its *failures* alone, so one
+failure in five hundred read as 0 percent ok. One row per pass answers both. It is shaped like
+naver's arm — the pass has a `run_id`, its own `status` and its own counts — so a run row's
+`started_at`/`finished_at` are the pass's, not an hour bucket's. `requests` there is the pass's
+units of work, and what a unit is belongs to the dataset: `prune` counts batches (#279 made the
+pass's cost a property of the number of batches, not of the candidates in one), `flatten` counts
+artifacts examined. `blocked` is 0 and truthfully — neither pass goes near a source — so the gap
+between `requests` and the three buckets is that pass's **skipped**, the same slot a 404 sits in on
+the commerce arm. `p90_ms` is NULL: a pass is stamped with one clock reading, so there is no
+per-unit duration to take a percentile of. **`watch` was checked and is not in this table**: it
+already writes `jobs` rows under its own dataset, so `youtube:watch` is not blind the way `prune`
+was, and giving that stage a second source would leave `pipeline_health` picking between the enqueue
+and the `work` pass that drained it — a decision that belongs with #39, which owns turning the stage
+back on.
+
 **`elapsed_ms` means something different per arm — the easiest thing in this view to get wrong.**
 commerce's and naver's `fetch_log.elapsed_ms` is one fetch's round trip, while youtube's
 `jobs.elapsed_ms` is one job's whole wall clock (claim→finish) (#101: a job answered from cache never
@@ -151,9 +171,11 @@ arms side by side and compare `p90_ms`. Old rows whose `elapsed_ms` is NULL drop
 percentile (they are not filled with 0).
 
 `queued` is NULL for commerce and naver: both are batch workers called by cron and have no waiting
-queue at all. It is a number for youtube alone, which is why 0 (the queue is empty) and NULL (there is
-no queue) part. A queue-specific value like `oldest_pending` is not added as a column — the sql fence
-above is canonical for the 12 columns, and widening it would make the other two arms each produce one
+queue at all. It is a number for youtube's **job-queue** arm alone, which is why 0 (the queue is empty)
+and NULL (there is no queue) part; youtube's run rows (#280) are NULL for the same reason commerce is,
+since a `prune` or `flatten` pass has no queue in front of it and writing 0 would claim it has an empty
+one. A queue-specific value like `oldest_pending` is not added as a column — the sql fence
+above is canonical for the 12 columns, and widening it would make the other arms each produce one
 more NULL. The age of a queue backlog is read from the `started_at` of the oldest bucket with
 `queued > 0`.
 
@@ -219,13 +241,20 @@ successes around them, so those artifacts were never flattened again and nothing
 now advances over every artifact the pass examined, and what remembers a failure instead is one row
 in `tubedepth.jobs`: `kind = 'flatten.artifact'`, `dataset = 'flatten'`, `target` the artifact's
 identifier, the reason in `error_code`·`error_message` and the moment in `finished_at`. No column
-and no table were added, nothing claims those rows (`work` claims `queued` alone, and these are
-`failed`), and `collector_health` counts them under dataset `flatten` with no change to the view.
+and no table were added, and nothing claims those rows (`work` claims `queued` alone, and these are
+`failed`). Since #280 `collector_health` no longer counts them in its job-queue arm — they were the
+only `jobs` rows dataset `flatten` ever had, so that bucket read `failed` whatever the pass had
+actually flattened — and the pass's own run row carries them beside the number they are a share of.
+They stay queryable in `jobs`, which is where one artifact's reason belongs.
 
 A failure the payload's own bytes decide — nothing under that digest, or a payload flatten has no
 handler for — is final on its first attempt (`max_attempts = 1`): a payload file is
-content-addressed and never rewritten, and since #274 `work` re-fetches such a target under a **new**
-artifact row ahead of the cursor, so passing the old one by loses nothing. A refusal from the
+content-addressed and never rewritten. Passing it by loses nothing **only where a job asks for that
+target again** (#280, narrowing #275's sentence): since #274 `work` re-fetches such a target under a
+**new** artifact row ahead of the cursor, so the next pass flattens the new row — but a target
+nothing will ever queue again is simply not flattened, and production's 3,707 old-fleet artifacts
+whose payload volume never came with them are exactly that case. The record is the only thing that
+says so, and `stack/README.md` carries the operator note. A refusal from the
 database says nothing about the artifact and is attempted again by the next pass, bounded at
 `FLATTEN_MAX_ATTEMPTS` = **3** attempts counted on the record — bounded because an artifact retried
 without end would be a second way to pin the pass. Retries are taken out of the same batch of 500
