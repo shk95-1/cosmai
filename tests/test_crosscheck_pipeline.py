@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -29,6 +30,11 @@ pytestmark = pytest.mark.postgres
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "trend_sample"
+# The Korean strings of fork #103 live in a fixture because tool/checks/lang rejects an added Hangul
+# line outside tests/**/fixtures/. The values are the production lump, abridged (see its `_source`).
+RUN_ON = json.loads(
+    (ROOT / "tests" / "fixtures" / "crosscheck" / "run_on_list.json").read_text(encoding="utf-8")
+)
 VIEWS = (
     ROOT / "db" / "views" / "metrics_topic_quarter_violation.sql",
     ROOT / "db" / "views" / "topic_quarter_judgement_violation.sql",
@@ -103,6 +109,18 @@ def _seed_commerce(url: str) -> None:
             (AT, AT, AT, "정제수, 트라이에톡시카프릴릴실레인 (1%), 병풀추출물, 나이아신아마이드(20,000 ppm)"),
         )
         cur.execute("GRANT SELECT ON rank_snapshot, review, review_topic, product TO needs_runtime")
+        source.commit()
+
+
+def _add_product(url: str, product_key: str, ingredients: str) -> None:
+    """One more product in the commerce source, after the fixture has been built. It is added here rather
+    than in `_seed_commerce` so the counts every other test in this file reads stay what they were."""
+    with connect(url) as source, source.cursor() as cur:
+        cur.execute(
+            "INSERT INTO product (source, product_key, captured_at, name, first_seen_at, "
+            "last_seen_at, ingredients) VALUES ('oliveyoung',%s,%s,%s,%s,%s,%s)",
+            (product_key, AT, product_key, AT, AT, ingredients),
+        )
         source.commit()
 
 
@@ -321,6 +339,43 @@ def test_a_key_that_catches_a_denied_substance_makes_the_answer_partial(
         built = build(conn, commerce_schema="")
     assert built.status == "partial"
     assert [line for line in built.violations if line.startswith("key_mismatch 시카")]
+
+
+def test_a_run_on_list_is_named_as_itself_rather_than_blamed_on_a_key(
+    crossable: str, database_url_for_tests: str
+):
+    """The production accident of fork #103: one product's whole ingredient string is separated by
+    whitespace, so a parsed "name" is a whole list and holds both a key term and a forbidden substance.
+    The run stays a 1 -- a value in the ingredient-name column is not a name -- but it must name the
+    unparsed list and its product rather than accuse two innocent keys."""
+    _add_product(database_url_for_tests, "runon", RUN_ON["run_on_list"])
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    assert built.status == "partial"
+    assert [line for line in built.violations if line.startswith("key_mismatch")] == []
+    named = [line for line in built.violations if line.startswith("run_on_list")]
+    assert len(named) == 2, "both the cica key and the niacinamide key sit inside that one lump"
+    assert all(RUN_ON["denied"] in line and "oliveyoung:runon" in line for line in named)
+    assert {row.key for row in built.ingredients.unparsed} == {
+        RUN_ON["cica_key"],
+        RUN_ON["niacinamide_key"],
+    }
+    assert built.ingredients.suspects == ()
+
+
+def test_a_wrong_key_is_still_caught_while_a_run_on_list_sits_in_the_same_table(
+    crossable: str, database_url_for_tests: str, monkeypatch: pytest.MonkeyPatch
+):
+    """Naming the lump must not cost the gate its teeth: the revived two-character alias still catches the
+    forbidden substance on a real name, and that is `key_mismatch` beside the `run_on_list` line."""
+    _add_product(database_url_for_tests, "runon", RUN_ON["run_on_list"])
+    alias = RUN_ON["cica_alias"]
+    monkeypatch.setitem(crosscheck.INGREDIENT_KEYS, alias, (alias,))
+    with connect(crossable) as conn:
+        built = build(conn, commerce_schema="")
+    assert built.status == "partial"
+    assert [line for line in built.violations if line.startswith(f"key_mismatch {alias} ")]
+    assert [line for line in built.violations if line.startswith("run_on_list")]
 
 
 def test_a_commerce_group_pointing_off_the_dictionary_axis_makes_the_answer_partial(

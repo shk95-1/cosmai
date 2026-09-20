@@ -1225,6 +1225,16 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   looks at the original text, so all it can really catch is a folding artefact (`pdrn` against `PDRN`).
   `시카` in fact **satisfies** that rule — 트라이에톡시카프릴릴실레인 really does contain `시카` inside it.
   What caught it was not a rule but **a person reading the names it printed**.
+- **A forbidden substance found only inside a run-on list is not that key's mismatch (fork #103).** A list
+  separated by whitespace alone stays one lump (it is not split: real names carry spaces, and a split would
+  manufacture fragment names and break the blending order `FORMULA_HOLD` is kept for), and a lump holds
+  dozens of substances — a key term and a forbidden substance sharing a lump says nothing about what the key
+  caught. The gate below is still asked at the matcher's width, but of ingredient **names**: a forbidden
+  substance that arrives only inside a lump is reported as **`run_on_list`**, naming the key, the substance
+  and the product, and it is still exit code 1, because a value in the ingredient-name column that is not a
+  name means the block is not whole. Everything the matcher brings in lands in one of the two
+  (`denied` or `denied_run_on`), and a test holds that. It is scoped this narrowly on purpose: on the
+  2026-08-27 table it produces 0 lines, so that record's exit code 0 stands.
 - **So the machine gate is a list a person read once and forbade.** Catching on that list is `key_mismatch`
   and exit code 1 (§entrypoints). Catching 0 rows is an absence rather than a mismatch, so it passes —
   `레티날`·`PDRN`·`엑소좀`·`트라넥삼산` are in that seat in our table. The forbidding has two layers:
@@ -1248,13 +1258,33 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   It was confirmed by measurement: put `"세라마이드": ("세라",)` into `INGREDIENT_KEYS` and that tool prints
   **카프릴릭/카프릭 트라이글리세라이드 (59 products, an emollient)** and exits 1 — a reproduction of the
   `시카` accident.
-- **Two rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
+- **That tool asks `audit()` for the split fork #103 made, rather than re-deriving it (fork #104).** A
+  forbidden substance in a plain name prints under `denied`; one caught only inside a run-on list prints
+  under its own `run_on` heading with the key, the substance and the product, and says the list is the
+  mismatch, not the key. Both are red, as in the pipeline. The tool had not run since 2026-08-27: a helper it
+  imports from `analysis/crosscheck/pipeline.py` was renamed that day and nothing imports a script under
+  `tool/`, so no test saw it; a test now loads the tool. **Measured 2026-09-19 (read-only): of 3,402 distinct
+  ingredient names, 368 are caught by some key. Counted per key, the way the tool reports it (a name two
+  keys both catch counts under each, 392 in all): the confirmed list's full 190 are still caught (0 `gone`),
+  202 are `new` (164 plain names, 38 run-on lists), 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
+  means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool (fork #107).
+  Re-measured the same day with fork #105's bound: of 3,403 distinct names the same 368 are caught and every
+  per-key line is unchanged — the 500 recovered names are caught by no key.
+- **Three rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
   being the name of a component of a gift set rather than an ingredient name (`콜라겐` 72→64 rows ·
   `시카센텔라` 179→174 rows are filtered by this) · a comma inside parentheses is not cut on
   (`나이아신아마이드(20,000 ppm)` would split into two ingredients). An ingredient list separated by
   whitespace alone with no commas stays as one lump, and the `note` counts that fact — split quietly, the
   blending order would stand as a wrong value.
+  **The third rule bounds the second (fork #105):** a `(` that no later `)` closes does not open a depth,
+  because left to do so it holds the depth above 0 to the end of the list and swallows every name after it
+  into one. Production had exactly one such list of 372 — a colourant written with a truncated CI number at
+  the end of its line — and it cost 500 names, 6,360 characters standing as a single name. An unclosed `(`
+  now costs at most the name it sits in; a `)` with no `(` costs nothing, as it already did (7 lists carry
+  at least one, up to 15). Measured 2026-09-19: all 364 balanced lists parse byte-identically and only that one list moves. A
+  length threshold was not used: the longest real name holding a parenthesis is 67 characters, but 35
+  balanced run-on lists carry parentheses too, up to 473, so no length separates the two.
 - **A discourse count must not be read as "sunscreen discourse".** Counted over the whole index, it holds
   every ampoule and skin booster the same channel introduced. So the ones that have a `SUN_WORDS`
   (`선크림`·`썬크림`·`선스크린`·`자차`·`선세럼`·`선쿠션`·`자외선차단`) **in the same chunk** are counted
@@ -1287,6 +1317,18 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   **11.3 seconds** (keyset pages of 20,000 rows with a commit per page — the same method as
   `gold_from_chunks` in `analysis/retrieval/eval.py`, and for the same reason). The three commerce-side
   queries are each under 0.4 seconds.
+- **Current state (2026-09-19, read-only, topic dictionary v3, fork #102 · #103):** the document counts are
+  the same (comments 285,735 · transcripts 5,303 · titles 5,908 · reviews 6,349) and the two composition rows
+  this section quotes read commerce **9.74%** against comments **1.54%** — still sixfold. The run is
+  **`partial` (exit code 1)** on two `run_on_list` lines, both from one product: `oliveyoung`
+  `A000000232098` writes a 3,224-character ingredient list whose only 8 commas sit inside one diol's name, so
+  each parsed "name" is a whole shade's list, and the cica/centella key and the niacinamide key each find
+  their term in the same lump as the forbidden silane dispersant. **No key is mismatched**: without the lumps
+  the audit has 0 suspicions, and reviving the bare cica alias on today's table still catches 890 rows, 882 of
+  them plain names, so `key_mismatch` still fires on a wrong key. The commerce side has grown since the block
+  below: 372 products with an ingredient list (was 180) · 62,834 ingredient rows (was 22,705) · 3,403
+  distinct names (was 2,051) — these two re-measured later the same day with fork #105's bound, 62,334 and 3,402
+  before it. One run is 27.3 seconds · 154MB peak resident.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
   **9.80%** against comments 1.55%.
@@ -1297,6 +1339,9 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
 - Ingredients: **0** audit suspicions (on the corrected keys, no key catches the forbidden list). The values
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
+  **On 2026-09-19, with fork #105's bound in place, that is 150 rows of 62,834 (125 distinct names, 43
+  products)** — one of the 151 rows measured earlier that day was the list an unclosed `(` had swallowed. The count grows with the
+  collection, which is why such a list is counted rather than split.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)
 **The promoted source is not the import pin** (`v0.4.0` `76db718`, `versioning.md`) — `cross_source.py` had its
@@ -1538,6 +1583,22 @@ verdict=순위 변동 window=새 기간이다 basket_shared=18   (종료 코드 
   `SELECT DISTINCT` means no fan-out (population 7,324 = 7,324 after the join) · no paging ·
   `review_pkey` exists.
 
+### Current measurement (2026-09-19, production DB read-only — `cosmai trend holdout`, fork #102)
+```
+seen=6,349 holdout=8,245 empty=0 topics=13 ranked=13 reproduced=9/13 scale=1.42→1.30
+verdict and window as on 2026-08-27 · basket_shared=30   (exit code 0)
+```
+- **The block above is a dated record and stays.** The holdout arm is everything collected after the seen
+  arm's end, so it grows with every collection pass: 975 reviews over 18 shared products then, 8,245 over 30
+  now (61 products in the arm). The seen arm is fixed by the cutoff and has not moved — 6,349 reviews, 9,027
+  topic mentions, 1.4218 mentions per review.
+- The verdict, the window and the idle platform mechanism are the same; four topics part instead of six.
+- **Both of the lowest topics now have mentions in the holdout arm** (`SPF_PA` 0.41%, the one below it
+  0.17%), so the stable-sort remark above describes the 2026-08-27 arm, not this one. The rule it defends is
+  unchanged: the lowest rank is still not part of the verdict.
+- This block is refreshed when §Holdout is next touched or when the verdict is quoted elsewhere; nothing
+  reads these numbers in code.
+
 ### Comparison against ydc (run 2026-08-27, 9 lines, **difference 0**)
 `tool/compare-ydc-holdout` takes `holdout_commerce.py` out of the tag (`v0.3.0`), runs it **untouched**
 (with `--demo` alone — run with no argument it goes out to that machine's PostgREST) and holds the two
@@ -1661,15 +1722,15 @@ alongside as a version.
 | mode | engine | queries | P@10 | MRR@10 | Hit@10 |
 |---|---|---|---|---|---|
 | literal | bm25 | 61 | .864 | .893 | 91.8% |
-| literal | vector | 61 | .618 | .785 | 91.8% |
-| literal | hybrid | 61 | .839 | .911 | 95.1% |
+| literal | vector | 61 | .615 | .770 | 90.2% |
+| literal | hybrid | 61 | .838 | .911 | 95.1% |
 | heldout | bm25 | 60 | .000 | .000 | 0.0% |
-| heldout | vector | 60 | .062 | .114 | 25.0% |
-| heldout | hybrid | 60 | .025 | .029 | 8.3% |
+| heldout | vector | 60 | .058 | .095 | 21.7% |
+| heldout | hybrid | 60 | .023 | .027 | 6.7% |
 - **The adoption condition is heldout's bm25 row: P@10 > .000.** The answer key in heldout is a document of
   the same topic that carries not one query token, so lexical search is structurally 0, and that 0 is the
   line the vector side has to clear (the two modes are defined in `analysis/retrieval/eval.py`). vector
-  cleared it at .062 · Hit 25.0% and hybrid at .025 · 8.3% — **the grounds for adopting the vector side are
+  cleared it at .058 · Hit 21.7% and hybrid at .023 · 6.7% — **the grounds for adopting the vector side are
   this one row, and this table is where that number lives.**
 - literal is not performance but **fault detection**. The answer key itself was made by string matching, so
   bm25 winning is normal (.864), and if this collapses the tokenisation is broken (the dictionary not
@@ -1715,7 +1776,7 @@ alongside as a version.
 - **The two bm25 rows are not values on that version.** bm25 does not open the vector store — what literal
   `.864` and heldout `.000` stand on is the corpus of 381,950 chunks and the active topic dictionary, and
   being on a different axis from the vector version they must not be read side by side. Only the heldout
-  vector `.062` that becomes the adoption criterion is a value on the store above.
+  vector `.058` that becomes the adoption criterion is a value on the store above.
 - This version **was not written by the rows themselves** — the six raw-value CSVs of the time had no
   version column at all (that is the place fork #49 fixed), and what is recorded here was tied by the
   comparison that the manifest's `count` equals the chunk count in the table's header. From the next
@@ -1755,13 +1816,31 @@ alongside as a version.
   needed. **Measuring this table again is not something this issue did** — the six rows stay a record of the
   v1 version, and a remeasurement stands on raw values that carry the `dictionary` and `store` columns
   together.
+  Fork #97 later rescored the rows on the same v1 footing with the grouped matcher (2026-09-19, the
+  paragraph below); the dictionary they record is still v1.
 
 
-**Fork #97's latin grouping moves the answer key the six rows above were scored against.** Over all 386,685
-chunks (2026-09-12) the `SPF_PA` key is 789 documents ungrouped and 706 grouped, none lost; the six rows
-score each engine against a per-engine scope (`analysis/retrieval/eval.py`), so this bounds the change
-rather than stating it per row. **The six rows remain a record of the ungrouped matcher** until they are
-measured again, and `tests/retrieval/frozen_topics.py` stays ungrouped with them.
+**Fork #97's latin grouping moved the answer key the six rows above are scored against, and the rows were
+rescored under it (2026-09-19).** Same footing as before: the v1 dictionary, the four encoded sources'
+381,950 chunks, the same store (`intfloat/multilingual-e5-base`, 381,950 vectors). On that scope the `SPF_PA`
+key is 637 documents ungrouped and 554 grouped (789 and 706 over all 386,685 chunks), the same 83 documents,
+none lost. With the ungrouped matcher the earlier rows reproduce (365 of 366 score rows identical); grouped,
+**only `SPF_PA`'s five query rows move, in every engine**: literal/vector was .618 · .785 · 91.8%,
+heldout/vector .062 · .114 · 25.0%, heldout/hybrid .025 · .029 · 8.3%. The bm25 rows keep their scores
+because `bm25.tokenize` never reads the topic pattern, and literal/hybrid moves below its third digit. The
+adoption condition holds: heldout bm25 is still .000 and the vector side still clears it.
+`tests/retrieval/frozen_topics.py` is re-frozen grouped with the rows. Crosscheck and holdout were
+re-measured with both matchers on the same day: holdout moves in neither arm, and in crosscheck `SPF_PA`
+alone moves (comments 0.55% → 0.39%, transcripts 2.12% → 2.05%), so no number either section quotes changes.
+
+**The vector arm's top-k is a total order since fork #101 (2026-09-19): `(-similarity, row index)`.** Before
+it, `argpartition` chose among rows of equal similarity at the boundary and the choice belonged to the numpy
+build, so the hybrid rows reproduced per host and not across hosts — #97's rescore met it as one score row of
+366 (literal/hybrid read .8410 on the ungrouped baseline against the published .839). The four vector and
+hybrid rows were rescored under the total order on the same footing: literal/vector .6148 · .7704 · 90.2%,
+heldout/vector .0583 · .0947 · 21.7% and heldout/hybrid .0233 · .0269 · 6.7% keep every published digit, and
+**literal/hybrid is .8377 · .9112 · 95.1%, so its P@10 reads .838 where it read .839.** The bm25 rows never
+open the store. No conclusion the table carries moves.
 
 ### Matcher difference between the two lineages (fork #96, 2026-09-12, production archive read-only)
 The archive's 13,979 videos re-matched with dictionary v3 against the mentions ydc stored at collection time,
