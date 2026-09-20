@@ -1,0 +1,11 @@
+{
+  "_comment": "A stand-in needs.product_ref catalogue for the launch-term rules (#285). Six refs over four brands, shaped after the seven sunscreens of the 2026-09-20 experiment: two brands hold two lines each (one pair where the shorter line name is contained in the longer one, which is the `partial` join the rule table gates on), one brand holds a single line, and one holds a product whose name is its brand plus the category word alone -- the refusal round one of the experiment measured.",
+  "refs": [
+    {"product_ref": "oy:A1", "brand": "조선미녀", "name_norm": "조선미녀 맑은쌀 선크림"},
+    {"product_ref": "oy:A2", "brand": "조선미녀", "name_norm": "조선미녀 데이스크린 틴티드 선크림"},
+    {"product_ref": "oy:B1", "brand": "구달", "name_norm": "구달 어성초 선크림"},
+    {"product_ref": "oy:B2", "brand": "구달", "name_norm": "구달 어성초 수분 선크림"},
+    {"product_ref": "oy:C1", "brand": "싸이닉", "name_norm": "싸이닉 파데스킵 톤업 선크림"},
+    {"product_ref": "oy:D1", "brand": "라운드랩", "name_norm": "라운드랩 선크림"}
+  ]
+}

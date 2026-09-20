@@ -1,0 +1,9 @@
+{
+  "_comment": "A filled stand-in for collectors/naver/launch_terms.json (#285), which ships empty. The terms are the ones the rules derive from launch_catalogue.json in the same directory; oy:D1 is absent because its only expressible terms are its brand and the category word, which is the refusal.",
+  "generic": [],
+  "products": {
+    "oy:A1": ["조선미녀 맑은쌀 선크림", "맑은쌀 선크림", "조선미녀 맑은쌀"],
+    "oy:B1": ["구달 어성초 선크림", "어성초 선크림", "구달 어성초"],
+    "oy:C1": ["싸이닉 파데스킵 톤업 선크림", "파데스킵 톤업 선크림", "싸이닉 파데스킵 톤업"]
+  }
+}

@@ -210,7 +210,13 @@ none = [
     "tests/collectors/commerce",
     "tests/test_cli_collect_commerce.py",
 ]
-"collectors/naver/" = ["tests/collectors/naver"]
+"collectors/naver/" = [
+    "tests/collectors/naver",
+    # #285: the launch-onset axis stamps `axis_version` from collectors/naver/launch.py, so the
+    # version-string guard reads this package too, and it declares a pipeline stage of its own.
+    "tests/test_version_strings.py",
+    "tests/test_pipeline_stage.py",
+]
 "collectors/youtube/" = [
     "tests/collectors/youtube",
     "tests/test_runtime_dsn.py",
