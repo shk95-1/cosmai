@@ -186,11 +186,13 @@ PAPER_HOLD = True
 
 READ_NOT_SUNCARE = "선크림 담론이 아니다"
 
-# 사람이 한 번 읽어 확인한 키별 성분명(2026-08-27 운영 표, 180제품 · 190이름). **키가 무엇을 잡는지의
-# 정본이다.** 상수 목록(DENIED_NAMES)은 이미 아는 오매칭만 막고, 아직 모르는 오매칭 -- 코퍼스가 자라
-# 새 물질이 어떤 키에 들어오는 것 -- 은 이 목록과 실제 표를 맞대야 보인다. 맞대는 길은
-# `tool/measure-crosscheck-keys` 이고, CI 는 그 일을 할 수 없다(운영 표에 닿지 못한다).
-KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v1.csv"
+# The ingredient names a person read and confirmed, per key. **This is the canonical form of what a key
+# catches.** The constant lists (DENIED_NAMES) only stop a mismatch already known; one not yet known -- the
+# corpus growing and a new substance entering some key -- shows only when this list is held against the real
+# table. That path is `tool/measure-crosscheck-keys`; CI cannot do it (it cannot reach the production table).
+# v1 is the 2026-08-27 read (180 products, 190 names) and stays as the record; v2 adds the 2026-09-19 read
+# (372 products, 163 more names, fork #107) with the date each name was read and a note where one is owed.
+KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v2.csv"
 
 # The rules that split an ingredient list into ingredient names (the third, the unclosed `(`, is in
 # parse_ingredients). A trap our source alone has, so ydc has no

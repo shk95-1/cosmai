@@ -328,7 +328,18 @@ def test_the_audited_catch_list_is_self_consistent():
         terms = crosscheck.INGREDIENT_KEYS[key]
         assert all(crosscheck.matches(name, terms) for name in names), key
         assert crosscheck.denied_in(key, names) == (), key
-    assert sum(len(names) for names in known.values()) == 190
+    assert sum(len(names) for names in known.values()) == 353  # 190 read 2026-08-27 + 163 read 2026-09-19
+
+
+def test_the_second_read_only_adds_to_the_first():
+    """v1 stays in the tree as the record of the 2026-08-27 read, and v2 carries every one of its rows
+    unchanged: a later read confirms more names, it does not quietly drop or rewrite an earlier one."""
+    audit_dir = crosscheck.KNOWN_NAMES_CSV.parent
+    first = crosscheck.known_names(audit_dir / "known_names_v1.csv")
+    second = crosscheck.known_names()
+    assert crosscheck.KNOWN_NAMES_CSV.name == "known_names_v2.csv"
+    for key, names in first.items():
+        assert names <= second[key], key
 
 
 def test_the_measure_tool_is_what_catches_a_new_mismatch():
