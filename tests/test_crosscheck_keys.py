@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -334,12 +335,16 @@ def test_the_audited_catch_list_is_self_consistent():
 def test_the_second_read_only_adds_to_the_first():
     """v1 stays in the tree as the record of the 2026-08-27 read, and v2 carries every one of its rows
     unchanged: a later read confirms more names, it does not quietly drop or rewrite an earlier one."""
-    audit_dir = crosscheck.KNOWN_NAMES_CSV.parent
-    first = crosscheck.known_names(audit_dir / "known_names_v1.csv")
-    second = crosscheck.known_names()
     assert crosscheck.KNOWN_NAMES_CSV.name == "known_names_v2.csv"
-    for key, names in first.items():
-        assert names <= second[key], key
+
+    def triples(path: Path) -> list[tuple[str, str, str]]:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            return [(row["key"], row["ingredient"], row["products"]) for row in csv.DictReader(handle)]
+
+    first = triples(crosscheck.KNOWN_NAMES_CSV.parent / "known_names_v1.csv")
+    second = triples(crosscheck.KNOWN_NAMES_CSV)
+    # Names alone would let a v1 row's product count be rewritten unseen, so the whole row is held, in place.
+    assert second[: len(first)] == first
 
 
 def test_the_measure_tool_is_what_catches_a_new_mismatch():
