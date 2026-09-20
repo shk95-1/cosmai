@@ -8,6 +8,21 @@
     "anchor_terms": ["세럼"],
     "category_groups_per_request": 4
   },
+  "launch_onset": {
+    "_comment": "The launch-onset axis (#285). search_groups_per_request is 1 on purpose: a DataLab ratio is rescaled inside one request, so a small product beside a large one rounds toward zero, and the onset rule reads a term against its own peak -- which is also why no anchor group rides along here, unlike datalab above. shopping_max_keywords_per_request groups, one term each, is the vendor's own shape for the keyword-trend endpoint. peak_fraction is the measured onset rule (#125, 2026-09-20); min_quiet_months and min_active_months are the volume guard, which has to be about the series' shape because a single-group series is always scaled to 100 at its own peak. max_requests_per_run is this dataset's own ceiling, requests_per_product x the catalogue's product_ref rows with room to grow.",
+    "search_window_start": "2016-01-01",
+    "shopping_window_start": "2017-08-01",
+    "shopping_category": "50000002",
+    "shopping_max_keywords_per_request": 5,
+    "search_groups_per_request": 1,
+    "peak_fraction": 0.10,
+    "min_quiet_months": 6,
+    "min_active_months": 3,
+    "max_terms_per_product": 3,
+    "generic_min_brands": 3,
+    "requests_per_product": 2,
+    "max_requests_per_run": 1500
+  },
   "blog": {
     "display": 100,
     "pages_max": 3,

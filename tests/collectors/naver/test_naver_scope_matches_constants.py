@@ -26,11 +26,35 @@ def test_scope_json_matches_the_module_constants():
     assert on_disk["http"]["retry_max_attempts"] == scope.RETRY_MAX_ATTEMPTS
     assert on_disk["http"]["retry_backoff_s"] == scope.RETRY_BACKOFF_S
     assert on_disk["http"]["max_requests_per_run"] == scope.MAX_REQUESTS_PER_RUN
+    launch = on_disk["launch_onset"]
+    assert launch["search_window_start"] == scope.DATALAB_WINDOW_START
+    assert launch["shopping_window_start"] == scope.SHOPPING_WINDOW_START
+    assert launch["shopping_category"] == scope.SHOPPING_CATEGORY
+    assert launch["shopping_max_keywords_per_request"] == scope.SHOPPING_MAX_KEYWORDS_PER_REQUEST
+    assert launch["search_groups_per_request"] == scope.LAUNCH_SEARCH_GROUPS_PER_REQUEST
+    assert launch["peak_fraction"] == scope.ONSET_PEAK_FRACTION
+    assert launch["min_quiet_months"] == scope.ONSET_MIN_QUIET_MONTHS
+    assert launch["min_active_months"] == scope.ONSET_MIN_ACTIVE_MONTHS
+    assert launch["max_terms_per_product"] == scope.LAUNCH_MAX_TERMS_PER_PRODUCT
+    assert launch["generic_min_brands"] == scope.LAUNCH_GENERIC_MIN_BRANDS
+    assert launch["requests_per_product"] == scope.LAUNCH_REQUESTS_PER_PRODUCT
+    assert launch["max_requests_per_run"] == scope.LAUNCH_MAX_REQUESTS_PER_RUN
 
 
 def test_scope_json_has_no_stray_top_level_keys():
     on_disk = json.loads(SCOPE_JSON.read_text(encoding="utf-8"))
-    assert set(on_disk) - {"_comment"} == {"datalab", "blog", "http"}
+    assert set(on_disk) - {"_comment"} == {"datalab", "launch_onset", "blog", "http"}
+
+
+def test_the_launch_onset_budget_covers_a_pass_over_the_whole_catalogue():
+    # The ceiling is a guard on one run, not a reservation: it has to be above what two requests a
+    # product cost over a catalogue bigger than today's 248 refs, and far below the vendor's month.
+    assert scope.LAUNCH_MAX_REQUESTS_PER_RUN > 248 * scope.LAUNCH_REQUESTS_PER_PRODUCT
+    assert scope.LAUNCH_MAX_REQUESTS_PER_RUN < scope.DATALAB_MONTHLY_QUOTA
+    # One group per search request is what makes an anchor unnecessary, so it is checked as a value
+    # and not only read: a second group would put the product's series on another group's scale.
+    assert scope.LAUNCH_SEARCH_GROUPS_PER_REQUEST == 1
+    assert scope.LAUNCH_MAX_TERMS_PER_PRODUCT <= scope.SHOPPING_MAX_KEYWORDS_PER_REQUEST
 
 
 def test_the_anchor_leaves_room_for_the_category_groups_beside_it():

@@ -17,6 +17,7 @@ from analysis.linker import LINKER_VERSION
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity.llm import VERSION as LLM_POLARITY_VERSION
 from analysis.polarity.ownership import _GEMMA4_2026_08_24, OWNERS
+from collectors.naver.launch import ONSET_AXIS_VERSION
 
 # versioning.md: `rule-vX.Y` or `llm-<model>-<yyyymmdd>`.
 FORMAT = re.compile(r"^rule-v\d+\.\d+$|^llm-.+-\d{8}$")
@@ -28,6 +29,9 @@ VERSIONS = (
     ("analysis.aggregate.AGGREGATE_VERSION", AGGREGATE_VERSION),
     # The rule table's version, stamped as `versions.launch` (#282, contracts/versioning.md).
     ("analysis.launch.LAUNCH_VERSION", LAUNCH_VERSION),
+    # An axis's own version, stamped into every claim's `axis_version` (#285). It is the axis and
+    # not the rule table, so it moves independently of LAUNCH_VERSION above.
+    ("collectors.naver.launch.ONSET_AXIS_VERSION", ONSET_AXIS_VERSION),
     ("analysis.polarity.llm.VERSION", LLM_POLARITY_VERSION),
     # OllamaPolarity(...).version is an instance attribute, so the constant cannot be imported
     # (analysis/polarity/ollama.py) -- the value production stamps is _GEMMA4_2026_08_24, the

@@ -49,6 +49,11 @@ if TYPE_CHECKING:  # cli imports this module; the spec type comes back the other
 API_HOST = "https://naverapihub.apigw.ntruss.com"
 DATALAB_PATH = "/search-trend/v1/search"
 BLOG_PATH = "/search/v1/blog"
+#: The shopping-insight keyword trend (#285), the second API the launch-onset axis reads. Same
+#: gateway and same key pair as the two above -- one API Hub application key grants the family
+#: (contracts/secrets.md) -- and the same POST-a-JSON-body shape as the search trend, with a
+#: `category` and one term per `keyword` group instead of `keywordGroups`.
+SHOPPING_PATH = "/shopping/v1/category/keywords"
 
 #: The gateway's own key headers, not developers.naver.com's `X-Naver-Client-*` (#182's fix round).
 KEY_ID_HEADER = "X-NCP-APIGW-API-KEY-ID"
@@ -134,11 +139,15 @@ class HttpFetcher:
 
     def fetch(self, spec: FetchSpec) -> dict[str, Any]:
         params = dict(spec.params)
-        if spec.kind == "datalab":
+        if spec.kind in ("datalab", "launch_trend"):
             # The body is `spec.params` unchanged: `parsing.datalab_request_key` hashes what is sent,
             # so a field added on the way out would leave the row's boundary key describing a
-            # request nobody made (#44).
+            # request nobody made (#44). `launch_trend` is the same endpoint with a body of its own
+            # shape -- one keyword group, no anchor (#285) -- and the two kinds are kept apart here
+            # rather than merged, because what a caller may put in the body differs.
             return self._send("POST", DATALAB_PATH, json=params)
+        if spec.kind == "launch_shopping":
+            return self._send("POST", SHOPPING_PATH, json=params)
         if spec.kind == "blog":
             start = int(params.get("start", 1))
             if start > BLOG_START_MAX:
@@ -233,6 +242,7 @@ __all__ = [
     "API_HOST",
     "DATALAB_PATH",
     "BLOG_PATH",
+    "SHOPPING_PATH",
     "KEY_ID_HEADER",
     "KEY_HEADER",
     "USER_AGENT",

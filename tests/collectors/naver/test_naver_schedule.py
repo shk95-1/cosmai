@@ -136,11 +136,15 @@ def test_every_naver_dataset_has_a_cron_line(dataset: Dataset):
 
 def test_no_naver_line_is_gated_now_that_the_anchor_is_in():
     """#182 commented the DataLab line out while there was no anchor to make a pull comparable;
-    #90 put the anchor in every request, so both naver lines run. A line commented out again needs
-    a reason above it naming the issue that restores it -- what `_gate_reason` reads."""
+    #90 put the anchor in every request, so every naver line runs. A line commented out again needs
+    a reason above it naming the issue that restores it -- what `_gate_reason` reads.
+
+    `launch_onset` (#285) is live rather than gated although its term list ships empty: its gate is
+    the file, not the crontab, and an empty list ends the run blocked (2) with a note saying so.
+    Commenting the line out instead would hide the same state behind a schedule nobody reads."""
     gated = _gated_times_by_dataset()
     assert gated == {}, f"gated naver datasets: {sorted(gated)}"
-    assert set(_times_by_dataset()) == {"datalab", "blog"}, sorted(_times_by_dataset())
+    assert set(_times_by_dataset()) == {d.value for d in Dataset}, sorted(_times_by_dataset())
     assert _gate_reason("datalab") == "", "a live line must not be read as a gated one"
 
 

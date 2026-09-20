@@ -26,6 +26,58 @@ DATALAB_ANCHOR_TERMS = ("세럼",)
 #: one of its 5 groups, so a category with more groups than this takes more than one request.
 DATALAB_CATEGORY_GROUPS_PER_REQUEST = DATALAB_MAX_GROUPS_PER_REQUEST - 1
 
+# ---- launch_onset (#285) -------------------------------------------------------------------
+#: One keyword group per search-trend request, and that is a design statement rather than a knob: a
+#: DataLab ratio is rescaled inside one request, so a small product's series beside a large one's
+#: rounds toward zero -- while the onset rule reads a term against its **own** peak, so it needs
+#: neither a companion group nor the `DATALAB_ANCHOR` the `datalab` dataset carries for exactly the
+#: opposite reason (there, two requests have to be put on one scale afterwards).
+LAUNCH_SEARCH_GROUPS_PER_REQUEST = 1
+#: `[확인 사실]` The shopping-insight keyword trend answers monthly from 2017-08 and not before
+#: (measured 2026-09-20). The search-trend window is `DATALAB_WINDOW_START`, nineteen months
+#: earlier, which is why a term already live in 2017 gets no onset from this API: the quiet-months
+#: guard refuses the window's own first month, which is the honest answer rather than a bound at
+#: the edge of what the vendor happens to hold.
+SHOPPING_WINDOW_START = "2017-08-01"
+#: `[확인 사실]` The vendor's category id for cosmetics/beauty; the keyword-trend endpoint takes one
+#: category per request and refuses a request without it (measured 2026-09-20).
+SHOPPING_CATEGORY = "50000002"
+#: `[확인 사실]` The vendor's cap on `keyword` groups in one shopping-insight request, and **one term
+#: per group**: a group's `param` array is what it searches, and the experiment put one term in
+#: each so every term keeps its own series. A group of several terms gives one merged series and
+#: loses exactly the per-term onset this axis reads.
+SHOPPING_MAX_KEYWORDS_PER_REQUEST = 5
+#: The onset threshold, measured on #125's seven sunscreens (2026-09-20): the first month a term
+#: reaches a tenth of its own peak. "The first month above zero" read 2016-02 for a 2023 product.
+ONSET_PEAK_FRACTION = 0.10
+#: The volume guard, part one. A single-group series is scaled to 100 at its own peak whatever the
+#: real volume was, so "is the peak high enough" cannot be asked; this asks the shape instead. The
+#: onset must be preceded by at least this many months below the threshold, so a flat or near-flat
+#: series -- above a tenth of its own peak from the window's first month -- yields no claim at all.
+ONSET_MIN_QUIET_MONTHS = 6
+#: The volume guard, part two: the onset opens a run of this many **consecutive** months at or above
+#: the threshold -- or of all the months that are left, when fewer remain. Consecutive, not a count
+#: of active months anywhere after it (#285 review F2): three isolated spikes over ten years clear a
+#: count of three and would claim the first of them, years too early. A product that launched this
+#: month, which can only ever show one active month, is still claimed -- those are the products the
+#: metric is about.
+ONSET_MIN_ACTIVE_MONTHS = 3
+#: How many terms a product's list may hold. The experiment used three per product (brand+line+
+#: category, line+category, brand+line) and three fit one shopping request's five groups with room.
+LAUNCH_MAX_TERMS_PER_PRODUCT = 3
+#: A token of `needs.product_ref.name_norm` is a **generic** category word once it appears in the
+#: names of this many distinct brands' products. Derived from the catalogue rather than listed by
+#: hand, so the rule holds as the catalogue grows.
+LAUNCH_GENERIC_MIN_BRANDS = 3
+#: Two requests a product -- one search trend, one shopping insight.
+LAUNCH_REQUESTS_PER_PRODUCT = 2
+#: How many requests one `launch_onset` run may send: `MAX_REQUESTS_PER_RUN`'s counterpart for the
+#: one dataset whose spend scales with the catalogue. Today's 248 `needs.product_ref` rows cost 496
+#: requests at two apiece; this ceiling leaves room for the refs to grow and for a run that retried
+#: everything, and it is 3% of `DATALAB_MONTHLY_QUOTA` -- the quota is not what binds here either
+#: (#110), the term list is.
+LAUNCH_MAX_REQUESTS_PER_RUN = 1500
+
 BLOG_DISPLAY = 100
 BLOG_PAGES_MAX = 3
 BLOG_SORT = "date"
@@ -62,6 +114,17 @@ __all__ = [
     "DATALAB_ANCHOR",
     "DATALAB_ANCHOR_TERMS",
     "DATALAB_CATEGORY_GROUPS_PER_REQUEST",
+    "LAUNCH_SEARCH_GROUPS_PER_REQUEST",
+    "SHOPPING_WINDOW_START",
+    "SHOPPING_CATEGORY",
+    "SHOPPING_MAX_KEYWORDS_PER_REQUEST",
+    "ONSET_PEAK_FRACTION",
+    "ONSET_MIN_QUIET_MONTHS",
+    "ONSET_MIN_ACTIVE_MONTHS",
+    "LAUNCH_MAX_TERMS_PER_PRODUCT",
+    "LAUNCH_GENERIC_MIN_BRANDS",
+    "LAUNCH_REQUESTS_PER_PRODUCT",
+    "LAUNCH_MAX_REQUESTS_PER_RUN",
     "BLOG_DISPLAY",
     "BLOG_PAGES_MAX",
     "BLOG_SORT",

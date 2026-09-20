@@ -13,6 +13,7 @@ from enum import StrEnum
 class Dataset(StrEnum):
     DATALAB = "datalab"
     BLOG = "blog"
+    LAUNCH_ONSET = "launch_onset"
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,4 +56,43 @@ class BlogPost:
         return (self.post_id,)
 
 
-__all__ = ["Dataset", "DatalabPoint", "BlogPost"]
+@dataclass(frozen=True, slots=True)
+class LaunchSeriesPoint:
+    """One (product, api, series, month) cell of a launch-onset series --
+    `needs.naver_launch_series` (011). Unlike `DatalabPoint` the subject is a canonical
+    `product_ref` rather than a lexicon category, and the ratio carries no anchor beside it: the
+    request holds one keyword group on purpose, so the series is relative to its own peak, which is
+    what the onset rule asks of it."""
+
+    product_ref: str
+    api: str  # search_trend | shopping_insight
+    series_key: str  # '' for search_trend's single group, the one term for a shopping series
+    month: str  # 'YYYY-MM'
+    ratio: float | None
+    terms: tuple[str, ...]
+    request_key: str
+    captured_at: datetime
+
+    def natural_key(self) -> tuple[str, str, str, str]:
+        return (self.product_ref, self.api, self.series_key, self.month)
+
+
+@dataclass(frozen=True, slots=True)
+class LaunchClaim:
+    """One row of `needs.product_launch_evidence` (010) as this collector writes it. The shape is
+    `analysis.types.LaunchClaimRow`, restated here rather than imported so the collector does not
+    take a dependency on the analysis package it only shares a table with."""
+
+    product_ref: str
+    axis: str
+    direction: str  # not_before | not_after | at
+    claimed_on: date
+    claimed_precision: str  # day | month
+    source_ref: str
+    match_strength: str  # exact | partial
+    axis_version: str
+    observed_at: datetime
+    note: str | None = None
+
+
+__all__ = ["Dataset", "DatalabPoint", "BlogPost", "LaunchSeriesPoint", "LaunchClaim"]
