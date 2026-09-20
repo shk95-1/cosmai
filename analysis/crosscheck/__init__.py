@@ -86,7 +86,9 @@ GROUP_MAP = {
 # 수단**이고 정본은 사람이 확인한 표다 (계약 §평가).
 NEGATIVE_HINTS = ("느껴져요", "아쉬", "부족", "무거", "끈적", "밀려", "answer_no", "없어요")
 NEUTRAL_HINTS = ("보통",)
-POLARITY_CSV = Path(__file__).resolve().parent / "audit" / "polarity_v1.csv"
+# v1 is the 2026-08-27 read (23 phrases) and stays as the record; v2 adds the phrases read since, with
+# the date each was read (fork #108).
+POLARITY_CSV = Path(__file__).resolve().parent / "audit" / "polarity_v2.csv"
 
 # Requiring document_count >= 5 for our verdict while making an exception for this crosscheck alone is a
 # double standard (the contract's §Rating).

@@ -1,0 +1,12 @@
+{
+  "_source": "the two rating phrases the user confirmed on 2026-09-19 (fork #108); production, one row each",
+  "group": "보습력",
+  "inverted_by_the_hint": {
+    "name": "보습이 약해요",
+    "right": "negative"
+  },
+  "agreed_with_the_hint": {
+    "name": "보습이 뛰어나요",
+    "right": "positive"
+  }
+}

@@ -1162,7 +1162,8 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   reviews pile up, so the values across times are nearly the same. Counted whole, the product count is
   inflated by the number of times.
 - **The canonical form of polarity is the table a person checked
-  (`analysis/crosscheck/audit/polarity_v1.csv`), and the hint is a last resort.** Using the hint alone, as
+  (`analysis/crosscheck/audit/polarity_v2.csv`; `polarity_v1.csv` is the 2026-08-27 read, kept unchanged), and
+  the hint is a last resort.** Using the hint alone, as
   ydc does, catches **the same disease** as the ingredient keys — both are substring lists over vendor
   strings. Feeding the hint alone to the 23 group vocabulary items of the production `review_topic`'s
   `GROUP_MAP` (measured 2026-08-27), **five came out inverted**:
@@ -1177,6 +1178,12 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   real 40%). Putting `수분감/매트해요` on negative is a judgment — **the axis is moisture, so this is the
   low end of that axis**, which is a different question from mattness being a virtue as a product
   preference.
+- **The second read (fork #108, 2026-09-19): 25 phrases, and a sixth inversion.** The vendor began a second
+  wording for the moisturising group's scale — two new option phrases, one row each beside the three
+  standing options (232 · 233 · 232 rows). The user confirmed the low end negative and the high end positive;
+  **on the hint alone the low end reads positive**, because its wording carries none of the negative hints.
+  `tool/measure-crosscheck-keys` had been unable to run since 2026-08-27 (fork #104), so nothing reported
+  the two phrases until it ran again. Each row of `polarity_v2.csv` carries the date it was read.
 - A phrase the table does not know is answered by the hint (answer nothing and that product disappears
   whole), but the fact that such a phrase arrived is said by `tool/measure-crosscheck-keys` — **the same
   tool and the same convention** as the ingredient keys. Give it no group and the hint alone runs, and
@@ -1347,7 +1354,7 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
 - Rating: 19 of the suncare ranking products have an attribute rating · 468 rows. The `topic_group` values
   that reach our topics are two, `자극도` and `발림성`, and `피부타입` is outside `GROUP_MAP`.
 - Polarity: all 23 option vocabulary items of the `GROUP_MAP` groups are in the confirmed table
-  (0 unconfirmed). On hints alone five invert — the table above.
+  (0 unconfirmed; 25 of 25 after the 2026-09-19 read, fork #108). On hints alone five invert — the table above.
 - Ingredients: **0** audit suspicions (on the corrected keys, no key catches the forbidden list). The values
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
