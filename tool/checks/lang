@@ -3,9 +3,17 @@
 # the moment it is staged. Only staged additions are examined, like tool/checks/paths: history is
 # not this check's business, and the migration itself has to be able to delete Korean.
 #
-# `--range <base>` reads `<base>...HEAD` instead of the index, for the one caller that has no index to
-# read: the push gate's prose class, where nothing is staged and the staged form passes vacuously --
-# the check the class exists to run measuring nothing at all (#215 review I3).
+# `--range <base>` reads `<base>...HEAD` instead of the index, for the callers that have no index to
+# read: the push gate, where nothing is staged and the staged form would pass whatever the branch
+# carries -- measuring nothing at all (#215 review I3). Since #281 that is every change class, not
+# the prose one alone.
+#
+# Why this check alone is missing from a BARE run of that gate -- CI's, which is given no base: it
+# has no tree-wide form and cannot be given one. 5430 tracked lines hold Hangul that the allowlist
+# below keeps as data (measured 2026-09-20), so "every Korean line in the tree" is not a question
+# with a usable answer, while "a Korean line this change added" is -- and answering that needs two
+# commits to compare. A change that reaches CI without ever meeting this gate locally is caught by
+# review instead, which is the rule contracts/ already runs on.
 set -e
 
 lang_range="--cached"

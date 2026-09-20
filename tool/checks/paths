@@ -1,10 +1,34 @@
 #!/bin/sh
 # Both repositories are public, so a machine path in a tracked file is published the moment it is
-# committed. Only staged additions are examined: history and files nobody touches are not this
-# check's business. The reference slices that carried such paths are gone (fork #9).
+# committed. The staged form examines added lines only: history and files nobody touches are not the
+# commit hook's business. The reference slices that carried such paths are gone (fork #9).
+#
+# `--tree` reads every tracked file instead of the index, for the caller with neither: `tool/checks/test`
+# runs this in every change class, and CI runs that gate bare -- class A, no `--changed`, so there is
+# no index staged and no base to diff against (#281). Until then this check's only caller was the
+# pre-commit hook, which a clone that never set core.hooksPath does not have at all.
 set -e
-hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/paths' | grep -E '^\+[^+]' | grep '/home/' || true)
+
+paths_usage() {
+    printf 'usage: tool/checks/paths [--tree]\n' >&2
+    exit 2
+}
+
+if [ "$1" = "--tree" ]; then
+    # Captured vendor pages under tests/**/fixtures/ carry CDN URLs whose first path segment is the
+    # one a home directory starts with -- two files on this tree, no machine path among them (#281).
+    # The staged form keeps no such exclusion, so a real machine path added to a fixture still fails
+    # at the commit that adds it.
+    hits=$(git grep -I -n -e '/home/' -- . ':!tool/checks/paths' \
+        ':!tests/fixtures/**' ':!tests/**/fixtures/**' || true)
+    subject="A tracked line"
+elif [ -n "$1" ]; then
+    paths_usage
+else
+    hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/paths' | grep -E '^\+[^+]' | grep '/home/' || true)
+    subject="A staged line"
+fi
 [ -z "$hits" ] && exit 0
 printf '%s\n' "$hits" >&2
-printf '\n✗ A staged line contains a machine path (/home/...). Use a repository-relative path or ~.\n\n' >&2
+printf '\n✗ %s contains a machine path (/home/...). Use a repository-relative path or ~.\n\n' "$subject" >&2
 exit 1

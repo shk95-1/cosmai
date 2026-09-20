@@ -8,8 +8,14 @@
 #
 #   A  the whole suite      the trigger list, the gate itself, a joining merge, or anything unmapped
 #   B  the computed set     mapped tests + the readers map + the import closure + smoke (#231)
-#   C  format·lint·lang + the snapshot tests   prose, or code tool/checks/invariants proves is unmoved
-#   N  format·lint, recorded nowhere           a tree identical to the base: there is nothing to verify
+#   C  the snapshot tests    prose, or code tool/checks/invariants proves is unmoved
+#   N  nothing, recorded nowhere   a tree identical to the base: there is nothing to verify
+#
+# tool/checks/unreachable-tests runs ahead of all four: the guard on tests/scope.toml's own reach is
+# the one thing no way of splitting a commit may route around (#261). format·lint·paths·todo, and
+# lang wherever the run was given a base, run ahead of all four for the same reason (#281): they used
+# to run in classes N and C alone -- or, for paths and todo, in the pre-commit hook alone -- so CI,
+# which runs this gate bare and therefore at class A, checked none of them on any tree.
 set -e
 . tool/checks/prerequisite
 . tool/checks/suite-lock
@@ -72,6 +78,15 @@ else
     require_command uv docker pg_isready
 fi
 
+# #261: outside the class dispatch below, because this is the one check no class may skip. The guard
+# that keeps tests/scope.toml able to reach every test file lived inside the suite, where the commit
+# that breaks it never arrives: a commit that only adds a test file earns class B or C, and neither
+# class runs tests/tool/test_change_scope.py. A single pass over the map and the tracked test files,
+# ~3s measured over five runs, stdlib only -- cheap enough that no class has to be exempted, and it
+# runs here, before anything that would need cleaning up.
+printf '→ unreachable\n'
+tool/checks/unreachable-tests
+
 # Before anything runs: what the suite proves is the tree it started against, not whatever HEAD has
 # become seventeen minutes later, and not a tree plus uncommitted edits (#214).
 tested_tree_capture
@@ -116,6 +131,33 @@ fi
 # The same extras in every class: a narrower sync would uninstall them from the shared venv, and the
 # next full run would pay to put them back.
 uv sync --extra dev --extra retrieval --frozen
+
+# #281, the same argument #261 made: these five judge every class, so they run outside the dispatch
+# below. format and lint ran in classes N and C alone, and paths and todo ran nowhere but the
+# pre-commit hook -- which is opt-in per clone (core.hooksPath) -- so the gate a push cannot skip
+# read none of them. Here, not before the sync above: without the dev extra `uv run ruff` has no ruff
+# to spawn (measured -- a cold venv exits 2). Here, not after the container either: a static verdict
+# is worth more before the two minutes a deploy into postgres costs. Measured on this tree, five runs
+# each: format 0.03-0.04s, lint 24.6-26.9s, paths and todo ~0.05s together, against a class-A run of
+# minutes -- and main is clean under all four today, so nothing is reformatted to make this green.
+# gitleaks is not here: ubuntu-latest carries no gitleaks binary and .github/workflows/suite.yml
+# installs none, so the call would report a clean tree by being absent rather than by finding
+# nothing -- the exact failure #281 is about. It stays in the commit hook until CI can install it.
+printf '→ format\n'
+tool/checks/format
+printf '→ lint\n'
+tool/checks/lint
+printf '→ paths\n'
+tool/checks/paths --tree
+printf '→ todo\n'
+tool/checks/todo --tree
+# lang is the one of the five with no tree-wide form: this tree carries 5430 tracked Korean lines the
+# check's allowlist keeps as data, so it can only read what a change ADDED -- and only a run given a
+# base has that. A bare run (CI) has none and skips it; the reason lives at tool/checks/lang.
+if [ -n "$change_base" ]; then
+    printf '→ lang\n'
+    tool/checks/lang --range "$change_base"
+fi
 
 if [ "$change_class" != C ] && [ "$change_class" != N ] && [ -z "$TEST_POSTGRES_URL" ]; then
     # Every worktree gets its own throwaway container, so channels can run this concurrently. The
@@ -213,24 +255,14 @@ fi
 # $change_tests is unquoted on purpose: it is a list of paths the classifier produced, one word each.
 case "$change_class" in
     N)
-        # The tree is the base's own. Format and lint still read the working files, so they can say
-        # something; nothing else can, and no entry is recorded for a run that verified nothing.
-        printf '→ format\n'
-        tool/checks/format
-        printf '→ lint\n'
-        tool/checks/lint
+        # The tree is the base's own: the static guards above have already read the working files,
+        # and nothing else can say anything about a change that is not there. No entry is recorded
+        # for a run that verified nothing.
         exit 0
         ;;
     C)
-        # Nothing executable moved, so what is left to check is the text and the surfaces made of it.
-        printf '→ format\n'
-        tool/checks/format
-        printf '→ lint\n'
-        tool/checks/lint
-        # --range: on a push nothing is staged, and the staged form of this check would pass whatever
-        # the branch carries -- the one check this class exists to run, measuring nothing (#215 review).
-        printf '→ lang\n'
-        tool/checks/lang --range "$change_base"
+        # Nothing executable moved, so what is left to check is the text and the surfaces made of it
+        # -- and the four checks that read text now run above, for this class and every other (#281).
         if [ -n "$change_tests" ]; then
             printf '→ pytest %s\n' "$change_tests"
             uv run pytest $change_tests

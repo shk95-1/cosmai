@@ -1,0 +1,21 @@
+#!/bin/sh
+# Can every test file still be reached by a change other than its own? (#261)
+#
+# `tool/change_scope.py --unreachable` lists every tracked tests/**/test_*.py that no entry in
+# tests/scope.toml could ever select, and `--check` compares that list against the allowlist in
+# tests/tool/test_change_scope.py -- the one definition of which files that is true of on purpose.
+#
+# The guard used to live only inside the suite, where the commit that breaks it never reaches it: a
+# commit that adds a test file and nothing else earns class B or C, and neither class runs
+# tests/tool/test_change_scope.py. `tool/checks/test` runs this check in every class instead, so no
+# way of splitting a commit routes around it.
+#
+# The classifier is resolved from this script and the repository from the working directory, so this
+# runs against any checkout it is pointed at (a fixture repository under test, a second worktree).
+set -e
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+. "$here/prerequisite"
+require_command python3 git
+
+# Stdlib only, so this needs no venv and runs before the `uv sync` the classes below it pay for.
+exec python3 "$here/../change_scope.py" --unreachable --check

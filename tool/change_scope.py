@@ -31,7 +31,9 @@ file, with every string constant compared as code.
 
 `tool/change_scope.py --unreachable` prints, one per line, every tracked `tests/**/test_*.py` that
 no map entry, reader entry, closure root or the smoke set could ever select for any change other
-than the file's own (#231 Work 6; `tool/issue audit` calls this).
+than the file's own (#231 Work 6; `tool/issue audit` calls this). With `--check` it compares that
+list against the allowlist in `tests/tool/test_change_scope.py` and exits 1 naming what is new --
+that is `tool/checks/unreachable-tests`, which every class of `tool/checks/test` runs (#261).
 """
 
 from __future__ import annotations
@@ -404,6 +406,23 @@ def unreachable_tests(root: Path) -> list[str]:
     return sorted(t for t in test_files if t not in reachable)
 
 
+# Which files are unreachable on purpose is defined in the test that owns the guard, and is read
+# back out of it here rather than restated (#261): two copies of that list is the drift this sweep
+# exists to catch. ast, not an import -- this runs before any venv exists.
+ALLOWLIST_FILE = "tests/tool/test_change_scope.py"
+ALLOWLIST_NAME = "ALLOWED_UNREACHABLE"
+
+
+def allowed_unreachable(root: Path) -> set[str]:
+    tree = ast.parse((root / ALLOWLIST_FILE).read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == ALLOWLIST_NAME for target in node.targets
+        ):
+            return set(ast.literal_eval(node.value))
+    raise SystemExit(f"{ALLOWLIST_FILE} no longer defines {ALLOWLIST_NAME}")
+
+
 def try_computed_set(
     root: Path,
     files: list[str],
@@ -619,8 +638,25 @@ def main(argv: list[str]) -> int:
         for path in unreachable_tests(toplevel()):
             print(path)
         return 0
+    if argv == ["--unreachable", "--check"]:
+        root = toplevel()
+        unmapped = sorted(set(unreachable_tests(root)) - allowed_unreachable(root))
+        if not unmapped:
+            return 0
+        for path in unmapped:
+            print(f"{path}: no change other than its own can ever select it", file=sys.stderr)
+        print(
+            f"give it an entry in tests/scope.toml (map, readers, docs or smoke) whose tests name "
+            f"it, or -- for a test no entry could reach -- add it to {ALLOWLIST_NAME} in "
+            f"{ALLOWLIST_FILE}",
+            file=sys.stderr,
+        )
+        return 1
     if len(argv) != 1:
-        print("usage: change_scope.py <base> | change_scope.py --unreachable", file=sys.stderr)
+        print(
+            "usage: change_scope.py <base> | change_scope.py --unreachable [--check]",
+            file=sys.stderr,
+        )
         return 2
     verdict, reason, tests, owed = classify(argv[0])
     print(verdict)
