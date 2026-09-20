@@ -197,13 +197,21 @@ READ_NOT_SUNCARE = "선크림 담론이 아니다"
 KNOWN_NAMES_CSV = Path(__file__).resolve().parent / "audit" / "known_names_v2.csv"
 
 # The rules that split an ingredient list into ingredient names (the third, the unclosed `(`, is in
-# parse_ingredients). A trap our source alone has, so ydc has no
+# parse_ingredients, and the fourth is NAME_SEPARATORS). A trap our source alone has, so ydc has no
 # counterpart (the contract's §Ingredients).
 BRACKET_RE = re.compile(r"\[[^\]]*\]")
 STAR_NOTE_RE = re.compile(r"^[^\S\n]*\*.*$", re.MULTILINE)
+# What stands between two whole names. `@` joins the 4th rule to the first two: one vendor list of 372
+# writes it in place of every comma, and it is on this set because it is never found inside a real name
+# anywhere in the table -- unlike `/` (inside a name on 299 products) or `+` (11), which may not split
+# (fork #109).
+NAME_SEPARATORS = ",\n@"
 # An ingredient list written with spaces and no commas stays one lump. Splitting it quietly would stand the
 # blending order on a wrong value, so it is only counted.
 RUN_ON_SPACES = 5
+# A lump joined by a separator this module does not know carries no spaces to count, so its length answers
+# for it: the longest real name measured on the table is 67 characters and the one such lump found was 301.
+RUN_ON_CHARS = 120
 
 
 @dataclass(frozen=True)
@@ -422,7 +430,8 @@ def closing_opens(body: str) -> frozenset[int]:
 
 def parse_ingredients(text: str) -> list[str]:
     """One ingredient list into ingredient names. A bracketed section marker is dropped and a comma inside
-    parentheses is not cut. An unclosed `(` costs at most the name it sits in."""
+    parentheses is not cut. An unclosed `(` costs at most the name it sits in, and `@` cuts where a comma
+    would (`NAME_SEPARATORS`)."""
     body = BRACKET_RE.sub(" ", STAR_NOTE_RE.sub(" ", text or ""))
     # A `(` that never closes must not open a depth: left to do so it holds the depth above 0 to the end of
     # the list and swallows every name after it into one (fork #105). A `)` with no `(` is already floored.
@@ -434,7 +443,7 @@ def parse_ingredients(text: str) -> list[str]:
             depth += 1
         elif char == ")":
             depth = max(0, depth - 1)
-        if char in ",\n" and depth == 0:
+        if char in NAME_SEPARATORS and depth == 0:
             out.append("".join(current))
             current = []
         else:
@@ -444,9 +453,10 @@ def parse_ingredients(text: str) -> list[str]:
 
 
 def run_on(name: str) -> bool:
-    """Is it one lump of an ingredient list written with spaces and no commas. It is only counted, not split
-    quietly."""
-    return name.count(" ") >= RUN_ON_SPACES
+    """Is it one lump of an ingredient list rather than a name -- written with spaces and no commas, or
+    joined by a separator this module does not know and so far past any real name that only a list can be
+    that long. It is only counted, not split quietly."""
+    return name.count(" ") >= RUN_ON_SPACES or len(name) >= RUN_ON_CHARS
 
 
 def known_names(path: Path | None = None) -> dict[str, frozenset[str]]:
