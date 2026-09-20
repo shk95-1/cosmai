@@ -350,7 +350,7 @@ table one left behind, and skipping it costs the lineage its "by way of".
 
 The criterion for choosing a store node is **a table another stage or a screen consumes**. That
 criterion forces a minimal set — every stage must have at least one edge (the test asks), so a stage's
-only output is necessarily a node. Today that is **13 stages + 14 stores = 27 nodes, 29 edges**
+only output is necessarily a node. Today that is **13 stages + 16 stores = 29 nodes, 31 edges**
 (`analyze:polarity_missing` and its two edges are gone, suspended since #242). What
 was left out on purpose, and why, is in the comments of `db/seed/pipeline.py` — among them
 `needs.corpus_*`, tables the fork's DDL 023 makes, which the upstream contract does not reference (in
@@ -365,7 +365,7 @@ after the verdict.
 ## Analysis
 ```
 cosmai analyze <stage> [--since <date>] [--scope <category>] [--impl <spec>] [--missing]
-  stage ∈ {link, polarity, aggregate, all}
+  stage ∈ {link, launch, polarity, aggregate, all}
 cosmai eval <task>        task ∈ {polarity, wish_class, brand_link, product_match}
 cosmai lexicon {load, activate} --kind <kind> --version <n>
 cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--against <n>]
@@ -382,6 +382,14 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   narrowing every other ruleset comes out as "deleted". Giving `--version` and `--csv` together is
   blocked (2) — when two things say which version it is, there are two answers. The exit code **does not
   change because they differ** (0 = an answer was computed).
+- `analyze launch` fills the launch-evidence ledger (#283, `interfaces.md` §Launch evidence): four
+  axes, one claim per axis and per matched source row, upserted on `(product_ref, axis, source_ref)`.
+  It runs inside `analyze all` straight after `link`, because the site-level axes resolve a listing
+  through `product_member` and must read the clustering that run has just rebuilt. It opens **no run
+  row** — like `link` — since every claim carries its own `axis_version`, and it **withdraws**: a
+  claim of its own four axes on a `product_ref` no `product_member` row points at any more is DELETEd,
+  which is the duty the contract puts on the axis that wrote it. Coverage is read back with
+  `uv run tool/launch-coverage` (read-only).
 - T14: `extract` is not a stage of its own — it only makes candidates and writes no row, so idempotence cannot be observed. Extraction runs inside `polarity` (the `Extractor` protocol is unchanged).
 - B11: `eval aspect` was dropped because both the evaluation set and the baseline are 0 rows. Reviving it means the evaluation set and a row in `interfaces.md`'s baseline table arriving in the same PR.
 - Every step is idempotent by **natural-key upsert**. A re-run produces the same result.

@@ -894,6 +894,64 @@ a third precision is a decision about what a claim means, not an insert — and 
 does not know (`ValueError`) rather than guessing. `match_strength` is closed at `exact`·`partial`
 because row 6 turns on it: a third strength would be read as not-exact by a rule that never agreed to it.
 
+### The first-round axes (`analysis/launch/axes.py`, `cosmai analyze launch`, #283)
+
+Four axes fill the ledger in rule version 1, and **what each one may claim is fixed here** — the
+direction, the precision, what goes in `source_ref`, and what `exact` means for that axis's own join.
+The last of those is the load-bearing one: row 6 gives a tier to a lower bound standing alone only
+when its join is `exact`, so an axis that calls a loose match `exact` empties that gate.
+
+| axis | direction · precision | `source_ref` | `exact` means | in rule v1 |
+|---|---|---|---|---|
+| `mfds_report` | `not_before` · day | the registration's `report_seq` | brand established on both sides **and** the two normalised line keys equal, nothing left over on either | yes |
+| `vendor_board` | `not_after` · day | `<source>:<product_key>` | that listing is the row the ref was minted from (`product_member.role = 'primary'`) | yes |
+| `old_review` | `not_after` · day | `<source>:<product_key>` | the same: `role = 'primary'` | yes |
+| `vendor_title_tag` | `not_after` · day | `<source>:<product_key>` | the same: `role = 'primary'` | **no** (above) |
+
+**`mfds_report`.** A cosmetic is filed before it is sold, so `report_date` is a genuine lower bound.
+The join is the risk, and it is built in two halves. The **brand** is established when the
+registration's stored `entp_key` is one of the brand's folded spellings *or* one of them occurs inside
+the registered name — both are needed, because `entp_name` is the filer and is a contract manufacturer
+on most rows (233 of 4,735 resolve to a lexicon brand), while a registered name is a legal name that
+opens with the brand. The **line** is `analysis.linker.normalize_name` (bracketed vendor tags, volume
+and count words, SPF/PA specs and the promotional vocabulary dropped, formulation synonyms folded)
+then folded to letters and digits, with the brand's spellings removed from both sides: the registered
+name carries the brand inside it and a listing name carries it in a column. `exact` is **equality** of
+those two strings, both at least four characters; one containing the other is `partial`; a brand-level
+match with no line-level containment is **no claim at all**, since 26 of 27 sun-care refs match at
+brand level and the brand's newest filing would otherwise land under every product it sells. A product
+that matches several registrations keeps every claim, each naming its own `report_seq`.
+
+**`vendor_board`.** The honest direction is the one the board actually supports. A product on a
+vendor's NEW board was **on sale** the day we captured it, so the launch is no later — but the board
+says nothing about how long it had been on sale, and `listed_at` is NULL on all 487 rows, so there is
+no date the vendor itself calls the listing date. Claimed as `at` it would mint `new_3m` for every
+boarded product out of a four-week collection window, and claimed as `not_before` it would do the same
+on marketing text; as an upper bound it can only make a product older (row 3) or corroborate a lower
+one (row 7), which is exactly what it knows. Filling `listed_at` and adding an oliveyoung board are
+collector work and are filed, not done in this axis.
+
+**`old_review`.** `min(written_at)` of the reviews held for that listing, and it can only prove age:
+3,392 of 3,511 reviewed products have their earliest held review in 2026 because the collector pages
+only recent reviews, so a recent upper bound is row 4 `unknown` and an old one is row 3 `not_new`.
+
+**The site-level axes' `exact`** is about the product→ref link and not a name join. `product_ref` is
+minted from its cluster's anchor (`analysis/linker` `_ref_id`), so the anchor listing **is** that
+product by construction; every other member reached the ref through the linker's cross-site similarity
+thresholds, which is the same class of join as the MFDS containment, and is therefore `partial`.
+
+**Withdrawal.** The stage writes a claim only for a `product_ref` some `product_member` row still
+points at, and DELETEs every claim of **its own four axes** that this run no longer makes. That is the
+duty above, made exact: a re-clustering re-points the member rows and leaves the old `product_ref`
+standing, so "the refs a re-link vacated" is "the refs with no member". The DELETE is scoped by `axis`,
+because another axis's claims are not this stage's to withdraw.
+
+**Coverage and accuracy are different questions.** Coverage is a read of the ledger and can be had at
+any time; accuracy needs launch months a person supplies. `eval/launch/launch_sample.csv` ships with a
+header and no rows for that reason, and `tool/launch-coverage` prints coverage now and the per-axis hit
+rate and median slack once the file has rows. That hit rate is what justifies each `exact` above, and
+what decides whether a further axis is worth building (#125).
+
 ### Where the three pieces live, and why the verdict is not the view
 
 | piece | where | why there |
@@ -913,8 +971,8 @@ The interval is the one thing written twice, once in SQL and once in Python, bec
 the view's excluded-axis literal against the module's constant — a mirror nobody compares is just a
 second implementation.
 
-Nothing writes the ledger yet: the first-round axes are #283, and `unresolved_new` — the metric that
-reads this verdict — is #125.
+The ledger is written by `cosmai analyze launch`, which `analyze all` runs straight after `link`
+(#283, the axes above). `unresolved_new` — the metric that reads this verdict — is #125.
 
 ## Verdict (the seven trend types and the two scores — `topic_quarter_judgement`, fork #40)
 

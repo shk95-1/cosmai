@@ -19,6 +19,7 @@ import psycopg
 from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate import pipeline as aggregate_stage
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
+from analysis.launch import pipeline as launch_stage
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.linker import LINKER_VERSION
 from analysis.linker import pipeline as link_stage
@@ -330,6 +331,10 @@ def run_all(
             conn, since=since, commerce_schema=commerce_schema, youtube_schema=youtube_schema
         )
         counts.update({name: linked[name] for name in LINK_COUNTS})
+        # After link and before the rest: the axes resolve a site listing through product_member,
+        # so they read the clustering this run has just rebuilt (#283).
+        stage = "launch"
+        counts.update(launch_stage.run(conn, commerce_schema=commerce_schema))
         stage = "polarity"
         found = polarity_stage.run(
             conn,
@@ -435,6 +440,11 @@ def _one(
             )
             done = StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
             return _reported(conn, _amend(done, stale))
+        if stage == "launch":
+            # No run row of its own, the same as link: the ledger's rows carry `axis_version`, and a
+            # standalone pass leaves the reporting row `_reported` writes when it is not ok.
+            written = launch_stage.run(conn, commerce_schema=commerce_schema)
+            return _reported(conn, _amend(StageOutcome(stage, OK, None, written), stale))
         if stage == "polarity":
             # This stage opens and closes its own run -- the run of a standalone execution is polarity's.
             found = polarity_stage.run(

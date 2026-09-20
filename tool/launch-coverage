@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""What the launch-evidence axes reach, and — once the sample has rows — how often they are right (#283).
+
+Two halves, and they answer different questions:
+
+  coverage   how many products each axis claims anything about, and how many of those claims are
+             `exact`. It needs no label and can be printed today.
+  accuracy   each axis's hit rate and its median slack against `eval/launch/launch_sample.csv`, the
+             launch months a person supplied. The file ships EMPTY, so this half prints nothing
+             until it has rows -- which is the honest state, not a failure. The number it produces
+             is what decides whether the next axis is worth building (#125), and it is the only
+             thing that can justify an axis calling a join `exact` (#282 concern b).
+
+The database is only ever read: the session sets `default_transaction_read_only`, so a stray write
+here fails instead of landing in production.
+
+    uv run tool/launch-coverage                      # production needs_runtime, read-only
+    uv run tool/launch-coverage --url <url>
+    uv run tool/launch-coverage --sample <path> --reference 2026-09-20
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from sqlalchemy.engine import make_url  # noqa: E402
+
+from analysis.launch import launch_interval, launch_verdict  # noqa: E402
+from analysis.launch.sample import SAMPLE_CSV, coverage, read_sample, score  # noqa: E402
+from analysis.types import LaunchClaimRow  # noqa: E402
+from db.runtime import runtime_url  # noqa: E402
+from db.seed._common import connect  # noqa: E402
+
+READ_ONLY = "-c default_transaction_read_only=on"
+CLAIMS = """
+SELECT product_ref, axis, direction, claimed_on, claimed_precision, source_ref, match_strength,
+       axis_version, observed_at, note
+FROM product_launch_evidence
+"""
+REFS = "SELECT count(*) FROM product_ref"
+
+
+def read_only(url: str) -> str:
+    """Read-only at the session level, the same way `tool/measure-mfds-join` does it: a measurement
+    tool that can write is a production write waiting for a typo. libpq takes one `options` string,
+    so the flag is joined onto whatever the caller's URL already carries."""
+    parsed = make_url(url)
+    existing = parsed.query.get("options", "")
+    joined = existing if isinstance(existing, str) else " ".join(existing)
+    options = " ".join(part for part in (joined, READ_ONLY) if part)
+    return parsed.update_query_dict({"options": options}).render_as_string(hide_password=False)
+
+
+def claims_of(url: str) -> tuple[list[LaunchClaimRow], int]:
+    with connect(read_only(url)) as conn, conn.cursor() as cur:
+        cur.execute(CLAIMS)
+        found = [LaunchClaimRow(*row) for row in cur.fetchall()]
+        cur.execute(REFS)
+        row = cur.fetchone()
+        refs = int(row[0]) if row else 0
+        conn.commit()
+    return found, refs
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime, read-only.")
+    parser.add_argument("--sample", default=None, help="The labelled sample CSV (default: the eval one).")
+    parser.add_argument(
+        "--reference", default=None, help="The date the verdict is asked at (default: today)."
+    )
+    args = parser.parse_args()
+
+    found, refs = claims_of(args.url or runtime_url())
+    reference = date.fromisoformat(args.reference) if args.reference else date.today()
+    by_ref: dict[str, list[LaunchClaimRow]] = {}
+    for claim in found:
+        by_ref.setdefault(claim.product_ref, []).append(claim)
+
+    print(f"ledger   {len(found):,} claims on {len(by_ref):,} of {refs:,} needs.product_ref rows")
+    print(f"{'axis':18s} {'products':>8s} {'claims':>7s} {'exact':>7s}")
+    for axis, (products, total, exact) in coverage(found).items():
+        print(f"{axis:18s} {products:8,} {total:7,} {exact:7,}")
+
+    verdicts: dict[str, int] = {}
+    for product_ref, claims in by_ref.items():
+        answer = launch_verdict(launch_interval(product_ref, claims), reference)
+        key = f"{answer.verdict}/{answer.basis}"
+        verdicts[key] = verdicts.get(key, 0) + 1
+    shown = " · ".join(f"{name} {n}" for name, n in sorted(verdicts.items()))
+    print(f"verdict at {reference.isoformat()}: {shown}")
+
+    sample = read_sample(Path(args.sample) if args.sample else SAMPLE_CSV)
+    if not sample:
+        # Repo-relative: an absolute path here would differ per checkout and mean nothing in a report.
+        print("sample   eval/launch/launch_sample.csv has no rows yet -- accuracy is not computable")
+        return 0
+    print(f"sample   {len(sample)} labelled products")
+    print(f"{'axis':18s} {'in_rule':>7s} {'products':>8s} {'claims':>7s} {'hit':>6s} {'slack_d':>8s}")
+    for axis, scored in score(sample, by_ref).items():
+        rate = "-" if scored.hit_rate is None else f"{scored.hit_rate:.2f}"
+        room = "-" if scored.median_slack is None else f"{scored.median_slack:+.0f}"
+        print(
+            f"{axis:18s} {str(scored.in_rule):>7s} {scored.products:8,} {scored.claims:7,} "
+            f"{rate:>6s} {room:>8s}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
