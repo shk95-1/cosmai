@@ -376,8 +376,9 @@ table one left behind, and skipping it costs the lineage its "by way of".
 
 The criterion for choosing a store node is **a table another stage or a screen consumes**. That
 criterion forces a minimal set — every stage must have at least one edge (the test asks), so a stage's
-only output is necessarily a node. Today that is **13 stages + 16 stores = 29 nodes, 31 edges**
-(`analyze:polarity_missing` and its two edges are gone, suspended since #242). What
+only output is necessarily a node. Today that is **14 stages + 17 stores = 31 nodes, 33 edges**
+(`analyze:polarity_missing` and its two edges are gone, suspended since #242; `naver:launch_onset`
+and its two came with #285, writing `needs.naver_launch_series` and the evidence ledger). What
 was left out on purpose, and why, is in the comments of `db/seed/pipeline.py` — among them
 `needs.corpus_*`, tables the fork's DDL 023 makes, which the upstream contract does not reference (in
 production `analyze` really does read them, so the picture is that much emptier; the fork adds those
