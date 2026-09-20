@@ -53,9 +53,13 @@ FROM (VALUES
     ('tubedepth.artifacts'),    -- #144: the artifact that carried in that comment (target,
                                 -- kind='video.comments', fetched_at, byte_count). A video can have
                                 -- several artifacts, and fetched_at is what tells them apart.
-    ('tubedepth.jobs')          -- #77: all 12 columns of the youtube arm (dataset,state,error_code,
+    ('tubedepth.jobs'),         -- #77: all 12 columns of the youtube arm (dataset,state,error_code,
                                 -- started_at,created_at,finished_at,elapsed_ms). #144 also reads this as
                                 -- the job that made that artifact.
+    ('tubedepth.collector_runs')  -- #280: the youtube arm's fourth source -- one row per `prune` or
+                                -- `flatten` pass (dataset,status,started_at,finished_at,attempted,
+                                -- succeeded,failed). Without this line the view cannot stand at all:
+                                -- migrate.sh runs this file at stage (e), before (f) creates it.
 ) v(t)
 WHERE to_regclass(t) IS NOT NULL \gexec
 
