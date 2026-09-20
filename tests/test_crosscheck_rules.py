@@ -208,6 +208,13 @@ def test_the_second_polarity_read_only_adds_to_the_first():
     assert len(second) == len(first) + 2 == 25
 
 
+def test_the_audit_files_end_their_lines_the_way_the_first_ones_do():
+    """`csv.writer` ends lines with CRLF unless told otherwise, and both second reads were written that way
+    first (fork #107, #108). The reader does not care; a diff of the next read would."""
+    for path in sorted(crosscheck.POLARITY_CSV.parent.glob("*.csv")):
+        assert b"\r" not in path.read_bytes(), path.name
+
+
 def test_a_group_the_table_does_not_know_still_falls_back_to_the_hints():
     """확인된 표는 오늘 아는 어휘뿐이다. 모르는 문구에 답을 안 하면 그 제품이 통째로 사라진다 --
     답은 하되, 그 문구가 왔다는 사실을 `tool/measure-crosscheck-keys` 가 말한다."""
