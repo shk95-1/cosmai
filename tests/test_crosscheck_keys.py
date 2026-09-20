@@ -45,6 +45,13 @@ UNBALANCED = json.loads(
         encoding="utf-8"
     )
 )
+# The same reason for fork #109's strings: the one production list written with `@` between whole names,
+# two names that carry a separator which must stay inside them, and a lump joined by such a separator.
+SEPARATORS = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "crosscheck" / "list_separators.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 # 우리 표에서 그대로 뜬 성분명들. 오매칭을 재현하는 데 필요한 만큼만 든다.
 OURS = (
@@ -210,6 +217,42 @@ def test_a_stray_closing_parenthesis_stays_ordinary_text():
     depth is floored at 0, so they cost no split -- and the bound on the unclosed `(` must not change
     that."""
     assert crosscheck.parse_ingredients(UNBALANCED["stray_close"]) == UNBALANCED["stray_close_names"]
+
+
+def test_a_list_written_with_at_between_names_parses_into_its_names():
+    """One production list of 372 is written with `@` and not one comma, so its 34 substances arrived as a
+    single 301-character "name" that a key then caught (fork #109). `@` is on the split set because it
+    never appears inside a real name anywhere in the table."""
+    names = crosscheck.parse_ingredients(SEPARATORS["at_list"])
+    assert names == SEPARATORS["at_names"]
+    assert SEPARATORS["at_starred_name"] in names, "a `*` suffix stays, as it does on every other name"
+    assert not any(crosscheck.run_on(name) for name in names), "no name is a whole list any more"
+
+
+def test_a_separator_that_lives_inside_real_names_is_not_on_the_split_set():
+    """`/` sits inside a real name on 299 of 372 products and `+` on 11, so neither can split a list --
+    and one of the `@` list's own names carries a `/`, which the split must leave whole."""
+    assert crosscheck.parse_ingredients(SEPARATORS["unsplit_list"]) == SEPARATORS["unsplit_names"]
+    assert SEPARATORS["at_slash_name"] in crosscheck.parse_ingredients(SEPARATORS["at_list"])
+
+
+def test_a_lump_joined_by_an_unknown_separator_is_still_a_run_on_list():
+    """The space count cannot see a lump joined by anything else, so length answers for it: the longest
+    real name on the table is 67 characters and the one separator-less lump found was 301. The gate must
+    blame the list rather than the key that happens to catch a substance inside it (fork #103)."""
+    lump = SEPARATORS["unknown_separator_lump"]
+    assert lump.count(" ") < crosscheck.RUN_ON_SPACES, "the space rule alone has to miss this one"
+    assert crosscheck.run_on(lump)
+    assert not crosscheck.run_on(SEPARATORS["longest_real_name"]), "67 characters is a name, not a list"
+
+
+def test_a_set_components_label_stays_with_the_lump_it_labels():
+    """A set product writes `<component> = <first substance> ...`. Stripping the label would buy nothing:
+    the row behind it is a space-separated list, so it is a run-on lump either way, and `=` on the split
+    set would only turn the label into a "name" of its own."""
+    label_lump = SEPARATORS["label_lump"]
+    assert crosscheck.parse_ingredients(label_lump) == [label_lump]
+    assert crosscheck.run_on(label_lump), "the gate already calls this row a list, not a name"
 
 
 def test_the_sun_context_rule_names_what_the_talk_count_is_not():
