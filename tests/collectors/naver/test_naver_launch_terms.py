@@ -86,8 +86,11 @@ def test_a_product_whose_only_terms_are_its_brand_and_a_category_word_is_refused
 
 
 def test_a_term_shared_with_another_line_of_the_same_brand_is_a_partial_join():
-    # oy:B1's line name is contained in oy:B2's, so every term built from it also names oy:B2.
-    # #282's rule table gates a single-axis tier on `exact`, which is why this may not be generous.
+    # oy:B1's line name is contained in oy:B2's, so every term built from it also names oy:B2 and
+    # the series rises when whichever of the pair launched first did. Under `rule-v1.1` row 3 reads
+    # `latest_exact`, so a `partial` upper bound cannot declare a product `not_new` on its own --
+    # it still reaches row 2 `conflict`, which is the MFDS cross-check this axis is kept for. That
+    # is what the word buys, and why it may not be generous.
     generic = launch_terms.generic_tokens(_refs())
     refs = _refs()
     b1 = _by_ref()["oy:B1"]

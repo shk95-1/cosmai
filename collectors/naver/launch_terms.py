@@ -27,9 +27,16 @@ fixture and against production without either one being the definition:
                     refusal.
   match_strength    `exact` when every term of the product is **specific** to it -- no other
                     `product_ref` of the same brand has a name holding all of that term's tokens --
-                    and `partial` otherwise. #282's rule table reads it: a tier resting on a lower
-                    bound alone is given only on an `exact` join, so a strength claimed too
-                    generously is worth nothing at all.
+                    and `partial` otherwise.
+
+**What that word costs, under `rule-v1.1`.** This axis emits only `not_after`, so row 6 (a tier held
+up by a lower bound alone) never reads its strength. Row 3 does: `not_new` is decided on
+`latest_exact`, the tightest upper bound **among the `exact` claims**, so a `partial` onset can no
+longer declare a product old on its own. It still reaches row 2 `conflict` against a lower bound,
+which is right -- a crossing is the MFDS cross-check this axis is kept for, and two of the seven
+measured sunscreens were exactly that. So a `partial` claimed too generously buys a wrong `not_new`,
+and that is the reason the rule here is the strict one: a term whose tokens a same-brand sibling's
+name also holds answers for the pair, and the series then rises when the **older** sibling launched.
 """
 
 from __future__ import annotations
