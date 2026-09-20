@@ -16,12 +16,24 @@
 -- The five rules this view holds:
 --   * a month claim is worth its whole month (first day for a lower bound, last day for an upper
 --     one), so a bound only ever moves outward -- mixed precision costs a tier and never buys one
---   * `earliest` is the tightest lower bound and `latest` the tightest upper bound **the evidence
---     names**; NULL means no claim of that side exists, which is not the same answer as a wide
---     interval and the rule table treats it as a different one. The reference-date clamp on the
---     upper end is the verdict's, not this view's -- a view takes no reference date
---   * `earliest_match` is the join strength of whichever claim set `earliest`: the tightest bound
---     wins and, on a tie, the surer one ('exact' sorts before 'partial'). The rule table reads it
+--   * `latest` is the tightest upper bound **the evidence names** (the earliest of them), and
+--     `latest_exact` is the tightest of the `exact` ones alone, NULL when there is none. The verdict
+--     reads `latest_exact` for `not_new` and nothing else does: a `partial` upper bound can be
+--     false rather than weak (a sibling line sharing a DataLab term, a member-linked review), so it
+--     may set `latest`, contradict a lower bound and corroborate one, but may not declare a product
+--     old by itself. Because it is a minimum, testing it is testing whether ANY `exact` upper bound
+--     is older than the window, and
+--     `earliest` folds the lower side TWICE (rule version 1.1, #283 review): each axis contributes
+--     the EARLIEST edge it names -- several filings of one product line are one statement and only
+--     its first is certainly true, a re-filing or a refill/set filing of a 2021 line does not say
+--     the launch was not before 2026 -- and the LATEST of those per-axis bounds is the interval's,
+--     because two axes are two independent statements and both have to hold. NULL means no claim of
+--     that side exists, which is not the same answer as a wide interval and the rule table treats it
+--     as a different one. The reference-date clamp on the upper end is the verdict's, not this
+--     view's -- a view takes no reference date
+--   * `earliest_match` is the join strength of whichever claim ended up setting `earliest`, and on
+--     a tie -- inside an axis or between two of them -- the surer one ('exact' sorts before
+--     'partial'). The rule table reads it: a tier needs it to be 'exact'
 --   * an axis this rule version does not read is counted in `excluded_claims` and moves no bound
 --     (`vendor_title_tag`: marketing text on one vendor, user decision 2026-09-20, #283 axis 5)
 --   * a product whose only claims are excluded still gets a row, with claims = 0 -- "recorded and
@@ -44,6 +56,7 @@ WITH claim AS (
         e.product_ref                                                      AS product_ref,
         e.direction                                                        AS direction,
         e.match_strength                                                   AS match_strength,
+        e.axis                                                             AS axis,
         e.axis <> ALL (ARRAY['vendor_title_tag'])                          AS in_rule,
         CASE WHEN e.claimed_precision = 'month'
              THEN date_trunc('month', e.claimed_on)::date
@@ -52,20 +65,43 @@ WITH claim AS (
              THEN (date_trunc('month', e.claimed_on) + interval '1 month')::date - 1
              ELSE e.claimed_on END                                         AS upper_edge
     FROM needs.product_launch_evidence e
+),
+-- The first fold: one axis's own lower bound is the EARLIEST edge it names, with that claim's
+-- strength and, on a tie, the surer one ('exact' < 'partial').
+axis_lower AS (
+    SELECT
+        product_ref,
+        min(lower_edge)                                                       AS lower_edge,
+        (array_agg(match_strength ORDER BY lower_edge ASC, match_strength ASC))[1] AS match_strength
+    FROM claim
+    WHERE in_rule AND direction IN ('not_before', 'at')
+    GROUP BY product_ref, axis
+),
+-- The second: across axes the tightest wins, because each of them has to hold on its own.
+lower_bound AS (
+    SELECT
+        product_ref,
+        max(lower_edge)                                                       AS earliest,
+        (array_agg(match_strength ORDER BY lower_edge DESC, match_strength ASC))[1] AS earliest_match
+    FROM axis_lower
+    GROUP BY product_ref
 )
+-- LEFT JOIN, not an inner one: a product whose only claims are upper bounds or excluded ones has no
+-- row in `lower_bound` and still gets a view row, with `earliest` NULL.
 SELECT
-    product_ref,
-    max(lower_edge) FILTER (WHERE in_rule AND direction IN ('not_before', 'at')) AS earliest,
-    -- The deciding lower bound's own strength: order by the edge, then by the strength so a tie
-    -- goes to the surer claim ('exact' < 'partial'), and take the first.
-    (array_agg(match_strength ORDER BY lower_edge DESC, match_strength ASC)
-       FILTER (WHERE in_rule AND direction IN ('not_before', 'at')))[1]          AS earliest_match,
-    min(upper_edge) FILTER (WHERE in_rule AND direction IN ('not_after', 'at'))  AS latest,
-    count(*) FILTER (WHERE in_rule)::int                                         AS claims,
-    count(*) FILTER (WHERE in_rule AND direction IN ('not_before', 'at'))::int   AS lower_claims,
-    count(*) FILTER (WHERE in_rule AND direction IN ('not_after', 'at'))::int    AS upper_claims,
-    count(*) FILTER (WHERE NOT in_rule)::int                                     AS excluded_claims
-FROM claim
-GROUP BY product_ref;
+    c.product_ref,
+    b.earliest                                                                   AS earliest,
+    b.earliest_match                                                             AS earliest_match,
+    min(c.upper_edge) FILTER (WHERE c.in_rule AND c.direction IN ('not_after', 'at')) AS latest,
+    min(c.upper_edge) FILTER (
+        WHERE c.in_rule AND c.direction IN ('not_after', 'at') AND c.match_strength = 'exact'
+    )                                                                                AS latest_exact,
+    count(*) FILTER (WHERE c.in_rule)::int                                       AS claims,
+    count(*) FILTER (WHERE c.in_rule AND c.direction IN ('not_before', 'at'))::int AS lower_claims,
+    count(*) FILTER (WHERE c.in_rule AND c.direction IN ('not_after', 'at'))::int  AS upper_claims,
+    count(*) FILTER (WHERE NOT c.in_rule)::int                                   AS excluded_claims
+FROM claim c
+LEFT JOIN lower_bound b ON b.product_ref = c.product_ref
+GROUP BY c.product_ref, b.earliest, b.earliest_match;
 
 GRANT SELECT ON needs.product_launch TO needs_runtime;

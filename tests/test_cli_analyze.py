@@ -51,7 +51,7 @@ def recorded(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 def test_the_stage_list_is_the_one_the_contract_names():
-    assert STAGES == ("link", "polarity", "aggregate", "all")
+    assert STAGES == ("link", "launch", "polarity", "aggregate", "all")
 
 
 @pytest.mark.parametrize("stage", STAGES)

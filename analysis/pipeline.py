@@ -19,6 +19,7 @@ import psycopg
 from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate import pipeline as aggregate_stage
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
+from analysis.launch import pipeline as launch_stage
 from analysis.lexicon import load_aspects, load_lexicon
 from analysis.linker import LINKER_VERSION
 from analysis.linker import pipeline as link_stage
@@ -360,7 +361,40 @@ def run_all(
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
         return _close(conn, outcome, versions)
     outcome = _amend_silent_scope(conn, _amend(StageOutcome("all", OK, run_id, counts), stale), scope)
-    return _close(conn, outcome, versions)
+    # Last, and outside the try above: see `_launch`.
+    return _close(conn, _launch(conn, outcome, commerce_schema), versions)
+
+
+def _launch(conn: psycopg.Connection[Any], outcome: StageOutcome, commerce_schema: str) -> StageOutcome:
+    """The launch axes, run after aggregate and unable to take the run's metrics with them (#283).
+
+    It is the only stage of `analyze all` that reads `trend_radar.new_product` and the newest of
+    them, and **nothing in this run consumes what it writes** -- `unresolved_new` is #125 and is not
+    built -- so a failure here must not cost a night of `metrics_need`/`metrics_wish`. Those are
+    already computed and committed by the time this runs, so the failure is folded into the outcome
+    instead of aborting: the run yields `partial` with the stage named, which is the same vocabulary
+    a half-written month gets (`entrypoints.md` §Common operations view). The exit code still says
+    something went wrong; what it no longer says is that the metrics are missing.
+
+    Its own reason for running after `link` is unchanged -- the site-level axes resolve a listing
+    through `product_member` -- and nothing between `link` and here re-clusters, so "after
+    aggregate" satisfies it just as "straight after link" did.
+    """
+    try:
+        return replace(
+            outcome, counts={**outcome.counts, **launch_stage.run(conn, commerce_schema=commerce_schema)}
+        )
+    except FAILURES as failure:
+        try:
+            conn.rollback()
+        except psycopg.Error:
+            pass
+        detail = _detail("launch", failure)
+        return replace(
+            outcome,
+            status=PARTIAL,
+            detail=f"{outcome.detail}; {detail}" if outcome.detail else detail,
+        )
 
 
 def run_stage(
@@ -435,6 +469,11 @@ def _one(
             )
             done = StageOutcome(stage, OK, None, {n: linked[n] for n in LINK_COUNTS})
             return _reported(conn, _amend(done, stale))
+        if stage == "launch":
+            # No run row of its own, the same as link: the ledger's rows carry `axis_version`, and a
+            # standalone pass leaves the reporting row `_reported` writes when it is not ok.
+            written = launch_stage.run(conn, commerce_schema=commerce_schema)
+            return _reported(conn, _amend(StageOutcome(stage, OK, None, written), stale))
         if stage == "polarity":
             # This stage opens and closes its own run -- the run of a standalone execution is polarity's.
             found = polarity_stage.run(

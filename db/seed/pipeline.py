@@ -138,6 +138,9 @@ EDGES: tuple[Edge, ...] = (
     _writes("analyze:all", "needs.wish_mention", "추출"),
     _writes("analyze:all", "needs.metrics_need", "집계 -- 화면 1·3·4·5"),
     _writes("analyze:all", "needs.metrics_wish", "집계 -- 화면 2"),
+    # The launch-evidence axes (#283): one claim per axis and per matched source row, read by the
+    # needs.product_launch view and by #125's metric.
+    _writes("analyze:all", "needs.product_launch_evidence", "launch evidence claims"),
     # analyze:polarity_missing wrote needs.need_mention here -- gone with the stage (#242).
     # -- Reads. The reasoning on the source side is the per-line comment in
     # db/grants/needs_runtime_reader.sql.
@@ -154,6 +157,8 @@ EDGES: tuple[Edge, ...] = (
     _reads("needs.need_mention", "analyze:all", "집계가 자기 추출분을 다시 읽는다"),
     # analyze:polarity_missing read needs.need_mention here -- gone with the stage (#242).
     _reads("needs.wish_mention", "analyze:all", ""),
+    # The reference ledger the MFDS axis reads: a filing date is the one lower bound round one has.
+    _reads("needs.mfds_registration", "analyze:all", "MFDS report date -- the not_before axis"),
 )
 
 EDGE_UPSERT: LiteralString = """

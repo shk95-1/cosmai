@@ -62,7 +62,7 @@ EXPECTED = {
     # 29 upstream + the corpus lineage's 22: fork #94's 12 (6 writes, 6 reads), fork #95's 6 for
     # project:corpus (2 writes, 4 reads -- three tubedepth tables and the panel roster) and fork #96's 4 for
     # match:topic (2 writes, 2 reads -- the documents and the dictionary).
-    "pipeline_edge": 51,
+    "pipeline_edge": 53,
 }
 
 

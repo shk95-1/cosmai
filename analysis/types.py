@@ -179,6 +179,7 @@ class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdic
     earliest: date | None
     earliest_match: str | None  # the match_strength of the claim that set `earliest`
     latest: date | None  # the evidence's own upper bound; the reference date clamps it in the verdict
+    latest_exact: date | None  # the tightest upper bound among the `exact` claims -- row 3 reads this one
     claims: int
     lower_claims: int
     upper_claims: int

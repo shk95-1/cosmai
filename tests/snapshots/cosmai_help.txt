@@ -44,10 +44,10 @@ options:
 
 $ cosmai analyze --help
 usage: cosmai analyze [-h] [--since SINCE] [--scope SCOPE] [--impl IMPL] [--missing] [--url URL]
-                      {link,polarity,aggregate,all}
+                      {link,launch,polarity,aggregate,all}
 
 positional arguments:
-  {link,polarity,aggregate,all}
+  {link,launch,polarity,aggregate,all}
 
 options:
   -h, --help            show this help message and exit

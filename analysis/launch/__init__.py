@@ -19,7 +19,10 @@ from datetime import date
 from analysis.types import LaunchClaimRow, LaunchIntervalRow, LaunchVerdict
 
 # The rule table's own version -- `needs.analysis_run.versions.launch` (contracts/versioning.md).
-LAUNCH_VERSION = "rule-v1.0"
+# v1.1 (#283 review + the #285 review's addendum): lower bounds fold per axis by the earliest,
+# the `exact` gate on the deciding lower bound no longer depends on the basis, and `not_new`
+# needs an `exact` upper bound of its own.
+LAUNCH_VERSION = "rule-v1.1"
 
 # The three claim directions and which bound each one moves.
 LOWER_DIRECTIONS = ("not_before", "at")
@@ -92,11 +95,19 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
     belongs to the verdict, not here -- this row has no reference date and the view that mirrors it
     takes none.
 
-    `earliest_match` is the join strength of whichever claim set `earliest`: the deciding bound is
-    the tightest one, and on a tie the surer one."""
-    earliest: date | None = None
-    earliest_match: str | None = None
+    **The lower side folds twice** (rule version 1.1). Several `not_before` claims of **one axis**
+    are one statement about one product, and the only part of it that is certainly true is the
+    earliest: an MFDS line filed again in 2026 does not say the launch was not before 2026, and a
+    refill or gift-set filing of a 2021 line normalises to that same line. So each axis contributes
+    the **earliest** edge it names, and only then is the **latest** of those taken, because two
+    axes are two independent statements and both have to hold. Upper bounds need no such fold: the
+    tightest of them is the earliest, and taking the minimum over all of them already does that.
+
+    `earliest_match` is the join strength of whichever claim ended up setting `earliest`, and on a
+    tie -- inside an axis or between two of them -- the surer one."""
+    per_axis: dict[str, tuple[date, str]] = {}
     latest: date | None = None
+    latest_exact: date | None = None
     read = lower = upper = excluded = 0
     for claim in claims:
         low, high = claim_edges(claim)  # also refuses a precision this version cannot read
@@ -106,22 +117,29 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
         read += 1
         if claim.direction in LOWER_DIRECTIONS:
             lower += 1
-            if (
-                earliest is None
-                or low > earliest
-                or (low == earliest and claim.match_strength < (earliest_match or ""))
-            ):
-                earliest, earliest_match = low, claim.match_strength
+            held = per_axis.get(claim.axis)
+            if held is None or low < held[0] or (low == held[0] and claim.match_strength < held[1]):
+                per_axis[claim.axis] = (low, claim.match_strength)
         if claim.direction in UPPER_DIRECTIONS:
             upper += 1
             latest = high if latest is None else min(latest, high)
-    return LaunchIntervalRow(product_ref, earliest, earliest_match, latest, read, lower, upper, excluded)
+            if claim.match_strength == EXACT:
+                latest_exact = high if latest_exact is None else min(latest_exact, high)
+    earliest: date | None = None
+    earliest_match: str | None = None
+    for edge, strength in per_axis.values():
+        if earliest is None or edge > earliest or (edge == earliest and strength < (earliest_match or "")):
+            earliest, earliest_match = edge, strength
+    return LaunchIntervalRow(
+        product_ref, earliest, earliest_match, latest, latest_exact, read, lower, upper, excluded
+    )
 
 
 def launch_basis(interval: LaunchIntervalRow) -> str:
     """What the interval's upper end rests on: a claim of its own (`corroborated`), or the
-    reference-date clamp alone (`single_axis`). It is not a verdict -- it is how much of one to
-    believe, and a reader that shows a tier shows this beside it."""
+    reference-date clamp alone (`single_axis`). It is description and **not a gate** -- since rule
+    version 1.1 no row turns on it; it is how much of an answer to believe, and a reader that shows
+    a tier shows this beside it."""
     return CORROBORATED if interval.lower_claims and interval.upper_claims else SINGLE_AXIS
 
 
@@ -139,7 +157,16 @@ def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> LaunchV
     # announces itself, and it is never auto-resolved.
     if earliest is not None and evidence_latest is not None and earliest > evidence_latest:
         return LaunchVerdict(CONFLICT, basis)
-    if latest < months_before(reference_date, WINDOW_MONTHS[-1]):
+    # Row 3, and the only way to `not_new`. It reads `latest_exact` and not `latest`: a `partial`
+    # upper bound can be FALSE rather than weak -- a sibling line sharing a DataLab term makes the
+    # series rise when the OLDER sibling launched, and a member-linked review belongs to a listing
+    # the linker only guessed was this product -- so on its own it may not declare a product old.
+    # `latest_exact` is the tightest `exact` upper bound, so testing it is testing whether **any**
+    # `exact` upper bound is older than the widest window; a `partial` claim tighter than an `exact`
+    # one cannot take that `exact` one's proof away.
+    if interval.latest_exact is not None and interval.latest_exact < months_before(
+        reference_date, WINDOW_MONTHS[-1]
+    ):
         return LaunchVerdict(NOT_NEW, basis)
     if earliest is None:
         return LaunchVerdict(UNKNOWN, basis)
@@ -147,9 +174,11 @@ def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> LaunchV
         # The lower bound is later than the reference date, so the launch is after it. That is not
         # a contradiction between axes, and the vocabulary has no word for "has not launched yet".
         return LaunchVerdict(UNKNOWN, basis)
-    if basis == SINGLE_AXIS and interval.earliest_match != EXACT:
-        # Option (B)'s risk, priced: with no upper bound of its own, the tier is only as good as
-        # the join that set the lower bound, and two of seven measured MFDS joins were wrong.
+    if interval.earliest_match != EXACT:
+        # Option (B)'s risk, priced (rule version 1.1: whatever the basis). A tier is only as good
+        # as the join that set its lower bound, and an upper bound corroborates that the product
+        # existed, never that the lower bound names the right product -- so it may not open this
+        # gate. Rows 2 and 3 are tested before it, so a weak join still contradicts and still ages.
         return LaunchVerdict(UNKNOWN, basis)
     for months in WINDOW_MONTHS:
         # The whole interval inside the window, never merely touching it -- which is also what
