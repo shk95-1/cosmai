@@ -404,8 +404,10 @@ def test_a_polarity_failure_closes_the_run_polarity_itself_opened(
     commerce, _ = sources
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        # link reads product only -- closing review alone makes polarity die after it opened the run.
-        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".review FROM needs_runtime')
+        # The ranking snapshot is polarity's alone (it reads `category_name` off it): link reads
+        # product and the comment tables, and launch reads product, new_product and review (#283),
+        # so closing any of those would now kill an earlier stage instead.
+        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".rank_snapshot FROM needs_runtime')
     engine.dispose()
     found = _all(analysis_url, sources)
     assert found.status == "failed" and "polarity" in found.detail
