@@ -90,6 +90,25 @@ YT_BUCKETS = (
 )
 
 
+# #280: the per-artifact records #275 writes for a flatten failure. They carry dataset 'flatten' and
+# are the only `jobs` rows that dataset has ever had, so this arm counting them made the bucket read
+# `failed` whatever the pass flattened -- a count with no denominator (N1 of #275's review). They are
+# seeded here to prove the arm now passes them by; the pass's own run row below carries them instead.
+YT_FLATTEN_RECORDS = datetime(2026, 8, 23, 5, 0, tzinfo=UTC)
+YT_FLATTEN_RECORD_JOBS = (("failed", "payload_unreadable", None), ("failed", "internal", None))
+
+# #280: one row per pass of a dataset that is not a queue of jobs.
+# (identifier, dataset, status, started_at, finished_at, attempted, succeeded, failed, skipped)
+YT_PRUNE_RUN_AT = datetime(2026, 8, 23, 6, 0, tzinfo=UTC)
+YT_FLATTEN_RUN_AT = datetime(2026, 8, 23, 7, 0, tzinfo=UTC)
+YT_RUNS = (
+    ("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "prune", "ok", YT_PRUNE_RUN_AT, 3, 3, 0, 0),
+    # 500 examined, 497 flattened, 1 to retry and 2 recorded unflattenable -- the shape N1 asked for:
+    # the failures are a share of a number the row itself carries.
+    ("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "flatten", "partial", YT_FLATTEN_RUN_AT, 500, 497, 1, 2),
+)
+
+
 def _youtube_job_rows() -> list[tuple[Any, ...]]:
     """A `state='queued'` job has never been claimed so it has no started_at, and an old row is the
     same -- so the bucket has to be `coalesce(started_at, created_at)` for both cases to land at their
@@ -115,6 +134,23 @@ def _youtube_job_rows() -> list[tuple[Any, ...]]:
                     dataset,
                 )
             )
+    for index, (state, error_code, elapsed_ms) in enumerate(YT_FLATTEN_RECORD_JOBS):
+        at = YT_FLATTEN_RECORDS + timedelta(minutes=index)
+        rows.append(
+            (
+                uuid4().hex,
+                "flatten.artifact",
+                f"art{index}",
+                state,
+                at,
+                at,
+                at,
+                at,
+                elapsed_ms,
+                error_code,
+                "flatten",
+            )
+        )
     return rows
 
 
@@ -162,12 +198,20 @@ def _seed_and_create_view(url: str, schema: str, td_schema: str) -> None:
         # of db/grants/needs_runtime_reader.sql is also what opens these two lines in production.
         conn.exec_driver_sql(f'GRANT USAGE ON SCHEMA "{td_schema}" TO needs_owner')
         conn.exec_driver_sql(f'GRANT SELECT ON "{td_schema}".jobs TO needs_owner')
+        conn.exec_driver_sql(f'GRANT SELECT ON "{td_schema}".collector_runs TO needs_owner')
         conn.exec_driver_sql(
             f'INSERT INTO "{td_schema}".jobs (identifier, kind, target, state, attempt_count,'
             " max_attempts, scheduled_at, created_at, started_at, finished_at, elapsed_ms,"
             " error_code, dataset, webhook_attempts) VALUES (%s, %s, %s, %s, 0, 3, %s, %s, %s, %s,"
             " %s, %s, %s, 0)",
             _youtube_job_rows(),
+        )
+        # #280: the fourth arm's source -- one row per `prune`/`flatten` pass.
+        conn.exec_driver_sql(
+            f'INSERT INTO "{td_schema}".collector_runs (identifier, dataset, status, started_at,'
+            " finished_at, attempted, succeeded, failed, skipped, note)"
+            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'a pass')",
+            [(i, d, s, at, at, a, ok, f, sk) for i, d, s, at, a, ok, f, sk in YT_RUNS],
         )
         conn.exec_driver_sql("SET ROLE needs_owner")
         conn.exec_driver_sql(
@@ -222,7 +266,11 @@ def test_all_three_arms_land_in_one_table_with_the_contracts_twelve_columns(
         ("commerce", None, str(RUN_D), STARTED_B),  # the same even with every source skipped
         ("commerce", None, str(RUN_E), STARTED_B),
         ("naver", "blog", str(RUN_C), STARTED),
-        # youtube has no run -- the run_id column is NULL and dataset + time bucket is what splits rows.
+        # #280: a pass that is not a queue of jobs has a run of its own, so it has a run_id.
+        ("youtube", "flatten", YT_RUNS[1][0], YT_FLATTEN_RUN_AT),
+        ("youtube", "prune", YT_RUNS[0][0], YT_PRUNE_RUN_AT),
+        # The job-queue arm has no run -- the run_id column is NULL and dataset + time bucket is what
+        # splits rows.
         ("youtube", "watch", None, YT_WATCH),
         ("youtube", "work", None, YT_BLOCKED),
         ("youtube", "work", None, YT_QUEUE),
@@ -264,6 +312,40 @@ def test_403_and_429_count_as_blocked_and_2xx_as_ok(health_rows: list[tuple[Any,
     assert (naver[0][6], naver[0][7], naver[0][8], naver[0][9]) == (3, 1, 1, 1)
 
 
+def test_a_prune_pass_has_a_row_of_its_own(health_rows: list[tuple[Any, ...]]):
+    """#280: `prune` writes no `jobs` row, so before the fourth arm no row of this view ever carried
+    dataset `prune` at all -- a prune that died every night read the same as one that succeeded."""
+    rows = [r for r in health_rows if (r[0], r[1]) == ("youtube", "prune")]
+    assert len(rows) == 1, rows
+    identifier, started, finished, status = rows[0][2], rows[0][3], rows[0][4], rows[0][5]
+    assert (identifier, status) == (YT_RUNS[0][0], "ok")
+    # A run has its own start and finish, not an hour bucket's.
+    assert (started, finished) == (YT_PRUNE_RUN_AT, YT_PRUNE_RUN_AT)
+    assert (rows[0][6], rows[0][7], rows[0][8], rows[0][9]) == (3, 3, 0, 0)
+    assert rows[0][11] is None, "a pass is stamped with one clock reading -- there is no percentile"
+
+
+def test_a_flatten_run_carries_the_denominator_its_failures_are_a_share_of(
+    health_rows: list[tuple[Any, ...]],
+):
+    """N1 of #275's review. The failure records alone made 1 failure in 500 read as 0 percent ok;
+    the run row's `requests` is what the rate is taken against, and the gap between it and the three
+    buckets is the pass's `skipped` -- the same slot a 404 occupies on the commerce arm."""
+    rows = [r for r in health_rows if (r[0], r[1]) == ("youtube", "flatten")]
+    assert len(rows) == 1, f"the per-artifact records must not make a second flatten row: {rows}"
+    requests, ok, blocked, failed = rows[0][6], rows[0][7], rows[0][8], rows[0][9]
+    assert (rows[0][5], requests, ok, blocked, failed) == ("partial", 500, 497, 0, 1)
+    assert requests - ok - blocked - failed == 2, "the two recorded unflattenable are the gap"
+
+
+def test_the_flatten_failure_records_are_not_counted_as_jobs(health_rows: list[tuple[Any, ...]]):
+    """The records #275 puts in `tubedepth.jobs` are a pass's memory of one artifact, not work the
+    queue ever held -- counted in the job arm they were the only `flatten` rows it had, so the bucket
+    read `failed` whatever the pass had flattened."""
+    buckets = [r[3] for r in health_rows if r[0] == "youtube" and r[2] is None]
+    assert YT_FLATTEN_RECORDS not in buckets, buckets
+
+
 def test_p90_ms_is_the_real_percentile_not_the_max_or_the_mean(health_rows: list[tuple[Any, ...]]):
     by_key = {(r[0], r[1]): r[11] for r in health_rows}
     # elapsed 10..80 (n=8): 0.9*(8-1)=6.3 -> 70 + 0.3*(80-70) = 73. max is 80, the mean is 45.
@@ -280,7 +362,10 @@ def test_queued_is_null_on_the_batch_arms_and_a_count_on_the_one_arm_with_a_queu
     # at all -- it must be NULL, not 0, for "the queue is empty" to read differently from "there is no
     # queue" in the table.
     assert {r[10] for r in health_rows if r[0] != "youtube"} == {None}
-    assert None not in {r[10] for r in health_rows if r[0] == "youtube"}
+    # #280 narrows this to the job-queue arm (run_id NULL). A `prune`/`flatten` run has no queue in
+    # front of it either, so its NULL means the same thing commerce's does.
+    assert None not in {r[10] for r in health_rows if r[0] == "youtube" and r[2] is None}
+    assert {r[10] for r in health_rows if r[0] == "youtube" and r[2] is not None} == {None}
 
 
 def test_youtube_tells_an_empty_queue_from_a_full_one(health_rows: list[tuple[Any, ...]]):
@@ -330,7 +415,9 @@ def test_a_youtube_bucket_spans_one_hour_and_ends_when_its_last_job_did(
     # started_at is the bucket's own start time (corresponding to commerce's run start). A bucket
     # holding only unclaimed jobs must still have this value, or the table loses its time entirely --
     # that row has no real started_at at all.
-    by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube"}
+    # The job-queue arm alone: since #280 a youtube row with a run_id is a pass, whose time is its
+    # own rather than a bucket's.
+    by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube" and r[2] is None}
     assert set(by_bucket) == {YT_WATCH, YT_BLOCKED, YT_LEGACY, YT_QUEUE}
     assert by_bucket[YT_WATCH][4] == YT_WATCH + timedelta(minutes=len(YT_WATCH_JOBS))
     assert by_bucket[YT_QUEUE][4] is None
@@ -340,14 +427,16 @@ def test_a_youtube_bucket_spans_one_hour_and_ends_when_its_last_job_did(
 def test_started_and_finished_come_from_the_run_row_not_from_a_neighbour(
     health_rows: list[tuple[Any, ...]],
 ):
-    # This asserts on the two arms that have a run -- a youtube row has no run_id, its time comes from
-    # the bucket.
+    # This asserts on the three arms that have a run -- a youtube *job-queue* row has no run_id, its
+    # time comes from the bucket, while a youtube run row (#280) carries the pass's own instant.
     assert {(r[2], r[3], r[4]) for r in health_rows if r[2] is not None} == {
         (str(RUN_A), STARTED, FINISHED),
         (str(RUN_B), STARTED_B, FINISHED_B),
         (str(RUN_C), STARTED, FINISHED),
         (str(RUN_D), STARTED_B, FINISHED_B),
         (str(RUN_E), STARTED_B, FINISHED_B),
+        (YT_RUNS[0][0], YT_PRUNE_RUN_AT, YT_PRUNE_RUN_AT),
+        (YT_RUNS[1][0], YT_FLATTEN_RUN_AT, YT_FLATTEN_RUN_AT),
     }
 
 

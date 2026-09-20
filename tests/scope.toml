@@ -151,6 +151,11 @@ none = [
     "tests/test_evidence_pipeline.py",
     "tests/test_sensitivity_pipeline.py",
 ]
+"analysis/launch/" = [
+    "tests/test_launch_rules.py",
+    "tests/test_product_launch_view.py",
+    "tests/test_version_strings.py",
+]
 "analysis/linker/" = [
     "tests/test_linker.py",
     "tests/test_analyze_all.py",
@@ -218,6 +223,10 @@ none = [
     # An additive file under contracts/ddl/<schema>/ is exactly what the per-schema ledger has to
     # carry to a database that already has that schema (#223).
     "tests/test_source_schema_ledger.py",
+    # §Launch evidence's rule table and the ledger it reads (#282): the contract text, the DDL and
+    # the view are one statement, so a change to any of them is asked of both files.
+    "tests/test_launch_rules.py",
+    "tests/test_product_launch_view.py",
 ]
 "cosmai/" = [
     "tests/test_cli_help.py",
@@ -246,6 +255,7 @@ none = [
     "tests/test_collection_lineage_view.py",
     "tests/test_mention_lineage_view.py",
     "tests/test_pipeline_health_view.py",
+    "tests/test_product_launch_view.py",
     "tests/test_project_corpus.py",
     "tests/test_archive_lineage.py",
     "tests/test_author_hash.py",

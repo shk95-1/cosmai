@@ -189,6 +189,30 @@ flatten_progress = Table(
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+collector_runs = Table(
+    "collector_runs",
+    metadata,
+    # #280 (contracts/ddl/tubedepth/008): one row per pass of a dataset that is not a queue of jobs
+    # -- `prune` and `flatten`. `jobs` could not hold it: a run has a `partial` and `jobs.state` (a
+    # work item's states) has not, and the count of what a pass examined -- the denominator a
+    # failure rate needs -- has no honest column there. The DDL file argues both at length.
+    sa.Column("identifier", sa.String(32), primary_key=True),
+    sa.Column("dataset", sa.String(16), nullable=False),
+    # The operations view's own five words (contracts/entrypoints.md), the same vocabulary
+    # needs.naver_run carries: running | ok | partial | blocked | failed.
+    sa.Column("status", sa.String(16), nullable=False),
+    sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("finished_at", sa.DateTime(timezone=True)),
+    # attempted = succeeded + failed + skipped, always. The view emits the first three and leaves
+    # `skipped` as the gap between `requests` and the three buckets.
+    sa.Column("attempted", sa.Integer, nullable=False),
+    sa.Column("succeeded", sa.Integer, nullable=False),
+    sa.Column("failed", sa.Integer, nullable=False),
+    sa.Column("skipped", sa.Integer, nullable=False),
+    sa.Column("note", sa.Text),
+    sa.Index("ix_collector_run_recent", "dataset", "started_at"),
+)
+
 __all__ = [
     "metadata",
     "jobs",
@@ -199,4 +223,5 @@ __all__ = [
     "comments",
     "transcripts",
     "flatten_progress",
+    "collector_runs",
 ]

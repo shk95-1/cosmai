@@ -8,13 +8,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GRANTS = ROOT / "db" / "grants" / "needs_runtime_reader.sql"
-DUMPS = ROOT / "contracts" / "ddl" / "current"
+DDL = ROOT / "contracts" / "ddl"
+DUMPS = DDL / "current"
 GRANTED = re.compile(r"\('([a-z_]+\.[a-z_]+)'\)")
 CREATED = re.compile(r"CREATE TABLE (\w+\.\w+)")
 
 
+def _declared_files() -> list[Path]:
+    """A source schema's canonical form is the dump baseline **plus** every additive file, the way
+    db/migrate.sh step (0) and tests/conftest.py both compose it. Asking the baselines alone held
+    while every additive file only ever added a column; #280's `tubedepth.collector_runs` is the
+    first table one of them creates, and a grant on it would have read here as a grant on a table
+    that does not exist -- the `tubedepth.videos` mistake this file exists to catch, with the
+    verdict pointed the wrong way."""
+    additive = [d for d in sorted(DDL.iterdir()) if d.is_dir() and d != DUMPS]
+    return sorted(DUMPS.glob("*.sql")) + [p for d in additive for p in sorted(d.glob("*.sql"))]
+
+
 def _dumped_tables() -> set[str]:
-    return {t for path in DUMPS.glob("*.sql") for t in CREATED.findall(path.read_text(encoding="utf-8"))}
+    return {t for path in _declared_files() for t in CREATED.findall(path.read_text(encoding="utf-8"))}
 
 
 def test_every_granted_table_exists_in_the_current_dumps():

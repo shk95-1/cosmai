@@ -2,13 +2,22 @@
 -- contracts/entrypoints.md §Common operations view with the same names, order and types (P16's table has to
 -- come out of this one view).
 --
--- Three arms feed it -- commerce (trend_radar's run+fetch_log), naver (naver_run+naver_fetch_log),
--- youtube (tubedepth.jobs). #77 added youtube: the three reasons it was left out at stage 3 (no run,
+-- Four arms feed it -- commerce (trend_radar's run+fetch_log), naver (naver_run+naver_fetch_log),
+-- youtube's job queue (tubedepth.jobs) and youtube's passes that are not a queue
+-- (tubedepth.collector_runs). #77 added youtube: the three reasons it was left out at stage 3 (no run,
 -- no column that times the lag, a different dataset vocabulary) were all removed by #100/#101/#102.
 --
+-- #280 added the fourth. `prune` writes no job row at all, so no row of this view ever carried dataset
+-- `prune` and a prune that died every night read the same as one that succeeded; and since #275
+-- `flatten` writes a job row for its *failures* alone, so one failure in five hundred read as 0 percent
+-- ok -- a count with no denominator (that review's N1). The run row is both: the dataset's own row, and
+-- the denominator beside the failures.
+--
 -- queued is NULL on the first two arms: both are batch workers a cron calls, so there is no such thing
--- as a wait queue for them. Only youtube gives a number -- 0 (the queue is empty) and NULL (there is no
--- queue) have to read differently in the table.
+-- as a wait queue for them. Only youtube's job-queue arm gives a number -- 0 (the queue is empty) and
+-- NULL (there is no queue) have to read differently in the table. The run arm is NULL for the same
+-- reason the batch arms are: a `prune` or `flatten` pass has no waiting queue in front of it, and
+-- writing 0 there would claim it has one and that it is empty.
 --
 -- elapsed_ms means something different per arm. commerce and naver mean one fetch's round trip, while
 -- youtube means one job's whole wall clock (claim->finish) (#101). A job answered from cache never fetches,
@@ -142,7 +151,49 @@ FROM (
         -- elapsed_ms.
         percentile_cont(0.9) WITHIN GROUP (ORDER BY j.elapsed_ms)::int          AS p90_ms
     FROM tubedepth.jobs j
+    -- #280: flatten's failure records are not jobs. #275 put one row per unflattenable artifact in
+    -- this table and this arm counted them under dataset `flatten`, where they were the only rows
+    -- that dataset ever had -- so the bucket read `failed` whatever the pass had actually flattened.
+    -- The pass's own row carries those failures now, beside the number they are a share of, and
+    -- leaving the records here as well would count each of them twice. They stay queryable in
+    -- `jobs`, which is where the reason for one artifact belongs.
+    WHERE j.kind <> 'flatten.artifact'
     GROUP BY j.dataset, date_trunc('hour', coalesce(j.started_at, j.created_at))
-) q;
+) q
+
+UNION ALL
+
+-- #280: one row per `cosmai collect youtube` pass of a dataset that is not a queue of jobs -- today
+-- `prune` and `flatten`. This arm is shaped like naver's rather than like the bucket above: the pass
+-- has an identity, a status of its own and its own counts, so nothing has to be rebuilt out of time.
+--
+-- `requests` is this pass's units of work, and what a unit is belongs to the dataset (the DDL file
+-- says so at the column): `prune` counts batches, `flatten` counts artifacts examined. That is the
+-- same licence the header above takes for the job arm -- on this collector `requests` has never been
+-- a count of HTTP requests.
+--
+-- `blocked` is 0 rather than NULL, and truthfully: neither pass goes near a source, so nothing can
+-- refuse them. That makes the gap `requests - ok - blocked - failed` exactly the pass's `skipped` --
+-- the artifacts flatten recorded as unflattenable -- which is the same slot the contract already
+-- gives a 404 on the commerce arm, so the screen needs no thirteenth column to show it.
+--
+-- p90_ms is NULL: this collector's passes are stamped with one clock reading each
+-- (collectors/youtube/cli.py's `_record_run`), so there is no per-unit duration to take a
+-- percentile of. NULL is what the other arms already use for "not measured" and percentile_cont
+-- drops such rows rather than reading them as zero.
+SELECT
+    'youtube'::text,
+    r.dataset::text,
+    r.identifier::text,
+    r.started_at,
+    r.finished_at,
+    r.status::text,
+    r.attempted,
+    r.succeeded,
+    0,
+    r.failed,
+    NULL::int,
+    NULL::int
+FROM tubedepth.collector_runs r;
 
 GRANT SELECT ON needs.collector_health TO needs_runtime;

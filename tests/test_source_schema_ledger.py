@@ -19,6 +19,7 @@ import re
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -36,6 +37,20 @@ FRESH_DATABASE = "source_ledger_fresh"
 AGED_DATABASE = "source_ledger_aged"
 
 ADD_COLUMN = re.compile(r"ALTER\s+TABLE\s+(\w+)\.(\w+)\s+ADD\s+COLUMN\s+(\w+)", re.IGNORECASE)
+CREATE_TABLE = re.compile(r"CREATE\s+TABLE\s+(\w+)\.(\w+)", re.IGNORECASE)
+# An index or a grant on a table the *same* file creates needs no undo of its own -- dropping that
+# table takes it along. One naming a table this file did not make falls through to the assertion in
+# `_owed_by`, which is where an unhandled statement has to stop.
+ON_A_TABLE = re.compile(r"(?:CREATE\s+INDEX\s+\w+\s+ON|GRANT\s+[\w\s,]+?\s+ON)\s+(\w+)\.(\w+)", re.IGNORECASE)
+
+
+class Owed(NamedTuple):
+    """One object an unadopted file adds, and what has to be there after the catch-up. `column` is
+    None for a table the file creates outright -- #280's `tubedepth.collector_runs` is the first of
+    those, and until it every additive file here only ever added a column."""
+
+    table: str
+    column: str | None
 
 
 def _psql(container: str, database: str, sql: str) -> list[list[str]]:
@@ -83,24 +98,38 @@ def _statements(path: Path) -> list[str]:
     return [s.strip() for s in body.split(";") if s.strip()]
 
 
-def _columns_the_deploy_still_owes() -> list[tuple[str, str]]:
-    """(table, column) for every additive file the adoption list does not name -- which is exactly
-    what production is missing, and what this test undoes to reproduce it.
-
-    A file that is not ADD COLUMN alone cannot be undone this way, and silently undoing less would
-    leave the "aged" database already current and measure the catch-up against nothing. It fails
-    here instead, naming the file that has to teach this test how (#223)."""
+def _files_the_deploy_still_owes() -> list[Path]:
+    """Every additive file the adoption list does not name -- exactly what production is missing,
+    and what the deploy's catch-up has to apply. This is the count the deploy prints."""
     adopted = _adopted()
-    owed: list[tuple[str, str]] = []
-    for path in _additive_files():
-        if path.stem in adopted:
+    return [path for path in _additive_files() if path.stem not in adopted]
+
+
+def _owed_by(path: Path) -> list[Owed]:
+    """What one unadopted file adds, and so what this test takes back out to age the database.
+
+    Every statement has to be accounted for: silently undoing less would leave the "aged" database
+    already current and measure the catch-up against nothing. A statement no branch here knows fails
+    the run, naming the file that has to teach this test how (#223)."""
+    owed: list[Owed] = []
+    made_here: set[str] = set()
+    for statement in _statements(path):
+        if made := CREATE_TABLE.match(statement):
+            made_here.add(made.group(2))
+            owed.append(Owed(table=made.group(2), column=None))
             continue
-        found = ADD_COLUMN.findall("\n".join(_statements(path)))
-        assert len(found) == len(_statements(path)), (
-            f"{path.name} is not ADD COLUMN alone; teach this test how to undo it"
+        if added := ADD_COLUMN.match(statement):
+            owed.append(Owed(table=added.group(2), column=added.group(3)))
+            continue
+        alongside = ON_A_TABLE.match(statement)
+        assert alongside and alongside.group(2) in made_here, (
+            f"{path.name} carries a statement this test cannot undo; teach it how: {statement[:60]!r}"
         )
-        owed += [(table, column) for _, table, column in found]
     return owed
+
+
+def _objects_the_deploy_still_owes() -> list[Owed]:
+    return [owed for path in _files_the_deploy_still_owes() for owed in _owed_by(path)]
 
 
 @pytest.fixture
@@ -117,21 +146,32 @@ def probe_databases(harness_container: str) -> Iterator[None]:
             _psql(harness_container, "fleet", f"DROP DATABASE IF EXISTS {database} WITH (FORCE)")
 
 
-#: A `needs` view that reads one of the columns this test takes back out. Since fork #95 there is
-#: one -- `needs.live_listing_route` reads `tubedepth.artifacts.fetch_route` -- and a view is not
-#: something an aged schema could have had either: the column was not there, so nothing could have
-#: been built on it. The deploy's view sweep (step (f)) puts it back on the way out, so a CASCADE
-#: here reproduces the aged state rather than losing anything, and the assertion below is what says
-#: so out loud instead of leaving it to the flag.
-DEPENDENT_VIEWS = ("needs.live_listing_route",)
+#: The `needs` views that read something this test takes back out. Since fork #95 there is
+#: `needs.live_listing_route`, which reads `tubedepth.artifacts.fetch_route`; #280 adds
+#: `needs.collector_health`, which reads the whole of `tubedepth.collector_runs`, and
+#: `needs.pipeline_health`, which the CASCADE then takes along because it reads that view. None of
+#: them is something an aged schema could have had either: the object was not there, so nothing
+#: could have been built on it. The deploy's view sweep (step (f)) puts them back on the way out, so
+#: a CASCADE here reproduces the aged state rather than losing anything, and the assertion below is
+#: what says so out loud instead of leaving it to the flag.
+DEPENDENT_VIEWS = (
+    "needs.live_listing_route",
+    "needs.collector_health",
+    "needs.pipeline_health",
+)
 
 
 def _age_it(container: str, database: str) -> None:
     """Turn a freshly built database into production's shape: the schema is there, it carries every
     version the adoption list names, and it carries neither the ledger nor anything later."""
     _psql(container, database, f"DROP TABLE {SOURCE}.schema_migration")
-    for table, column in _columns_the_deploy_still_owes():
-        _psql(container, database, f"ALTER TABLE {SOURCE}.{table} DROP COLUMN {column} CASCADE")
+    # Newest first, the order the files were applied in run backwards: a later file may rest on an
+    # earlier one's object, and nothing here may rest on one it has already taken away.
+    for owed in reversed(_objects_the_deploy_still_owes()):
+        if owed.column is None:
+            _psql(container, database, f"DROP TABLE {SOURCE}.{owed.table} CASCADE")
+        else:
+            _psql(container, database, f"ALTER TABLE {SOURCE}.{owed.table} DROP COLUMN {owed.column} CASCADE")
 
 
 def test_a_fresh_build_records_every_additive_file_it_applied(
@@ -159,31 +199,40 @@ def test_a_present_schema_applies_the_files_it_predates_exactly_once(
     written for a file that did not run is the one failure a ledger adds that no earlier check had."""
     assert deploy(AGED_DATABASE).returncode == 0
     _age_it(harness_container, AGED_DATABASE)
-    owed = _columns_the_deploy_still_owes()
+    owed = _objects_the_deploy_still_owes()
+    files = _files_the_deploy_still_owes()
     assert owed, "the adoption list names every file, so there is no catch-up left to measure"
 
     done = deploy(AGED_DATABASE)
     assert done.returncode == 0, done.stderr
     assert f"{SOURCE}: present, left alone" in done.stdout
     assert "created from the baseline dump" not in done.stdout
-    assert f"{SOURCE}: {len(owed)} migration(s) applied, {len(_adopted())} already present" in done.stdout
+    # Files, not objects: the deploy counts what it applied, and a file may carry more than one
+    # object (#280's table, its index and its grant are one migration).
+    assert f"{SOURCE}: {len(files)} migration(s) applied, {len(_adopted())} already present" in done.stdout
 
     rows = _psql(
         harness_container, AGED_DATABASE, f"SELECT version FROM {SOURCE}.schema_migration ORDER BY 1"
     )
     assert [row[0] for row in rows] == [path.stem for path in _additive_files()]
-    for table, column in owed:
+    for owed_object in owed:
         present = _psql(
-            harness_container, AGED_DATABASE, f"SELECT to_regclass('{SOURCE}.{table}') IS NOT NULL"
+            harness_container,
+            AGED_DATABASE,
+            f"SELECT to_regclass('{SOURCE}.{owed_object.table}') IS NOT NULL",
         )
-        assert present == [["t"]]
+        assert present == [["t"]], f"{SOURCE}.{owed_object.table} has a ledger row and no table"
+        if owed_object.column is None:
+            continue
         columns = _psql(
             harness_container,
             AGED_DATABASE,
-            f"SELECT a.attname FROM pg_attribute a WHERE a.attrelid = '{SOURCE}.{table}'::regclass"
-            " AND a.attnum > 0 AND NOT a.attisdropped",
+            f"SELECT a.attname FROM pg_attribute a WHERE a.attrelid = '{SOURCE}.{owed_object.table}'"
+            "::regclass AND a.attnum > 0 AND NOT a.attisdropped",
         )
-        assert [column] in columns, f"{SOURCE}.{table}.{column} has a ledger row and no column"
+        assert [owed_object.column] in columns, (
+            f"{SOURCE}.{owed_object.table}.{owed_object.column} has a ledger row and no column"
+        )
 
     # The CASCADE in _age_it took these with the column. A deploy that catches the column up and
     # leaves the view behind is a surface gone quiet, which is what this asks about rather than trusts.
