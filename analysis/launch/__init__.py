@@ -42,30 +42,85 @@ CONFLICT = "conflict"
 VERDICTS = ("new_3m", "new_6m", "new_12m", NOT_NEW, UNKNOWN, CONFLICT)
 
 
-def months_before(day: date, months: int) -> date:
-    """The window edge. Day-of-month is clamped to the month's length, the same arithmetic
-    `date - interval 'n months'` does, so a 31st never walks into the next month."""
-    total = day.year * 12 + day.month - 1 - months
+def shift_months(day: date, months: int) -> date:
+    """Day-of-month is clamped to the month's length, the same arithmetic
+    `date + interval 'n months'` does, so a 31st never walks into the next month."""
+    total = day.year * 12 + day.month - 1 + months
     year, month = divmod(total, 12)
     month += 1
     return date(year, month, min(day.day, calendar.monthrange(year, month)[1]))
 
 
+def months_before(day: date, months: int) -> date:
+    """A window edge: the reference date less the window."""
+    return shift_months(day, -months)
+
+
+def months_after(day: date, months: int) -> date:
+    return shift_months(day, months)
+
+
 def claim_edges(claim: LaunchClaimRow) -> tuple[date, date]:
-    """The claim widened to the span its own precision can actually name."""
-    return claim.claimed_on, claim.claimed_on
+    """The claim widened to the span its own precision can actually name: a day is itself, a month
+    is its whole month. The widening only ever moves a bound outward, so mixed precision costs a
+    tier and never buys one."""
+    if claim.claimed_precision == "day":
+        return claim.claimed_on, claim.claimed_on
+    if claim.claimed_precision == "month":
+        first = claim.claimed_on.replace(day=1)
+        return first, first.replace(day=calendar.monthrange(first.year, first.month)[1])
+    # Not a guess and not a skip: a claim dropped in silence would make a narrower interval out of
+    # less evidence, which is the one direction this rule table may not move in.
+    raise ValueError(f"{claim.axis}: unknown claimed_precision {claim.claimed_precision!r}")
 
 
 def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> LaunchIntervalRow:
-    """[earliest, latest] over the claims this rule version reads, plus what it read."""
-    return LaunchIntervalRow(product_ref, None, None, 0, 0, 0, 0)
+    """[earliest, latest] over the claims this rule version reads, and how many it read.
+
+    `earliest` is the tightest lower bound and `latest` the tightest upper bound; either is None
+    when no claim of that side exists, which is a different answer from a wide interval and the
+    rule table treats it as one."""
+    earliest: date | None = None
+    latest: date | None = None
+    read = lower = upper = excluded = 0
+    for claim in claims:
+        low, high = claim_edges(claim)  # also refuses a precision this version cannot read
+        if claim.axis in EXCLUDED_AXES:
+            excluded += 1
+            continue
+        read += 1
+        if claim.direction in LOWER_DIRECTIONS:
+            lower += 1
+            earliest = low if earliest is None else max(earliest, low)
+        if claim.direction in UPPER_DIRECTIONS:
+            upper += 1
+            latest = high if latest is None else min(latest, high)
+    return LaunchIntervalRow(product_ref, earliest, latest, read, lower, upper, excluded)
 
 
 def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> str:
-    """The rule table of §Launch evidence, row by row."""
+    """The rule table of §Launch evidence, in its own order -- the rows below are that table."""
+    earliest, latest = interval.earliest, interval.latest
+    if interval.claims == 0:
+        return UNKNOWN
+    if earliest is not None and latest is not None and earliest > latest:
+        return CONFLICT
+    if latest is not None and latest < months_before(reference_date, WINDOW_MONTHS[-1]):
+        return NOT_NEW
+    if earliest is None or latest is None:
+        return UNKNOWN
+    for months in WINDOW_MONTHS:
+        # The whole interval inside the window, never merely touching it -- which is also what
+        # makes a tier narrower than the interval's own width impossible to assign.
+        if months_before(reference_date, months) <= earliest and latest <= reference_date:
+            return NEW.format(months=months)
     return UNKNOWN
 
 
 def launch_at(interval: LaunchIntervalRow) -> date | None:
-    """The launch instant a reader may quote, or None when the evidence does not pin one."""
-    return None
+    """The launch instant a reader may quote: the lower bound, and only where a pair pins it
+    within FIXED_WITHIN_MONTHS. No verdict is read off this value (§Launch evidence)."""
+    earliest, latest = interval.earliest, interval.latest
+    if earliest is None or latest is None or earliest > latest:
+        return None
+    return earliest if latest <= months_after(earliest, FIXED_WITHIN_MONTHS) else None

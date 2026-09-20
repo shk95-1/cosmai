@@ -93,21 +93,31 @@ def ledger(needs_schema: str, _schema_name: str) -> str:
     return needs_schema
 
 
-def test_the_ledger_carries_the_columns_the_contract_declares(ledger: str, _schema_name: str):
-    engine = create_engine(ledger)
+def _columns(url: str, schema: str, relation: str) -> list[tuple[str, bool]]:
+    """pg_catalog, not information_schema: the latter hides the columns of a table the connecting
+    role holds no privilege on, and needs_migrator holds them only under SET ROLE needs_owner --
+    the same reason tests/test_contract_ddl.py reads the catalog directly."""
+    engine = create_engine(url)
     with engine.connect() as conn:
         rows = conn.execute(
             text(
-                "SELECT column_name, is_nullable FROM information_schema.columns"
-                " WHERE table_schema = :s AND table_name = 'product_launch_evidence'"
+                "SELECT a.attname, a.attnotnull FROM pg_attribute a"
+                " JOIN pg_class c ON c.oid = a.attrelid"
+                " JOIN pg_namespace n ON n.oid = c.relnamespace"
+                " WHERE n.nspname = :s AND c.relname = :r AND a.attnum > 0 AND NOT a.attisdropped"
+                " ORDER BY a.attnum"
             ),
-            {"s": _schema_name},
+            {"s": schema, "r": relation},
         ).all()
     engine.dispose()
-    nullable = {name: state for name, state in rows}
-    assert set(nullable) == {*COLUMNS, "note"}
+    return [(name, bool(notnull)) for name, notnull in rows]
+
+
+def test_the_ledger_carries_the_columns_the_contract_declares(ledger: str, _schema_name: str):
+    columns = _columns(ledger, _schema_name, "product_launch_evidence")
+    assert {name for name, _ in columns} == {*COLUMNS, "note"}
     # `note` is the only thing about a claim that may be absent.
-    assert sorted(name for name, state in nullable.items() if state == "YES") == ["note"]
+    assert [name for name, notnull in columns if not notnull] == ["note"]
 
 
 def test_an_axis_restates_its_own_claim_without_duplicating_it(ledger: str, _schema_name: str):
@@ -184,17 +194,9 @@ def test_the_view_emits_the_row_type_the_contract_declares(ledger: str, _schema_
     with engine.begin() as conn:
         conn.exec_driver_sql("SET ROLE needs_owner")
         conn.exec_driver_sql(_body(VIEW).replace("needs.", f'"{_schema_name}".'))
-        emitted = (
-            conn.exec_driver_sql(
-                "SELECT column_name FROM information_schema.columns"
-                f" WHERE table_schema = '{_schema_name}' AND table_name = 'product_launch'"
-                " ORDER BY ordinal_position"
-            )
-            .scalars()
-            .all()
-        )
     engine.dispose()
-    assert list(emitted) == fields
+    emitted = [name for name, _ in _columns(ledger, _schema_name, "product_launch")]
+    assert emitted == fields
 
 
 def test_the_view_grants_select_to_the_runtime_role_and_to_no_other():
