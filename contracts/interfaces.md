@@ -1248,8 +1248,9 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   `레티놀` rows disappear.
 - **The place that list cannot see — a mismatch not yet known — is carried by
   `tool/measure-crosscheck-keys`.** The canonical form of what a key catches is
-  `analysis/crosscheck/audit/known_names_v1.csv` (the **190 names** a person read and confirmed off the
-  2026-08-27 production table), and that tool measures the table as it is now and holds it against the list:
+  `analysis/crosscheck/audit/known_names_v2.csv` (**353 names**: the 190 a person read and confirmed off the
+  2026-08-27 production table, kept unchanged as `known_names_v1.csv`, plus 163 read on 2026-09-19, fork
+  #107), and that tool measures the table as it is now and holds it against the list:
   when a name that is forbidden, or not on the list, comes into some key, it exits **1** and prints that
   name and its product count (a name that was there and has gone is not red — a product dropping out is not
   a mismatch). **CI cannot do this job**: it cannot reach the production table, and a few strings pinned in
@@ -1267,9 +1268,20 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   ingredient names, 368 are caught by some key. Counted per key, the way the tool reports it (a name two
   keys both catch counts under each, 392 in all): the confirmed list's full 190 are still caught (0 `gone`),
   202 are `new` (164 plain names, 38 run-on lists), 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
-  means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool (fork #107).
+  means a person has not read the name yet, and the 202 were that backlog, not a fault in the tool.
   Re-measured the same day with fork #105's bound: of 3,403 distinct names the same 368 are caught and every
   per-key line is unchanged — the 500 recovered names are caught by no key.
+- **The second read (fork #107, 2026-09-19).** The user read the 164 plain `new` names and confirmed 163 into
+  `known_names_v2.csv`, which carries the date each name was read and a note where one is owed. By shape: 120
+  are a confirmed name with a concentration or `*`, 24 are new peptide names, 9 are vendor typos (a space
+  inside a name, a stray quote, a cut-off name), 6 are two or three substances joined without a comma (the
+  key's substance is present), and 4 rows were judged one by one (3 names, one of them under two keys) — among them a vendor's branded name used
+  as a set component's title, confirmed because the product really carries collagen and also lists it under
+  its ordinary name, so neither the key nor the product count is wrong. **The forbidden list was not used
+  for it**: that list is an alarm that turns crosscheck `partial`, meant for a wrong key, and a key that is
+  right about the substance is not one. One caught "name" was not confirmed: a whole ingredient list
+  separated by `@`, which the splitter and the run-on test both miss (fork #109). After the read the tool
+  still exits 1 on 39 `new` lines — the 38 run-on lists and that one — 0 `gone`, 0 `denied`, 2 `run_on`.
 - **Three rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
   being the name of a component of a gift set rather than an ingredient name (`콜라겐` 72→64 rows ·
