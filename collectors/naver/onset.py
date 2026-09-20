@@ -22,12 +22,15 @@ are about the series' shape instead, and both were chosen against the measured f
                            it. A flat or near-flat series is above a tenth of its own peak from the
                            window's first month, so its "onset" is the edge of our window and not
                            the product's -- the same for a term that was already live in 2016.
-  ONSET_MIN_ACTIVE_MONTHS  from the onset onward, this many months at or above the threshold -- or
-                           all of the ones that are left, when fewer remain. A lone spike in the
-                           middle of the window (one month over the vendor's disclosure floor) is
-                           refused, while a product that launched this month, which can show only
-                           one active month, is not: a guard aimed at noise must not refuse exactly
-                           the products the metric is about.
+  ONSET_MIN_ACTIVE_MONTHS  the onset opens a run of this many **consecutive** months at or above
+                           the threshold -- or of all the months that are left, when fewer remain.
+                           A spike (one month over the vendor's disclosure floor) is refused however
+                           many other spikes the series holds, while a product that launched this
+                           month, which can show only one active month, is not: a guard aimed at
+                           noise must not refuse exactly the products the metric is about. A month
+                           that fails the run is not the answer, and the next candidate is judged on
+                           its own run -- so a series with an early spike still answers, from the
+                           month its real rise starts.
 
 The month in progress counts: the series runs to today and a fresh product's onset lands in it.
 That is deliberate and it is safe because #282's verdict clamps the interval's upper end to the
@@ -55,20 +58,29 @@ def series_onset(points: Sequence[tuple[str, float | None]]) -> str | None:
         return None
     peak = max(ratio for _, ratio in months)
     threshold = peak * ONSET_PEAK_FRACTION
-    active = [index for index, (_, ratio) in enumerate(months) if ratio >= threshold]
-    if not active:
-        # Unreachable while the threshold is a fraction of the peak, since the peak itself clears
-        # it. Written out rather than asserted: a later fraction above 1 would make it reachable.
-        return None
-    first = active[0]
-    if first < ONSET_MIN_QUIET_MONTHS:
-        # The term was already at a tenth of its own peak when the window opened -- a flat series,
-        # or one whose rise predates 2016. Either way the month would be our window's edge.
-        return None
-    remaining = len(months) - first
-    if sum(1 for index in active if index >= first) < min(ONSET_MIN_ACTIVE_MONTHS, remaining):
-        return None
-    return months[first][0]
+    active = [ratio >= threshold for _, ratio in months]
+    quiet_before = 0
+    for index, (month, _ratio) in enumerate(months):
+        if not active[index]:
+            quiet_before += 1
+            continue
+        if quiet_before < ONSET_MIN_QUIET_MONTHS:
+            # The term was already at a tenth of its own peak when the window opened -- a flat
+            # series, or one whose rise predates 2016. Either way the month would be the edge of
+            # our window and not the product's. Counted rather than taken from the index, because
+            # the months before a candidate may hold a spike this loop has already rejected.
+            continue
+        # A **consecutive** run, not a count of active months anywhere after this one (#285 review
+        # F2): three isolated one-month spikes over ten years clear any count of three, and the
+        # month that would be claimed is the first spike -- a `not_after` years too early, which is
+        # the harmful direction, since #282's row 2 then mints a false `conflict` against a true
+        # recent lower bound and row 3 a confident wrong `not_new`. The run is as long as the
+        # window can still show it, so a product that launched this month is not refused by a rule
+        # aimed at noise.
+        need = min(ONSET_MIN_ACTIVE_MONTHS, len(months) - index)
+        if all(active[index : index + need]):
+            return month
+    return None
 
 
 def combine(onsets: Iterable[str | None]) -> str | None:

@@ -55,11 +55,12 @@ ONSET_PEAK_FRACTION = 0.10
 #: onset must be preceded by at least this many months below the threshold, so a flat or near-flat
 #: series -- above a tenth of its own peak from the window's first month -- yields no claim at all.
 ONSET_MIN_QUIET_MONTHS = 6
-#: The volume guard, part two: from the onset onward the series has to be at or above the threshold
-#: in this many months -- or in all of the months that are left, when fewer remain. A lone spike in
-#: the middle of the window (one month over the vendor's disclosure floor in an otherwise empty
-#: series) is refused; a product that launched this month, which can only ever show one or two
-#: active months, is not -- and those are the products the metric is about.
+#: The volume guard, part two: the onset opens a run of this many **consecutive** months at or above
+#: the threshold -- or of all the months that are left, when fewer remain. Consecutive, not a count
+#: of active months anywhere after it (#285 review F2): three isolated spikes over ten years clear a
+#: count of three and would claim the first of them, years too early. A product that launched this
+#: month, which can only ever show one active month, is still claimed -- those are the products the
+#: metric is about.
 ONSET_MIN_ACTIVE_MONTHS = 3
 #: How many terms a product's list may hold. The experiment used three per product (brand+line+
 #: category, line+category, brand+line) and three fit one shopping request's five groups with room.

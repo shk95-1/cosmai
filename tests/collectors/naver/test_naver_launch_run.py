@@ -19,18 +19,20 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import sqlalchemy as sa
 
-from collectors.naver import launch, scope
+from collectors.naver import cli, launch, scope
 from collectors.naver.cli import FetchSpec, run
+from collectors.naver.storage import db as storage_db
 from collectors.naver.storage.tables import (
     naver_fetch_log,
     naver_launch_series,
     naver_run,
     product_launch_evidence,
 )
-from collectors.naver.transport import RateLimited, RequestFailed
+from collectors.naver.transport import HttpFetcher, RateLimited, RequestFailed
 
 pytestmark = pytest.mark.postgres
 
@@ -455,3 +457,106 @@ def test_the_series_is_stored_under_the_product_and_the_api(catalogue, secret_fi
     assert set(apis) == {"search_trend", "shopping_insight"}
     assert keys == [""], "one keyword group means one series, keyed by nothing but the product"
     assert len(shopping_keys) == 3, "one series per term, keyed by the term"
+
+
+def _terms_file(tmp_path: Path, keep: Collection[str] = (), *, extra: Collection[str] = ()) -> Path:
+    """A term list built from the fixture rather than typed here: the terms are Korean data values
+    and `tool/checks/lang` allows those under `tests/**/fixtures/`, not in a test module."""
+    raw = json.loads(TERMS.read_text(encoding="utf-8"))
+    products = {ref: terms for ref, terms in raw["products"].items() if not keep or ref in keep}
+    borrowed = next(iter(raw["products"].values()))
+    for ref in extra:
+        products[ref] = borrowed
+    path = tmp_path / "launch_terms.json"
+    path.write_text(json.dumps({"generic": [], "products": products}, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def test_the_pass_gives_the_real_fetcher_the_launch_budget(catalogue, secret_file, monkeypatch):
+    """B1: the one wire that no run test could see, because every one of them injects a fake.
+
+    `cli.run` builds the real `HttpFetcher` when no fetcher is passed, and a fetcher built without a
+    budget takes `MAX_REQUESTS_PER_RUN` (200) -- under which a filled 248-product list spends its
+    budget at the 101st product, stops `partial`, never reaches the vacated-claims sweep, and makes
+    `contracts/entrypoints.md`'s "1,500 requests a run" false of the code.
+
+    The real class is constructed here, with an httpx transport instead of a socket, so the default
+    in `HttpFetcher.__init__` is the thing under test rather than a stand-in for it."""
+    built: list[HttpFetcher] = []
+    real = cli.HttpFetcher
+
+    def spy(client_id: str, client_secret: str, **kwargs: Any) -> HttpFetcher:
+        fetcher = real(
+            client_id,
+            client_secret,
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"results": []})),
+            **kwargs,
+        )
+        built.append(fetcher)
+        return fetcher
+
+    monkeypatch.setattr(cli, "HttpFetcher", spy)
+    run(
+        "launch_onset",
+        database_url=catalogue,
+        secrets_path=secret_file,
+        captured_at=AT,
+        terms_path=TERMS,
+    )
+    assert [f.budget for f in built] == [scope.LAUNCH_MAX_REQUESTS_PER_RUN]
+    assert scope.LAUNCH_MAX_REQUESTS_PER_RUN != scope.MAX_REQUESTS_PER_RUN, "the test would be vacuous"
+
+
+def test_the_other_datasets_keep_the_house_budget(catalogue, secret_file, monkeypatch):
+    # The counterpart: giving launch_onset its own ceiling must not raise everyone else's.
+    built: list[HttpFetcher] = []
+    real = cli.HttpFetcher
+
+    def spy(client_id: str, client_secret: str, **kwargs: Any) -> HttpFetcher:
+        fetcher = real(
+            client_id,
+            client_secret,
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={"results": []})),
+            **kwargs,
+        )
+        built.append(fetcher)
+        return fetcher
+
+    monkeypatch.setattr(cli, "HttpFetcher", spy)
+    run("datalab", database_url=catalogue, secrets_path=secret_file, captured_at=AT)
+    assert [f.budget for f in built] == [scope.MAX_REQUESTS_PER_RUN]
+
+
+def test_a_term_list_naming_a_ref_the_catalogue_does_not_hold_spares_no_claim(
+    catalogue, secret_file, tmp_path, monkeypatch
+):
+    """F4: the one hole in the DELETE duty. Such a ref is skipped before its per-product withdrawal,
+    so the only thing that could ever withdraw it is the vacated sweep -- and the sweep spared it,
+    because the term list still named it. What the pass hands the sweep is the set it can speak
+    for, which is what is checked here."""
+    seen: list[list[str]] = []
+    real = storage_db.withdraw_vacated_launch_claims
+
+    def spy(connection: Any, *, axis: str, considered: Sequence[str]) -> int:
+        seen.append(list(considered))
+        return real(connection, axis=axis, considered=considered)
+
+    monkeypatch.setattr(storage_db, "withdraw_vacated_launch_claims", spy)
+    terms = _terms_file(tmp_path, extra=["oy:NOT_IN_THE_CATALOGUE"])
+    code = _go(
+        catalogue,
+        secret_file,
+        _FakeFetcher({"oy:A1": {"search_trend": rising(2023, 5)}}),
+        terms=terms,
+    )
+    assert seen, "a pass that ran to the end must reach the sweep"
+    assert "oy:NOT_IN_THE_CATALOGUE" not in seen[0]
+    assert {"oy:A1", "oy:B1", "oy:C1"} <= set(seen[0])
+    assert code == 1, "the unreachable ref is reported, not swallowed"
+
+
+def test_one_products_4xx_is_partial_even_when_it_is_the_whole_term_list(catalogue, secret_file, tmp_path):
+    # F5: blocked (2) is what collector_health reads as refused, and one product's 4xx is not a
+    # refusal however short the term list is. Only 401/429/a spent budget stop the whole pass.
+    terms = _terms_file(tmp_path, keep=["oy:A1"])
+    assert _go(catalogue, secret_file, _FakeFetcher({}, fails=["oy:A1"]), terms=terms) == 1

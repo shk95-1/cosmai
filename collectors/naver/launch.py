@@ -208,12 +208,19 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
     claimed = 0
     no_onset: list[str] = []
     failed: list[str] = []
+    unknown: list[str] = []
     stopped: TransportError | None = None
     for product_ref, terms in wanted.items():
         ref = by_ref.get(product_ref)
         if ref is None:
-            # The catalogue no longer holds this ref -- the foreign key would refuse the claim, and
-            # the reviewed list is what has to be corrected. Counted, not guessed at.
+            # The catalogue does not hold this ref, so nothing can be asked about it and the
+            # reviewed list is what has to be corrected. It is counted, and -- the hole the review
+            # named (F4) -- it is kept out of the set the sweep below spares: the per-product
+            # withdrawal is skipped here, so the sweep is the only thing that could ever withdraw a
+            # claim standing under it, and a ref the pass cannot speak for must not be spared by
+            # the term list still naming it. Today 010's foreign key makes such a claim impossible
+            # to have written in the first place; this closes the path rather than relying on that.
+            unknown.append(product_ref)
             failed.append(product_ref)
             continue
         points: list[LaunchSeriesPoint] = []
@@ -289,23 +296,22 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
         # The other half of the duty, and only after a pass that ran to the end: a `product_ref` is
         # minted from its cluster's anchor and **wobbles** when the catalogue is re-clustered, so a
         # claim of this axis on a ref the term list no longer names is one nothing else will ever
-        # withdraw. The set is the term list itself and not what this pass managed to fetch -- a ref
-        # the list still names is one this axis still speaks for, whatever the vendor said today.
-        vacated = storage_db.withdraw_vacated_launch_claims(connection, axis=AXIS, considered=list(wanted))
+        # withdraw. The set is the term list minus the refs the catalogue does not hold -- a ref the
+        # list names and the catalogue knows is one this axis still speaks for whatever the vendor
+        # said today, and a ref it does not hold is one nothing here can speak for at all.
+        vacated = storage_db.withdraw_vacated_launch_claims(
+            connection, axis=AXIS, considered=[ref for ref in wanted if ref not in unknown]
+        )
 
     coverage = (
         f"launch_onset: {claimed} claim(s), {len(no_onset)} with no onset, "
         f"{len(wanted)} product(s) in the term list, {len(failed)} failed, {vacated} withdrawn"
     )
     print(coverage)
-    if len(failed) == len(wanted):
-        # Every product failed, so the pass learned nothing at all -- that is a refusal. It is not
-        # keyed on the claim count the way `datalab`'s is keyed on its row count: a pass where every
-        # product honestly has no onset writes no claim and is a perfectly good `ok` run, and
-        # reading zero claims as a refusal would put the axis in `pipeline_health` as broken for
-        # exactly the answer it is supposed to be able to give.
-        return _Outcome("blocked", 2, f"every product failed: {', '.join(failed)}")
     if failed:
+        # Always partial, never blocked, however short the term list is (#285 review F5): a product
+        # that failed is one product's 4xx, and `collector_health` reads blocked as refused. What
+        # refuses a whole pass is 401, 429 or a spent budget, and those return above as `stopped`.
         return _Outcome("partial", 1, f"{len(failed)} product(s) failed: {', '.join(failed)}")
     return _Outcome("ok", 0, coverage)
 

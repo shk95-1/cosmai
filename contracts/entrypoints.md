@@ -42,7 +42,8 @@ nests it (`{"error": {"errorCode": "200", …}}` on a refused key), and the sear
 puts it at the top level beside an `errorMessage` (`{"errorCode": "SE03", …}`); the messages beside
 it are never read, in either shape.
 
-One run may send `collectors/naver/scope.json`'s `http.max_requests_per_run` (200) requests, and
+One run may send `collectors/naver/scope.json`'s `http.max_requests_per_run` (200) requests — except
+`launch_onset`, which has a ceiling of its own below and is handed it by `cli.budget_for` — and
 **every attempt is charged, a retry included** — a retry is another request NAVER serves. A 5xx or a timeout is retried `retry_max_attempts` (3) times
 with `retry_backoff_s` (2.0) doubling (2s, then 4s), under a `timeout_s` of 20.0. What a response
 does to the run, in the exit codes above:

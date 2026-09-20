@@ -72,6 +72,30 @@ def test_a_single_spike_in_the_middle_of_the_window_yields_no_onset():
     assert onset.series_onset(sustained) == "2018-07"
 
 
+def test_three_spikes_spread_over_the_window_are_not_an_onset():
+    # The guard has to ask for a *run* of active months, not a count of them anywhere after the
+    # first one: three isolated one-month spikes clear any count of three, and the month claimed
+    # would be the first spike -- a `not_after` years too early, which is the harmful direction
+    # (#282's row 2 then mints a false `conflict`, row 3 a confident wrong `not_new`).
+    spikes = _series([*_quiet(12), 100.0, *_quiet(24), 100.0, *_quiet(24), 100.0, *_quiet(10)])
+    assert onset.series_onset(spikes) is None
+
+
+def test_a_lone_early_spike_does_not_become_the_onset_of_a_later_rise():
+    # The same shape with a real launch in it: the answer is the start of the sustained run and not
+    # the spike that came first.
+    series = _series([*_quiet(12), 100.0, *_quiet(20), 40.0, 60.0, 100.0, 80.0])
+    assert onset.series_onset(series) == "2018-10"
+
+
+def test_the_active_months_are_consecutive_from_the_onset():
+    # A month back under the threshold right after the rise is not a launch that ran for three
+    # months. The next candidate is judged on its own run, so the series still answers -- from the
+    # month its run actually starts.
+    broken = _series([*_quiet(24), 50.0, 0.0, 60.0, 100.0, 90.0])
+    assert onset.series_onset(broken) == "2018-03"
+
+
 def test_an_onset_in_the_month_in_progress_is_returned():
     # A product launched this month: the series runs to the month in progress and the rise is in it.
     # The active-months guard asks for what the window can still show -- one month here -- so the
