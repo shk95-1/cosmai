@@ -18,8 +18,12 @@
   (`analysis.launch.LAUNCH_VERSION`, `interfaces.md` §Launch evidence, #282) — not an exception to the two
   formats, for `evidence`'s reason: it is the version of rules the code fixed, not the name of an agreement
   document. What it covers is the whole read, because all of it changes what a verdict means: the rule
-  table's rows and their order, the 3·6·12-month windows, the precision widening, and which axes this
-  version leaves out of the verdict (`EXCLUDED_AXES`). An axis's own `axis_version` is a different thing
+  table's rows and their order, the 3·6·12-month windows, the precision widening, the reference-date clamp
+  on the interval's upper end, the `exact` gate a `single_axis` tier passes, and which axes this
+  version leaves out of the verdict (`EXCLUDED_AXES`). It stayed `rule-v1.0` through the review round of
+  #282: the key exists so a stored value names the table that made it, and since no run has stamped it and
+  no row was ever computed under the reviewed table, a bump would name a version that produced nothing —
+  the first value this key carries is the one #125 writes. An axis's own `axis_version` is a different thing
   and lives on the claim row — a claim is evidence and survives a rule change, which is why the ledger is a
   table and the rule table is not. The run that reads the verdict stamps this key (#125's
   `unresolved_new`), so two runs under different rule tables are never compared unmarked; the ledger's rows

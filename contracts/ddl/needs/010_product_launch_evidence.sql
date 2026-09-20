@@ -24,8 +24,17 @@ CREATE TABLE needs.product_launch_evidence (
   -- needs.metrics_need.product_ref carries (#128), and an axis that observes one site resolves its
   -- observation through needs.product_member before writing the claim -- which site row it saw is
   -- kept in source_ref below, so nothing is lost by folding. The FK is what keeps a claim from
-  -- naming a product the catalogue does not hold; the linker only ever upserts product_ref rows
-  -- (analysis/linker/pipeline.py REF_SQL), so no claim is orphaned by a re-clustering.
+  -- naming a product the catalogue does not hold, and it never breaks: product_ref rows are only
+  -- ever upserted, never deleted (analysis/linker/pipeline.py REF_SQL).
+  --
+  -- **The ref a product is known by does move, though.** It is minted from the cluster's anchor
+  -- (analysis/linker/__init__.py `_ref_id`) and `link_products`' own docstring says the ref wobbles
+  -- when the catalogue is re-clustered; product_member.product_ref is re-pointed, while the old
+  -- product_ref row stays. A claim written under the old ref is then live on a ref that no longer
+  -- names the product, under a primary key the new claim cannot overwrite, and the metric reads the
+  -- new ref. Nothing here withdraws it: a membership move obliges the axis that wrote the claim to
+  -- DELETE it (contracts/interfaces.md §Launch evidence, #283's duty). No trigger, because the axis
+  -- is the only thing that knows which of its claims the move invalidated.
   product_ref       text        NOT NULL REFERENCES needs.product_ref,
   -- Which observation this is. The vocabulary belongs to the axes issue (#283) rather than to this
   -- file, so there is no CHECK on it: a new axis is a new value, and adding one must not be a
@@ -56,6 +65,16 @@ CREATE TABLE needs.product_launch_evidence (
   -- measured trap of 2026-09-20 (a later variant matched to an older line). An empty value would
   -- collapse an axis's claims into one and take that trace with it.
   source_ref        text        NOT NULL CHECK (source_ref <> ''),
+  -- How sure the join from that source row to this product is. It is a column of its own rather
+  -- than a word inside source_ref or note, because the **rule table reads it**: a tier held up by a
+  -- lower bound alone is given only on an `exact` join (contracts/interfaces.md §Launch evidence).
+  -- source_ref is an identifier and part of the primary key -- re-scoring a join would move the key
+  -- and mint a second live claim -- and note is free text no rule may read. Closed for the same
+  -- reason as direction and claimed_precision: a strength the reader does not understand would be
+  -- treated as not-exact or dropped, and both of those are decisions rather than inserts.
+  --   exact    the source row names this product and no other
+  --   partial  the join is a containment or a brand-level match that may have taken a variant
+  match_strength    text        NOT NULL CHECK (match_strength IN ('exact', 'partial')),
   -- The axis implementation's version (contracts/versioning.md's `rule-vX.Y`). Not in the key: a
   -- claim is a statement about one source row, and a new axis version restates that same row --
   -- two rows would both be live with nothing to say which is current.

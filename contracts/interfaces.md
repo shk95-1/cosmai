@@ -160,6 +160,7 @@ class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
     claimed_on: date
     claimed_precision: str  # day | month
     source_ref: str
+    match_strength: str  # exact | partial -- how sure the join from the source row to the product is
     axis_version: str
     observed_at: datetime
     note: str | None = None
@@ -169,11 +170,18 @@ class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
 class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdict is read from
     product_ref: str
     earliest: date | None
-    latest: date | None
+    earliest_match: str | None  # the match_strength of the claim that set `earliest`
+    latest: date | None  # the evidence's own upper bound; the reference date clamps it in the verdict
     claims: int
     lower_claims: int
     upper_claims: int
     excluded_claims: int
+
+
+@dataclass(frozen=True)
+class LaunchVerdict:  # analysis/launch's answer; stored in no table (§Launch evidence)
+    verdict: str  # new_3m | new_6m | new_12m | not_new | unknown | conflict
+    basis: str  # corroborated | single_axis
 
 
 # ---------- extraction ----------
@@ -721,6 +729,7 @@ One row is one axis's statement about one product, read off one source row.
 | `claimed_on` | the instant claimed, at the axis's own precision |
 | `claimed_precision` | `day` · `month`. Closed by a `CHECK`, see below |
 | `source_ref` | the source row in the axis's own spelling — an MFDS `report_seq`, a DataLab `request_key`, a site product key |
+| `match_strength` | how sure the join from that source row to this product is: `exact` · `partial`. Closed by a `CHECK`, and the rule table reads it |
 | `axis_version` | the axis implementation's version (`rule-vX.Y`, `versioning.md`) |
 | `observed_at` | when the axis read it |
 
@@ -740,6 +749,25 @@ re-reading the same source row upserts its own claim in place rather than adding
 `axis_version` is a value and not part of the key for that reason: a new axis version restates the same
 source row, and two rows would both be live with nothing to say which is current.
 
+**`match_strength` is a column of the claim rather than a word inside `source_ref` or `note`**, because
+the rule table reads it: a tier held up by a lower bound alone is given only on an `exact` join (below).
+`source_ref` is an identifier and part of the key, so re-scoring a join through it would move the key and
+mint a second live claim, and `note` is free text no rule may read.
+
+**A claim is withdrawn by the axis that wrote it when the product's membership moves.** A `product_ref`
+is minted from its cluster's anchor (`analysis/linker` `_ref_id`), so re-clustering re-points
+`product_member.product_ref` while the old `product_ref` row stays and the foreign key holds. The claim
+written under the old ref is then live on a ref that no longer names the product, under a primary key the
+new claim cannot overwrite, and the metric reads the new ref — so the axis **DELETEs** its claims for the
+refs a re-link vacated (#283's duty; no trigger, because only the axis knows which of its claims the move
+invalidated).
+
+**Most of the catalogue is outside this metric, and silently.** `needs.product_ref` holds 248 rows
+against 10,032 commerce products, and `metrics_need.product_ref` also carries `''` and
+`unlinked:<site>:<key>` (§`metrics_need.product_ref`) — neither can hold a claim at all, because the
+foreign key refuses it. Both are `unknown` by construction rather than by absence of evidence, and #125
+drops them from numerator and denominator alike.
+
 ### The launch interval (`LaunchIntervalRow` ← `needs.product_launch`)
 
 A claim at **month** precision is worth its whole month: the first day of it for a lower bound, the last
@@ -747,9 +775,15 @@ day for an upper one. The widening is the reader's (`analysis.launch.claim_edges
 axis's — stored already-widened, that rule would live in as many places as there are axes.
 
 `earliest` is the tightest lower bound (`max` over `not_before`·`at`) and `latest` the tightest upper
-bound (`min` over `not_after`·`at`). **NULL means no claim of that side exists**, which is a different
-answer from a wide interval, and the rule table treats it as one. `claims`·`lower_claims`·`upper_claims`
-count what the rule version read, `excluded_claims` what it did not.
+bound (`min` over `not_after`·`at`) **the evidence names**. **NULL means no claim of that side exists**,
+which is a different answer from a wide interval, and the rule table treats it as one.
+`claims`·`lower_claims`·`upper_claims` count what the rule version read, `excluded_claims` what it did
+not. `earliest_match` is the `match_strength` of whichever claim set `earliest` — the deciding bound is
+the tightest one and, on a tie, the surer one.
+
+The interval is **the evidence alone**: the reference-date clamp below belongs to the verdict, because
+this row has no reference date and neither does the view that mirrors it. A product with no claims at all
+gets **no view row**; a reader takes a missing row as row 1 of the rule table rather than as a NULL.
 
 ### The verdict
 
@@ -758,32 +792,62 @@ Six answers — `new_3m` · `new_6m` · `new_12m` · `not_new` · `unknown` · `
 re-read at another date must give that date's answer, and the run stamps `versions.launch` so two rule
 tables are never compared unmarked (`versioning.md`).
 
-The rule table, in this order. `W` is a window of 3, 6 or 12 months.
+**The upper bound that is always true.** A launch cannot be later than the date being asked about, so
+`launch ≤ R` holds for free and the verdict reads the interval's upper end as `min(latest, R)`, or `R`
+when the evidence names no upper bound at all. It lives in the verdict function and not in the view,
+which takes no reference date. Without it a DataLab onset in the month *in progress* widens to that
+month's last day, runs past `R`, and drops a corroborated pair to `unknown` — measured: `not_before`
+2026-07-10 (MFDS, day) with `not_after` 2026-09 (onset, month) at `R` = 2026-09-20 is `new_3m`, not a
+tier lower and not gone.
+
+**Every answer carries a basis**, because the clamp is not an observation: `corroborated` when at least
+one `not_before`/`at` **and** at least one `not_after`/`at` claim the rule version reads stand behind it,
+`single_axis` when the upper end is the clamp alone. It is a second field on the answer
+(`LaunchVerdict`), not six more verdict strings, and a reader that shows a tier shows this beside it.
+
+The rule table, in this order. `W` is a window of 3, 6 or 12 months and `latest` below is the clamped
+upper end.
 
 | # | the claims of one product, after the rule version's exclusions | verdict |
 |---|---|---|
 | 1 | none | `unknown` |
-| 2 | `earliest > latest` — a `not_after` earlier than a `not_before` | `conflict` |
+| 2 | a `not_after` **claim** earlier than a `not_before` claim | `conflict` |
 | 3 | `latest < R - 12 months` — an upper bound older than the widest window | `not_new` |
 | 4 | no lower bound (upper bounds alone, none older than 12 months) | `unknown` |
-| 5 | no upper bound (lower bounds alone, however recent) | `unknown` |
-| 6 | the whole interval inside `[R - W, R]`, for the **narrowest** W that holds | `new_3m` · `new_6m` · `new_12m` |
-| 7 | both bounds, and no window holds the whole interval | `unknown` |
+| 5 | `earliest > R` — the lower bound is later than the date being asked about | `unknown` |
+| 6 | `single_axis` and the deciding lower bound's `match_strength` is not `exact` | `unknown` |
+| 7 | the interval `[earliest, latest]` inside `[R - W, R]`, for the **narrowest** W that holds | `new_3m` · `new_6m` · `new_12m` |
+| 8 | no window holds the whole interval | `unknown` |
 
-Read row by row: row 2 is never auto-resolved, because a crossing is how a variant, a renewal or a set
-announces itself and the pair that crossed is the finding. Row 4 is the "never new on upper bounds alone"
-rule — a recent `not_after` is equally true of a product launched in 2011. Row 5 is its mirror: a lower
-bound alone leaves `[earliest, ∞)`, which is wider than every window. Row 6 says **inside**, not
-*touching*: a tier narrower than the interval's own width can therefore never be assigned, since an
-interval inside a window of width W is itself at most W wide. Row 3 is the only way to `not_new`, because
-it is the only shape that proves the launch is outside every window.
+Read row by row. Row 2 is between two claims and never against the clamp, and it is never auto-resolved:
+a crossing is how a variant, a renewal or a set announces itself, and the pair that crossed is the
+finding. Row 3 is the only way to `not_new`, because it is the only shape that proves the launch is
+outside every window — and **a lower bound alone can never reach it**, however old, since the latest that
+launch could be is `R`: a 2025-06 registration is as consistent with a launch last week as with an old
+product, so it is row 8 `unknown`. Row 4 is the "never new on upper bounds alone" rule: a recent
+`not_after` is equally true of a product launched in 2011. Row 5 is what the clamp leaves when the
+evidence puts the launch after `R` — not a contradiction between axes, and the vocabulary has no word for
+"has not launched yet". Row 7 says **inside**, not *touching*: a tier narrower than the interval's own
+width can therefore never be assigned, since an interval inside a window of width W is itself at most W
+wide.
 
-Rows 1 and 7 are both `unknown` and they are not the same state — `claims` and the two counts beside the
-interval tell them apart, which is what #125's screen prints next to a NULL cell.
+**Row 6 is what a lower bound alone costs.** With the clamp, a product whose only claims are `not_before`
+has the interval `[earliest, R]` and its tier follows from `earliest` exactly as a corroborated one does
+(user decision 2026-09-20, option B) — so `new_*` is reachable without a second axis, and `single_axis`
+is what says so. The risk it prices is a wrong lower bound: two of the seven measured sunscreens had an
+MFDS join that had taken a later variant or an older line name. So the tier is given only where the
+deciding claim's join is `exact`; a `partial` lower bound standing alone is `unknown`, while a `partial`
+lower bound an upper bound corroborates still yields its tier. The gate is on the lower bound alone — an
+upper bound only ever makes a product older, so a weak join there cannot mint a `new_*`.
+
+Rows 1, 5, 6 and 8 are all `unknown` and they are not the same state — `claims`, the two counts and
+`basis` beside the interval tell them apart, which is what #125's screen prints next to a NULL cell.
 
 **A pair within 6 months of each other pins the launch at its lower bound** (`analysis.launch.launch_at`,
-`FIXED_WITHIN_MONTHS`). That value is for a reader to quote; **no verdict is read off it**, and there is
-no strength column beside it — the tier is the strength.
+`FIXED_WITHIN_MONTHS`). It reads the evidence's own bounds and never the clamp, so a `single_axis`
+interval has no quotable instant. That value is for a reader to quote; **no verdict is read off it**, and
+there is no strength column beside it — the tier is the strength, and `basis` is how much of it to
+believe.
 
 #### Month precision against a 3-month window
 
@@ -802,11 +866,11 @@ answer drops a tier. It never moves the other way, because a widened bound is ne
 #### The four measured traps, and that none of them earns a row
 
 The 2026-09-20 DataLab experiment on seven sunscreens with a known report date found four failure shapes.
-Each is already answered by a row above, which is why the table stops at seven:
+Each is already answered by a row above; none of them earned a row of its own:
 
 | trap | claims | row | verdict |
 |---|---|---|---|
-| a slow burner: the term reaches its own 10% years after the filing | `not_before` 2019-05-02 · `not_after` 2026-03 | 7 | `unknown` |
+| a slow burner: the term reaches its own 10% years after the filing | `not_before` 2019-05-02 · `not_after` 2026-03 | 8 | `unknown` |
 | a line name older than the product: the onset precedes the filing | `not_before` 2024-06-03 · `not_after` 2016-01 | 2 | `conflict` |
 | a later variant matched by MFDS: the held review predates the filing | `not_before` 2026-05-04 · `not_after` 2023-01-09 | 2 | `conflict` |
 | upper bounds alone, both recent | `not_after` 2026-07-02 · `not_after` 2026-08 | 4 | `unknown` |
@@ -822,12 +886,13 @@ title tag, 530 of 10,032 products and oliveyoung alone: marketing text on one si
 2026-09-20, #283 axis 5). Its claims are stored, counted in `excluded_claims`, and move no bound. A
 product whose only claims are excluded still gets a view row, with `claims = 0`.
 
-Two vocabularies are closed by a `CHECK` instead, and the reason is the same in both cases: a stored row
+Three vocabularies are closed by a `CHECK` instead, and the reason is the same in all three: a stored row
 the reader cannot read would drop out of the interval in silence, and **a narrower interval built out of
 less evidence is the one direction this rule table may not move in**. `direction` is closed because a
 bound on a point in time is lower, upper or exact. `claimed_precision` is closed at `day`·`month` because
 a third precision is a decision about what a claim means, not an insert — and the reader refuses one it
-does not know (`ValueError`) rather than guessing.
+does not know (`ValueError`) rather than guessing. `match_strength` is closed at `exact`·`partial`
+because row 6 turns on it: a third strength would be read as not-exact by a rule that never agreed to it.
 
 ### Where the three pieces live, and why the verdict is not the view
 

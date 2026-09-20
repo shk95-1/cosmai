@@ -13,16 +13,20 @@
 -- over the same claims, and the excluded-axis list below against the module's constant -- a mirror
 -- nobody compares is just a second implementation.
 --
--- The four rules this view holds:
+-- The five rules this view holds:
 --   * a month claim is worth its whole month (first day for a lower bound, last day for an upper
 --     one), so a bound only ever moves outward -- mixed precision costs a tier and never buys one
---   * `earliest` is the tightest lower bound and `latest` the tightest upper bound; NULL means no
---     claim of that side exists, which is not the same answer as a wide interval and the rule
---     table treats it as a different one
+--   * `earliest` is the tightest lower bound and `latest` the tightest upper bound **the evidence
+--     names**; NULL means no claim of that side exists, which is not the same answer as a wide
+--     interval and the rule table treats it as a different one. The reference-date clamp on the
+--     upper end is the verdict's, not this view's -- a view takes no reference date
+--   * `earliest_match` is the join strength of whichever claim set `earliest`: the tightest bound
+--     wins and, on a tie, the surer one ('exact' sorts before 'partial'). The rule table reads it
 --   * an axis this rule version does not read is counted in `excluded_claims` and moves no bound
 --     (`vendor_title_tag`: marketing text on one vendor, user decision 2026-09-20, #283 axis 5)
 --   * a product whose only claims are excluded still gets a row, with claims = 0 -- "recorded and
---     not read" is a state worth being able to see
+--     not read" is a state worth being able to see. A product with no claims at all gets no row,
+--     and a reader takes a missing row as row 1 of the rule table (`unknown`)
 --
 -- The columns are exactly the fields of `LaunchIntervalRow` (contracts/interfaces.md), in order.
 --
@@ -39,6 +43,7 @@ WITH claim AS (
     SELECT
         e.product_ref                                                      AS product_ref,
         e.direction                                                        AS direction,
+        e.match_strength                                                   AS match_strength,
         e.axis <> ALL (ARRAY['vendor_title_tag'])                          AS in_rule,
         CASE WHEN e.claimed_precision = 'month'
              THEN date_trunc('month', e.claimed_on)::date
@@ -51,6 +56,10 @@ WITH claim AS (
 SELECT
     product_ref,
     max(lower_edge) FILTER (WHERE in_rule AND direction IN ('not_before', 'at')) AS earliest,
+    -- The deciding lower bound's own strength: order by the edge, then by the strength so a tie
+    -- goes to the surer claim ('exact' < 'partial'), and take the first.
+    (array_agg(match_strength ORDER BY lower_edge DESC, match_strength ASC)
+       FILTER (WHERE in_rule AND direction IN ('not_before', 'at')))[1]          AS earliest_match,
     min(upper_edge) FILTER (WHERE in_rule AND direction IN ('not_after', 'at'))  AS latest,
     count(*) FILTER (WHERE in_rule)::int                                         AS claims,
     count(*) FILTER (WHERE in_rule AND direction IN ('not_before', 'at'))::int   AS lower_claims,

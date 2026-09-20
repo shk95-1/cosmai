@@ -24,7 +24,6 @@ LAUNCH_VERSION = "rule-v1.0"
 # The three claim directions and which bound each one moves.
 LOWER_DIRECTIONS = ("not_before", "at")
 UPPER_DIRECTIONS = ("not_after", "at")
-PRECISIONS = ("day", "month")
 
 # Recorded as evidence, not read by this rule version: a vendor's `[NEW]` title tag is marketing
 # text on one vendor (#283 axis 5, user decision 2026-09-20).
@@ -87,10 +86,16 @@ def claim_edges(claim: LaunchClaimRow) -> tuple[date, date]:
 def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> LaunchIntervalRow:
     """[earliest, latest] over the claims this rule version reads, and how many it read.
 
-    `earliest` is the tightest lower bound and `latest` the tightest upper bound; either is None
-    when no claim of that side exists, which is a different answer from a wide interval and the
-    rule table treats it as one."""
+    `earliest` is the tightest lower bound and `latest` the tightest upper bound **the evidence
+    names**; either is None when no claim of that side exists, which is a different answer from a
+    wide interval and the rule table treats it as one. The reference-date clamp on the upper end
+    belongs to the verdict, not here -- this row has no reference date and the view that mirrors it
+    takes none.
+
+    `earliest_match` is the join strength of whichever claim set `earliest`: the deciding bound is
+    the tightest one, and on a tie the surer one."""
     earliest: date | None = None
+    earliest_match: str | None = None
     latest: date | None = None
     read = lower = upper = excluded = 0
     for claim in claims:
@@ -101,41 +106,64 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
         read += 1
         if claim.direction in LOWER_DIRECTIONS:
             lower += 1
-            earliest = low if earliest is None else max(earliest, low)
+            if (
+                earliest is None
+                or low > earliest
+                or (low == earliest and claim.match_strength < (earliest_match or ""))
+            ):
+                earliest, earliest_match = low, claim.match_strength
         if claim.direction in UPPER_DIRECTIONS:
             upper += 1
             latest = high if latest is None else min(latest, high)
-    return LaunchIntervalRow(product_ref, earliest, None, latest, read, lower, upper, excluded)
+    return LaunchIntervalRow(product_ref, earliest, earliest_match, latest, read, lower, upper, excluded)
 
 
 def launch_basis(interval: LaunchIntervalRow) -> str:
-    """What the interval's upper end rests on."""
-    return SINGLE_AXIS
+    """What the interval's upper end rests on: a claim of its own (`corroborated`), or the
+    reference-date clamp alone (`single_axis`). It is not a verdict -- it is how much of one to
+    believe, and a reader that shows a tier shows this beside it."""
+    return CORROBORATED if interval.lower_claims and interval.upper_claims else SINGLE_AXIS
 
 
 def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> LaunchVerdict:
     """The rule table of §Launch evidence, in its own order -- the rows below are that table."""
-    earliest, latest = interval.earliest, interval.latest
+    earliest, evidence_latest = interval.earliest, interval.latest
     basis = launch_basis(interval)
+    # The one upper bound that is always true: a product cannot have launched after the date being
+    # asked about. Without it a month-precision onset in the month in progress widens past the
+    # reference date and drops a corroborated pair to `unknown` (the review's measured defect).
+    latest = reference_date if evidence_latest is None else min(evidence_latest, reference_date)
     if interval.claims == 0:
         return LaunchVerdict(UNKNOWN, basis)
-    if earliest is not None and latest is not None and earliest > latest:
+    # Between two claims, never against the clamp: a crossing is how a variant, a renewal or a set
+    # announces itself, and it is never auto-resolved.
+    if earliest is not None and evidence_latest is not None and earliest > evidence_latest:
         return LaunchVerdict(CONFLICT, basis)
-    if latest is not None and latest < months_before(reference_date, WINDOW_MONTHS[-1]):
+    if latest < months_before(reference_date, WINDOW_MONTHS[-1]):
         return LaunchVerdict(NOT_NEW, basis)
-    if earliest is None or latest is None:
+    if earliest is None:
+        return LaunchVerdict(UNKNOWN, basis)
+    if earliest > latest:
+        # The lower bound is later than the reference date, so the launch is after it. That is not
+        # a contradiction between axes, and the vocabulary has no word for "has not launched yet".
+        return LaunchVerdict(UNKNOWN, basis)
+    if basis == SINGLE_AXIS and interval.earliest_match != EXACT:
+        # Option (B)'s risk, priced: with no upper bound of its own, the tier is only as good as
+        # the join that set the lower bound, and two of seven measured MFDS joins were wrong.
         return LaunchVerdict(UNKNOWN, basis)
     for months in WINDOW_MONTHS:
         # The whole interval inside the window, never merely touching it -- which is also what
         # makes a tier narrower than the interval's own width impossible to assign.
-        if months_before(reference_date, months) <= earliest and latest <= reference_date:
+        if months_before(reference_date, months) <= earliest:
             return LaunchVerdict(NEW.format(months=months), basis)
     return LaunchVerdict(UNKNOWN, basis)
 
 
 def launch_at(interval: LaunchIntervalRow) -> date | None:
-    """The launch instant a reader may quote: the lower bound, and only where a pair pins it
-    within FIXED_WITHIN_MONTHS. No verdict is read off this value (§Launch evidence)."""
+    """The launch instant a reader may quote: the lower bound, and only where a pair of real
+    claims pins it within FIXED_WITHIN_MONTHS. The reference-date clamp is not a claim and never
+    pins anything here, so a `single_axis` interval has no quotable instant. No verdict is read off
+    this value (§Launch evidence)."""
     earliest, latest = interval.earliest, interval.latest
     if earliest is None or latest is None or earliest > latest:
         return None
