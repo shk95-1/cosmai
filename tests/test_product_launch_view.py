@@ -32,7 +32,7 @@ ANON_GRANTS = REPO_ROOT / "db" / "grants" / "postgrest_anon_needs.sql"
 
 AT = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 EXCLUDED = next(iter(EXCLUDED_AXES))
-PRODUCTS = ("oy:A1", "oy:A2", "oy:A3", "oy:A4", "oy:A5", "oy:A6", "oy:A7")
+PRODUCTS = ("oy:A1", "oy:A2", "oy:A3", "oy:A4", "oy:A5", "oy:A6", "oy:A7", "oy:A8", "oy:A9")
 COLUMNS = (
     "product_ref",
     "axis",
@@ -87,6 +87,14 @@ CLAIMS = (
     # the Python -- this is the row the grade-A review of #283 found missing.
     _claim("oy:A7", "mfds_report", "not_before", date(2026, 7, 10), "day", "seq=7b"),
     _claim("oy:A7", "mfds_report", "not_before", date(2021, 4, 16), "day", "seq=7a"),
+    # Rule version 1.1 again, on the upper side: `latest` is the tightest of all upper bounds and
+    # `latest_exact` the tightest of the `exact` ones, which is the only one row 3 may read. Here a
+    # `partial` claim is the tighter of the two, so the two columns differ.
+    _claim("oy:A8", "old_review", "not_after", date(2019, 1, 5), "day", "oy:A8", "partial"),
+    _claim("oy:A8", "datalab_onset", "not_after", date(2021, 3, 10), "day", "req=a8"),
+    # And a product whose only upper bound is `partial`: `latest_exact` is NULL, which is what says
+    # "nothing here may declare this product old".
+    _claim("oy:A9", "old_review", "not_after", date(2019, 3, 2), "day", "oy:A9", "partial"),
 )
 
 INSERT = (

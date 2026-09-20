@@ -343,11 +343,65 @@ def test_a_partial_lower_bound_still_conflicts_and_still_ages():
     assert verdict(aged) == NOT_NEW
 
 
-def test_a_partial_upper_bound_alone_still_proves_age():
-    # The strength gate is about the lower bound, which is what a single-axis tier rests on. An
-    # upper bound only ever makes a product older, so a weak join there cannot mint a `new_*`.
+def test_a_partial_upper_bound_alone_no_longer_proves_age():
+    # Re-pointed from the assertion that expected `not_new` here. A `partial` upper bound can be
+    # FALSE rather than merely weak -- a same-brand sibling shares the DataLab term, so the series
+    # rose when the OLDER sibling launched, and `launch <= onset` does not hold for this product;
+    # a member-linked review belongs to a listing the linker only guessed was the same product.
+    # Declaring a product old on that alone is a confident wrong answer, so it is `unknown`.
     held = answer([claim("not_after", date(2019, 3, 2), axis="old_review", match="partial")])
+    assert (held.verdict, held.basis) == (UNKNOWN, SINGLE_AXIS)
+
+
+def test_an_exact_upper_bound_still_proves_age():
+    held = answer([claim("not_after", date(2019, 5, 2), axis="old_review")])
     assert (held.verdict, held.basis) == (NOT_NEW, SINGLE_AXIS)
+
+
+def test_a_partial_upper_bound_alone_older_than_the_window_is_unknown():
+    # The measured shape: a DataLab onset whose term a sibling line shares.
+    held = answer([claim("not_after", date(2021, 3, 1), axis="datalab_onset", match="partial")])
+    assert held.verdict == UNKNOWN
+
+
+def test_any_exact_upper_bound_older_than_the_window_proves_age():
+    # Row 3 asks whether ANY `exact` upper bound is older than the widest window, not whether the
+    # tightest one is: a `partial` claim tighter than an `exact` one cannot take the `exact` one's
+    # proof away, and the `exact` one alone already proves the product old.
+    claims = [
+        claim("not_after", date(2021, 3, 1), axis="datalab_onset", match="partial"),
+        claim("not_after", date(2019, 5, 2), axis="old_review", source_ref="oy:A1"),
+    ]
+    assert verdict(claims) == NOT_NEW
+
+
+def test_a_partial_upper_bound_still_conflicts_and_still_corroborates():
+    # It keeps its two other jobs: a crossing is a finding (row 2, and barring it would throw away
+    # the MFDS cross-check this axis exists for), and it still makes the answer `corroborated`.
+    crossed = [
+        claim("not_before", date(2026, 7, 1)),
+        claim("not_after", date(2023, 5, 1), axis="datalab_onset", match="partial"),
+    ]
+    assert verdict(crossed) == CONFLICT
+    held = answer(
+        [
+            claim("not_before", date(2026, 7, 1)),
+            claim("not_after", date(2026, 8, 25), axis="old_review", source_ref="oy:A1", match="partial"),
+        ]
+    )
+    assert (held.verdict, held.basis) == ("new_3m", CORROBORATED)
+
+
+def test_the_interval_names_the_tightest_exact_upper_bound_separately():
+    claims = [
+        claim("not_after", date(2019, 1, 5), axis="old_review", source_ref="oy:A1", match="partial"),
+        claim("not_after", date(2021, 3, 10), axis="datalab_onset"),
+    ]
+    interval = launch_interval(PRODUCT, claims)
+    # `latest` is the tightest of all of them; `latest_exact` is the tightest of the `exact` ones,
+    # and it is what row 3 reads.
+    assert (interval.latest, interval.latest_exact) == (date(2019, 1, 5), date(2021, 3, 10))
+    assert launch_interval(PRODUCT, claims[:1]).latest_exact is None
 
 
 @pytest.mark.parametrize(

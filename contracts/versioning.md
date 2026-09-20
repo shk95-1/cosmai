@@ -28,7 +28,10 @@
   now fold **per axis by the earliest** before the tightest-across-axes is taken (several filings of one
   product line are one statement, and only its first is certainly true), and the `exact` gate on the
   deciding lower bound applies **whatever the basis** (an upper bound corroborates that the product
-  existed, not that the lower bound names the right product). Still no run has stamped the key, so the
+  existed, not that the lower bound names the right product). The addendum from the review of #285 is the
+  third: `not_new` needs an **`exact`** upper bound, because a `partial` one can be false rather than
+  weak — a sibling line sharing a DataLab term, a member-linked review — and declaring a product old on
+  it is a confident wrong answer where the other rows only lose a tier. Still no run has stamped the key, so the
   first value it carries in the database is `rule-v1.1` and nothing computed under v1.0 exists to
   compare. An axis's own `axis_version` is a different thing
   and lives on the claim row — a claim is evidence and survives a rule change, which is why the ledger is a

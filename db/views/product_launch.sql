@@ -17,6 +17,12 @@
 --   * a month claim is worth its whole month (first day for a lower bound, last day for an upper
 --     one), so a bound only ever moves outward -- mixed precision costs a tier and never buys one
 --   * `latest` is the tightest upper bound **the evidence names** (the earliest of them), and
+--     `latest_exact` is the tightest of the `exact` ones alone, NULL when there is none. The verdict
+--     reads `latest_exact` for `not_new` and nothing else does: a `partial` upper bound can be
+--     false rather than weak (a sibling line sharing a DataLab term, a member-linked review), so it
+--     may set `latest`, contradict a lower bound and corroborate one, but may not declare a product
+--     old by itself. Because it is a minimum, testing it is testing whether ANY `exact` upper bound
+--     is older than the window, and
 --     `earliest` folds the lower side TWICE (rule version 1.1, #283 review): each axis contributes
 --     the EARLIEST edge it names -- several filings of one product line are one statement and only
 --     its first is certainly true, a re-filing or a refill/set filing of a 2021 line does not say
@@ -87,6 +93,9 @@ SELECT
     b.earliest                                                                   AS earliest,
     b.earliest_match                                                             AS earliest_match,
     min(c.upper_edge) FILTER (WHERE c.in_rule AND c.direction IN ('not_after', 'at')) AS latest,
+    min(c.upper_edge) FILTER (
+        WHERE c.in_rule AND c.direction IN ('not_after', 'at') AND c.match_strength = 'exact'
+    )                                                                                AS latest_exact,
     count(*) FILTER (WHERE c.in_rule)::int                                       AS claims,
     count(*) FILTER (WHERE c.in_rule AND c.direction IN ('not_before', 'at'))::int AS lower_claims,
     count(*) FILTER (WHERE c.in_rule AND c.direction IN ('not_after', 'at'))::int  AS upper_claims,

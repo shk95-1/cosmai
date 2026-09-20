@@ -19,8 +19,9 @@ from datetime import date
 from analysis.types import LaunchClaimRow, LaunchIntervalRow, LaunchVerdict
 
 # The rule table's own version -- `needs.analysis_run.versions.launch` (contracts/versioning.md).
-# v1.1 (#283 review): lower bounds fold per axis by the earliest, and the `exact` gate on the
-# deciding lower bound no longer depends on the basis.
+# v1.1 (#283 review + the #285 review's addendum): lower bounds fold per axis by the earliest,
+# the `exact` gate on the deciding lower bound no longer depends on the basis, and `not_new`
+# needs an `exact` upper bound of its own.
 LAUNCH_VERSION = "rule-v1.1"
 
 # The three claim directions and which bound each one moves.
@@ -106,6 +107,7 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
     tie -- inside an axis or between two of them -- the surer one."""
     per_axis: dict[str, tuple[date, str]] = {}
     latest: date | None = None
+    latest_exact: date | None = None
     read = lower = upper = excluded = 0
     for claim in claims:
         low, high = claim_edges(claim)  # also refuses a precision this version cannot read
@@ -121,12 +123,16 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
         if claim.direction in UPPER_DIRECTIONS:
             upper += 1
             latest = high if latest is None else min(latest, high)
+            if claim.match_strength == EXACT:
+                latest_exact = high if latest_exact is None else min(latest_exact, high)
     earliest: date | None = None
     earliest_match: str | None = None
     for edge, strength in per_axis.values():
         if earliest is None or edge > earliest or (edge == earliest and strength < (earliest_match or "")):
             earliest, earliest_match = edge, strength
-    return LaunchIntervalRow(product_ref, earliest, earliest_match, latest, read, lower, upper, excluded)
+    return LaunchIntervalRow(
+        product_ref, earliest, earliest_match, latest, latest_exact, read, lower, upper, excluded
+    )
 
 
 def launch_basis(interval: LaunchIntervalRow) -> str:
@@ -151,7 +157,16 @@ def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> LaunchV
     # announces itself, and it is never auto-resolved.
     if earliest is not None and evidence_latest is not None and earliest > evidence_latest:
         return LaunchVerdict(CONFLICT, basis)
-    if latest < months_before(reference_date, WINDOW_MONTHS[-1]):
+    # Row 3, and the only way to `not_new`. It reads `latest_exact` and not `latest`: a `partial`
+    # upper bound can be FALSE rather than weak -- a sibling line sharing a DataLab term makes the
+    # series rise when the OLDER sibling launched, and a member-linked review belongs to a listing
+    # the linker only guessed was this product -- so on its own it may not declare a product old.
+    # `latest_exact` is the tightest `exact` upper bound, so testing it is testing whether **any**
+    # `exact` upper bound is older than the widest window; a `partial` claim tighter than an `exact`
+    # one cannot take that `exact` one's proof away.
+    if interval.latest_exact is not None and interval.latest_exact < months_before(
+        reference_date, WINDOW_MONTHS[-1]
+    ):
         return LaunchVerdict(NOT_NEW, basis)
     if earliest is None:
         return LaunchVerdict(UNKNOWN, basis)
