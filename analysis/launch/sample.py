@@ -33,7 +33,8 @@ UPPER = ("not_after", "at")
 
 @dataclass(frozen=True)
 class SampleRow:
-    """One labelled product. `product_ref` or `brand`+`name`, and always a month."""
+    """One labelled product: always a `product_ref` and always a month. `brand` and `name` are
+    there so a person can read the file back; nothing joins on them."""
 
     product_ref: str
     brand: str
@@ -93,8 +94,14 @@ def read_sample(path: Path = SAMPLE_CSV) -> list[SampleRow]:
                 raise ValueError(
                     f"{path.name}:{line}: launch_month must be YYYY-MM, not {row.launch_month!r}"
                 )
-            if not row.product_ref and not (row.brand and row.name):
-                raise ValueError(f"{path.name}:{line}: give a product_ref, or a brand and a name")
+            if not row.product_ref:
+                # `score` joins on `product_ref` and on nothing else, so a row identified by brand
+                # and name alone would be dropped in silence -- forty labelled rows printing "40
+                # labelled products" beside empty axis columns (#283 review, fix-when-touched).
+                raise ValueError(
+                    f"{path.name}:{line}: every row needs a product_ref; brand and name are what a "
+                    "person reads, not what the score joins on (eval/launch/README.md)"
+                )
             rows.append(row)
     return rows
 
@@ -117,7 +124,8 @@ def score(
     sample: Sequence[SampleRow], claims: Mapping[str, Iterable[LaunchClaimRow]]
 ) -> dict[str, AxisScore]:
     """Per axis, over the labelled products alone. `claims` is keyed by `product_ref`."""
-    windows = {row.product_ref: row.window for row in sample if row.product_ref}
+    # `read_sample` refuses a row without one, so every labelled product is reachable here.
+    windows = {row.product_ref: row.window for row in sample}
     gathered: dict[str, list[tuple[str, int]]] = {}
     for product_ref, window in windows.items():
         for claim in claims.get(product_ref, ()):

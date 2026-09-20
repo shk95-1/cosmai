@@ -32,7 +32,7 @@ ANON_GRANTS = REPO_ROOT / "db" / "grants" / "postgrest_anon_needs.sql"
 
 AT = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 EXCLUDED = next(iter(EXCLUDED_AXES))
-PRODUCTS = ("oy:A1", "oy:A2", "oy:A3", "oy:A4", "oy:A5", "oy:A6")
+PRODUCTS = ("oy:A1", "oy:A2", "oy:A3", "oy:A4", "oy:A5", "oy:A6", "oy:A7")
 COLUMNS = (
     "product_ref",
     "axis",
@@ -82,6 +82,11 @@ CLAIMS = (
     # The weaker one is first so the replacement branch of `launch_interval` has to run.
     _claim("oy:A6", "mfds_report", "not_before", date(2026, 7, 1), "day", "seq=6a", "partial"),
     _claim("oy:A6", "mfds_report", "not_before", date(2026, 7, 1), "day", "seq=6b"),
+    # Rule version 1.1: two filings of one line, five years apart and both `exact`. The axis's bound
+    # is the EARLIEST of its own claims, so the pair has to fold to 2021 in the SQL as well as in
+    # the Python -- this is the row the grade-A review of #283 found missing.
+    _claim("oy:A7", "mfds_report", "not_before", date(2026, 7, 10), "day", "seq=7b"),
+    _claim("oy:A7", "mfds_report", "not_before", date(2021, 4, 16), "day", "seq=7a"),
 )
 
 INSERT = (
@@ -236,6 +241,26 @@ def test_a_tie_between_two_lower_bounds_goes_to_the_surer_claim(ledger: str, _sc
     tied = [c for c in CLAIMS if c.product_ref == "oy:A6"]
     assert launch_interval("oy:A6", tied).earliest_match == "exact"
     assert tuple(row) == dataclasses.astuple(launch_interval("oy:A6", tied))
+
+
+def test_several_lower_bounds_of_one_axis_fold_to_the_earliest_in_the_view_too(
+    ledger: str, _schema_name: str
+):
+    # Pinned by value as well as by the mirror: a per-axis fold both implementations got wrong in
+    # the same direction would still make them agree, and this bound is what rule 6 and 7 read.
+    fields = tuple(f.name for f in dataclasses.fields(LaunchIntervalRow))
+    engine = create_engine(ledger)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("SET ROLE needs_owner")
+        conn.exec_driver_sql(INSERT.format(schema=f'"{_schema_name}"'), [_values(c) for c in CLAIMS])
+        conn.exec_driver_sql(_body(VIEW).replace("needs.", f'"{_schema_name}".'))
+        row = conn.exec_driver_sql(
+            f"SELECT {', '.join(fields)} FROM \"{_schema_name}\".product_launch WHERE product_ref = 'oy:A7'"
+        ).one()
+    engine.dispose()
+    folded = [c for c in CLAIMS if c.product_ref == "oy:A7"]
+    assert launch_interval("oy:A7", folded).earliest == date(2021, 4, 16)
+    assert tuple(row) == dataclasses.astuple(launch_interval("oy:A7", folded))
 
 
 def test_the_view_emits_the_row_type_the_contract_declares(ledger: str, _schema_name: str):

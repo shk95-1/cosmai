@@ -14,16 +14,23 @@
   `interfaces.md` §Evidence), so it is carried by the implementation rather than by team agreement. An
   evidence row uses the same `run_id` as its verdict row, so one run's `versions` carries three keys. Cards
   make no rows and so have no key (fork #6).
-- `launch` is **the version of the launch-evidence rule table** and its value is `rule-v1.0`
+- `launch` is **the version of the launch-evidence rule table** and its value is `rule-v1.1`
   (`analysis.launch.LAUNCH_VERSION`, `interfaces.md` §Launch evidence, #282) — not an exception to the two
   formats, for `evidence`'s reason: it is the version of rules the code fixed, not the name of an agreement
   document. What it covers is the whole read, because all of it changes what a verdict means: the rule
   table's rows and their order, the 3·6·12-month windows, the precision widening, the reference-date clamp
-  on the interval's upper end, the `exact` gate a `single_axis` tier passes, and which axes this
-  version leaves out of the verdict (`EXCLUDED_AXES`). It stayed `rule-v1.0` through the review round of
-  #282: the key exists so a stored value names the table that made it, and since no run has stamped it and
-  no row was ever computed under the reviewed table, a bump would name a version that produced nothing —
-  the first value this key carries is the one #125 writes. An axis's own `axis_version` is a different thing
+  on the interval's upper end, **how the interval's bounds are folded out of the claims**, the `exact` gate
+  a tier passes, and which axes this version leaves out of the verdict (`EXCLUDED_AXES`). It stayed
+  `rule-v1.0` through the review round of #282: the key exists so a stored value names the table that made
+  it, and since no run has stamped it and no row was ever computed under the reviewed table, a bump would
+  name a version that produced nothing. **`rule-v1.1` is the grade-A review of #283**, and it is a bump
+  rather than an edit in place because it moves two answers that #282's merged table gave: lower bounds
+  now fold **per axis by the earliest** before the tightest-across-axes is taken (several filings of one
+  product line are one statement, and only its first is certainly true), and the `exact` gate on the
+  deciding lower bound applies **whatever the basis** (an upper bound corroborates that the product
+  existed, not that the lower bound names the right product). Still no run has stamped the key, so the
+  first value it carries in the database is `rule-v1.1` and nothing computed under v1.0 exists to
+  compare. An axis's own `axis_version` is a different thing
   and lives on the claim row — a claim is evidence and survives a rule change, which is why the ledger is a
   table and the rule table is not. The run that reads the verdict stamps this key (#125's
   `unresolved_new`), so two runs under different rule tables are never compared unmarked; the ledger's rows

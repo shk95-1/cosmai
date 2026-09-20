@@ -384,12 +384,17 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
   change because they differ** (0 = an answer was computed).
 - `analyze launch` fills the launch-evidence ledger (#283, `interfaces.md` §Launch evidence): four
   axes, one claim per axis and per matched source row, upserted on `(product_ref, axis, source_ref)`.
-  It runs inside `analyze all` straight after `link`, because the site-level axes resolve a listing
-  through `product_member` and must read the clustering that run has just rebuilt. It opens **no run
-  row** — like `link` — since every claim carries its own `axis_version`, and it **withdraws**: a
-  claim of its own four axes on a `product_ref` no `product_member` row points at any more is DELETEd,
-  which is the duty the contract puts on the axis that wrote it. Coverage is read back with
-  `uv run tool/launch-coverage` (read-only).
+  It runs inside `analyze all` **last, after `aggregate`** — its own requirement is only that the
+  clustering be fresh, since the site-level axes resolve a listing through `product_member`, and
+  nothing between `link` and the end re-clusters. Running it last is what keeps it from costing a
+  night of metrics: it is the newest stage and the only one here that reads
+  `trend_radar.new_product`, and **nothing in this run consumes the ledger** (`unresolved_new` is
+  #125), so a failure is folded into the outcome rather than aborting — `metrics_need` and
+  `metrics_wish` are already computed and committed, and the run reports **`partial`** with the
+  stage named. It opens **no run row** — like `link` — since every claim carries its own
+  `axis_version`, and it **withdraws**: a claim of its own four axes on a `product_ref` no
+  `product_member` row points at any more is DELETEd, which is the duty the contract puts on the axis
+  that wrote it. Coverage is read back with `uv run tool/launch-coverage` (read-only).
 - T14: `extract` is not a stage of its own — it only makes candidates and writes no row, so idempotence cannot be observed. Extraction runs inside `polarity` (the `Extractor` protocol is unchanged).
 - B11: `eval aspect` was dropped because both the evaluation set and the baseline are 0 rows. Reviving it means the evaluation set and a row in `interfaces.md`'s baseline table arriving in the same PR.
 - Every step is idempotent by **natural-key upsert**. A re-run produces the same result.

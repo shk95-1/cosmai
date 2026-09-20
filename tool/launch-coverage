@@ -98,7 +98,13 @@ def main() -> int:
     shown = " · ".join(f"{name} {n}" for name, n in sorted(verdicts.items()))
     print(f"verdict at {reference.isoformat()}: {shown}")
 
-    sample = read_sample(Path(args.sample) if args.sample else SAMPLE_CSV)
+    try:
+        sample = read_sample(Path(args.sample) if args.sample else SAMPLE_CSV)
+    except (ValueError, OSError) as refused:
+        # A file a person fills by hand is wrong sooner or later; what they need is the line and the
+        # reason, not a traceback out of a reporting tool.
+        print(f"sample   {refused}")
+        return 2
     if not sample:
         # Repo-relative: an absolute path here would differ per checkout and mean nothing in a report.
         print("sample   eval/launch/launch_sample.csv has no rows yet -- accuracy is not computable")

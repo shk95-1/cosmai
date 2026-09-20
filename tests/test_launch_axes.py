@@ -258,6 +258,29 @@ def test_an_exact_mfds_bound_alone_yields_its_tier_and_a_partial_one_does_not():
     assert launch_verdict(launch_interval("oy:A1", [partial]), REFERENCE).verdict == "unknown"
 
 
+def test_a_later_refiling_of_one_line_does_not_make_the_product_new():
+    # The review's main finding, from these very fixtures: `base` and `recent` are the same
+    # registered name filed five years apart, and 91 names in the real ledger are filed twice (13 of
+    # them years apart). Both claims are `exact`, so no strength gate can catch it -- the axis's
+    # bound has to be the EARLIEST of its own claims.
+    claims = _claims(SUNSCREEN, ("base", "recent"))
+    assert {c.match_strength for c in claims} == {EXACT}
+    interval = launch_interval("oy:A1", claims)
+    assert interval.earliest == REGISTRATIONS["base"].report_date
+    assert launch_verdict(interval, REFERENCE).verdict != "new_3m"
+    assert launch_verdict(interval, REFERENCE).verdict == "unknown"
+
+
+def test_a_refill_or_set_filing_resolves_to_the_base_lines_earliest_filing():
+    # `normalize_name`'s GLUED rule strips the refill, set and gift words, so a 2026 refill or
+    # gift-set registration of a 2021 line folds to that line's key and is `exact` at its own
+    # date. Nothing about the join is wrong -- it is the same line -- so only the fold answers it.
+    claims = _claims(SUNSCREEN, ("base", "refill", "gift_set"))
+    assert len(claims) == 3
+    assert {c.match_strength for c in claims} == {EXACT}
+    assert launch_interval("oy:A1", claims).earliest == REGISTRATIONS["base"].report_date
+
+
 def test_a_filing_after_a_held_review_is_a_conflict_rather_than_a_launch():
     # The second measured trap: the MFDS join took a later variant, and the product's own held
     # review predates the filing. The pair crosses, and #282's row 2 answers `conflict`.

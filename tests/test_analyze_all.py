@@ -380,6 +380,33 @@ def test_an_impl_run_records_that_implementations_version_not_the_rules(
     assert stamped == [(StubPolarity.version,)]
 
 
+def test_a_launch_failure_leaves_the_metrics_of_that_run_standing(
+    analysis_url: str, sources: tuple[str, str], database_url_for_tests: str
+):
+    """The launch axes run last and may not take a night's metrics with them (#283 review B3).
+
+    `trend_radar.new_product` is read by that stage and by nothing else in this run, so closing it
+    isolates a launch failure. Nothing in `analyze all` consumes the ledger -- #125 is not built --
+    so the run yields: the metrics are computed, committed and counted, and the failure is said.
+    """
+    commerce, _ = sources
+    engine = create_engine(database_url_for_tests)
+    with engine.begin() as conn:
+        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".new_product FROM needs_runtime')
+    engine.dispose()
+    found = _all(analysis_url, sources)
+    assert found.status == "partial", found.detail
+    assert "launch" in found.detail
+    # The point of the whole fix: the two metric tables of this run are there anyway.
+    assert found.counts["metrics_need"] > 0
+    assert found.counts["metrics_wish"] > 0
+    assert _dump(analysis_url, "metrics_need", NEED_METRICS, found.run_id)
+    with connect(analysis_url) as conn, conn.cursor() as cur:
+        cur.execute("SELECT status, note FROM analysis_run WHERE run_id = %s", (found.run_id,))
+        row = cur.fetchone()
+    assert row is not None and row[0] == "partial" and "launch" in row[1]
+
+
 def test_a_failing_stage_closes_the_run_as_failed(analysis_url: str, sources: tuple[str, str]):
     _, youtube = sources
     with connect(analysis_url) as conn:
@@ -404,10 +431,8 @@ def test_a_polarity_failure_closes_the_run_polarity_itself_opened(
     commerce, _ = sources
     engine = create_engine(database_url_for_tests)
     with engine.begin() as conn:
-        # The ranking snapshot is polarity's alone (it reads `category_name` off it): link reads
-        # product and the comment tables, and launch reads product, new_product and review (#283),
-        # so closing any of those would now kill an earlier stage instead.
-        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".rank_snapshot FROM needs_runtime')
+        # link reads product only -- closing review alone makes polarity die after it opened the run.
+        conn.exec_driver_sql(f'REVOKE SELECT ON "{commerce}".review FROM needs_runtime')
     engine.dispose()
     found = _all(analysis_url, sources)
     assert found.status == "failed" and "polarity" in found.detail

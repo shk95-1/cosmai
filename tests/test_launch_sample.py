@@ -56,7 +56,11 @@ def test_a_labelled_row_names_the_month_as_the_span_it_is():
     [
         ("oy:A1,b,n,2021-5,page,", "launch_month must be YYYY-MM"),
         ("oy:A1,b,n,,page,", "launch_month must be YYYY-MM"),
-        (",,,2021-05,page,", "give a product_ref, or a brand and a name"),
+        (",,,2021-05,page,", "needs a product_ref"),
+        # A row given as brand+name alone used to be accepted here and then dropped in silence by
+        # `score`, which keys on `product_ref` -- forty labelled rows would have printed "40
+        # labelled products" beside empty axis columns (#283 review, fix-when-touched).
+        (",brand,name,2021-05,page,", "needs a product_ref"),
     ],
 )
 def test_a_row_that_cannot_be_scored_is_refused_rather_than_counted_as_a_miss(
