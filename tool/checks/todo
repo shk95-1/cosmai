@@ -3,12 +3,19 @@
 # `when-touched` issue, TODO(#n) or, once two repos share one history, TODO(owner/repo#n) (#238,
 # the same call #175 made for `Closes #n`) -- tool/issue audit checks at boot that n is open in the
 # named repo, the shape is what an offline hook can enforce, the linkage is not.
+#
+# `--tree` reads the tracked files instead of the index (#281). Skeleton: the flag is accepted and
+# finds nothing yet.
 set -e
 # Loose on purpose, as the bare-only version before it was: this also has to let through the
 # check's own regex source (tool/issue's git-grep pattern), which contains "TODO(" followed by
 # metacharacters rather than a real issue number.
-hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/todo' | grep -E '^\+[^+]' | grep -E 'TODO' \
-    | grep -vE 'TODO\\*\(?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#' || true)
+if [ "$1" = "--tree" ]; then
+    hits=""
+else
+    hits=$(git diff --cached -U0 --no-color -- . ':!tool/checks/todo' | grep -E '^\+[^+]' | grep -E 'TODO' \
+        | grep -vE 'TODO\\*\(?([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#' || true)
+fi
 [ -z "$hits" ] && exit 0
 printf '%s\n' "$hits" >&2
 printf '\n✗ A staged marker has no issue: write TODO(#n) or TODO(owner/repo#n) and open a when-touched issue for n.\n\n' >&2
