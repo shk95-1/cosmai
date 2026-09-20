@@ -167,6 +167,7 @@ class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
     claimed_on: date
     claimed_precision: str  # day | month
     source_ref: str
+    match_strength: str  # exact | partial -- how sure the join from the source row to the product is
     axis_version: str
     observed_at: datetime
     note: str | None = None
@@ -176,11 +177,18 @@ class LaunchClaimRow:  # → needs.product_launch_evidence (§Launch evidence)
 class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdict is read from
     product_ref: str
     earliest: date | None
-    latest: date | None
+    earliest_match: str | None  # the match_strength of the claim that set `earliest`
+    latest: date | None  # the evidence's own upper bound; the reference date clamps it in the verdict
     claims: int
     lower_claims: int
     upper_claims: int
     excluded_claims: int
+
+
+@dataclass(frozen=True)
+class LaunchVerdict:  # analysis/launch's answer; stored in no table (§Launch evidence)
+    verdict: str  # new_3m | new_6m | new_12m | not_new | unknown | conflict
+    basis: str  # corroborated | single_axis
 
 
 # ---------- extraction ----------

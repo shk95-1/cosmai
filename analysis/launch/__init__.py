@@ -16,7 +16,7 @@ import calendar
 from collections.abc import Iterable
 from datetime import date
 
-from analysis.types import LaunchClaimRow, LaunchIntervalRow
+from analysis.types import LaunchClaimRow, LaunchIntervalRow, LaunchVerdict
 
 # The rule table's own version -- `needs.analysis_run.versions.launch` (contracts/versioning.md).
 LAUNCH_VERSION = "rule-v1.0"
@@ -40,6 +40,16 @@ NOT_NEW = "not_new"
 UNKNOWN = "unknown"
 CONFLICT = "conflict"
 VERDICTS = ("new_3m", "new_6m", "new_12m", NOT_NEW, UNKNOWN, CONFLICT)
+
+# What the interval's upper end rests on, which is what tells a tier held up by two axes from one
+# held up by a lower bound and the reference date alone.
+CORROBORATED = "corroborated"
+SINGLE_AXIS = "single_axis"
+BASES = (CORROBORATED, SINGLE_AXIS)
+
+# The join strengths a claim may carry, and the one this rule version trusts on its own.
+MATCH_STRENGTHS = ("exact", "partial")
+EXACT = "exact"
 
 
 def shift_months(day: date, months: int) -> date:
@@ -95,26 +105,32 @@ def launch_interval(product_ref: str, claims: Iterable[LaunchClaimRow]) -> Launc
         if claim.direction in UPPER_DIRECTIONS:
             upper += 1
             latest = high if latest is None else min(latest, high)
-    return LaunchIntervalRow(product_ref, earliest, latest, read, lower, upper, excluded)
+    return LaunchIntervalRow(product_ref, earliest, None, latest, read, lower, upper, excluded)
 
 
-def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> str:
+def launch_basis(interval: LaunchIntervalRow) -> str:
+    """What the interval's upper end rests on."""
+    return SINGLE_AXIS
+
+
+def launch_verdict(interval: LaunchIntervalRow, reference_date: date) -> LaunchVerdict:
     """The rule table of §Launch evidence, in its own order -- the rows below are that table."""
     earliest, latest = interval.earliest, interval.latest
+    basis = launch_basis(interval)
     if interval.claims == 0:
-        return UNKNOWN
+        return LaunchVerdict(UNKNOWN, basis)
     if earliest is not None and latest is not None and earliest > latest:
-        return CONFLICT
+        return LaunchVerdict(CONFLICT, basis)
     if latest is not None and latest < months_before(reference_date, WINDOW_MONTHS[-1]):
-        return NOT_NEW
+        return LaunchVerdict(NOT_NEW, basis)
     if earliest is None or latest is None:
-        return UNKNOWN
+        return LaunchVerdict(UNKNOWN, basis)
     for months in WINDOW_MONTHS:
         # The whole interval inside the window, never merely touching it -- which is also what
         # makes a tier narrower than the interval's own width impossible to assign.
         if months_before(reference_date, months) <= earliest and latest <= reference_date:
-            return NEW.format(months=months)
-    return UNKNOWN
+            return LaunchVerdict(NEW.format(months=months), basis)
+    return LaunchVerdict(UNKNOWN, basis)
 
 
 def launch_at(interval: LaunchIntervalRow) -> date | None:

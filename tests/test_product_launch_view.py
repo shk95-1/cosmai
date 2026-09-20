@@ -32,7 +32,7 @@ ANON_GRANTS = REPO_ROOT / "db" / "grants" / "postgrest_anon_needs.sql"
 
 AT = datetime(2026, 9, 20, 3, 0, tzinfo=UTC)
 EXCLUDED = next(iter(EXCLUDED_AXES))
-PRODUCTS = ("oy:A1", "oy:A2", "oy:A3")
+PRODUCTS = ("oy:A1", "oy:A2", "oy:A3", "oy:A4", "oy:A5")
 COLUMNS = (
     "product_ref",
     "axis",
@@ -40,26 +40,46 @@ COLUMNS = (
     "claimed_on",
     "claimed_precision",
     "source_ref",
+    "match_strength",
     "axis_version",
     "observed_at",
 )
 
+
+def _claim(
+    product_ref: str,
+    axis: str,
+    direction: str,
+    claimed_on: date,
+    precision: str,
+    source_ref: str,
+    match: str = "exact",
+) -> LaunchClaimRow:
+    return LaunchClaimRow(
+        product_ref, axis, direction, claimed_on, precision, source_ref, match, "rule-v1.0", AT
+    )
+
+
 # One claim set per product, covering every shape the view has to fold: two claims of one axis on
-# one product, both directions, both precisions, and an axis this rule version does not read.
+# one product, both directions, both precisions on both ends, an in-rule `at`, a product whose only
+# bound is a lower one (`latest` NULL), and an axis this rule version does not read.
 CLAIMS = (
-    LaunchClaimRow("oy:A1", "mfds_report", "not_before", date(2026, 6, 12), "day", "seq=1", "rule-v1.0", AT),
-    LaunchClaimRow("oy:A1", "mfds_report", "not_before", date(2026, 5, 2), "day", "seq=2", "rule-v1.0", AT),
-    LaunchClaimRow(
-        "oy:A1", "datalab_onset", "not_after", date(2026, 8, 4), "month", "req=abc", "rule-v1.0", AT
-    ),
-    LaunchClaimRow("oy:A1", EXCLUDED, "at", date(2019, 1, 1), "day", "oy:A1", "rule-v1.0", AT),
-    LaunchClaimRow("oy:A2", "old_review", "not_after", date(2019, 3, 2), "day", "oy:A2", "rule-v1.0", AT),
-    LaunchClaimRow("oy:A3", EXCLUDED, "at", date(2026, 9, 1), "day", "oy:A3", "rule-v1.0", AT),
+    _claim("oy:A1", "mfds_report", "not_before", date(2026, 6, 12), "day", "seq=1"),
+    _claim("oy:A1", "mfds_report", "not_before", date(2026, 5, 2), "day", "seq=2", "partial"),
+    _claim("oy:A1", "datalab_onset", "not_after", date(2026, 8, 4), "month", "req=abc"),
+    _claim("oy:A1", EXCLUDED, "at", date(2019, 1, 1), "day", "oy:A1"),
+    _claim("oy:A2", "old_review", "not_after", date(2019, 3, 2), "day", "oy:A2"),
+    _claim("oy:A3", EXCLUDED, "at", date(2026, 9, 1), "day", "oy:A3"),
+    # An in-rule `at` moves both ends at once, and it outranks a month-precision lower bound whose
+    # own join is the stronger of the two -- the deciding bound is the tightest one, not the surest.
+    _claim("oy:A4", "vendor_board", "at", date(2026, 7, 15), "day", "daisomall:99", "partial"),
+    _claim("oy:A4", "mfds_report", "not_before", date(2026, 6, 20), "month", "seq=4"),
+    _claim("oy:A5", "mfds_report", "not_before", date(2026, 8, 1), "day", "seq=5"),
 )
 
 INSERT = (
     "INSERT INTO {schema}.product_launch_evidence (" + ", ".join(COLUMNS) + ")"
-    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
 )
 
 
@@ -144,7 +164,12 @@ def test_an_axis_restates_its_own_claim_without_duplicating_it(ledger: str, _sch
 
 @pytest.mark.parametrize(
     ("column", "value"),
-    [("direction", "maybe_before"), ("claimed_precision", "quarter"), ("source_ref", "")],
+    [
+        ("direction", "maybe_before"),
+        ("claimed_precision", "quarter"),
+        ("match_strength", "probably"),
+        ("source_ref", ""),
+    ],
 )
 def test_a_claim_this_rule_version_could_not_read_cannot_be_stored(
     ledger: str, _schema_name: str, column: str, value: str
