@@ -284,6 +284,30 @@ def test_a_failed_request_costs_that_product_and_leaves_the_run_partial(catalogu
     assert errors >= 1
 
 
+def test_a_failed_request_never_withdraws_the_claim_that_was_already_there(catalogue, secret_file):
+    # A 4xx is something NAVER said about one call, not evidence that a product stopped having an
+    # onset. Withdrawing on it would flip the product's verdict on the month the vendor happened to
+    # be unhappy, and the next month's pass would put the same claim back -- with nothing anywhere
+    # saying the metric had moved.
+    _go(catalogue, secret_file, _FakeFetcher({"oy:A1": {"search_trend": rising(2023, 5)}}))
+    (standing,) = _claims(catalogue)
+    assert standing.product_ref == "oy:A1"
+
+    assert _go(catalogue, secret_file, _FakeFetcher({}, fails=["oy:A1"])) == 1
+    rows = _claims(catalogue)
+    assert [r.product_ref for r in rows] == ["oy:A1"]
+    assert rows[0].claimed_on == standing.claimed_on
+
+
+def test_two_apis_that_answer_with_no_series_do_withdraw(catalogue, secret_file):
+    # The other side of the rule above: nothing failed, both instruments answered, and what they
+    # answered is that these terms have no series. That is evidence, and the claim goes.
+    _go(catalogue, secret_file, _FakeFetcher({"oy:A1": {"search_trend": rising(2023, 5)}}))
+    assert len(_claims(catalogue)) == 1
+    assert _go(catalogue, secret_file, _FakeFetcher({})) == 0
+    assert _claims(catalogue) == []
+
+
 def test_a_refused_product_is_never_requested(catalogue, secret_file):
     # oy:D1's only terms would be its brand and the category word, so it is not in the term file
     # and no request is spent on it.

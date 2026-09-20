@@ -205,7 +205,6 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
     by_ref = {ref.product_ref: ref for ref in catalogue}
 
     end_date = now.date()
-    considered: list[str] = []
     claimed = 0
     no_onset: list[str] = []
     failed: list[str] = []
@@ -235,7 +234,6 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
             break
         if hurt:
             failed.append(product_ref)
-        considered.append(product_ref)
 
         months = []
         for api in ("search_trend", "shopping_insight"):
@@ -262,14 +260,21 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
             else:
                 storage_db.write_launch_claims(connection, [claim])
                 claimed += 1
-            # Scoped to this axis and this product: the old term set's claim is not a second
-            # opinion, it is a statement this axis no longer makes (#282's DELETE duty).
-            storage_db.withdraw_launch_claims(
-                connection,
-                axis=AXIS,
-                product_ref=product_ref,
-                keep_source_ref=None if claim is None else claim.source_ref,
-            )
+            if claim is not None or not hurt:
+                # Scoped to this axis and this product: the old term set's claim is not a second
+                # opinion, it is a statement this axis no longer makes (#282's DELETE duty).
+                #
+                # Not when a request failed and nothing came of the product: a 4xx is a thing NAVER
+                # said about one call, not evidence that a product stopped having an onset, and a
+                # withdrawal on it would quietly flip the product's verdict on the month the vendor
+                # happened to be unhappy. Two APIs that both answered with no series *is* evidence,
+                # and it lands here with `hurt` false.
+                storage_db.withdraw_launch_claims(
+                    connection,
+                    axis=AXIS,
+                    product_ref=product_ref,
+                    keep_source_ref=None if claim is None else claim.source_ref,
+                )
 
     if stopped is not None:
         # The pass did not run to the end, so nothing is withdrawn: a rate limit is not evidence
@@ -281,17 +286,24 @@ def run(engine: Any, fetcher: Any, journal: Any, *, now: datetime, terms_path: P
         return _Outcome("partial", 1, f"launch_onset stopped: {stopped}")
 
     with engine.begin() as connection:
-        # The other half of the duty, and only here: a `product_ref` wobbles when the catalogue is
-        # re-clustered, so a claim of this axis on a ref this complete pass never considered is one
-        # nothing else will ever withdraw.
-        vacated = storage_db.withdraw_vacated_launch_claims(connection, axis=AXIS, considered=considered)
+        # The other half of the duty, and only after a pass that ran to the end: a `product_ref` is
+        # minted from its cluster's anchor and **wobbles** when the catalogue is re-clustered, so a
+        # claim of this axis on a ref the term list no longer names is one nothing else will ever
+        # withdraw. The set is the term list itself and not what this pass managed to fetch -- a ref
+        # the list still names is one this axis still speaks for, whatever the vendor said today.
+        vacated = storage_db.withdraw_vacated_launch_claims(connection, axis=AXIS, considered=list(wanted))
 
     coverage = (
         f"launch_onset: {claimed} claim(s), {len(no_onset)} with no onset, "
         f"{len(wanted)} product(s) in the term list, {len(failed)} failed, {vacated} withdrawn"
     )
     print(coverage)
-    if failed and claimed == 0:
+    if len(failed) == len(wanted):
+        # Every product failed, so the pass learned nothing at all -- that is a refusal. It is not
+        # keyed on the claim count the way `datalab`'s is keyed on its row count: a pass where every
+        # product honestly has no onset writes no claim and is a perfectly good `ok` run, and
+        # reading zero claims as a refusal would put the axis in `pipeline_health` as broken for
+        # exactly the answer it is supposed to be able to give.
         return _Outcome("blocked", 2, f"every product failed: {', '.join(failed)}")
     if failed:
         return _Outcome("partial", 1, f"{len(failed)} product(s) failed: {', '.join(failed)}")
