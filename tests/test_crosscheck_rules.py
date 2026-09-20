@@ -7,10 +7,16 @@ ydc 세 스크립트의 `demo()` 가 못 박은 입력·출력이 여기 그대�
 
 from __future__ import annotations
 
+import csv
+import json
+from pathlib import Path
+
 import pytest
 
 from analysis import crosscheck
 from analysis.trend import MIN_MENTIONS
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "crosscheck"
 
 
 def test_ranks_puts_the_largest_first():
@@ -177,6 +183,29 @@ def test_the_confirmed_table_answers_before_the_hints():
         assert crosscheck.polarity(name, topic_group=group) == "negative", f"{group}/{name}"
     # `없어요` 힌트가 부정으로 끌어당기는 자리도 같은 병이다.
     assert crosscheck.polarity("날림이 없어요") == "negative"
+
+
+def test_the_second_read_holds_a_sixth_phrase_the_hint_inverts():
+    """The vendor began a second wording for one group's scale after the first read. Of the two phrases the
+    user confirmed (fork #108), the hint alone calls the low end positive -- the same illness, a month on."""
+    read = json.loads((FIXTURES / "polarity_second_read.json").read_text(encoding="utf-8"))
+    flipped, agreed = read["inverted_by_the_hint"], read["agreed_with_the_hint"]
+    assert crosscheck.polarity(flipped["name"]) == "positive", "the hint inverting it is this test's premise"
+    assert crosscheck.polarity(flipped["name"], topic_group=read["group"]) == flipped["right"]
+    assert crosscheck.polarity(agreed["name"], topic_group=read["group"]) == agreed["right"]
+
+
+def test_the_second_polarity_read_only_adds_to_the_first():
+    assert crosscheck.POLARITY_CSV.name == "polarity_v2.csv"
+
+    def rows(path: Path) -> list[tuple[str, str, str]]:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            return [(r["topic_group"], r["topic_name"], r["polarity"]) for r in csv.DictReader(handle)]
+
+    first = rows(crosscheck.POLARITY_CSV.parent / "polarity_v1.csv")
+    second = rows(crosscheck.POLARITY_CSV)
+    assert second[: len(first)] == first
+    assert len(second) == len(first) + 2 == 25
 
 
 def test_a_group_the_table_does_not_know_still_falls_back_to_the_hints():
