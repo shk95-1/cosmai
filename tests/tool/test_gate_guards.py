@@ -55,6 +55,13 @@ MAPPED = "analysis/polarity/pipeline.py"
 
 CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
+# tool/checks/lang matches Hangul by codepoint, which `grep -P` can only do in a UTF-8 locale -- and
+# it says so rather than passing quietly when it cannot. A real run inherits the caller's locale, so
+# the fixture passes it on; C.UTF-8 is the fallback for an environment carrying none.
+LOCALE = {k: v for k, v in os.environ.items() if k in ("LANG", "LC_ALL", "LC_CTYPE") and v} or {
+    "LC_ALL": "C.UTF-8"
+}
+
 
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(
@@ -121,6 +128,7 @@ def stub_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 def run_gate(repo: Path, stub_path: str, *args: str) -> subprocess.CompletedProcess:
     env = {
+        **LOCALE,
         "HOME": str(repo),
         "PATH": stub_path,
         # Set, so the gate takes the branch that needs no container (its own #178 wiring).
@@ -195,8 +203,9 @@ def test_a_bare_class_a_run_refuses_a_marker_that_names_no_issue(repo: Path, stu
 
 def test_a_class_b_change_pays_the_static_guards_too(repo: Path, stub_path: str):
     base = class_b_change(repo, "notes.md", "nothing to see\n")
+    # Left uncommitted on purpose: committed, a changed tool/checks/lint would itself be on the
+    # trigger list and the run would be class A -- the one class that was never the question here.
     write_check(repo, "lint", FAILING_STUB)
-    commit(repo, "static analysis has something to say")
     done = run_gate(repo, stub_path, "--changed", base)
     assert "class B" in done.stdout, done.stdout
     assert done.returncode != 0, done.stdout + done.stderr

@@ -28,6 +28,15 @@
 #
 # Reads nothing secret: pg_dump runs inside the production container as the superuser via docker
 # exec, the same access path db/migrate.sh already uses.
+#
+# Why this one stays out of `tool/checks/test` while #281 moved the five static guards into it: those
+# judge a tree and this judges a deployment. It compares the live production database against the
+# contract, so it cannot answer on a runner at all (CI has no production container and no route to
+# one), and on a developer's host it would make a push's verdict depend on the state of a database
+# that push never touched -- red for a tree that is right, green for one that is not. Its moment is
+# the deploy, beside tool/checks/deploy-gate and db/migrate.sh, run by the session doing it. The cost
+# whoever schedules it there is buying: a throwaway postgres:18-alpine plus a whole db/migrate.sh --
+# the same ~2 minutes tool/checks/test pays for its own container -- and then the dumps of production.
 set -e
 . tool/checks/prerequisite
 require_command docker pg_isready
