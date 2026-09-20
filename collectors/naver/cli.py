@@ -37,7 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from collectors.naver import keywords, parsing
+from collectors.naver import keywords, launch, parsing
 from collectors.naver.models import Dataset
 from collectors.naver.scope import (
     BLOG_DISPLAY,
@@ -96,9 +96,11 @@ def run(
     fetcher: Fetcher | None = None,
     secrets_path: str | Path | None = None,
     captured_at: datetime | None = None,
+    terms_path: Path | None = None,
 ) -> int:
     """Run one dataset for one pass. `board`/`since` are accepted for the entrypoint's shape
-    (contracts/entrypoints.md); neither means anything to either naver dataset today."""
+    (contracts/entrypoints.md); neither means anything to any naver dataset today. `terms_path` is
+    `launch_onset` only, and is how a test points the axis at a term list of its own."""
     del board, since
     try:
         wanted = Dataset(dataset)
@@ -134,6 +136,10 @@ def run(
             active_fetcher = fetcher
         if wanted is Dataset.DATALAB:
             outcome = _run_datalab(engine, active_fetcher, journal, now=now)
+        elif wanted is Dataset.LAUNCH_ONSET:
+            # Its own module (#285): the one dataset that writes evidence rather than source rows,
+            # and the one whose request shapes are not this file's.
+            outcome = launch.run(engine, active_fetcher, journal, now=now, terms_path=terms_path)
         else:
             outcome = _run_blog(engine, active_fetcher, journal, now=now)
     except BaseException as exc:

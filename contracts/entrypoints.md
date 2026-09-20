@@ -6,7 +6,7 @@ cosmai collect <collector> --dataset <dataset> [--board <board>] [--since <date>
   collector ∈ {commerce, youtube, naver}
   commerce datasets: ranking | product | review | review_stats | new_product | review_low
   youtube  datasets: watch | work | flatten | prune  (the meaning of the old tubedepth commands is kept)
-  naver    datasets: datalab | blog   (no source-row model -- not inherited from cosmai-old; the sources are needs.naver_* (004))
+  naver    datasets: datalab | blog | launch_onset   (no source-row model -- not inherited from cosmai-old; the sources are needs.naver_* (004, 011))
 exit codes: 0 ok · 1 partial (some failed or were truncated) · 2 blocked (blocked/refused)   <- the trend-radar observation convention as it stands
 cosmai login --source <source>
   Refused with exit code 2 when <source> is not in the registry or is not a browser transport (Transport.BROWSER).
@@ -94,6 +94,32 @@ the anchor and the batch it is missing from (`no 기준_세럼 point from: …`)
 written, so this is partial and not blocked, by the same rule as a stop above: partial means we
 yielded. The groups of that request can only rescale to NULL, and an `ok` run whose rescale is
 entirely NULL is the state #250 was filed for.
+
+**The launch-onset axis (#285).** A third dataset, `launch_onset`, reads **two** DataLab APIs for
+each product a reviewed term list names: the search trend above and the shopping-insight keyword
+trend `POST /shopping/v1/category/keywords` (monthly from 2017-08, one `category` per request —
+`scope.SHOPPING_CATEGORY`), through the same gateway and the same key pair. It writes a `not_after`
+claim per product into `needs.product_launch_evidence` under the axis `datalab_onset`
+(`interfaces.md` §Launch evidence), and the monthly series behind it into `needs.naver_launch_series`
+(`ddl/needs/011`).
+
+Its two request shapes are not the `datalab` dataset's, and the difference is the design: **one
+keyword group per search-trend request** (`scope.LAUNCH_SEARCH_GROUPS_PER_REQUEST` = 1) and **one
+term per shopping-insight keyword group** (at most `scope.SHOPPING_MAX_KEYWORDS_PER_REQUEST` = 5 of
+them). A DataLab ratio is rescaled inside one request, so a small product's series beside a large
+one's rounds toward zero; and because the onset is read against the term's **own** peak, nothing is
+compared across requests and **no anchor group rides along** — the mirror image of the reason
+`datalab` carries one. A product whose only expressible terms are its brand and a category word is
+**refused** rather than asked about: that term answers for the brand's whole shelf (measured
+2026-09-20).
+
+**Its budget is its own** (`scope.LAUNCH_MAX_REQUESTS_PER_RUN`, `launch_onset.max_requests_per_run`
+in scope.json), because it is the one naver dataset whose spend scales with the catalogue rather
+than with a keyword file: **2 requests a product** (`launch_onset.requests_per_product`), so today's
+248 `needs.product_ref` rows cost **496 requests a month** against the DataLab family ceiling of
+50,000/month, and the ceiling of **1,500 requests a run** leaves room for the catalogue to grow and
+for a run that retried everything. As with blog, the vendor's quota is not what binds it — the term
+list is.
 
 ## DB connection knobs (not secrets)
 ```
@@ -1095,5 +1121,5 @@ beside them still run.
 30 5 * * *  cosmai collect commerce --dataset new_product
 0 5 * * *   cosmai analyze all
 youtube: watch 1h · work 5m · flatten 15m · prune 1d  (after the fan-out cap is applied)
-naver:   datalab once a month (by the keyword dictionary) · blog once a month
+naver:   datalab once a month (by the keyword dictionary) · blog once a month · launch_onset once a month (by the term list)
 ```

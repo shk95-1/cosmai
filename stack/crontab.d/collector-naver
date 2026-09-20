@@ -8,3 +8,10 @@
 # natural-key upsert on post_id makes that safe), so once a month is enough spend. 06:40 clears datalab
 # (06:10), analyze all (05:00, entrypoints.md §Schedule) and every commerce time.
 40 6 1 * *  cosmai collect naver --dataset blog
+# naver launch_onset (#285): monthly too, and on the same day -- the series it reads is monthly, so
+# a second pass inside one month would re-ask the vendor for the same numbers. 07:20 clears blog
+# (06:40) and datalab (06:10), so the three naver passes never overlap on one API Hub key; it is the
+# heaviest of the three (two requests a product, ~496 against a 50,000/month ceiling) and it is the
+# only one whose spend grows with the catalogue. It writes nothing at all until
+# collectors/naver/launch_terms.json is filled -- the run ends blocked (2) with an empty term list.
+20 7 1 * *  cosmai collect naver --dataset launch_onset
