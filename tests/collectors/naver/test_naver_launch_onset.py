@@ -9,10 +9,13 @@ month in progress, a single spike, and a term already live when the window opene
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 
 from collectors.naver import launch, onset, scope
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _series(values: list[float | None], *, start_year: int = 2016, start_month: int = 1):
@@ -173,6 +176,18 @@ def test_a_shopping_request_never_exceeds_the_vendors_group_cap():
     many = tuple(f"t{i}" for i in range(9))
     spec = launch.shopping_spec("oy:A1", many, end_date=date(2026, 9, 20))
     assert len(spec.params["keyword"]) == scope.SHOPPING_MAX_KEYWORDS_PER_REQUEST
+
+
+def test_the_launch_series_is_outside_the_anchor_rescale_and_the_contract_says_so():
+    # contracts/formats.md §NAVER DataLab is the rule that a ratio crosses no request boundary
+    # without an anchor rescale. These rows never cross one -- they are read against their own
+    # series' peak -- so the view must not reach them and the section has to name the exception,
+    # or the next reader adds the table to the view and gets NULL on every row.
+    view = (REPO_ROOT / "db" / "views" / "naver_datalab_rescaled.sql").read_text(encoding="utf-8")
+    assert "naver_launch_series" not in view
+    formats = (REPO_ROOT / "contracts" / "formats.md").read_text(encoding="utf-8")
+    section = formats[formats.index("## NAVER DataLab") : formats.index("## Lists that go into")]
+    assert "needs.naver_launch_series" in section
 
 
 @pytest.mark.parametrize("terms", [(), ("",)])
