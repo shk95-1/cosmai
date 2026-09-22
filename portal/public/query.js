@@ -163,6 +163,8 @@ export const NEED_QUERIES = {
   },
 };
 
+// One run-scoped query receives both the marginal wish:a cells and the separate format×attribute scope.
+// scope and all three axes must be selected: screens.js separates them before any total is computed.
 export const WISH_QUERY = {
   select: ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'],
   order: 'run_id.desc,scope,format,attribute,brand',
@@ -304,10 +306,9 @@ export function sortRows(rows, key, dir = 'desc') {
   });
 }
 
-// Sums mentions per dimKey (format|attribute|brand) value and returns the top n.
-// An empty string (a row where a different axis is filled, meaning this one is not marginal) is treated as
-// "no value" for this axis and excluded — avoiding the double-counting in contract check #7 (the cross-tab
-// marginal vs. PK conflict) would need a proper marginal query, but the first-cut screen is well served by an approximate top list.
+// Sums mentions per dimKey (format|attribute|brand) value and returns the top n. The caller gives
+// only the marginal scope; the format×attribute scope is displayed in its own table and never added
+// here. An empty string means this axis was not present on that marginal row.
 export function topByDimension(rows, dimKey, n = 5) {
   const sums = new Map();
   for (const r of rows || []) {
