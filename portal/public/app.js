@@ -541,7 +541,8 @@ async function boot() {
     openScope('need-scope', defaultScope(need, needRunId), renderNeedScreen);
     openScope('wish-scope', wishDefaultScope(wish, wishRunId), renderWishScreen);
     openScope('character-scope', defaultScope(need, needRunId), renderCharacterScreen);
-    openScope('product-scope', defaultScope(needProducts, needRunId), renderProductScreen);
+    if (productScopes.length) openScope('product-scope', defaultScope(needProducts, needRunId), renderProductScreen);
+    else renderProductScreen(''); // keep the explicit empty state when this run has no product rows
     // Screen 5 opens on a scope that has month rows — opening with screen 1's default (the scope with the most rows
     // overall) would make a scope with no month axis the first screen, always showing just the wording.
     openScope('month-scope', defaultScope(needMonths, needRunId), (scope) => {
