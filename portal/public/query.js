@@ -163,6 +163,67 @@ export const NEED_QUERIES = {
   },
 };
 
+export const WISH_QUERY = {
+  select: ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'],
+  order: 'run_id.desc,scope,format,attribute,brand',
+};
+
+// Adds the runtime half of a metric query without mutating its canonical axis spec. Removing an existing
+// run_id first makes "exactly one run filter" an invariant even if a caller composes the same spec twice.
+export function queryForRun(spec, runId) {
+  return {
+    ...spec,
+    select: [...(spec.select || [])],
+    filters: [
+      ...(spec.filters || []).filter((f) => f && f.column !== 'run_id').map((f) => ({ ...f })),
+      { column: 'run_id', op: 'eq', value: runId },
+    ],
+  };
+}
+
+export function runProbe(spec, runId) {
+  const narrowed = queryForRun(spec, runId);
+  return { ...narrowed, select: ['run_id'], order: undefined, limit: 1 };
+}
+
+async function firstPopulatedRun(candidates, path, spec, probe) {
+  for (const run of candidates) {
+    if (await probe(path, runProbe(spec, run.run_id))) return run;
+  }
+  return null;
+}
+
+// Need and wish are independent populations. Their existence probes run in parallel, while each walks the
+// complete successful-run list newest to oldest. Probe errors deliberately escape: an unavailable table is
+// not evidence that a run is empty.
+export async function selectMetricRuns(runs, probe) {
+  const candidates = okRunsByRecency(runs);
+  const [needRun, wishRun] = await Promise.all([
+    firstPopulatedRun(candidates, '/metrics_need', NEED_QUERIES.category, probe),
+    firstPopulatedRun(candidates, '/metrics_wish', WISH_QUERY, probe),
+  ]);
+  return {
+    needRun,
+    wishRun,
+    needRunId: needRun ? needRun.run_id : null,
+    wishRunId: wishRun ? wishRun.run_id : null,
+  };
+}
+
+// The one production path for full metric pages. An injected loader keeps the request plan directly
+// testable and lets an empty table skip full paging altogether.
+export async function fetchSelectedMetrics({ needRunId, wishRunId }, load) {
+  const jobs = [];
+  if (needRunId !== null) {
+    jobs.push(['need', '/metrics_need', queryForRun(NEED_QUERIES.category, needRunId)]);
+    jobs.push(['needProducts', '/metrics_need', queryForRun(NEED_QUERIES.product, needRunId)]);
+    jobs.push(['needMonths', '/metrics_need', queryForRun(NEED_QUERIES.month, needRunId)]);
+  }
+  if (wishRunId !== null) jobs.push(['wish', '/metrics_wish', queryForRun(WISH_QUERY, wishRunId)]);
+  const loaded = await Promise.all(jobs.map(async ([key, path, spec]) => [key, await load(path, spec)]));
+  return { need: [], needProducts: [], needMonths: [], wish: [], ...Object.fromEntries(loaded) };
+}
+
 // The total count is what follows the slash in 'Content-Range: 0-999/65646'. '*' means the server
 // did not count (meaning Prefer: count=exact was missing), so the count is unknown (null).
 export function parseContentRange(header) {
@@ -227,7 +288,7 @@ export function okRunsByRecency(runs) {
   return (runs || [])
     .filter((r) => r && r.status === 'ok' && r.finished_at)
     .slice()
-    .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at));
+    .sort((a, b) => new Date(b.finished_at) - new Date(a.finished_at) || Number(b.run_id) - Number(a.run_id));
 }
 
 // Sorts a table on a sortable column such as need_key/product_ref. The original array is not touched.
