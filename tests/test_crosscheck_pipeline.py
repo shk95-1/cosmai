@@ -134,6 +134,15 @@ def _chunk(conn, chunk_id: str, source: str, doc_id: str, text_: str) -> None:
     conn.commit()
 
 
+def _mark_archive(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE corpus_snapshot SET lineage = 'archive' WHERE snapshot_id = %s",
+            (corpus.SNAPSHOT_ID,),
+        )
+    conn.commit()
+
+
 @pytest.fixture
 def crossable(
     needs_schema: str, trend_radar_schema: str, needs_runtime_url: str, database_url_for_tests: str,
@@ -148,6 +157,7 @@ def crossable(
     _seed_commerce(database_url_for_tests)
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
+        _mark_archive(conn)
         quarter_run(conn)
         judge_run(conn)
         for source, review_key, _at, _product, body in REVIEWS:
@@ -283,6 +293,7 @@ def test_a_run_without_judgement_rows_is_blocked_not_failed(
     _seed_commerce(database_url_for_tests)
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
+        _mark_archive(conn)
         quarter_run(conn)
         with pytest.raises(NoCrosscheck, match="trend judge"):
             build(conn, commerce_schema="")
@@ -301,6 +312,7 @@ def test_no_suncare_product_in_the_ranking_is_blocked_not_failed(
     _grant_commerce(database_url_for_tests)
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
+        _mark_archive(conn)
         quarter_run(conn)
         judge_run(conn)
         with pytest.raises(NoCrosscheck, match="collect commerce"):
