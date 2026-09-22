@@ -27,7 +27,7 @@ import psycopg
 from psycopg import sql as pgsql
 
 from analysis.extractor import RuleExtractor
-from analysis.lexicon import load_aspects, load_lexicon
+from analysis.lexicon import active_entity_versions, load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_RULESET, RulePolarity, ruleset_for
 from analysis.polarity.ownership import OWNERS, Owner, Scopes, may_write, scopes_of
 from analysis.types import (
@@ -379,6 +379,8 @@ class PolarityStage:
             name: load_aspects(conn, name) for name in (SUNCARE_RULESET, GENERIC_RULESET)
         }
         self.lexicon: Lexicon = load_lexicon(conn)
+        with conn.cursor() as cur:
+            self.entity_versions = active_entity_versions(cur)
         self.categories: CategoryMap = load_category_map(conn)
         self.members: dict[tuple[str, str], str] = _members(conn)
         conn.rollback()
@@ -387,7 +389,10 @@ class PolarityStage:
         return {
             "extractor": RuleExtractor.version,
             "polarity": self.polarity.version,
-            "lexicon": {"entity": self.lexicon.version, "aspect": self.aspects[GENERIC_RULESET].version},
+            "lexicon": {
+                "entity": self.entity_versions,
+                "aspect": self.aspects[GENERIC_RULESET].version,
+            },
         }
 
     def _owner_args(self) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
