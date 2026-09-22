@@ -64,15 +64,13 @@ export function wishCrossReconciliation(marginal, crossRows) {
   return { format, attribute, both, union, cross, agrees: union === cross };
 }
 
-// Product-axis rows come out one set per scope (per category + the 'all' rollup, #41). If the same product
-// were caught twice, once in its own category and once in 'all,' the top 20 would fill with duplicates, so
-// only the rollup is read when it exists — 'all' carries every product once, after synonyms are folded. A
-// run run narrowed by --scope has no 'all,' so in that case the scope that exists is used as-is.
-export function productRows(need, runId, limit = 20) {
+// Product-axis rows come out one set per scope (per category + the 'all' rollup, #41). The screen's
+// selected scope is read as-is, so a product in both its category and 'all' appears only once.
+export function productRows(need, runId, scope, limit = 20) {
   // month is '' for both the category sum and the product axis. Once the month axis exists, those rows must never mix in here.
-  const rows = (need || []).filter((r) => r.run_id === runId && r.product_ref !== '' && r.month === '');
-  const rolled = rows.filter((r) => r.scope === 'all');
-  return sortRows(rolled.length ? rolled : rows, 'unresolved', 'desc').slice(0, limit);
+  const rows = (need || []).filter((r) => r.run_id === runId && r.scope === scope
+    && r.product_ref !== '' && r.month === '');
+  return sortRows(rows, 'unresolved', 'desc').slice(0, limit);
 }
 
 // finished_at is an ISO string like '2026-08-26T05:01:31.074893+00:00'. Parsing it with Date and printing

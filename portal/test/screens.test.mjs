@@ -16,6 +16,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const needFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_need.sample.json'), 'utf8'));
 const wishFixture = JSON.parse(readFileSync(join(here, 'fixtures/metrics_wish.sample.json'), 'utf8'));
 const runsFixture = JSON.parse(readFileSync(join(here, 'fixtures/analysis_run.sample.json'), 'utf8'));
+const PRODUCT_SCOPE = needFixture.find((row) => row.product_ref === 'oy:A1').scope;
 
 // 시드는 슬라이스별로 다른 run(need=2, wish=3, 에픽 #16 §1단계 판정 4) — 표마다
 // must use its own run. Sharing one runId always leaves wish empty (fix round 1 finding 1).
@@ -101,9 +102,24 @@ test('needRowsForScope: 카테고리 합(product_ref/month 빈 값)만 남는다
 
 test('productRows: run 2의 product_ref 비어있지 않은 행이 나온다', () => {
   const { needRunId } = latestRuns(runsFixture, needFixture, wishFixture);
-  const rows = productRows(needFixture, needRunId);
+  const rows = productRows(needFixture, needRunId, PRODUCT_SCOPE);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].product_ref, 'oy:A1');
+});
+
+test('productRows uses the selected category without repeating its rollup products (#105)', () => {
+  const rows = [
+    { run_id: 2, scope: 'all', month: '', product_ref: 'p1', unresolved: 0.9 },
+    { run_id: 2, scope: 'sun', month: '', product_ref: 'p1', unresolved: 0.8 },
+    { run_id: 2, scope: 'sun', month: '', product_ref: 'p2', unresolved: 0.6 },
+    { run_id: 2, scope: 'cushion', month: '', product_ref: 'p3', unresolved: 0.95 },
+    { run_id: 2, scope: 'sun', month: '2026-08', product_ref: 'p4', unresolved: 1 },
+    { run_id: 1, scope: 'sun', month: '', product_ref: 'old', unresolved: 1 },
+  ];
+  assert.deepEqual(productRows(rows, 2, 'sun').map((r) => r.product_ref), ['p1', 'p2']);
+  assert.deepEqual(productRows(rows, 2, 'all').map((r) => r.product_ref), ['p1']);
+  assert.deepEqual(productRows(rows, 2, 'cushion').map((r) => r.product_ref), ['p3']);
+  assert.deepEqual(productRows(rows, 2, 'sun', 1).map((r) => r.product_ref), ['p1']);
 });
 
 // #87: the caption must show each run's versions·note to confirm a manual reaggregation actually took effect.
@@ -181,25 +197,25 @@ test('defaultScope: 동률은 사전순으로 끊는다', () => {
   assert.equal(defaultScope(rows, 1), 'a');
 });
 
-// #41: product-axis rows come out one set per scope — if the same product were caught twice, once in its own
-// category and once in the rollup ('all'), the top 20 would fill with duplicates. Only the rollup is read when it exists.
-test('productRows: 롤업 scope 가 있으면 제품이 두 번 나오지 않는다 (#41)', () => {
+// #41: product-axis rows come out one set per scope. Selecting 'all' reads that set alone, so a
+// product also present in its category does not fill two slots.
+test('productRows: selecting the rollup does not repeat category products (#41, #105)', () => {
   const need = [
     { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: '', neg: 9, unresolved: 0.6 },
     { run_id: 5, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
     { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
     { run_id: 5, scope: 'all', need_key: '밀림', month: '', product_ref: 'oy:B2', neg: 2, unresolved: 0.5 },
   ];
-  const rows = productRows(need, 5);
+  const rows = productRows(need, 5, 'all');
   assert.deepEqual(rows.map((r) => [r.scope, r.product_ref]), [['all', 'oy:A1'], ['all', 'oy:B2']]);
 });
 
-// A run narrowed by --scope has no 'all' — in that case the scope that exists is used as-is.
+// A run narrowed by --scope has no 'all'; that category remains selectable.
 test('productRows: 롤업이 없는 run 은 카테고리 scope 의 제품 행을 낸다 (#41)', () => {
   const need = [
     { run_id: 6, scope: '선블록', need_key: '밀림', month: '', product_ref: 'oy:A1', neg: 4, unresolved: 0.8 },
   ];
-  assert.deepEqual(productRows(need, 6).map((r) => r.product_ref), ['oy:A1']);
+  assert.deepEqual(productRows(need, 6, need[0].scope).map((r) => r.product_ref), ['oy:A1']);
 });
 
 // ---- Screen 4: need character --------------------------------------------------
@@ -343,7 +359,7 @@ test('월 행이 섞여도 화면 1·3·4 는 같은 값을 낸다 (#130 회귀 
   assert.deepEqual(character.map((r) => [r.yt_neg, r.yt_pos]), [[12, 3], [0, 0]]);
   assert.equal(hasYoutubeMentions(needCharacterRows(needFixture, needRunId, '쿠션')), false);
   // Screen 3: the product axis has only that one row.
-  assert.deepEqual(productRows(needFixture, needRunId).map((r) => r.product_ref), ['oy:A1']);
+  assert.deepEqual(productRows(needFixture, needRunId, PRODUCT_SCOPE).map((r) => r.product_ref), ['oy:A1']);
   // The scope list does not grow either — a month row never creates a new scope.
   assert.deepEqual(scopesForRun(needFixture, needRunId), ['선블록', '쿠션']);
 });
@@ -451,7 +467,7 @@ test('화면 1·3·4 도 질의가 돌려주는 행으로 같은 값을 낸다 (
   assert.equal(character[0].persist_month_ratio, 5 / 6);   // persist_* is still present in select
   assert.equal(character[0].low_share, 0.44);
   assert.equal(hasYoutubeMentions(needCharacterRows(SERVED.category, 2, '쿠션')), false);
-  assert.deepEqual(productRows(SERVED.product, 2).map((r) => r.product_ref), ['oy:A1']);
+  assert.deepEqual(productRows(SERVED.product, 2, PRODUCT_SCOPE).map((r) => r.product_ref), ['oy:A1']);
   assert.deepEqual(scopesForRun(SERVED.category, 2), ['선블록', '쿠션']);
   // The three partition the fixture without gaps or overlap — an overlap would receive the same row twice.
   assert.equal(SERVED.category.length + SERVED.product.length + SERVED.month.length, needFixture.length);

@@ -192,9 +192,9 @@ const WISH_CELL_LIMIT = 30;
 const PRODUCT_LABEL_W = 240;
 const PRODUCT_LABEL_MAX = 20;
 
-function renderProductScreen() {
+function renderProductScreen(scope) {
   const rows = withProductNames(
-    productRows(state.needProducts, state.needRunId, 20), state.productNames, PRODUCT_LABEL_MAX,
+    productRows(state.needProducts, state.needRunId, scope, 20), state.productNames, PRODUCT_LABEL_MAX,
   );
   $('product-chart').innerHTML = renderMagnitudeBars(rows, {
     key: 'unresolved', labelKey: 'product_short', titleKey: 'product', hue: 'blue',
@@ -518,8 +518,10 @@ async function boot() {
     // — filling both from one table's scope leaves the other table with nothing to pick (fix round 1 finding 2).
     const needScopes = scopesForRun(need, needRunId);
     const wishScopes = wishScreenScopes(wish, wishRunId);
+    const productScopes = scopesForRun(needProducts, needRunId);
     $('need-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     $('wish-scope').replaceChildren(...wishScopes.map((s) => new Option(s, s)));
+    $('product-scope').replaceChildren(...productScopes.map((s) => new Option(s, s)));
     // Screen 4 sees the same table as screen 1 (category sum), so its scope list is the same.
     $('character-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     // Screen 5's scope list is also the same as screen 1's — filling it with only scopes that have month rows would
@@ -528,6 +530,7 @@ async function boot() {
     $('month-limit').textContent = String(MONTH_LIMIT); // the caption's number also comes from the source of truth
     $('need-scope').onchange = () => renderNeedScreen($('need-scope').value);
     $('wish-scope').onchange = () => renderWishScreen($('wish-scope').value);
+    $('product-scope').onchange = () => renderProductScreen($('product-scope').value);
     $('character-scope').onchange = () => renderCharacterScreen($('character-scope').value);
     $('month-scope').onchange = () => { fillMonthNeedKeys($('month-scope').value); renderMonthScreen(); };
     $('month-need').onchange = renderMonthScreen;
@@ -538,7 +541,7 @@ async function boot() {
     openScope('need-scope', defaultScope(need, needRunId), renderNeedScreen);
     openScope('wish-scope', wishDefaultScope(wish, wishRunId), renderWishScreen);
     openScope('character-scope', defaultScope(need, needRunId), renderCharacterScreen);
-    renderProductScreen();
+    openScope('product-scope', defaultScope(needProducts, needRunId), renderProductScreen);
     // Screen 5 opens on a scope that has month rows — opening with screen 1's default (the scope with the most rows
     // overall) would make a scope with no month axis the first screen, always showing just the wording.
     openScope('month-scope', defaultScope(needMonths, needRunId), (scope) => {
