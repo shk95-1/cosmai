@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from importlib.machinery import SourceFileLoader
 from importlib.util import module_from_spec, spec_from_loader
@@ -41,6 +42,13 @@ RUN_ON = json.loads(
 # closes, and the two shapes the bound on it must leave alone.
 UNBALANCED = json.loads(
     (Path(__file__).resolve().parent / "fixtures" / "crosscheck" / "unbalanced_paren.json").read_text(
+        encoding="utf-8"
+    )
+)
+# The same reason for fork #109's strings: the one production list written with `@` between whole names,
+# two names that carry a separator which must stay inside them, and a lump joined by such a separator.
+SEPARATORS = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "crosscheck" / "list_separators.json").read_text(
         encoding="utf-8"
     )
 )
@@ -211,6 +219,42 @@ def test_a_stray_closing_parenthesis_stays_ordinary_text():
     assert crosscheck.parse_ingredients(UNBALANCED["stray_close"]) == UNBALANCED["stray_close_names"]
 
 
+def test_a_list_written_with_at_between_names_parses_into_its_names():
+    """One production list of 372 is written with `@` and not one comma, so its 34 substances arrived as a
+    single 301-character "name" that a key then caught (fork #109). `@` is on the split set because it
+    never appears inside a real name anywhere in the table."""
+    names = crosscheck.parse_ingredients(SEPARATORS["at_list"])
+    assert names == SEPARATORS["at_names"]
+    assert SEPARATORS["at_starred_name"] in names, "a `*` suffix stays, as it does on every other name"
+    assert not any(crosscheck.run_on(name) for name in names), "no name is a whole list any more"
+
+
+def test_a_separator_that_lives_inside_real_names_is_not_on_the_split_set():
+    """`/` sits inside a real name on 299 of 372 products and `+` on 11, so neither can split a list --
+    and one of the `@` list's own names carries a `/`, which the split must leave whole."""
+    assert crosscheck.parse_ingredients(SEPARATORS["unsplit_list"]) == SEPARATORS["unsplit_names"]
+    assert SEPARATORS["at_slash_name"] in crosscheck.parse_ingredients(SEPARATORS["at_list"])
+
+
+def test_a_lump_joined_by_an_unknown_separator_is_still_a_run_on_list():
+    """The space count cannot see a lump joined by anything else, so length answers for it: the longest
+    real name on the table is 67 characters and the one separator-less lump found was 301. The gate must
+    blame the list rather than the key that happens to catch a substance inside it (fork #103)."""
+    lump = SEPARATORS["unknown_separator_lump"]
+    assert lump.count(" ") < crosscheck.RUN_ON_SPACES, "the space rule alone has to miss this one"
+    assert crosscheck.run_on(lump)
+    assert not crosscheck.run_on(SEPARATORS["longest_real_name"]), "67 characters is a name, not a list"
+
+
+def test_a_set_components_label_stays_with_the_lump_it_labels():
+    """A set product writes `<component> = <first substance> ...`. Stripping the label would buy nothing:
+    the row behind it is a space-separated list, so it is a run-on lump either way, and `=` on the split
+    set would only turn the label into a "name" of its own."""
+    label_lump = SEPARATORS["label_lump"]
+    assert crosscheck.parse_ingredients(label_lump) == [label_lump]
+    assert crosscheck.run_on(label_lump), "the gate already calls this row a list, not a name"
+
+
 def test_the_sun_context_rule_names_what_the_talk_count_is_not():
     """담론 수를 "선크림 담론" 으로 읽으면 안 된다 -- 전량에서 PDRN 은 933문서 중 149문서였다."""
     pdrn = crosscheck.IngredientRow("PDRN", talk_youtube=933, talk_youtube_sun=149, talk_commerce=54)
@@ -328,7 +372,22 @@ def test_the_audited_catch_list_is_self_consistent():
         terms = crosscheck.INGREDIENT_KEYS[key]
         assert all(crosscheck.matches(name, terms) for name in names), key
         assert crosscheck.denied_in(key, names) == (), key
-    assert sum(len(names) for names in known.values()) == 190
+    assert sum(len(names) for names in known.values()) == 353  # 190 read 2026-08-27 + 163 read 2026-09-19
+
+
+def test_the_second_read_only_adds_to_the_first():
+    """v1 stays in the tree as the record of the 2026-08-27 read, and v2 carries every one of its rows
+    unchanged: a later read confirms more names, it does not quietly drop or rewrite an earlier one."""
+    assert crosscheck.KNOWN_NAMES_CSV.name == "known_names_v2.csv"
+
+    def triples(path: Path) -> list[tuple[str, str, str]]:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            return [(row["key"], row["ingredient"], row["products"]) for row in csv.DictReader(handle)]
+
+    first = triples(crosscheck.KNOWN_NAMES_CSV.parent / "known_names_v1.csv")
+    second = triples(crosscheck.KNOWN_NAMES_CSV)
+    # Names alone would let a v1 row's product count be rewritten unseen, so the whole row is held, in place.
+    assert second[: len(first)] == first
 
 
 def test_the_measure_tool_is_what_catches_a_new_mismatch():

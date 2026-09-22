@@ -1505,7 +1505,8 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   reviews pile up, so the values across times are nearly the same. Counted whole, the product count is
   inflated by the number of times.
 - **The canonical form of polarity is the table a person checked
-  (`analysis/crosscheck/audit/polarity_v1.csv`), and the hint is a last resort.** Using the hint alone, as
+  (`analysis/crosscheck/audit/polarity_v2.csv`; `polarity_v1.csv` is the 2026-08-27 read, kept unchanged), and
+  the hint is a last resort.** Using the hint alone, as
   ydc does, catches **the same disease** as the ingredient keys — both are substring lists over vendor
   strings. Feeding the hint alone to the 23 group vocabulary items of the production `review_topic`'s
   `GROUP_MAP` (measured 2026-08-27), **five came out inverted**:
@@ -1520,6 +1521,12 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   real 40%). Putting `수분감/매트해요` on negative is a judgment — **the axis is moisture, so this is the
   low end of that axis**, which is a different question from mattness being a virtue as a product
   preference.
+- **The second read (fork #108, 2026-09-19): 25 phrases, and a sixth inversion.** The vendor began a second
+  wording for the moisturising group's scale — two new option phrases, one row each beside the three
+  standing options (232 · 233 · 232 rows). The user confirmed the low end negative and the high end positive;
+  **on the hint alone the low end reads positive**, because its wording carries none of the negative hints.
+  `tool/measure-crosscheck-keys` had been unable to run since 2026-08-27 (fork #104), so nothing reported
+  the two phrases until it ran again. Each row of `polarity_v2.csv` carries the date it was read.
 - A phrase the table does not know is answered by the hint (answer nothing and that product disappears
   whole), but the fact that such a phrase arrived is said by `tool/measure-crosscheck-keys` — **the same
   tool and the same convention** as the ingredient keys. Give it no group and the hint alone runs, and
@@ -1569,7 +1576,8 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   `시카` in fact **satisfies** that rule — 트라이에톡시카프릴릴실레인 really does contain `시카` inside it.
   What caught it was not a rule but **a person reading the names it printed**.
 - **A forbidden substance found only inside a run-on list is not that key's mismatch (fork #103).** A list
-  separated by whitespace alone stays one lump (it is not split: real names carry spaces, and a split would
+  separated by whitespace alone stays one lump, and so does one joined by a separator the splitter does not
+  know (it is not split: real names carry spaces, and a split would
   manufacture fragment names and break the blending order `FORMULA_HOLD` is kept for), and a lump holds
   dozens of substances — a key term and a forbidden substance sharing a lump says nothing about what the key
   caught. The gate below is still asked at the matcher's width, but of ingredient **names**: a forbidden
@@ -1591,8 +1599,9 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   `레티놀` rows disappear.
 - **The place that list cannot see — a mismatch not yet known — is carried by
   `tool/measure-crosscheck-keys`.** The canonical form of what a key catches is
-  `analysis/crosscheck/audit/known_names_v1.csv` (the **190 names** a person read and confirmed off the
-  2026-08-27 production table), and that tool measures the table as it is now and holds it against the list:
+  `analysis/crosscheck/audit/known_names_v2.csv` (**353 names**: the 190 a person read and confirmed off the
+  2026-08-27 production table, kept unchanged as `known_names_v1.csv`, plus 163 read on 2026-09-19, fork
+  #107), and that tool measures the table as it is now and holds it against the list:
   when a name that is forbidden, or not on the list, comes into some key, it exits **1** and prints that
   name and its product count (a name that was there and has gone is not red — a product dropping out is not
   a mismatch). **CI cannot do this job**: it cannot reach the production table, and a few strings pinned in
@@ -1610,10 +1619,26 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   ingredient names, 368 are caught by some key. Counted per key, the way the tool reports it (a name two
   keys both catch counts under each, 392 in all): the confirmed list's full 190 are still caught (0 `gone`),
   202 are `new` (164 plain names, 38 run-on lists), 0 `denied`, 2 `run_on`.** `new` stays red on purpose: it
-  means a person has not read the name yet, and the 202 are that backlog, not a fault in the tool (fork #107).
+  means a person has not read the name yet, and the 202 were that backlog, not a fault in the tool.
   Re-measured the same day with fork #105's bound: of 3,403 distinct names the same 368 are caught and every
-  per-key line is unchanged — the 500 recovered names are caught by no key.
-- **Three rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
+  per-key line is unchanged — the 500 recovered names are caught by no key. Re-measured 2026-09-20 with
+  fork #109's separator: of 3,414 distinct names 367 are caught, 391 per-key lines — one fewer of each,
+  because the list the panthenol key used to catch as a single name is now 34 names, and the only one of
+  them a key catches was already confirmed.
+- **The second read (fork #107, 2026-09-19).** The user read the 164 plain `new` names and confirmed 163 into
+  `known_names_v2.csv`, which carries the date each name was read and a note where one is owed. By shape: 120
+  are a confirmed name with a concentration or `*`, 24 are new peptide names, 9 are vendor typos (a space
+  inside a name, a stray quote, a cut-off name), 6 are two or three substances joined without a comma (the
+  key's substance is present), and 4 rows were judged one by one (3 names, one of them under two keys) — among them a vendor's branded name used
+  as a set component's title, confirmed because the product really carries collagen and also lists it under
+  its ordinary name, so neither the key nor the product count is wrong. **The forbidden list was not used
+  for it**: that list is an alarm that turns crosscheck `partial`, meant for a wrong key, and a key that is
+  right about the substance is not one. One caught "name" was not confirmed: a whole ingredient list
+  separated by `@`, which the splitter and the run-on test both missed. After the read the tool still
+  exited 1 on 39 `new` lines — the 38 run-on lists and that one — 0 `gone`, 0 `denied`, 2 `run_on`. Fork
+  #109 put `@` on the split set, so that list is 34 names now: measured 2026-09-20 the tool exits 1 on
+  **38** `new` lines, all of them run-on lists, and the plain-name backlog is empty.
+- **Four rules for splitting an ingredient list into ingredient names** (a trap only our source has, so ydc
   has no counterpart): a bracketed section marker (`[마데카소사이드] 정제수` · `[시카에센스]`) is dropped,
   being the name of a component of a gift set rather than an ingredient name (`콜라겐` 72→64 rows ·
   `시카센텔라` 179→174 rows are filtered by this) · a comma inside parentheses is not cut on
@@ -1628,6 +1653,21 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   at least one, up to 15). Measured 2026-09-19: all 364 balanced lists parse byte-identically and only that one list moves. A
   length threshold was not used: the longest real name holding a parenthesis is 67 characters, but 35
   balanced run-on lists carry parentheses too, up to 473, so no length separates the two.
+  **The fourth rule adds one separator to the first (fork #109):** `@` cuts where a comma would. One vendor
+  list of 372 is written with 33 of them and not one comma, so its 34 substances arrived as a single
+  301-character "name" with no spaces in it — invisible to the run-on count, and caught by the panthenol key
+  as if it were an ingredient. `@` is on the set because it is found nowhere else in the table, inside a name
+  or out of it; `/` (inside a name on 299 products, 4,678 times) and `+` (11 products) are not, and `|`, a
+  tab and a spaced ` / ` were measured and left off — they mark a section or a product variant rather than a
+  name, on one or two products each. A set component's label (`<label> =` before a list, one product, 16
+  rows) is left where it is: those rows are run-on lists either way. A `*` the vendor hangs on a name is kept,
+  as it is on the 90 other names that carry one. Measured 2026-09-20: all 371 lists without an `@` parse
+  byte-identically and only that one list moves — 62,834 ingredient rows become 62,867 and 3,403 distinct
+  names become 3,414. **The run-on count also takes a lump that carries no separator at all**: a name of 120
+  characters or more is a list, the longest real name with few spaces being 67. That is a different question
+  from the third rule's — there length could not tell a parenthesised name from a parenthesised list; here it
+  only backs up the space count, which still decides 125 of 125 lumps today (the length test flags none), so
+  the next unknown separator reads as `run_on_list` instead of blaming a key.
 - **A discourse count must not be read as "sunscreen discourse".** Counted over the whole index, it holds
   every ampoule and skin booster the same channel introduced. So the ones that have a `SUN_WORDS`
   (`선크림`·`썬크림`·`선스크린`·`자차`·`선세럼`·`선쿠션`·`자외선차단`) **in the same chunk** are counted
@@ -1669,21 +1709,21 @@ actually put on its suncare boards and categories, and the predicate is `SUN_BOA
   their term in the same lump as the forbidden silane dispersant. **No key is mismatched**: without the lumps
   the audit has 0 suspicions, and reviving the bare cica alias on today's table still catches 890 rows, 882 of
   them plain names, so `key_mismatch` still fires on a wrong key. The commerce side has grown since the block
-  below: 372 products with an ingredient list (was 180) · 62,834 ingredient rows (was 22,705) · 3,403
-  distinct names (was 2,051) — these two re-measured later the same day with fork #105's bound, 62,334 and 3,402
-  before it. One run is 27.3 seconds · 154MB peak resident.
+  below: 372 products with an ingredient list (was 180) · 62,867 ingredient rows (was 22,705) · 3,414
+  distinct names (was 2,051) — these two re-measured with fork #105's bound (62,834 and 3,403, from 62,334
+  and 3,402 before it) and again on 2026-09-20 with fork #109's separator. One run is 27.3 seconds · 154MB peak resident.
 - Composition: commerce reviews 6,349 documents (those of the suncare ranking products' 7,324 reviews that
   have a chunk) · comments 285,735 · transcripts 5,303 · titles 5,908. `백탁` parts sixfold, commerce
   **9.80%** against comments 1.55%.
 - Rating: 19 of the suncare ranking products have an attribute rating · 468 rows. The `topic_group` values
   that reach our topics are two, `자극도` and `발림성`, and `피부타입` is outside `GROUP_MAP`.
 - Polarity: all 23 option vocabulary items of the `GROUP_MAP` groups are in the confirmed table
-  (0 unconfirmed). On hints alone five invert — the table above.
+  (0 unconfirmed; 25 of 25 after the 2026-09-19 read, fork #108). On hints alone five invert — the table above.
 - Ingredients: **0** audit suspicions (on the corrected keys, no key catches the forbidden list). The values
   for the three aliases are in the table above, and the ingredient lists separated by whitespace alone with
   no commas are **60** rows of the 22,705 ingredient rows (59 distinct names).
-  **On 2026-09-19, with fork #105's bound in place, that is 150 rows of 62,834 (125 distinct names, 43
-  products)** — one of the 151 rows measured earlier that day was the list an unclosed `(` had swallowed. The count grows with the
+  **On 2026-09-20, with fork #105's bound and fork #109's separator in place, that is 150 rows of 62,867
+  (125 distinct names, 43 products)** — one of the 151 rows measured on 2026-09-19 was the list an unclosed `(` had swallowed. The count grows with the
   collection, which is why such a list is counted rather than split.
 
 ### Comparison against ydc (run 2026-08-27, 38 lines, **difference 0**)

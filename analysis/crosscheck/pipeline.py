@@ -433,8 +433,8 @@ def build(
     # ingredient name, so the ingredient block is not whole. What it must not do is blame the key --
     # the substance and the key term merely share one unsplit list (fork #103).
     violations += [
-        f"run_on_list {audit.key} caught {bad} inside {product} -- that ingredient list is separated by "
-        f"whitespace alone, so the lump is a list rather than a name and the parse is what failed"
+        f"run_on_list {audit.key} caught {bad} inside {product} -- that ingredient list carries no "
+        f"separator the splitter cuts on, so the lump is a list rather than a name and the parse failed"
         for audit in ingredients.unparsed
         for bad, product in audit.denied_run_on
     ]

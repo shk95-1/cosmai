@@ -1,0 +1,26 @@
+{
+  "_source": "trend_radar.product, read 2026-09-20 read-only and abridged: oliveyoung A000000264936 (the one list written with '@' between whole names) and A000000262979 (a set product whose components carry a label and '='). The lump is the same product's names joined by '/' instead, a joiner the splitter must not take, to stand for a separator it does not know.",
+  "at_list": "알로에베라잎즙*@소듐코코일이세치오네이트@소듐메칠코코일타우레이트@글리세릴스테아레이트세스이@소듐라우로암포아세테이트@글리세린@크레아틴@판테놀@라벤더꽃/잎/줄기추출물",
+  "at_names": [
+    "알로에베라잎즙*",
+    "소듐코코일이세치오네이트",
+    "소듐메칠코코일타우레이트",
+    "글리세릴스테아레이트세스이",
+    "소듐라우로암포아세테이트",
+    "글리세린",
+    "크레아틴",
+    "판테놀",
+    "라벤더꽃/잎/줄기추출물"
+  ],
+  "at_starred_name": "알로에베라잎즙*",
+  "at_caught_name": "판테놀",
+  "at_slash_name": "라벤더꽃/잎/줄기추출물",
+  "unsplit_list": "비스-베헤닐/아이소스테아릴/피토스테아릴다이머다이리놀레일다이머다이리놀리에이트, 유칼립투스잎추출물*+",
+  "unsplit_names": [
+    "비스-베헤닐/아이소스테아릴/피토스테아릴다이머다이리놀레일다이머다이리놀리에이트",
+    "유칼립투스잎추출물*+"
+  ],
+  "unknown_separator_lump": "알로에베라잎즙*/소듐코코일이세치오네이트/소듐메칠코코일타우레이트/글리세릴스테아레이트세스이/소듐라우로암포아세테이트/글리세린/크레아틴/판테놀/하이드롤라이즈드퀴노아/토코페롤/아보카도오일*/올리브오일*/바오밥나무씨추출물/라벤더꽃/잎/줄기추출물",
+  "longest_real_name": "소듐페닐부티로일히스티디닐4-t-부틸D-페닐알라닐알지닐라이신N6-(석신이미도프로피오닐티오 에틸다이팔미토일글리세로포스페이트)",
+  "label_lump": "염모제=정제수 세테아릴알코올 에탄올아민 글리세린 프로판다이올 올레익애씨드 올레일알코올 코코-글루코사이드 향료 p-페닐렌디아민 레조시놀 소듐메타바이설파이트 염산2"
+}
