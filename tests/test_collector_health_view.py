@@ -64,6 +64,11 @@ YT_WATCH = datetime(2026, 8, 23, 1, 0, tzinfo=UTC)
 YT_BLOCKED = datetime(2026, 8, 23, 2, 0, tzinfo=UTC)  # a bucket where every failure is quota exhaustion
 YT_LEGACY = datetime(2026, 8, 23, 3, 0, tzinfo=UTC)  # a row from before #101/#102: no dataset, no elapsed_ms
 YT_QUEUE = datetime(2026, 8, 23, 4, 0, tzinfo=UTC)  # nothing has been claimed yet = a full queue
+YT_CANCELLED = datetime(2026, 8, 23, 8, 0, tzinfo=UTC)
+YT_CANCELLED_QUEUE = datetime(2026, 8, 23, 9, 0, tzinfo=UTC)
+YT_CANCELLED_OK = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
+YT_CANCELLED_BLOCKED = datetime(2026, 8, 23, 11, 0, tzinfo=UTC)
+YT_CANCELLED_FAILED = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
 
 # (state, error_code, elapsed_ms). One cancelled is deliberate -- it is the share that lands in none of
 # the ok/blocked/failed buckets, the same spot 404 sits in on the commerce arm.
@@ -82,11 +87,21 @@ YT_WATCH_JOBS = (
 YT_BLOCKED_JOBS = (("failed", "quota", 1000), ("failed", "quota", 2000), ("failed", "quota", None))
 YT_LEGACY_JOBS = (("succeeded", None, None), ("succeeded", None, None))
 YT_QUEUE_JOBS = (("queued", None, None), ("queued", None, None))
+YT_CANCELLED_JOBS = (("cancelled", None, 10), ("cancelled", None, 20))
+YT_CANCELLED_QUEUE_JOBS = (("cancelled", None, 10), ("queued", None, None))
+YT_CANCELLED_OK_JOBS = (("cancelled", None, 10), ("succeeded", None, 20))
+YT_CANCELLED_BLOCKED_JOBS = (("cancelled", None, 10), ("failed", "quota", 20))
+YT_CANCELLED_FAILED_JOBS = (("cancelled", None, 10), ("failed", "http_500", 20))
 YT_BUCKETS = (
     (YT_WATCH, "watch", YT_WATCH_JOBS),
     (YT_BLOCKED, "work", YT_BLOCKED_JOBS),
     (YT_LEGACY, None, YT_LEGACY_JOBS),
     (YT_QUEUE, "work", YT_QUEUE_JOBS),
+    (YT_CANCELLED, "work", YT_CANCELLED_JOBS),
+    (YT_CANCELLED_QUEUE, "work", YT_CANCELLED_QUEUE_JOBS),
+    (YT_CANCELLED_OK, "work", YT_CANCELLED_OK_JOBS),
+    (YT_CANCELLED_BLOCKED, "work", YT_CANCELLED_BLOCKED_JOBS),
+    (YT_CANCELLED_FAILED, "work", YT_CANCELLED_FAILED_JOBS),
 )
 
 
@@ -274,6 +289,11 @@ def test_all_three_arms_land_in_one_table_with_the_contracts_twelve_columns(
         ("youtube", "watch", None, YT_WATCH),
         ("youtube", "work", None, YT_BLOCKED),
         ("youtube", "work", None, YT_QUEUE),
+        ("youtube", "work", None, YT_CANCELLED),
+        ("youtube", "work", None, YT_CANCELLED_QUEUE),
+        ("youtube", "work", None, YT_CANCELLED_OK),
+        ("youtube", "work", None, YT_CANCELLED_BLOCKED),
+        ("youtube", "work", None, YT_CANCELLED_FAILED),
         ("youtube", None, None, YT_LEGACY),  # jobs made before dataset was written down (#102)
     ]
     assert all(len(r) == 12 for r in health_rows)
@@ -396,6 +416,18 @@ def test_a_youtube_row_counts_quota_and_rate_limit_as_blocked_not_as_failed(
     assert (blocked[5], blocked[6], blocked[7], blocked[8], blocked[9]) == ("blocked", 3, 0, 3, 0)
 
 
+def test_youtube_cancellation_status_keeps_failure_precedence(health_rows: list[tuple[Any, ...]]):
+    by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube" and r[2] is None}
+    expected = {
+        YT_CANCELLED: ("cancelled", 2, 0, 0, 0),
+        YT_CANCELLED_QUEUE: ("running", 1, 0, 0, 0),
+        YT_CANCELLED_OK: ("ok", 2, 1, 0, 0),
+        YT_CANCELLED_BLOCKED: ("blocked", 2, 0, 1, 0),
+        YT_CANCELLED_FAILED: ("failed", 2, 0, 0, 1),
+    }
+    assert {bucket: tuple(by_bucket[bucket][5:10]) for bucket in expected} == expected
+
+
 def test_youtube_p90_skips_the_rows_that_predate_the_elapsed_ms_column(
     health_rows: list[tuple[Any, ...]],
 ):
@@ -418,7 +450,17 @@ def test_a_youtube_bucket_spans_one_hour_and_ends_when_its_last_job_did(
     # The job-queue arm alone: since #280 a youtube row with a run_id is a pass, whose time is its
     # own rather than a bucket's.
     by_bucket = {r[3]: r for r in health_rows if r[0] == "youtube" and r[2] is None}
-    assert set(by_bucket) == {YT_WATCH, YT_BLOCKED, YT_LEGACY, YT_QUEUE}
+    assert set(by_bucket) == {
+        YT_WATCH,
+        YT_BLOCKED,
+        YT_LEGACY,
+        YT_QUEUE,
+        YT_CANCELLED,
+        YT_CANCELLED_QUEUE,
+        YT_CANCELLED_OK,
+        YT_CANCELLED_BLOCKED,
+        YT_CANCELLED_FAILED,
+    }
     assert by_bucket[YT_WATCH][4] == YT_WATCH + timedelta(minutes=len(YT_WATCH_JOBS))
     assert by_bucket[YT_QUEUE][4] is None
     assert by_bucket[YT_LEGACY][5] == "ok"
@@ -527,3 +569,22 @@ def test_the_contract_fence_still_names_twelve_columns_the_view_can_be_checked_a
         ("dataset", "text"),
         ("run_id", "text"),
     ]
+
+
+def test_the_contract_fence_names_every_arm_specific_status():
+    fence = re.search(
+        r"## Common operations view[^\n]*\n```sql\n(.*?)\n```",
+        ENTRYPOINTS_MD.read_text(encoding="utf-8"),
+        re.DOTALL,
+    )
+    assert fence
+    status_line = next(line for line in fence.group(1).splitlines() if line.startswith("status text"))
+    assert set(re.findall(r"\b(?:ok|partial|blocked|failed|running|yielded|cancelled)\b", status_line)) == {
+        "ok",
+        "partial",
+        "blocked",
+        "failed",
+        "running",
+        "yielded",
+        "cancelled",
+    }

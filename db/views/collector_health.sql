@@ -114,10 +114,12 @@ SELECT
         WHEN q.ok > 0 AND q.failures > 0 THEN 'partial'
         WHEN q.ok > 0 THEN 'ok'
         WHEN q.failures > 0 AND q.failures = q.blocked THEN 'blocked'
-        -- A bucket with not a single success reads as failed. What's left is only a bucket that is
-        -- entirely cancelled, and no path writes that state today -- better for the health view to be
-        -- wrong on the loud side than the quiet one.
-        ELSE 'failed'
+        WHEN q.failures > 0 THEN 'failed'
+        -- requests counts succeeded, failed and cancelled. Reaching here with a finished job therefore
+        -- means every finished job was cancelled; queued/running work exited through in_flight above.
+        WHEN q.requests > 0 THEN 'cancelled'
+        -- A nonempty group cannot reach this branch while jobs.state keeps its declared vocabulary.
+        ELSE 'running'
     END,
     q.requests,
     q.ok,

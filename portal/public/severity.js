@@ -8,8 +8,9 @@
 // If the two columns each kept their own ranking and those rankings were mixed, the comparison would lose
 // its meaning — "the worse of the two" only holds when both are measured on the same ruler.
 const FRESHNESS_SEVERITY = { stalled: 0, late: 1, never: 2, ok: 3, disabled: 4 };
-// yielded is a run that stepped aside for a source lock, not a failure (#78). blocked is 403·429 — a warning.
-const STATUS_SEVERITY = { failed: 0, partial: 1, blocked: 1, yielded: 3, ok: 3 };
+// yielded is a run that stepped aside for a source lock, not a failure (#78). A cancelled-only queue
+// bucket likewise completed no work, so it is idle rather than failed (#112). blocked is 403·429 — a warning.
+const STATUS_SEVERITY = { failed: 0, partial: 1, blocked: 1, cancelled: 2, yielded: 3, ok: 3 };
 
 export const SEVERITY_CLASS = ['sev-critical', 'sev-warn', 'sev-idle', 'sev-ok', 'sev-muted'];
 
