@@ -20,7 +20,7 @@ from analysis.aggregate import AGGREGATE_VERSION
 from analysis.aggregate import pipeline as aggregate_stage
 from analysis.extractor import VERSION as EXTRACTOR_VERSION
 from analysis.launch import pipeline as launch_stage
-from analysis.lexicon import load_aspects, load_lexicon
+from analysis.lexicon import active_entity_versions, load_aspects, load_lexicon
 from analysis.linker import LINKER_VERSION
 from analysis.linker import pipeline as link_stage
 from analysis.locks import ANALYZE, analyze_lock
@@ -139,15 +139,17 @@ def _detail(stage: str, failure: Exception) -> str:
 def _versions(conn: psycopg.Connection[Any], polarity_version: str = POLARITY_VERSION) -> dict[str, Any]:
     """Decision of #17: lexicon is the active version + ruleset -- an aspect dictionary is switched on per
     ruleset."""
-    lexicon = load_lexicon(conn)
+    load_lexicon(conn)
     aspects = {ruleset: load_aspects(conn, ruleset).version for ruleset in RULESETS}
+    with conn.cursor() as cur:
+        entities = active_entity_versions(cur)
     conn.rollback()
     return {
         "linker": LINKER_VERSION,
         "extractor": EXTRACTOR_VERSION,
         "polarity": polarity_version,
         "aggregate": AGGREGATE_VERSION,
-        "lexicon": {"entity": lexicon.version, "aspect": aspects},
+        "lexicon": {"entity": entities, "aspect": aspects},
     }
 
 

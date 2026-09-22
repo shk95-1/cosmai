@@ -98,6 +98,20 @@ test('runCaptionParts: 요약은 한 줄, versions·note 는 상세로 간다 (#
   assert.equal(runCaptionParts(null, null).summary, '데이터 없음');
 });
 
+test('runCaptionParts: legacy numeric and per-kind entity versions all remain readable (#173)', () => {
+  const versionShapes = [
+    { lexicon: { entity: 1 } },
+    { lexicon: 1 },
+    { lexicon: { entity: { brand: 1, stopword: 2 } } },
+  ];
+  for (const [index, versions] of versionShapes.entries()) {
+    const run = { run_id: index + 1, versions };
+    const { summary, detail } = runCaptionParts(run, null);
+    assert.match(summary, new RegExp(`#${index + 1}`));
+    assert.equal(detail.includes(JSON.stringify(versions)), true);
+  }
+});
+
 // In practice one analyze run writes both tables (run #24) — writing the same thing twice would make
 // the summary that much longer, erasing the very reason it was being collapsed.
 test('runCaptionParts: need 와 wish 가 같은 run 이면 한 번만 적는다', () => {

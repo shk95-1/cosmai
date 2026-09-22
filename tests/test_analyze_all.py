@@ -310,7 +310,10 @@ def test_the_run_records_every_version_and_the_active_lexicon_per_ruleset(
     assert versions["polarity"] == POLARITY_VERSION
     assert versions["aggregate"]
     # Decision of #17: lexicon is the active version + ruleset.
-    assert versions["lexicon"] == {"entity": 1, "aspect": {SUNCARE_RULESET: 1, GENERIC_RULESET: 1}}
+    assert versions["lexicon"] == {
+        "entity": {"attribute": 1, "brand": 1, "format": 1, "ingredient": 1},
+        "aspect": {SUNCARE_RULESET: 1, GENERIC_RULESET: 1},
+    }
 
 
 def test_only_the_version_this_run_wrote_is_aggregated(analysis_url: str, sources: tuple[str, str]):
