@@ -37,6 +37,13 @@ test('partial 은 배너를 빨갛게 만들지 않는다 — 돌았고 대부�
   assert.equal(severityOf(partial), 1);
 });
 
+test('cancelled is idle, not a failed-run banner problem (#112)', () => {
+  const cancelled = row({ freshness: 'ok', last_run_status: 'cancelled' });
+  assert.equal(severityOf(cancelled), 2);
+  assert.equal(isProblem(cancelled), false);
+  assert.equal(problemCount([cancelled]), 0);
+});
+
 test('배너의 수와 문제 덩어리의 행 수는 같은 술어에서 나온다', () => {
   const rows = [
     row({ stage_key: 'a', freshness: 'ok' }),
