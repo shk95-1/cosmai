@@ -15,8 +15,8 @@
 -- are enabled (#138 user decision) -- the values are filled in by fork cosmai-import-ydc#53. The
 -- screen's banner does not count never: a dashboard that is always red is a dashboard no one watches.
 --
--- Premise: youtube's failed cannot be trusted yet (#112 -- a bucket that is entirely cancellations
--- reads as failed). This view passes collector_health's value straight through, and #112 owns the fix.
+-- A cancellation-only youtube bucket is `cancelled` (#112). This view passes that value straight
+-- through as last_run_status, while last_ran deliberately keeps only work that produced a result.
 --
 -- db/migrate.sh (f) re-applies this on every deploy. CREATE OR REPLACE only succeeds when the columns
 -- stay the same, so DROP goes first -- a deploy that widens the view must not stop with exit 1.
@@ -63,8 +63,9 @@ last_run AS (
 -- This asks "did it run", not "did it run cleanly". partial belongs here since it ran and gathered most
 -- of what it should -- how well it finished is what last_run_status says alongside it, and that is why
 -- the two columns are never folded into one (#154).
--- What does not belong: yielded (pushed entirely out by a source lock, gathered nothing, #78), failed,
--- blocked. Drawing this line wrong lets a stage that runs on schedule every day but is always partial
+-- What does not belong: yielded (pushed entirely out by a source lock, gathered nothing, #78), cancelled
+-- (a queue bucket finished without a result, #112), failed, blocked. Drawing this line wrong lets a stage
+-- that runs on schedule every day but is always partial
 -- harden into stalled two days later and stay red forever -- the same failure mode that made #138 drop
 -- never from the banner.
 last_ran AS (

@@ -55,6 +55,7 @@ STAGES = (
     ("commerce:review_stats", "commerce", "review_stats", "1 hour", True),
     ("naver:datalab", "naver", "datalab", "1 hour", True),  # never
     ("youtube:watch", "youtube", "watch", "1 hour", False),  # disabled -- even with a recent success
+    ("youtube:work", "youtube", "work", "1 hour", True),
     ("analyze:all", "analyze", "all", "1 hour", True),
     ("analyze:polarity_missing", "analyze", "polarity_missing", "1 hour", True),
     # fork #95's projection. Its run note carries the snapshot id, so the view folds a prefix rather
@@ -80,6 +81,8 @@ COLLECTOR_ROWS = (
     # An old row with an empty dataset cannot say which stage it is -- it must not land on any stage.
     ("commerce", "", ago(minutes=1), ago(minutes=1), "ok", 0, 0, 0, 0, None, None),
     ("youtube", "watch", ago(minutes=5), ago(minutes=5), "ok", 1, 1, 0, 0, 0, 50),
+    ("youtube", "work", ago(minutes=95), ago(minutes=90), "ok", 1, 1, 0, 0, 0, 50),
+    ("youtube", "work", ago(minutes=6), ago(minutes=5), "cancelled", 1, 0, 0, 0, 0, 50),
 )
 
 # (stage, started, finished, status, note)
@@ -186,6 +189,7 @@ FRESHNESS = (
     ("commerce:product", "stalled"),
     ("naver:datalab", "never"),
     ("youtube:watch", "disabled"),
+    ("youtube:work", "late"),
     ("analyze:all", "ok"),
     ("analyze:polarity_missing", "stalled"),
 )
@@ -222,6 +226,13 @@ def test_freshness_and_last_run_status_are_two_facts_not_one(health: dict[str, A
     # be waited for.
     fresh = health["commerce:new_product"]
     assert (fresh["freshness"], fresh["last_run_status"]) == ("ok", "failed")
+
+
+def test_cancelled_is_the_last_run_but_not_a_success(health: dict[str, Any]):
+    row = health["youtube:work"]
+    assert row["last_run_status"] == "cancelled"
+    assert row["last_run_at"] > row["last_success_at"]
+    assert row["freshness"] == "late"
 
 
 def test_the_run_statistics_come_from_the_last_run_not_the_last_success(health: dict[str, Any]):
@@ -279,5 +290,6 @@ def test_the_freshness_expectations_fail_when_the_view_stops_measuring_the_perio
     broken = _read(needs_runtime_url)
     assert [k for k, expected in FRESHNESS if broken[k]["freshness"] != expected] == [
         "commerce:product",
+        "youtube:work",
         "analyze:polarity_missing",
     ]

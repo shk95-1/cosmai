@@ -148,12 +148,19 @@ COSMAI_DB_PORT   default 5434
 -- naver (needs.naver_run+naver_fetch_log), youtube's job queue (tubedepth.jobs) and
 -- youtube's passes that are not a queue (tubedepth.collector_runs, #280)
 collector text, dataset text, run_id text, started_at timestamptz, finished_at timestamptz,
-status text,          -- ok | partial | blocked | failed | running
+status text,          -- ok | partial | blocked | failed | running | yielded | cancelled
 requests int, ok int, blocked int, failed int, queued int, p90_ms int
 ```
 P16's table has to come out of this one view. `requests` is every fetch attempt, and `ok`·`blocked`·`failed`
 are three buckets only — 2xx / 403·429 / (error or 5xx) — so the difference between their sum and
 `requests` is the responses that went into no bucket (a 404, say).
+
+The status vocabulary is the union across arms, not a requirement that every arm emit every value.
+`yielded` is commerce-specific, while `cancelled` is the YouTube job-queue arm's cancellation-only
+bucket. In that arm a success plus cancellations is `ok`; a blocked or failed job plus cancellations
+remains `blocked` or `failed`; and success plus a failure remains `partial`. Queued or running jobs take
+the existing `running` precedence. `needs.pipeline_health` passes `cancelled` through as the last-run
+status but does not count it as a successful run, so repeated cancellations become late or stalled.
 
 **The youtube arm was attached by #77** (restoring what step 3 had removed — the three grounds the
 2026-08-24 user decision hung on are all gone with #100·#101·#102: `jobs.error_code` classifies
