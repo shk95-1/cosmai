@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Hash the finite pre-rule ``tubedepth.comments`` author population (#288).
+
+Dry-run is the default and every mode prints counts only.  The table update connects as
+``tubedepth_runtime``: it is the schema's existing writer, and one bounded transaction per batch
+fits under its 30-second statement timeout without granting a one-off tool superuser access.
+
+The verification sample is different.  It crosses ``needs``, ``needs_verify`` and ``tubedepth``
+and changes role to ``needs_owner``, so those two modes run psql through the production Postgres
+container's local socket as ``platform``.  No password or identifier crosses the process boundary;
+the SQL returns counts only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+
+import sqlalchemy as sa
+
+from collectors.youtube import author_backfill
+from collectors.youtube.storage import db as storage_db
+
+DEFAULT_CONTAINER = "cosmai-postgres"
+
+SAMPLE_LOAD = r"""
+SET ROLE needs_owner;
+WITH inserted AS (
+    INSERT INTO needs_verify.author_sample (author_hash, channel_id)
+    SELECT h, cid
+      FROM (
+        SELECT DISTINCT d.source_metadata->>'author_channel_hash' AS h, c.author_id AS cid
+          FROM needs.corpus_document d
+          JOIN needs.corpus_snapshot s
+            ON s.snapshot_id = d.snapshot_id AND s.label = 'yt-handoff-20260819'
+          JOIN tubedepth.comments c
+            ON c.comment_id = d.source_item_id AND c.video_id = d.parent_item_id
+         WHERE d.source = 'youtube_comment'
+           AND c.author_id ~ '^UC[0-9A-Za-z_-]{22}$'
+           AND d.source_metadata->>'author_channel_hash' ~ '^[0-9a-f]{24}$'
+      ) AS candidates
+     ORDER BY h
+     LIMIT 50
+    ON CONFLICT (author_hash) DO NOTHING
+    RETURNING 1
+)
+SELECT count(*) FROM inserted;
+"""
+
+SAMPLE_VERIFY = r"""
+SELECT count(*) FILTER (
+           WHERE substr(encode(sha256(('youtube:' || channel_id)::bytea), 'hex'), 1, 24) = author_hash
+       ),
+       count(*),
+       count(*) FILTER (
+           WHERE EXISTS (
+               SELECT 1 FROM tubedepth.comments c WHERE c.author_id = author_sample.author_hash
+           )
+       ),
+       count(*) FILTER (
+           WHERE EXISTS (
+               SELECT 1 FROM tubedepth.comments c WHERE c.author_id = author_sample.channel_id
+           )
+       )
+  FROM needs_verify.author_sample;
+"""
+
+
+class PsqlError(RuntimeError):
+    pass
+
+
+def _psql(container: str, sql: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-U",
+            "platform",
+            "-d",
+            "app",
+            "-X",
+            "-q",
+            "-A",
+            "-t",
+            "-F",
+            ",",
+            "-v",
+            "ON_ERROR_STOP=1",
+        ],
+        input=sql,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def _one_line(container: str, sql: str) -> str:
+    completed = _psql(container, sql)
+    if completed.returncode:
+        raise PsqlError("the count-only psql step failed; inspect the container log, not author values")
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise PsqlError(f"the count-only psql step returned {len(lines)} lines, expected one")
+    return lines[0]
+
+
+def _must_be_refused(container: str, role: str) -> None:
+    completed = _psql(
+        container,
+        f"SET ROLE {role}; SELECT count(*) FROM needs_verify.author_sample;",
+    )
+    if completed.returncode == 0:
+        raise PsqlError(f"{role} unexpectedly read needs_verify.author_sample")
+    if "permission denied" not in completed.stderr.lower():
+        raise PsqlError(f"{role}'s closure probe failed without proving a permission refusal")
+
+
+def sample_load(container: str) -> int:
+    _must_be_refused(container, "needs_runtime")
+    _must_be_refused(container, "postgrest_anon")
+    before = int(
+        _one_line(
+            container,
+            "SET ROLE needs_verify_reader; SELECT count(*) FROM needs_verify.author_sample;",
+        )
+    )
+    if before:
+        raise PsqlError(f"the verification sample is not empty ({before} rows); refusing")
+    loaded = int(_one_line(container, SAMPLE_LOAD))
+    if loaded <= 0:
+        raise PsqlError("the closed archive/raw-id candidate pool produced 0 sample rows")
+    return loaded
+
+
+def sample_verify(container: str) -> tuple[int, int, int, int]:
+    values = tuple(int(value) for value in _one_line(container, SAMPLE_VERIFY).split(","))
+    if len(values) != 4:
+        raise PsqlError("sample verification did not return four counts")
+    matched, total, hashed_present, raw_present = values
+    if total <= 0 or matched != total or hashed_present != total or raw_present != 0:
+        raise PsqlError(
+            "sample verification failed: "
+            f"hash={matched}/{total} stored={hashed_present}/{total} raw_present={raw_present}"
+        )
+    return matched, total, hashed_present, raw_present
+
+
+def _render(report: author_backfill.Report) -> str:
+    return (
+        f"total={report.total} raw_ids={report.raw_ids} display_names={report.display_names} "
+        f"invalid_ids={report.invalid_ids} candidates={report.candidates}"
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="update bounded batches; default is dry-run")
+    mode.add_argument("--sample-load", action="store_true", help="prove closure and load about 50 pairs")
+    mode.add_argument("--sample-verify", action="store_true", help="verify N/N after the table update")
+    parser.add_argument("--batch-size", type=int, default=1000)
+    parser.add_argument("--url", help="SQLAlchemy URL for the table pass; defaults to TUBEDEPTH_DB_RUNTIME")
+    parser.add_argument("--container", default=DEFAULT_CONTAINER, help="Postgres container for sample modes")
+    args = parser.parse_args(argv)
+
+    try:
+        if args.sample_load:
+            loaded = sample_load(args.container)
+            print(f"sample_loaded={loaded}")
+            return 0
+        if args.sample_verify:
+            matched, total, stored, raw = sample_verify(args.container)
+            print(f"sample_hash={matched}/{total} stored_hash={stored}/{total} raw_present={raw}")
+            return 0
+
+        engine = sa.create_engine(args.url or storage_db.runtime_url(), pool_pre_ping=True)
+        try:
+            with engine.connect() as conn:
+                before = author_backfill.inspect(conn)
+            print(f"before {_render(before)}")
+            if not args.apply:
+                return 2 if before.invalid_ids else 0
+            changed = author_backfill.apply(engine, batch_size=args.batch_size)
+            with engine.connect() as conn:
+                after = author_backfill.inspect(conn)
+            print(f"changed={changed}")
+            print(f"after {_render(after)}")
+            return 0 if after.candidates == 0 and after.invalid_ids == 0 else 1
+        finally:
+            engine.dispose()
+    except (author_backfill.UnknownIdentifierShape, PsqlError, ValueError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

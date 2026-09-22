@@ -95,6 +95,7 @@ extend-include = [
     "tool/measure-trend-sample",
     "tool/measure-mfds-join",
     "tool/measure-youtube-listing-routes",
+    "tool/hash-pre-rule-comment-authors",
     "tool/launch-coverage",
     "tool/derive-naver-launch-terms",
 ]
