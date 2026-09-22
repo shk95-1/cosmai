@@ -43,9 +43,9 @@ SELECT 'corpus_hash_shape'::text,
    AND d.source_metadata ->> 'author_channel_hash' !~ '^[0-9a-f]{24}$'
    AND d.source_metadata ->> 'author_channel_hash' !~ '^UC[0-9A-Za-z_-]{22}$'
 UNION ALL
--- (4) The collector's own table. Cutoff: the last pre-rule comment row was first seen 2026-08-23T22:55:44Z
--- and the collector has been stopped since; every row after this date is collected under the hash rule
--- (#92), so the view must see it. A later cutoff would leave the first days of live collection unwatched.
+-- (4) The collector's own table. Upstream #288 hashed the finite pre-rule population once, so the
+-- invariant now covers history as well as new collection; a date cutoff would hide a regression in the
+-- repaired rows.
 -- The predicate asks what the value is **not**, not what it is: a `UC...`-shaped test would pass a handle
 -- (`@name`), a legacy `/user/` id or anything else raw that is not that one shape, and every one of those
 -- is as much an identifier as the shape we happen to recognise. Branch (5) already asks the display name
@@ -55,8 +55,7 @@ SELECT 'comment_raw_author_id'::text,
        format('%s/%s', c.video_id, c.comment_id),
        format('first_seen_at=%s column=author_id', c.first_seen_at)
   FROM tubedepth.comments c
- WHERE c.first_seen_at > '2026-08-24'
-   AND c.author_id IS NOT NULL
+ WHERE c.author_id IS NOT NULL
    AND c.author_id !~ '^[0-9a-f]{24}$'
 UNION ALL
 -- (5) The display name is not stored at all, so its presence is the violation whatever it holds -- a
@@ -66,8 +65,7 @@ SELECT 'comment_author_name'::text,
        format('%s/%s', c.video_id, c.comment_id),
        format('first_seen_at=%s column=author', c.first_seen_at)
   FROM tubedepth.comments c
- WHERE c.first_seen_at > '2026-08-24'
-   AND c.author IS NOT NULL
+ WHERE c.author IS NOT NULL
 UNION ALL
 -- (6) The allow-list, mirrored (fork #95). Branch (1) names two keys, so `author_name`,
 -- `author_channel_id` or a whole `snippet` object carrying `authorDisplayName` passed it and the

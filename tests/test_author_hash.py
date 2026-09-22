@@ -43,10 +43,6 @@ DIGEST = "224427a5eb83274bdf825b8a"
 # number, not a target: with a different formula it is 0, which is exactly the silent failure this pins.
 CREATOR_COMMENTS = 40
 
-# The cutoff in the view, and why it is that date. Live collection starts under upstream #183, and a cutoff
-# later than the archive's last row would leave its first days unwatched.
-CUTOFF = "2026-08-24"
-
 
 # ---------- the function ----------
 def test_the_hash_is_the_rule_the_collector_used():
@@ -147,8 +143,7 @@ def test_the_view_and_the_loader_recognise_one_shape_of_raw_identifier():
     assert body.count(RAW_CHANNEL_ID.pattern) == 2
     assert body.count(AUTHOR_HASH.pattern) == 2
     assert "GRANT SELECT ON needs.author_identifier_violation TO needs_runtime" in body
-    assert body.count(f"'{CUTOFF}'") == 2
-    assert "A later cutoff would leave the first days of live collection unwatched." in body
+    assert "first_seen_at >" not in body
 
 
 @pytest.fixture
@@ -265,9 +260,16 @@ def test_the_view_lists_a_corpus_row_that_went_round_the_loader(
 @pytest.mark.parametrize(
     ("comment_id", "author", "author_id", "first_seen", "expected"),
     [
-        # The archive's own rows: raw on both columns, and first seen before the rule. They are the
-        # retroactive pass's work, not a live collector writing raw identifiers today.
-        ("OLD", "Some Person", "UCqrNqg3UgVoD3Sa-F_TxuSA", "2026-08-23T22:55:44Z", []),
+        # The one-off upstream pass repaired the pre-rule population, so the invariant now watches
+        # history too: a raw historical row is a regression, while its hashed counterpart is clean.
+        (
+            "OLD_RAW",
+            "Some Person",
+            "UCqrNqg3UgVoD3Sa-F_TxuSA",
+            "2026-08-23T22:55:44Z",
+            ["comment_author_name", "comment_raw_author_id"],
+        ),
+        ("OLD_HASHED", None, "224427a5eb83274bdf825b8a", "2026-08-23T22:55:44Z", []),
         ("NAME", "Some Person", None, "2026-09-01T00:00:00Z", ["comment_author_name"]),
         ("ID", None, "UCqrNqg3UgVoD3Sa-F_TxuSA", "2026-09-01T00:00:00Z", ["comment_raw_author_id"]),
         ("HASHED", None, "224427a5eb83274bdf825b8a", "2026-09-01T00:00:00Z", []),
@@ -276,7 +278,7 @@ def test_the_view_lists_a_corpus_row_that_went_round_the_loader(
         ("HANDLE", None, "@some-channel", "2026-09-01T00:00:00Z", ["comment_raw_author_id"]),
     ],
 )
-def test_the_view_watches_what_the_collector_writes_after_the_cutoff(
+def test_the_view_watches_the_collectors_whole_history(
     loaded: tuple[str, str],
     comment_id: str,
     author: str | None,
