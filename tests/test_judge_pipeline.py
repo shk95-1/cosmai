@@ -69,6 +69,13 @@ def graded(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
 def _plant(conn: psycopg.Connection[Any]) -> int:
     """One dense grid of the same shape `cosmai trend quarter` emits."""
     with conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO corpus_snapshot"
+            " (snapshot_id, label, source_runs, collected_at, lineage)"
+            " VALUES (%s, 'judge-pipeline-live', ARRAY['test'], now(), 'live')"
+            " ON CONFLICT (snapshot_id) DO NOTHING",
+            (SNAPSHOT,),
+        )
         cur.execute(OPEN_RUN, ('{"metric": "v0.2"}', note_of(SCOPE, SNAPSHOT, 1)))
         found = cur.fetchone()
         assert found is not None
@@ -96,10 +103,20 @@ def test_the_quarter_in_progress_comes_from_the_cutoff_the_run_recorded(graded: 
         with conn.cursor() as cur:
             cur.execute("UPDATE analysis_run SET versions = versions - 'cutoff' WHERE run_id = %s", (run_id,))
         conn.commit()
+        with pytest.raises(NoJudgement, match="live.*cutoff"):
+            build(conn, snapshot_id=SNAPSHOT, panel_version=1)
+    assert RUNNING not in cutoff
+
+
+def test_the_archive_keeps_its_last_observed_quarter_fallback(graded: str):
+    with connect(graded) as conn:
+        _plant(conn)
+        with conn.cursor() as cur:
+            cur.execute("UPDATE corpus_snapshot SET lineage = 'archive' WHERE snapshot_id = %s", (SNAPSHOT,))
+        conn.commit()
         without = {
             row.quarter: row.trend_type for row in build(conn, snapshot_id=SNAPSHOT, panel_version=1).rows
         }
-    assert RUNNING not in cutoff
     assert without[QUARTERS[-1]] == RUNNING
 
 
