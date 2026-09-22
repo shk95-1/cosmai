@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildQuery, parseContentRange, rangeLength, appendCsvPage, nextPageOffset, latestRunId,
   sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
-  NEED_QUERIES,
+  NEED_QUERIES, WISH_QUERY, okRunsByRecency, queryForRun, runProbe,
+  selectMetricRuns, fetchSelectedMetrics,
 } from '../public/query.js';
 
 test('buildQuery adds select/filters/order/limit/offset', () => {
@@ -84,6 +85,89 @@ test('NEED_QUERIES: 세 축은 서로 겹치지 않는다 (#130)', () => {
     }
     assert.match(spec.order, /^run_id\.desc,scope,need_key,month/); // the stable sort for offset paging
   }
+});
+
+test('runtime run filter leaves the canonical query immutable and occurs exactly once', () => {
+  const before = structuredClone(NEED_QUERIES.category);
+  const twice = queryForRun(queryForRun(NEED_QUERIES.category, 7), 8);
+  assert.deepEqual(NEED_QUERIES.category, before);
+  assert.deepEqual(twice.filters.filter((f) => f.column === 'run_id'), [
+    { column: 'run_id', op: 'eq', value: 8 },
+  ]);
+  assert.equal(new URLSearchParams(buildQuery(twice)).get('run_id'), 'eq.8');
+});
+
+test('run probes preserve the need axis and ask for one row only', () => {
+  const probe = runProbe(NEED_QUERIES.category, 9);
+  assert.deepEqual(probe.select, ['run_id']);
+  assert.equal(probe.limit, 1);
+  const params = new URLSearchParams(buildQuery(probe));
+  assert.equal(params.get('product_ref'), 'eq.');
+  assert.equal(params.get('month'), 'eq.');
+  assert.equal(params.get('run_id'), 'eq.9');
+});
+
+test('successful candidates are newest first with run_id as the timestamp tie-break', () => {
+  const runs = [
+    { run_id: 4, status: 'failed', finished_at: '2026-03-01T00:00:00Z' },
+    { run_id: 3, status: 'ok', finished_at: null },
+    { run_id: 1, status: 'ok', finished_at: '2026-02-01T00:00:00Z' },
+    { run_id: 2, status: 'ok', finished_at: '2026-02-01T00:00:00Z' },
+  ];
+  assert.deepEqual(okRunsByRecency(runs).map((r) => r.run_id), [2, 1]);
+});
+
+test('need and wish probe independently through every empty successful run', async () => {
+  const runs = [
+    { run_id: 1, status: 'ok', finished_at: '2026-01-01T00:00:00Z' },
+    { run_id: 2, status: 'ok', finished_at: '2026-02-01T00:00:00Z' },
+    { run_id: 3, status: 'ok', finished_at: '2026-03-01T00:00:00Z' },
+  ];
+  const seen = [];
+  const selected = await selectMetricRuns(runs, async (path, spec) => {
+    const id = Number(new URLSearchParams(buildQuery(spec)).get('run_id').slice(3));
+    seen.push([path, id]);
+    return path === '/metrics_need' ? id === 2 : id === 1;
+  });
+  assert.equal(selected.needRunId, 2);
+  assert.equal(selected.wishRunId, 1);
+  assert.deepEqual(seen.filter(([path]) => path === '/metrics_need').map(([, id]) => id), [3, 2]);
+  assert.deepEqual(seen.filter(([path]) => path === '/metrics_wish').map(([, id]) => id), [3, 2, 1]);
+});
+
+test('no populated run selects the existing empty state and a probe error is visible', async () => {
+  const runs = [{ run_id: 1, status: 'ok', finished_at: '2026-01-01T00:00:00Z' }];
+  const empty = await selectMetricRuns(runs, async () => false);
+  assert.equal(empty.needRunId, null);
+  assert.equal(empty.wishRunId, null);
+  await assert.rejects(selectMetricRuns(runs, async () => { throw new Error('probe failed'); }), /probe failed/);
+});
+
+test('full metric paging receives only the independently selected runs', async () => {
+  const calls = [];
+  const rows = await fetchSelectedMetrics({ needRunId: 8, wishRunId: 5 }, async (path, spec) => {
+    calls.push([path, spec]);
+    return [{ run_id: Number(new URLSearchParams(buildQuery(spec)).get('run_id').slice(3)) }];
+  });
+  assert.equal(calls.length, 4);
+  assert.deepEqual(calls.map(([path]) => path), [
+    '/metrics_need', '/metrics_need', '/metrics_need', '/metrics_wish',
+  ]);
+  for (const [path, spec] of calls) {
+    const filters = spec.filters.filter((f) => f.column === 'run_id');
+    assert.equal(filters.length, 1);
+    assert.equal(filters[0].value, path === '/metrics_need' ? 8 : 5);
+  }
+  assert.deepEqual(rows.need.map((r) => r.run_id), [8]);
+  assert.deepEqual(rows.wish.map((r) => r.run_id), [5]);
+
+  const skipped = [];
+  const none = await fetchSelectedMetrics({ needRunId: null, wishRunId: null }, async (...args) => {
+    skipped.push(args);
+    return [];
+  });
+  assert.deepEqual(skipped, []);
+  assert.deepEqual(none, { need: [], needProducts: [], needMonths: [], wish: [] });
 });
 
 test('parseContentRange reads the total after the slash', () => {
