@@ -34,7 +34,7 @@ WITH runs AS (
     FROM needs.collector_health
     WHERE dataset IS NOT NULL AND dataset <> ''
     UNION ALL
-    -- The three analysis lines. An incremental pass is told apart by missing= in the note
+    -- The four analysis lines. An incremental pass is told apart by missing= in the note
     -- (contracts/entrypoints.md §Analysis) -- a cron line does not tell them apart, and stage carries an
     -- implementation version and cannot be used as it stands.
     -- eval:* and trend-quarter:* are not cron stages and never reach this view.
@@ -42,9 +42,12 @@ WITH runs AS (
     -- pipeline_stage, so without this branch it would read 'never' on the screen for as long as it ran
     -- correctly -- the one failure mode a health view must not have. Its note carries the snapshot id,
     -- so the branch is a prefix and the stage_key it folds to is the declared one, 'project:corpus'.
+    -- 'match-topic:snapshot<id>' follows the same rule for the live topic matcher and folds to the
+    -- disabled-until-enabled-checklist stage 'match:topic' (fork #114).
     SELECT
-        CASE WHEN stage = 'analyze:all'               THEN 'analyze:all'
-             WHEN starts_with(stage, 'project-corpus') THEN 'project:corpus'
+        CASE WHEN stage = 'analyze:all'                 THEN 'analyze:all'
+             WHEN starts_with(stage, 'project-corpus')  THEN 'project:corpus'
+             WHEN starts_with(stage, 'match-topic')     THEN 'match:topic'
              ELSE 'analyze:polarity_missing' END,
         coalesce(finished_at, started_at),
         status,
@@ -55,6 +58,7 @@ WITH runs AS (
     -- mean the same thing without using that character.
     WHERE stage = 'analyze:all'
        OR starts_with(stage, 'project-corpus')
+       OR starts_with(stage, 'match-topic')
        OR (starts_with(stage, 'analyze:polarity:') AND strpos(note, 'missing=') > 0)
 ),
 last_run AS (

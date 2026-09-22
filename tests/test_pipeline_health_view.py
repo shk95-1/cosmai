@@ -62,6 +62,9 @@ STAGES = (
     # than an exact stage name -- without that branch this row would read 'never' for as long as the
     # stage ran correctly, which is the one answer a health view must not give.
     ("project:corpus", "analyze", "corpus", "1 hour", True),
+    # The live matcher stays disabled until fork #96's whole enable checklist is satisfied. Health still
+    # folds its run history so the last result is visible beside that declaration.
+    ("match:topic", "analyze", "topic", "1 hour", False),
 )
 
 # (collector, dataset, started, finished, status, requests, ok, blocked, failed, queued, p90)
@@ -103,6 +106,12 @@ ANALYSIS_ROWS = (
     # The projection of a snapshot other than 1 -- the id is part of the stage name and must not stop
     # it reaching its declared stage_key.
     ("project-corpus:snapshot2", ago(minutes=10), ago(minutes=9), "ok", "project-corpus:snapshot2"),
+    # db/corpus/match.py writes this prefix followed by the snapshot id. Both rows must fold to the one
+    # declared stage, and the newest run must win without erasing the older success time.
+    ("match-topic:snapshot2", ago(minutes=25), ago(minutes=24), "ok", "match-topic:snapshot2"),
+    ("match-topic:snapshot2", ago(minutes=6), ago(minutes=5), "failed", "match-topic:snapshot2"),
+    # A similarly named analysis run is not part of the live topic matcher and must not be admitted.
+    ("match:topic", ago(minutes=2), ago(minutes=1), "ok", "unrelated exact stage key"),
 )
 
 COLUMNS = (
@@ -265,10 +274,23 @@ def test_the_projection_reaches_its_stage_whatever_snapshot_its_note_names(healt
     assert projected["requests"] is None  # no external fetch, the same as the other analysis rows
 
 
+def test_the_matcher_prefix_folds_to_one_disabled_stage_and_the_latest_run_wins(
+    health: dict[str, Any],
+):
+    matched = health["match:topic"]
+    assert matched["freshness"] == "disabled"
+    assert matched["last_run_status"] == "failed"
+    assert matched["last_run_at"] > matched["last_success_at"]
+    assert matched["requests"] is None
+
+
 def test_runs_that_are_not_cron_stages_are_ignored(health: dict[str, Any]):
     # eval:* · trend-quarter:* and polarity without missing= ran 2-3 minutes ago. Had any of them landed on a
     # stage, the freshness of the analyze side would flip to ok.
     assert health["analyze:polarity_missing"]["freshness"] == "stalled"
+    # The unrelated exact stage key is newer and successful. If a broad match admitted it, it would replace
+    # the failed prefix run above.
+    assert health["match:topic"]["last_run_status"] == "failed"
 
 
 # The one branch the assertions above are made of: every freshness value other than never and disabled hangs
