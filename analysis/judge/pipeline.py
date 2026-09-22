@@ -22,6 +22,7 @@ from analysis.judge import JUDGEMENT_VERSION, UNJUDGED, judge, quarter_of
 from analysis.trend.pipeline import CONTENT_TYPE, PANEL_ROLE, RUN_CUTOFF, SCOPE, cutoff_of, note_of
 from analysis.types import MetricsTopicQuarterRow, TopicQuarterJudgementRow
 from db.corpus import active_snapshot
+from db.corpus.project import ARCHIVE_LINEAGE
 from db.seed import panel as panel_seed
 
 METRIC_COLUMNS = (
@@ -59,6 +60,7 @@ VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 VIOLATIONS: LiteralString = (
     "SELECT violation, quarter, detail FROM topic_quarter_judgement_violation WHERE run_id = %s"
 )
+SNAPSHOT_LINEAGE: LiteralString = "SELECT lineage FROM corpus_snapshot WHERE snapshot_id = %s"
 
 
 class NoJudgement(LookupError):
@@ -143,11 +145,21 @@ def build(
             )
         run_id = int(found[0])
         cutoff = cutoff_of(found[1])
+        cur.execute(SNAPSHOT_LINEAGE, (snapshot,))
+        found = cur.fetchone()
+        if found is None:
+            raise NoJudgement(f"no corpus snapshot {snapshot}; its quarter run cannot be judged")
+        lineage = str(found[0])
         metrics = _metric_rows(cur, run_id, scope, version, panel_role)
     conn.commit()
 
     if not metrics:
         raise NoJudgement(f"run {run_id} has no metrics_topic_quarter row to judge")
+    if cutoff is None and lineage != ARCHIVE_LINEAGE:
+        raise NoJudgement(
+            f"{lineage} snapshot {snapshot}'s quarter run {run_id} records no cutoff;"
+            " only the archive may fall back to its last observed quarter"
+        )
     in_progress = quarter_of(cutoff) if cutoff is not None else None
     return Built(run_id, snapshot, version, judge(metrics, in_progress=in_progress))
 

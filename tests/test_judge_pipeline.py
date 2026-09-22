@@ -24,6 +24,7 @@ from analysis.trend.pipeline import INSERT as INSERT_METRIC
 from analysis.trend.pipeline import OPEN_RUN, PANEL_ROLE, SCOPE, note_of
 from analysis.trend.pipeline import _values as metric_values
 from analysis.types import MetricsTopicQuarterRow
+from cosmai.cli import main
 from db import seed
 from db.seed._common import connect
 
@@ -71,12 +72,18 @@ def _plant(conn: psycopg.Connection[Any]) -> int:
     with conn.cursor() as cur:
         cur.execute(
             "INSERT INTO corpus_snapshot"
-            " (snapshot_id, label, source_runs, collected_at, lineage)"
-            " VALUES (%s, 'judge-pipeline-live', ARRAY['test'], now(), 'live')"
+            " (snapshot_id, label, source_runs, collected_at, lineage, active)"
+            " VALUES (%s, 'judge-pipeline-live', ARRAY['test'], now(), 'live', true)"
             " ON CONFLICT (snapshot_id) DO NOTHING",
             (SNAPSHOT,),
         )
-        cur.execute(OPEN_RUN, ('{"metric": "v0.2"}', note_of(SCOPE, SNAPSHOT, 1)))
+        cur.execute(
+            OPEN_RUN,
+            (
+                '{"metric": "v0.2", "cutoff": "2024-10-03T00:00:00+00:00"}',
+                note_of(SCOPE, SNAPSHOT, 1),
+            ),
+        )
         found = cur.fetchone()
         assert found is not None
         run_id = int(found[0])
@@ -88,7 +95,9 @@ def _plant(conn: psycopg.Connection[Any]) -> int:
     return run_id
 
 
-def test_the_quarter_in_progress_comes_from_the_cutoff_the_run_recorded(graded: str):
+def test_the_quarter_in_progress_comes_from_the_cutoff_the_run_recorded(
+    graded: str, capsys: pytest.CaptureFixture[str]
+):
     """A run three days into 2025Q1 whose last quarter with rows is 2024Q4: that quarter is complete and is
     judged, not labelled in progress (fork #96)."""
     with connect(graded) as conn:
@@ -106,6 +115,9 @@ def test_the_quarter_in_progress_comes_from_the_cutoff_the_run_recorded(graded: 
         with pytest.raises(NoJudgement, match="live.*cutoff"):
             build(conn, snapshot_id=SNAPSHOT, panel_version=1)
     assert RUNNING not in cutoff
+    assert main(["trend", "judge", "--url", graded]) == 2
+    said = capsys.readouterr().out
+    assert "live" in said and "cutoff" in said
 
 
 def test_the_archive_keeps_its_last_observed_quarter_fallback(graded: str):
@@ -113,6 +125,7 @@ def test_the_archive_keeps_its_last_observed_quarter_fallback(graded: str):
         _plant(conn)
         with conn.cursor() as cur:
             cur.execute("UPDATE corpus_snapshot SET lineage = 'archive' WHERE snapshot_id = %s", (SNAPSHOT,))
+            cur.execute("UPDATE analysis_run SET versions = versions - 'cutoff'")
         conn.commit()
         without = {
             row.quarter: row.trend_type for row in build(conn, snapshot_id=SNAPSHOT, panel_version=1).rows
