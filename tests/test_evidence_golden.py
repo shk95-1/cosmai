@@ -113,6 +113,12 @@ def quoted(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
     assert main(["lexicon", "activate", *where]) == 0
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE corpus_snapshot SET lineage = 'archive' WHERE snapshot_id = %s",
+                (corpus.SNAPSHOT_ID,),
+            )
+        conn.commit()
         quarter_run(conn)
         judge_run(conn)
         run(conn)

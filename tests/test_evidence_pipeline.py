@@ -58,6 +58,15 @@ def _install_views(url: str, schema: str) -> None:
         engine.dispose()
 
 
+def _mark_archive(conn) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE corpus_snapshot SET lineage = 'archive' WHERE snapshot_id = %s",
+            (corpus.SNAPSHOT_ID,),
+        )
+    conn.commit()
+
+
 @pytest.fixture
 def judged(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
     """The schema after `cosmai trend quarter` and then `judge`. The cells the evidence attaches to are
@@ -69,6 +78,7 @@ def judged(needs_schema: str, needs_runtime_url: str, _schema_name: str) -> str:
     assert main(["lexicon", "activate", *where]) == 0
     with connect(needs_runtime_url) as conn:
         corpus.load(conn, FIXTURE / "corpus")
+        _mark_archive(conn)
         quarter_run(conn)
     return needs_runtime_url
 
