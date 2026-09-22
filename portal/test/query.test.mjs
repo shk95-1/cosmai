@@ -158,6 +158,9 @@ test('full metric paging receives only the independently selected runs', async (
     assert.equal(filters.length, 1);
     assert.equal(filters[0].value, path === '/metrics_need' ? 8 : 5);
   }
+  const wishSpec = calls.find(([path]) => path === '/metrics_wish')[1];
+  assert.deepEqual(wishSpec.select, ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions']);
+  assert.equal(wishSpec.filters.some((f) => f.column === 'scope'), false); // both scopes in one read
   assert.deepEqual(rows.need.map((r) => r.run_id), [8]);
   assert.deepEqual(rows.wish.map((r) => r.run_id), [5]);
 

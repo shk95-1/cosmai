@@ -36,6 +36,34 @@ export function wishRowsForScope(wish, runId, scope) {
   return (wish || []).filter((r) => r.run_id === runId && r.scope === scope);
 }
 
+// The format×attribute rows occupy their own scope because their two nonempty axes would collide with
+// marginal cells in metrics_wish's key. They are shown beside wish:a, not as a third wish class.
+const WISH_CROSS_SCOPE = 'wish:a:format×attr';
+export function wishScreenScopes(wish, runId) {
+  return scopesForRun(wish, runId).filter((scope) => scope !== WISH_CROSS_SCOPE);
+}
+
+export function wishDefaultScope(wish, runId) {
+  const visible = new Set(wishScreenScopes(wish, runId));
+  return defaultScope((wish || []).filter((row) => visible.has(row.scope)), runId);
+}
+
+export function wishCrossRows(wish, runId, scope) {
+  return scope === 'wish:a' ? wishRowsForScope(wish, runId, WISH_CROSS_SCOPE) : [];
+}
+
+// A mention with both axes appears once in each marginal, but only once in the cross scope. Thus
+// format + attribute - both must equal the cross scope's whole total (including its one-axis cells).
+export function wishCrossReconciliation(marginal, crossRows) {
+  const sum = (rows) => rows.reduce((total, row) => total + Number(row.mentions || 0), 0);
+  const format = sum(marginal.filter((r) => r.format && !r.attribute && !r.brand));
+  const attribute = sum(marginal.filter((r) => r.attribute && !r.format && !r.brand));
+  const both = sum(crossRows.filter((r) => r.format && r.attribute));
+  const union = format + attribute - both;
+  const cross = sum(crossRows);
+  return { format, attribute, both, union, cross, agrees: union === cross };
+}
+
 // Product-axis rows come out one set per scope (per category + the 'all' rollup, #41). If the same product
 // were caught twice, once in its own category and once in 'all,' the top 20 would fill with duplicates, so
 // only the rollup is read when it exists — 'all' carries every product once, after synonyms are folded. A

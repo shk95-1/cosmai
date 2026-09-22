@@ -11,7 +11,8 @@ import {
   groupByDocument, describeMatch,
 } from './lineage.js';
 import {
-  scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  scopesForRun, needRowsForScope, wishRowsForScope, wishScreenScopes, wishDefaultScope, wishCrossRows,
+  wishCrossReconciliation, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, withProductNames,
   monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
@@ -160,11 +161,25 @@ function renderWishScreen(scope) {
   $('wish-chart-format').innerHTML = renderTopBars(topByDimension(rows, 'format'), { empty: 'format 값이 없음' });
   $('wish-chart-attribute').innerHTML = renderTopBars(topByDimension(rows, 'attribute'), { empty: 'attribute 값이 없음' });
   $('wish-chart-brand').innerHTML = renderTopBars(topByDimension(rows, 'brand'), { empty: 'brand 값이 없음' });
-  // The panel is a top-N approximation per axis, but lineage descends from one cell of metrics_wish — there
+  // The panel shows each marginal axis's top N, but lineage descends from one cell of metrics_wish — there
   // must be a place on screen to pick that cell (#144). Order is by mentions, capped the same as the panel for the same reason.
   fillTable($('wish-table'), ['format', 'attribute', 'brand', 'mentions'],
     sortRows(rows, 'mentions', 'desc').slice(0, WISH_CELL_LIMIT), undefined,
     (r) => openDrill(r, 'wish'));
+
+  const crossPanel = $('wish-cross');
+  crossPanel.hidden = scope !== 'wish:a';
+  if (crossPanel.hidden) return;
+  const crossRows = wishCrossRows(state.wish, state.wishRunId, scope);
+  const totals = wishCrossReconciliation(rows, crossRows);
+  const caption = $('wish-cross-total');
+  caption.textContent = crossRows.length
+    ? `format ${totals.format} + attribute ${totals.attribute} − 둘 다 ${totals.both}`
+      + ` = 교차표 ${totals.cross}건${totals.agrees ? '' : ' — 집계 불일치'}`
+    : 'format×attribute 교차 행이 없음';
+  caption.classList.toggle('error', crossRows.length > 0 && !totals.agrees);
+  fillTable($('wish-cross-table'), ['format', 'attribute', 'mentions'],
+    sortRows(crossRows, 'mentions', 'desc'), undefined, (r) => openDrill(r, 'wish'));
 }
 
 // Cap for the wish-cell table. Drawing all of them would be hundreds of marginal combinations pushing the panel off-screen.
@@ -502,7 +517,7 @@ async function boot() {
     // need·wish are different runs (per-slice seeds) so the scope list is also filled per table
     // — filling both from one table's scope leaves the other table with nothing to pick (fix round 1 finding 2).
     const needScopes = scopesForRun(need, needRunId);
-    const wishScopes = scopesForRun(wish, wishRunId);
+    const wishScopes = wishScreenScopes(wish, wishRunId);
     $('need-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     $('wish-scope').replaceChildren(...wishScopes.map((s) => new Option(s, s)));
     // Screen 4 sees the same table as screen 1 (category sum), so its scope list is the same.
@@ -521,7 +536,7 @@ async function boot() {
     // Opens with the scope defaultScope picks, not the first item in the order the select was filled (alphabetical) —
     // otherwise "01 > mask pack > sheet pack" would accidentally become the first screen (#122).
     openScope('need-scope', defaultScope(need, needRunId), renderNeedScreen);
-    openScope('wish-scope', defaultScope(wish, wishRunId), renderWishScreen);
+    openScope('wish-scope', wishDefaultScope(wish, wishRunId), renderWishScreen);
     openScope('character-scope', defaultScope(need, needRunId), renderCharacterScreen);
     renderProductScreen();
     // Screen 5 opens on a scope that has month rows — opening with screen 1's default (the scope with the most rows

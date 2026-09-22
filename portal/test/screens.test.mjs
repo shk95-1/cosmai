@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { NEED_QUERIES } from '../public/query.js';
 import {
-  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, wishScreenScopes, wishDefaultScope,
+  wishCrossRows, wishCrossReconciliation, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, productLabel, truncateLabel, withProductNames, UNLINKED_LABEL,
   monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
@@ -56,6 +57,29 @@ test('wishRowsForScope: wish 자신의 run(3)으로 걸러야 행이 나온다',
   const { wishRunId } = latestRuns(runsFixture, needFixture, wishFixture);
   const rows = wishRowsForScope(wishFixture, wishRunId, 'wish:a');
   assert.equal(rows.length, 4);
+});
+
+test('wish cross table reconciles with the two marginals without adding their shared mentions twice (#88)', () => {
+  const rows = [
+    { run_id: 7, scope: 'wish:a', format: 'stick', attribute: '', brand: '', mentions: 4 },
+    { run_id: 7, scope: 'wish:a', format: '', attribute: 'light', brand: '', mentions: 3 },
+    { run_id: 7, scope: 'wish:a:format×attr', format: 'stick', attribute: 'light', brand: '', mentions: 2 },
+    { run_id: 7, scope: 'wish:a:format×attr', format: 'stick', attribute: '', brand: '', mentions: 2 },
+    { run_id: 7, scope: 'wish:a:format×attr', format: '', attribute: 'light', brand: '', mentions: 1 },
+    { run_id: 7, scope: 'wish:b', format: 'roller', attribute: '', brand: '', mentions: 9 },
+    { run_id: 8, scope: 'wish:a:format×attr', format: 'other', attribute: '', brand: '', mentions: 100 },
+  ];
+  assert.deepEqual(wishScreenScopes(rows, 7), ['wish:a', 'wish:b']);
+  assert.equal(defaultScope(rows, 7), 'wish:a:format×attr');
+  assert.equal(wishDefaultScope(rows, 7), 'wish:a');
+  const marginal = wishRowsForScope(rows, 7, 'wish:a');
+  const cross = wishCrossRows(rows, 7, 'wish:a');
+  assert.equal(cross.length, 3);
+  assert.deepEqual(wishCrossReconciliation(marginal, cross), {
+    format: 4, attribute: 3, both: 2, union: 5, cross: 5, agrees: true,
+  });
+  assert.deepEqual(wishCrossRows(rows, 7, 'wish:b'), []);
+  assert.equal(wishCrossReconciliation(marginal, cross.slice(0, 2)).agrees, false);
 });
 
 // Reproducing finding 2: filling the wish scope select with need scope (category names) leaves not one
