@@ -60,6 +60,9 @@ ENTITY_ROWS: LiteralString = """
 SELECT kind, canonical, surface, tier, source, version
 FROM entity_lexicon WHERE version = %s ORDER BY id
 """
+ENTITY_ACTIVE_VERSIONS: LiteralString = """
+SELECT kind, version FROM entity_lexicon WHERE active GROUP BY kind, version ORDER BY kind, version
+"""
 ASPECT_ACTIVE: LiteralString = """
 SELECT aspect, scope, category, pattern, is_neutral_noun, priority, ruleset, version
 FROM aspect_lexicon WHERE active AND ruleset IN (%s, 'shared') ORDER BY priority, id
@@ -76,6 +79,17 @@ def _label(rows: Sequence[Sequence[Any]], version: int | None, table: str) -> in
     if not rows:
         raise LookupError(f"{table} 에 active 행이 없다 — cosmai lexicon activate 로 한 버전을 켜라")
     return max(int(row[-1]) for row in rows)
+
+
+def active_entity_versions(cur: psycopg.Cursor[Any]) -> dict[str, int]:
+    """Return the one active version of each entity kind, refusing an ambiguous kind."""
+    cur.execute(ENTITY_ACTIVE_VERSIONS)
+    found: dict[str, int] = {}
+    for kind, version in cur.fetchall():
+        if kind in found:
+            raise ValueError(f"entity_lexicon kind {kind!r} has more than one active version")
+        found[str(kind)] = int(version)
+    return found
 
 
 def _alternation(surfaces: list[str]) -> str:

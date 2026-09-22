@@ -325,14 +325,7 @@ def test_the_tool_is_wired_to_the_read_only_handoff_corpus():
 
 @pytest.mark.postgres
 def test_raising_the_aspect_dictionary_to_v3_does_not_move_the_run_stamp(needs_runtime_url: str):
-    """Fork #58 writes that the number of `entity_lexicon` does not pick by kind. **The topic dictionary does
-    not step on that place** -- `aspect_lexicon` is a different table, so it does not share
-    `versions.lexicon` (the `SELECT max(version) FROM entity_lexicon` at `aggregate/pipeline.py:149`). What
-    moves and what does not when the coordinator switches v3 on is the answer of this test.
-
-    변이: `entity_lexicon` 에 v3 를 한 행 넣으면 (활성이 아니어도) 그 칸이 3 이 된다 -- #58 이 고칠
-    자리가 실제로 무는 것을 여기서 본다.
-    """
+    """Aspect and inactive entity versions cannot move an active per-kind entity stamp."""
     from analysis.aggregate.pipeline import _versions
     from analysis.lexicon import load_aspects
     from analysis.retrieval import topics as topic_registry
@@ -348,7 +341,7 @@ def test_raising_the_aspect_dictionary_to_v3_does_not_move_the_run_stamp(needs_r
     with _connect(needs_runtime_url) as conn, conn.cursor() as cur:
         insert_entities(cur, [("brand", "라네즈", "라네즈", "normal", "oliveyoung", None)], 1)
         conn.commit()
-        assert stamp(cur) == 1
+        assert stamp(cur) == {"entity": {"brand": 1}}
         for version in (1, 3):
             argv = ["lexicon", "load", "--kind", "aspect", "--version", str(version)]
             assert cli([*argv, str(topic_registry.DICTIONARY_CSV), "--url", needs_runtime_url]) == 0
@@ -359,8 +352,8 @@ def test_raising_the_aspect_dictionary_to_v3_does_not_move_the_run_stamp(needs_r
         conn.commit()
         assert load_aspects(conn, topic_registry.RULESET).version == 3
         assert topic_registry.load(conn).version == 3
-        assert stamp(cur) == 1, "aspect v3 가 entity 의 번호표를 움직였다"
-        # Variant: one v3 row arriving on the entity side moves that column (even unswitched) (#58).
+        assert stamp(cur) == {"entity": {"brand": 1}}, "aspect v3 moved the entity stamp"
+        # An inactive future entity version is not part of the run's effective dictionary.
         insert_entities(cur, [("brand", "라네즈", "라네즈", "normal", "oliveyoung", None)], 3, active=False)
         conn.commit()
-        assert stamp(cur) == 3
+        assert stamp(cur) == {"entity": {"brand": 1}}

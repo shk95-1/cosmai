@@ -11,6 +11,7 @@ import psycopg
 
 from analysis.aggregate import ROLLUP_SCOPE, WISH_SCOPES, RuleAggregator
 from analysis.aggregate.ranking import WRITE_BATCH, run_ranking
+from analysis.lexicon import active_entity_versions
 from analysis.types import DenominatorRow, MetricsNeedRow, MetricsWishRow, NeedMentionRow, WishMentionRow
 
 __all__ = ["load_denominators", "load_needs", "load_wishes", "population_of", "run", "scopes_for"]
@@ -148,8 +149,7 @@ def _versions(
         (list(population),),
     )
     pairs = sorted(cur.fetchall())
-    cur.execute("SELECT max(version) FROM entity_lexicon")
-    lexicon = cur.fetchone()
+    entities = active_entity_versions(cur)
     cur.execute("SELECT DISTINCT linker_version FROM product_ref")
     return {
         "linker": ";".join(sorted(v for (v,) in cur.fetchall())) or None,
@@ -157,7 +157,7 @@ def _versions(
         "extractor": ";".join(population) or None,
         "polarity": ";".join(sorted({p for _, p in pairs})) or None,
         "aggregate": aggregator.version,
-        "lexicon": lexicon[0] if lexicon else None,
+        "lexicon": {"entity": entities},
     }
 
 

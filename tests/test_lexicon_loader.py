@@ -7,7 +7,7 @@ from collections.abc import Iterator
 
 import pytest
 
-from analysis.lexicon import load_aspects, load_lexicon
+from analysis.lexicon import active_entity_versions, load_aspects, load_lexicon
 from analysis.polarity import GENERIC_RULESET, SUNCARE_CATEGORY, SUNCARE_RULESET, ruleset_for
 from analysis.polarity.pipeline import PolarityStage
 from db import seed
@@ -34,6 +34,37 @@ def test_the_active_entity_version_loads_every_surface(seeded):
     assert len(lex.surfaces) == 1428
     assert lex.surface_to_canonical["3CE"] == "3CE"
     assert lex.surface_to_canonical["무기자차"] == "ZINC_OXIDE"
+
+
+def test_entity_versions_are_active_per_kind_and_new_kinds_appear_automatically(seeded):
+    with seeded.cursor() as cur:
+        assert active_entity_versions(cur) == {
+            "attribute": 1,
+            "brand": 1,
+            "format": 1,
+            "ingredient": 1,
+        }
+        cur.execute(
+            "INSERT INTO entity_lexicon (kind, canonical, surface, version, active) "
+            "VALUES ('alias', 'inactive', 'inactive', 9, false), ('stopword', 'new', 'new', 2, true)"
+        )
+        assert active_entity_versions(cur) == {
+            "attribute": 1,
+            "brand": 1,
+            "format": 1,
+            "ingredient": 1,
+            "stopword": 2,
+        }
+
+
+def test_two_active_versions_of_one_entity_kind_are_refused(seeded):
+    with seeded.cursor() as cur:
+        cur.execute(
+            "INSERT INTO entity_lexicon (kind, canonical, surface, version, active) "
+            "VALUES ('brand', 'future', 'future', 2, true)"
+        )
+        with pytest.raises(ValueError, match="brand.*more than one active version"):
+            active_entity_versions(cur)
 
 
 def test_the_surface_regex_allows_a_particle_and_skips_stopped_brands(seeded):

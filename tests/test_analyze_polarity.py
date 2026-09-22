@@ -182,7 +182,10 @@ def test_the_run_is_recorded_with_its_versions_and_the_captured_at_fallback_coun
     status, versions, note = row
     assert status == "ok"
     assert versions["extractor"] == "rule-v2.4" and versions["polarity"] == "rule-v2.2"
-    assert versions["lexicon"] == {"entity": 1, "aspect": 1}
+    assert versions["lexicon"] == {
+        "entity": {"attribute": 1, "brand": 1, "format": 1, "ingredient": 1},
+        "aspect": 1,
+    }
     assert "captured_at_fallback=1" in note
 
 

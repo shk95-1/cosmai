@@ -3,14 +3,15 @@
 // that is why this file has no tests (the same split as data-portal/public/app.js).
 import {
   buildQuery, sortRows, topByDimension, buildFileName, fileBody, rowsToCsv, describeError,
-  PAGE_SIZE, nextPageOffset, parseContentRange, NEED_QUERIES, LINEAGE_QUERIES,
+  PAGE_SIZE, nextPageOffset, parseContentRange, LINEAGE_QUERIES,
+  selectMetricRuns, fetchSelectedMetrics,
 } from './query.js';
 import {
   reproducible, rewritersAfter, needCellFilters, wishCellFilters, documentFilters,
   groupByDocument, describeMatch,
 } from './lineage.js';
 import {
-  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
+  scopesForRun, needRowsForScope, wishRowsForScope, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, withProductNames,
   monthRows, monthNeedKeys, hasMonthRows, MONTH_LIMIT,
@@ -60,6 +61,11 @@ async function apiAll(basePath, { select, order, filters }) {
     offset = next;
   }
   return rows;
+}
+
+async function apiExists(basePath, spec) {
+  const page = await apiPage(`${basePath}?${buildQuery(spec)}`);
+  return page.rows.length > 0;
 }
 
 // need comes in three sets — the category-sum rows screen 1·4 use, the product-axis rows screen 3
@@ -469,32 +475,26 @@ function openScope(selectId, scope, render) {
 async function boot() {
   showError('');
   try {
-    // The spec for metrics_need's three axes (category sum · product axis · month axis) is query.js's NEED_QUERIES —
-    // this must be a place where a test can pin the exclusivity of the three and the select↔screens.js contract (#130).
-    const wishSelect = ['run_id', 'scope', 'format', 'attribute', 'brand', 'mentions'];
-    const wishOrder = 'run_id.desc,scope,format,attribute,brand'; // full metrics_wish PK
     // analysis_run: the basis for "latest" (#87) — chosen by finished_at·status, not run_id.
     const runSelect = ['run_id', 'finished_at', 'status', 'versions', 'note'];
-    const runOrder = 'run_id.desc';
+    const runOrder = 'finished_at.desc,run_id.desc';
     // The catalog (#11 input) that turns screen 3's ref into a human-readable name. Rides the same
     // paging path as the other four.
     const productRefSelect = ['product_ref', 'brand', 'name', 'name_norm'];
 
-    const [runs, need, needProducts, needMonths, wish, productRefs] = await Promise.all([
+    const [runs, productRefs] = await Promise.all([
       apiAll('/analysis_run', { select: runSelect, order: runOrder }),
-      apiAll('/metrics_need', NEED_QUERIES.category),
-      apiAll('/metrics_need', NEED_QUERIES.product),
-      apiAll('/metrics_need', NEED_QUERIES.month),
-      apiAll('/metrics_wish', { select: wishSelect, order: wishOrder }),
       apiAll('/product_ref', { select: productRefSelect, order: 'product_ref' }),
     ]);
+    const selected = await selectMetricRuns(runs, apiExists);
+    const { need, needProducts, needMonths, wish } = await fetchSelectedMetrics(selected, apiAll);
     state.need = need;
     state.needProducts = needProducts;
     state.needMonths = needMonths;
     state.wish = wish;
     state.productNames = productNameIndex(productRefs);
     state.runs = runs;
-    const { needRunId, wishRunId, needRun, wishRun } = latestRuns(runs, need, wish);
+    const { needRunId, wishRunId, needRun, wishRun } = selected;
     state.needRunId = needRunId;
     state.wishRunId = wishRunId;
     showCaption(needRun, wishRun);
