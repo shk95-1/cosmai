@@ -1210,10 +1210,16 @@ quarter whose row is missing for want of mentions still takes a slot of the wind
 - What it asks: the two things the proposal's §4 demands — **mark** ads and sponsorships, and **confirm**
   whether the conclusion is the same with them removed. Do only the first and it becomes a column that is
   marked and read by nobody.
+- The measured population below is snapshot 1, panel version 1, `video_long` documents with the
+  `선크림` topic, and active panel roles `product` **and** `expert` (1,038 videos). This is the
+  `POPULATION` CTE used by `analysis/sensitivity/pipeline.py`, including its comment groups attached to
+  those videos. The uploader-report count is unchanged by adding expert channels on this panel; phrase
+  matches and operator comments are not, so agreement on the report count alone does not verify the
+  population.
 - The three things marked (the vocabulary is `variant`'s closed four: `ad_video` · `creator_comment` · `promo_comment` · `all_flagged`):
   | mark | what | from where |
   |---|---|---|
-  | `ad_video` | an ad or sponsored video | the **union** of `source_metadata.has_paid_product_placement` (the uploader's own report) and a phrase in the description. The report has gaps (TEAM_DECISIONS §9), so over everything the measurement is 254 reported · **407** by phrase · 465 in union · 196 overlapping, and the **211 caught by phrase only** are invisible to the report field. The source's docstring writes 410 by phrase and 214 by phrase only, and those numbers **do not reproduce in any state** — fork #41 ran that file's birth commit (`9fd7ec0`; neither `AD_RE` nor the population definition changed after it) over the same two runs and got 407 back. The 196 overlap written alongside is the number that agrees with 407 (254+407−465). What is stale is 410/214 |
+  | `ad_video` | an ad or sponsored video | the **union** of `source_metadata.has_paid_product_placement` (the uploader's own report) and a phrase in the description. The report has gaps (TEAM_DECISIONS §9): in the population above, 254 reported · **412** by phrase · 470 in union · 196 overlapping · **216 caught by phrase only**. The former 407 · 465 · 211 figures describe the narrower 964-video `product`-only population, not this calculation. The source's historical 410-by-phrase and 214-phrase-only figures reproduce under neither role set; fork #41 also checked the birth commit (`9fd7ec0`) and got 407 for `product` only |
   | `creator_comment` | a comment by the channel's own operator | `source_metadata.author_channel_hash` = `sha256("youtube:" + channel_id)[:24]`, so it can be rebuilt from a channel id. It is an exact match, not an estimate. An operator's pinned comment is closer to a copy of the description, so leaving it in the comment series **breaks the definition of that series as consumer reaction** |
   | `promo_comment` | a sales-link, group-buy or market-notice comment | a regular expression. Operator comments come **first**, so one document never falls into both sets. **At bundle grain they can overlap** — when an operator's copy and someone else's copy share the same (parent video, text), that bundle carries both marks (the same behaviour as ydc, which is why `all_flagged`'s exclusion set can be smaller than the sum of the two sets) |
 - **The rules that were dropped**: measured again, the phone-number regular expression (6 hits) and the
