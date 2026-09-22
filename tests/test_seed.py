@@ -56,13 +56,16 @@ EXPECTED = {
     # (db/seed/pipeline_corpus.py, fork #94, #95 and #96): corpus:load, match:topic and the three analysis
     # stages, all enabled = False, plus project:corpus, which is enabled and does have a cron line -- so the
     # crontab pairing test_pipeline_stage.py asks for reads both modules since fork #95.
-    "pipeline_stage": 19,
+    # 14 upstream since #285's naver:launch_onset, which has a cron line of its own.
+    "pipeline_stage": 20,
     # The edges linking the stages and stores above. Checked against reality by tests/test_pipeline_edge.py
     # (#141); two edges (analyze:polarity_missing's read and write of needs.need_mention) left with it.
     # 29 upstream + the corpus lineage's 22: fork #94's 12 (6 writes, 6 reads), fork #95's 6 for
     # project:corpus (2 writes, 4 reads -- three tubedepth tables and the panel roster) and fork #96's 4 for
     # match:topic (2 writes, 2 reads -- the documents and the dictionary).
-    "pipeline_edge": 51,
+    # +2 from #283's launch axes and +2 from #285: naver:launch_onset writes both
+    # needs.naver_launch_series and the evidence ledger needs.product_launch_evidence.
+    "pipeline_edge": 55,
 }
 
 

@@ -8,14 +8,17 @@ What a status does to the run (#182, contracts/entrypoints.md's exit codes):
                   status and the vendor's errorCode (never its errorMessage, which echoes the request)
   429             the vendor says "not now" -- the run stops: partial (1) when it wrote rows,
                   blocked (2) when it wrote none (partial means we yielded, blocked means we were refused)
-  budget spent    scope.MAX_REQUESTS_PER_RUN reached -- the same stop as a 429
+  budget spent    `budget_for(dataset)` reached -- the same stop as a 429
   other 4xx       that one request failed; the run goes on and ends partial if anything failed
   5xx / timeout   retried scope.RETRY_MAX_ATTEMPTS times with a doubling backoff, then a failed request
 
 A blog `start` past scope.BLOG_START_MAX is never requested (#110): the ceiling is the vendor's own
 and independent of `total`, so the walk stops there rather than spending budget on an error.
 
-Two datasets, matching contracts/entrypoints.md's `naver datasets: datalab | blog`. `datalab` sends
+Three datasets, matching contracts/entrypoints.md's `naver datasets: datalab | blog | launch_onset`
+(`launch_onset` is `collectors/naver/launch.py`'s, and `budget_for` is why it is named here: it is
+the one dataset whose spend comes from the catalogue rather than from `keywords.json`, so it takes
+its own per-run ceiling instead of `MAX_REQUESTS_PER_RUN`). `datalab` sends
 one request per batch of a category's groups: every request carries the global anchor group
 (`scope.DATALAB_ANCHOR` as the `groupName`, `scope.DATALAB_ANCHOR_TERMS` as what it searches, #90 /
 #250) as one `keywordGroups` entry, so at most `scope.DATALAB_CATEGORY_GROUPS_PER_REQUEST` of the
@@ -37,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from collectors.naver import keywords, parsing
+from collectors.naver import keywords, launch, parsing
 from collectors.naver.models import Dataset
 from collectors.naver.scope import (
     BLOG_DISPLAY,
@@ -49,6 +52,8 @@ from collectors.naver.scope import (
     DATALAB_CATEGORY_GROUPS_PER_REQUEST,
     DATALAB_TIME_UNIT,
     DATALAB_WINDOW_START,
+    LAUNCH_MAX_REQUESTS_PER_RUN,
+    MAX_REQUESTS_PER_RUN,
 )
 from collectors.naver.storage import db as storage_db
 from collectors.naver.transport import (
@@ -67,6 +72,21 @@ SECRET_KEYS = ("COSMA_SRC_NAVER_BLOG_CLIENT_ID", "COSMA_SRC_NAVER_BLOG_CLIENT_SE
 
 #: keywords.json's one category today. A second category is a config change, not a code change --
 #: `_run_datalab`/`_run_blog` both walk every category `keywords.load()` names.
+
+
+def budget_for(dataset: Dataset) -> int:
+    """How many requests this dataset's run may send.
+
+    `MAX_REQUESTS_PER_RUN` (200) is sized for a run whose spend comes from `keywords.json` -- 1
+    datalab request plus 15 blog terms x 3 pages. `launch_onset` is the one dataset whose spend
+    comes from the catalogue instead (two requests per product in the term list), so it carries its
+    own ceiling; left on the house default, a filled 248-product list would raise
+    `BudgetExhausted` at the 101st product, stop the pass `partial`, and never reach the sweep that
+    withdraws the claims of a vacated ref -- every month, in silence (#285 review B1).
+    """
+    if dataset is Dataset.LAUNCH_ONSET:
+        return LAUNCH_MAX_REQUESTS_PER_RUN
+    return MAX_REQUESTS_PER_RUN
 
 
 class Fetcher(Protocol):
@@ -96,9 +116,11 @@ def run(
     fetcher: Fetcher | None = None,
     secrets_path: str | Path | None = None,
     captured_at: datetime | None = None,
+    terms_path: Path | None = None,
 ) -> int:
     """Run one dataset for one pass. `board`/`since` are accepted for the entrypoint's shape
-    (contracts/entrypoints.md); neither means anything to either naver dataset today."""
+    (contracts/entrypoints.md); neither means anything to any naver dataset today. `terms_path` is
+    `launch_onset` only, and is how a test points the axis at a term list of its own."""
     del board, since
     try:
         wanted = Dataset(dataset)
@@ -128,12 +150,16 @@ def run(
         # Inside the try, after log.start: a constructor that raises out here would otherwise leave
         # this run at `running` forever, with nothing to say why.
         if fetcher is None:
-            built = HttpFetcher(found[SECRET_KEYS[0]], found[SECRET_KEYS[1]])
+            built = HttpFetcher(found[SECRET_KEYS[0]], found[SECRET_KEYS[1]], budget=budget_for(wanted))
             active_fetcher: Fetcher = built
         else:
             active_fetcher = fetcher
         if wanted is Dataset.DATALAB:
             outcome = _run_datalab(engine, active_fetcher, journal, now=now)
+        elif wanted is Dataset.LAUNCH_ONSET:
+            # Its own module (#285): the one dataset that writes evidence rather than source rows,
+            # and the one whose request shapes are not this file's.
+            outcome = launch.run(engine, active_fetcher, journal, now=now, terms_path=terms_path)
         else:
             outcome = _run_blog(engine, active_fetcher, journal, now=now)
     except BaseException as exc:
@@ -347,4 +373,4 @@ def _walk_blog_query(
     return posted, False, None
 
 
-__all__ = ["run", "Fetcher", "FetchSpec", "datalab_request_batches"]
+__all__ = ["run", "Fetcher", "FetchSpec", "datalab_request_batches", "budget_for"]

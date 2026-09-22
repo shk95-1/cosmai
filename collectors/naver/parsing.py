@@ -16,7 +16,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from typing import Any
 
-from collectors.naver.models import BlogPost, DatalabPoint
+from collectors.naver.models import BlogPost, DatalabPoint, LaunchSeriesPoint
 
 _TAG = re.compile(r"<[^>]+>")
 _POSTDATE = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})$")
@@ -95,6 +95,102 @@ def parse_datalab_response(
     return points
 
 
+def _series_points(
+    data: object,
+    *,
+    product_ref: str,
+    api: str,
+    series_key: str,
+    terms: tuple[str, ...],
+    captured_at: datetime,
+    request_key: str,
+) -> list[LaunchSeriesPoint]:
+    points: list[LaunchSeriesPoint] = []
+    for point in data or []:  # type: ignore[union-attr]
+        if not isinstance(point, dict):
+            continue
+        period = point.get("period")
+        ratio = point.get("ratio")
+        if not isinstance(period, str) or len(period) < 7:
+            continue
+        if isinstance(ratio, bool) or not isinstance(ratio, (int, float)):
+            ratio = None
+        points.append(
+            LaunchSeriesPoint(
+                product_ref=product_ref,
+                api=api,
+                series_key=series_key,
+                month=period[:7],
+                ratio=float(ratio) if ratio is not None else None,
+                terms=terms,
+                request_key=request_key,
+                captured_at=captured_at,
+            )
+        )
+    return points
+
+
+def parse_launch_trend_response(
+    body: dict[str, Any],
+    *,
+    product_ref: str,
+    terms: tuple[str, ...],
+    captured_at: datetime,
+    request_key: str,
+) -> list[LaunchSeriesPoint]:
+    """A search-trend answer to a launch-onset request (#285). The request carries exactly one
+    keyword group, so the answer carries exactly one series -- and `series_key` is `''` rather than
+    the group's echoed title, because the series *is* the product's whole term set and a title is a
+    label we chose. Anything past the first series is ignored: a second one would mean the request
+    was not the shape this axis sends."""
+    results = body.get("results")
+    if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+        return []
+    return _series_points(
+        results[0].get("data"),
+        product_ref=product_ref,
+        api="search_trend",
+        series_key="",
+        terms=terms,
+        captured_at=captured_at,
+        request_key=request_key,
+    )
+
+
+def parse_launch_shopping_response(
+    body: dict[str, Any],
+    *,
+    product_ref: str,
+    terms: tuple[str, ...],
+    captured_at: datetime,
+    request_key: str,
+) -> list[LaunchSeriesPoint]:
+    """A shopping-insight keyword-trend answer (#285): one series per keyword group, one term per
+    group, so `series_key` is the term itself.
+
+    The mapping is **by position**, not by the echoed `title`. The request names its groups `k0`,
+    `k1`, ... -- the shape the vendor was measured accepting on 2026-09-20 -- so the title carries no
+    term to read back, and the vendor answers in the order the `keyword` array was sent. A response
+    holding more series than the request had terms is truncated rather than guessed at."""
+    results = body.get("results")
+    if not isinstance(results, list):
+        return []
+    points: list[LaunchSeriesPoint] = []
+    for index, series in enumerate(results):
+        if not isinstance(series, dict) or index >= len(terms):
+            continue
+        points += _series_points(
+            series.get("data"),
+            product_ref=product_ref,
+            api="shopping_insight",
+            series_key=terms[index],
+            terms=(terms[index],),
+            captured_at=captured_at,
+            request_key=request_key,
+        )
+    return points
+
+
 def parse_blog_response(
     body: dict[str, Any],
     *,
@@ -152,6 +248,8 @@ def blog_items(body: dict[str, Any]) -> Iterable[dict[str, Any]]:
 __all__ = [
     "datalab_request_key",
     "parse_datalab_response",
+    "parse_launch_trend_response",
+    "parse_launch_shopping_response",
     "parse_blog_response",
     "blog_page_is_empty",
     "blog_items",

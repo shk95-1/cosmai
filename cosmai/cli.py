@@ -26,7 +26,7 @@ from analysis.registry import TASKS
 if TYPE_CHECKING:  # importing psycopg here drags the driver in on a single --help.
     import psycopg
 
-STAGES = ("link", "polarity", "aggregate", "all")
+STAGES = ("link", "launch", "polarity", "aggregate", "all")
 # The same value as analysis.retrieval.corpus.SOURCES. It is written out again here so that a single
 # `--help` does not drag psycopg in, and tests/retrieval checks that the two are the same.
 RETRIEVAL_SOURCES = ("youtube_comment", "youtube_video", "youtube_transcript", "commerce_review", "mfds")

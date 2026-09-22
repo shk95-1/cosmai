@@ -430,6 +430,16 @@ overwrite an earlier one's anchor row, since every batch of one category shares 
 boundary is never overwritten by a different request, so every batch keeps the anchor it was sent
 with and all of a category's groups rescale, however many requests it took.
 
+**`needs.naver_launch_series` is the one DataLab table this whole section does not apply to** (#285,
+`contracts/ddl/needs/011_naver_launch_onset.sql`). Its rows carry a `request_key` computed by the
+same `datalab_request_key`, but nothing ever compares them across one: the launch-onset axis reads a
+term against that term's **own** peak inside its own series, which is the one question a ratio
+normalised to 100 answers exactly. That is why its requests carry **one** keyword group — a second
+group would put a small product's series on the larger group's scale, which is the failure this
+section is about — and **no anchor group at all**, and why `naver_datalab_rescaled` does not read
+it: there is nothing to rescale, and a rescale of it would be NULL on every row. Its `ratio` may
+never be put beside another product's.
+
 ## Lists that go into a scalar column (A12)
 `wish_mention.format` · `wish_mention.attribute` are `;`-separated, **at most 3**, and **the first is the main value**. Aggregation uses the first alone.
 `product_line_mention.line_key` = `brand || ' ' || line_tokens` (A14).

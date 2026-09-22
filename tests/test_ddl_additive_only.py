@@ -33,6 +33,13 @@ FORBIDDEN = re.compile(
 SANCTIONED_DESTRUCTIVE = {
     # 사용자 승인 2026-08-24 — #5 운영 실패(btree 2704B 상한) + #12 안 A(키에 extractor_version).
     "needs/005_need_mention_natural_key.sql": ("DROP CONSTRAINT",),
+    # user approval 2026-09-20 — widens needs.naver_run.dataset's CHECK from ('datalab','blog') to
+    # add 'launch_onset': DROP and ADD of the same-named constraint in one transaction, the new
+    # value set a superset of the old, no existing row changes (5 rows at approval), reverse is one
+    # ALTER. #285, the third dataset of the same collector -- one run row and one fetch journal like
+    # `datalab` and `blog`. The approval is this file's alone: teaching the guard that a same-named
+    # CHECK whose value list only grows is additive is its own issue, not an edit here.
+    "needs/011_naver_launch_onset.sql": ("DROP CONSTRAINT",),
 }
 
 
@@ -97,22 +104,24 @@ def test_the_001_exemption_follows_who_created_the_schema_not_the_filename():
     assert "tubedepth/001_comments_columns.sql" in scanned
 
 
-def test_an_unsanctioned_file_with_the_same_drop_still_fails(tmp_path: Path):
-    (sanctioned,) = SANCTIONED_DESTRUCTIVE
+# Per entry since the list grew past one (#285): unpacking a single exemption and checking that one
+# would leave every exemption added after it checked by nothing at all.
+@pytest.mark.parametrize("sanctioned", sorted(SANCTIONED_DESTRUCTIVE))
+def test_an_unsanctioned_file_with_the_same_drop_still_fails(sanctioned: str, tmp_path: Path):
     body = (DDL_ROOT / sanctioned).read_text(encoding="utf-8")
     copy = tmp_path / "006_someone_elses.sql"
     copy.write_text(body, encoding="utf-8")
-    assert unsanctioned(copy) == ["DROP CONSTRAINT"]
+    assert unsanctioned(copy) == list(SANCTIONED_DESTRUCTIVE[sanctioned])
 
 
-def test_a_sanctioned_file_may_not_smuggle_a_second_destructive_statement(tmp_path: Path):
-    (sanctioned,) = SANCTIONED_DESTRUCTIVE
+@pytest.mark.parametrize("sanctioned", sorted(SANCTIONED_DESTRUCTIVE))
+def test_a_sanctioned_file_may_not_smuggle_a_second_destructive_statement(sanctioned: str, tmp_path: Path):
     body = (DDL_ROOT / sanctioned).read_text(encoding="utf-8")
     # 면제는 <디렉터리>/<파일명> 에 붙으므로 사본도 같은 디렉터리 이름 아래 두어야 면제가 적용된다.
     smuggled = tmp_path / sanctioned
     smuggled.parent.mkdir(parents=True, exist_ok=True)
     smuggled.write_text(body + "\nALTER TABLE needs.need_mention DROP COLUMN marker;\n", encoding="utf-8")
-    assert unsanctioned(smuggled) == ["DROP CONSTRAINT", "DROP COLUMN"]
+    assert unsanctioned(smuggled) == [*SANCTIONED_DESTRUCTIVE[sanctioned], "DROP COLUMN"]
 
 
 def test_the_guard_catches_a_drop(tmp_path: Path):

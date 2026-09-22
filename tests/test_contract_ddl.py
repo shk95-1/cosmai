@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_forty_one_contract_tables():
+def test_the_ddl_declares_the_forty_two_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: declaring a pipeline stage's expected interval)
@@ -59,8 +59,11 @@ def test_the_ddl_declares_the_forty_one_contract_tables():
     # claims the axes write. The interval and the verdict are not tables -- the interval is the
     # `product_launch` view and the verdict is a rule table in analysis/launch, so a rule change is
     # never a migration).
+    # + 1 from 011_naver_launch_onset.sql (issue #285: naver_launch_series, the monthly DataLab
+    # series the launch-onset axis reads. The same file widens needs.naver_run's dataset CHECK for
+    # the third dataset, which adds no table and is registered in tests/test_ddl_additive_only.py).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 41
+    assert len(declared_tables()) == 42
 
 
 def test_every_declared_table_exists_in_the_database():

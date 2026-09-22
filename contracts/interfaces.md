@@ -172,6 +172,7 @@ class LaunchIntervalRow:  # ← needs.product_launch (the view); what the verdic
     earliest: date | None
     earliest_match: str | None  # the match_strength of the claim that set `earliest`
     latest: date | None  # the evidence's own upper bound; the reference date clamps it in the verdict
+    latest_exact: date | None  # the tightest upper bound among the `exact` claims -- row 3 reads this one
     claims: int
     lower_claims: int
     upper_claims: int
@@ -744,7 +745,8 @@ writes, and keeps the site row it saw in `source_ref`: the fold happens once, in
 traceable.
 
 The natural key is `(product_ref, axis, source_ref)`. A product that matches several MFDS registrations
-keeps **every** claim (#283 work 1) — the rule table, not the axis, picks the bound — and an axis
+keeps **every** claim (#283 work 1) — the rule table, not the axis, picks the bound, **and the earliest
+of one axis's claims is that axis's bound** (§The launch interval) — and an axis
 re-reading the same source row upserts its own claim in place rather than adding a second live one.
 `axis_version` is a value and not part of the key for that reason: a new axis version restates the same
 source row, and two rows would both be live with nothing to say which is current.
@@ -774,12 +776,21 @@ A claim at **month** precision is worth its whole month: the first day of it for
 day for an upper one. The widening is the reader's (`analysis.launch.claim_edges` and the view), not the
 axis's — stored already-widened, that rule would live in as many places as there are axes.
 
-`earliest` is the tightest lower bound (`max` over `not_before`·`at`) and `latest` the tightest upper
-bound (`min` over `not_after`·`at`) **the evidence names**. **NULL means no claim of that side exists**,
-which is a different answer from a wide interval, and the rule table treats it as one.
-`claims`·`lower_claims`·`upper_claims` count what the rule version read, `excluded_claims` what it did
-not. `earliest_match` is the `match_strength` of whichever claim set `earliest` — the deciding bound is
-the tightest one and, on a tie, the surer one.
+`latest` is the tightest upper bound **the evidence names** (`min` over `not_after`·`at`) and
+**`latest_exact`** is the tightest of the `exact` ones alone — NULL when there is none — because the
+verdict's `not_new` may read only that one (row 3 below). **`earliest` folds the lower side twice**
+(rule version 1.1). Several `not_before`·`at` claims of **one
+axis** are one statement about one product, and the only part of it that is certainly true is the
+**earliest**: an MFDS line filed again years later does not say the launch was not before that second
+filing, and a refill or gift-set registration normalises to the line it is a refill of. So each axis
+contributes the earliest edge it names, and only then is the **latest of those per-axis bounds** taken,
+because two axes are two independent statements and both have to hold. Upper bounds need no such fold —
+the tightest of them is the earliest, and the `min` already takes it.
+
+**NULL means no claim of that side exists**, which is a different answer from a wide interval, and the
+rule table treats it as one. `claims`·`lower_claims`·`upper_claims` count what the rule version read,
+`excluded_claims` what it did not. `earliest_match` is the `match_strength` of whichever claim ended up
+setting `earliest` and, on a tie — inside an axis or between two of them — the surer one.
 
 The interval is **the evidence alone**: the reference-date clamp below belongs to the verdict, because
 this row has no reference date and neither does the view that mirrors it. A product with no claims at all
@@ -812,10 +823,10 @@ upper end.
 |---|---|---|
 | 1 | none | `unknown` |
 | 2 | a `not_after` **claim** earlier than a `not_before` claim | `conflict` |
-| 3 | `latest < R - 12 months` — an upper bound older than the widest window | `not_new` |
+| 3 | `latest_exact < R - 12 months` — **an `exact`** upper bound older than the widest window | `not_new` |
 | 4 | no lower bound (upper bounds alone, none older than 12 months) | `unknown` |
 | 5 | `earliest > R` — the lower bound is later than the date being asked about | `unknown` |
-| 6 | `single_axis` and the deciding lower bound's `match_strength` is not `exact` | `unknown` |
+| 6 | the deciding lower bound's `match_strength` is not `exact` (whatever the basis) | `unknown` |
 | 7 | the interval `[earliest, latest]` inside `[R - W, R]`, for the **narrowest** W that holds | `new_3m` · `new_6m` · `new_12m` |
 | 8 | no window holds the whole interval | `unknown` |
 
@@ -824,21 +835,39 @@ a crossing is how a variant, a renewal or a set announces itself, and the pair t
 finding. Row 3 is the only way to `not_new`, because it is the only shape that proves the launch is
 outside every window — and **a lower bound alone can never reach it**, however old, since the latest that
 launch could be is `R`: a 2025-06 registration is as consistent with a launch last week as with an old
-product, so it is row 8 `unknown`. Row 4 is the "never new on upper bounds alone" rule: a recent
+product, so it is row 8 `unknown`. It reads `latest_exact`, so **only an `exact` upper bound may declare
+a product old**; because that column is a minimum, the test is "is *any* `exact` upper bound older than
+the widest window", and a `partial` claim tighter than an `exact` one cannot take the `exact` one's proof
+away. Row 4 is the "never new on upper bounds alone" rule: a recent
 `not_after` is equally true of a product launched in 2011. Row 5 is what the clamp leaves when the
 evidence puts the launch after `R` — not a contradiction between axes, and the vocabulary has no word for
 "has not launched yet". Row 7 says **inside**, not *touching*: a tier narrower than the interval's own
 width can therefore never be assigned, since an interval inside a window of width W is itself at most W
 wide.
 
-**Row 6 is what a lower bound alone costs.** With the clamp, a product whose only claims are `not_before`
-has the interval `[earliest, R]` and its tier follows from `earliest` exactly as a corroborated one does
-(user decision 2026-09-20, option B) — so `new_*` is reachable without a second axis, and `single_axis`
-is what says so. The risk it prices is a wrong lower bound: two of the seven measured sunscreens had an
-MFDS join that had taken a later variant or an older line name. So the tier is given only where the
-deciding claim's join is `exact`; a `partial` lower bound standing alone is `unknown`, while a `partial`
-lower bound an upper bound corroborates still yields its tier. The gate is on the lower bound alone — an
-upper bound only ever makes a product older, so a weak join there cannot mint a `new_*`.
+**Row 6 is what a tier costs.** With the clamp, a product whose only claims are `not_before` has the
+interval `[earliest, R]` and its tier follows from `earliest` exactly as a corroborated one does (user
+decision 2026-09-20, option B) — so `new_*` is reachable without a second axis. The risk that prices is a
+wrong lower bound: two of the seven measured sunscreens had an MFDS join that had taken a later variant
+or an older line name. So **a tier is given only where the deciding lower bound's join is `exact`,
+whatever the basis** — `basis` is description and no longer a gate (rule version 1.1). It used to be one,
+and the hole that left was measured: any 2026 upper bound flipped `basis` to `corroborated` and let a
+`partial` lower bound through, and 3,392 of 3,511 reviewed products hold only 2026 reviews. An upper
+bound corroborates that the product **existed**, never that the lower bound's join names the right
+product, so it may not open this gate. It sits **after** rows 2 and 3, so a `partial` lower bound still
+contradicts (`conflict`) and an `exact` old upper bound still ages the product (`not_new`).
+
+**Row 3 carries the same gate, and for a sharper reason.** A `partial` upper bound is not merely a weak
+claim, it can be a **false** one: `partial` on `datalab_onset` means a same-brand sibling line shares the
+term, so the series rose when the *older* sibling launched and `launch ≤ onset` does not hold for this
+product at all; `partial` on a site axis means the listing reached this `product_ref` through the
+linker's cross-site threshold rather than by being the row the ref was minted from. What such a claim can
+mint is therefore not a missing `new_*` but two wrong answers: a false `conflict` against a true recent
+lower bound, and — before this rule — a confident wrong `not_new`. The second had no gate anywhere on its
+path, so row 3 now asks for an `exact` upper bound. The first is **left alone on purpose**: a crossing is
+a finding, and barring a `partial` claim from row 2 would throw away the cross-check the MFDS join is
+kept for. A `partial` upper bound still sets `latest`, still reaches row 2 and still makes the answer
+`corroborated`; it simply cannot declare a product old on its own, and that case is `unknown`.
 
 Rows 1, 5, 6 and 8 are all `unknown` and they are not the same state — `claims`, the two counts and
 `basis` beside the interval tell them apart, which is what #125's screen prints next to a NULL cell.
@@ -894,6 +923,71 @@ a third precision is a decision about what a claim means, not an insert — and 
 does not know (`ValueError`) rather than guessing. `match_strength` is closed at `exact`·`partial`
 because row 6 turns on it: a third strength would be read as not-exact by a rule that never agreed to it.
 
+### The first-round axes (`analysis/launch/axes.py`, `cosmai analyze launch`, #283)
+
+Four axes fill the ledger in rule version 1, and **what each one may claim is fixed here** — the
+direction, the precision, what goes in `source_ref`, and what `exact` means for that axis's own join.
+The last of those is the load-bearing one: row 6 gives a tier to a lower bound standing alone only
+when its join is `exact`, so an axis that calls a loose match `exact` empties that gate.
+
+| axis | direction · precision | `source_ref` | `exact` means | in rule v1 |
+|---|---|---|---|---|
+| `mfds_report` | `not_before` · day | the registration's `report_seq` | brand established on both sides **and** the two normalised line keys equal, nothing left over on either | yes |
+| `vendor_board` | `not_after` · day | `<source>:<product_key>` | that listing is the row the ref was minted from (`product_member.role = 'primary'`) | yes |
+| `old_review` | `not_after` · day | `<source>:<product_key>` | the same: `role = 'primary'` | yes |
+| `vendor_title_tag` | `not_after` · day | `<source>:<product_key>` | the same: `role = 'primary'` | **no** (above) |
+
+**`mfds_report`.** A cosmetic is filed before it is sold, so `report_date` is a genuine lower bound.
+The join is the risk, and it is built in two halves. The **brand** is established when the
+registration's stored `entp_key` is one of the brand's folded spellings *or* one of them occurs inside
+the registered name — both are needed, because `entp_name` is the filer and is a contract manufacturer
+on most rows (233 of 4,735 resolve to a lexicon brand), while a registered name is a legal name that
+opens with the brand. The **line** is `analysis.linker.normalize_name` (bracketed vendor tags, volume
+and count words, SPF/PA specs and the promotional vocabulary dropped, formulation synonyms folded)
+then folded to letters and digits, with the brand's spellings removed from both sides: the registered
+name carries the brand inside it and a listing name carries it in a column. `exact` is **equality** of
+those two strings, both at least four characters; one containing the other is `partial`; a brand-level
+match with no line-level containment is **no claim at all**, since 26 of 27 sun-care refs match at
+brand level and the brand's newest filing would otherwise land under every product it sells. A product
+that matches several registrations keeps every claim, each naming its own `report_seq`, and the **earliest
+of them is this axis's bound**: 91 registered names in the ledger are filed twice and 13 of those pairs
+are years apart, a refill/gift-set filing normalises to the line it belongs to, and neither of those says
+the launch was not before the later date. `exact` cannot catch that — both filings are exact — so the
+fold in §The launch interval is what answers it.
+
+**`vendor_board`.** The honest direction is the one the board actually supports. A product on a
+vendor's NEW board was **on sale** the day we captured it, so the launch is no later — but the board
+says nothing about how long it had been on sale, and `listed_at` is NULL on all 487 rows, so there is
+no date the vendor itself calls the listing date. Claimed as `at` it would mint `new_3m` for every
+boarded product out of a four-week collection window, and claimed as `not_before` it would do the same
+on marketing text; as an upper bound it can only make a product older (row 3) or corroborate a lower
+one (row 7), which is exactly what it knows. Filling `listed_at` and adding an oliveyoung board are
+collector work and are filed, not done in this axis.
+
+**`old_review`.** `min(written_at)` of the reviews held for that listing, and it can only prove age:
+3,392 of 3,511 reviewed products have their earliest held review in 2026 because the collector pages
+only recent reviews, so a recent upper bound is row 4 `unknown` and an old one is row 3 `not_new`.
+
+**The site-level axes' `exact`** is about the product→ref link and not a name join. `product_ref` is
+minted from its cluster's anchor (`analysis/linker` `_ref_id`), so the anchor listing **is** that
+product by construction; every other member reached the ref through the linker's cross-site similarity
+thresholds, which is the same class of join as the MFDS containment, and is therefore `partial`. Since
+rule version 1.1 that has a price on the upper side too, and it is the intended one: a 2019 review on a
+**member** listing no longer proves the product old by itself (row 3), because the listing it was written
+about may not be this product. The same review on the **primary** listing does.
+
+**Withdrawal.** The stage writes a claim only for a `product_ref` some `product_member` row still
+points at, and DELETEs every claim of **its own four axes** that this run no longer makes. That is the
+duty above, made exact: a re-clustering re-points the member rows and leaves the old `product_ref`
+standing, so "the refs a re-link vacated" is "the refs with no member". The DELETE is scoped by `axis`,
+because another axis's claims are not this stage's to withdraw.
+
+**Coverage and accuracy are different questions.** Coverage is a read of the ledger and can be had at
+any time; accuracy needs launch months a person supplies. `eval/launch/launch_sample.csv` ships with a
+header and no rows for that reason, and `tool/launch-coverage` prints coverage now and the per-axis hit
+rate and median slack once the file has rows. That hit rate is what justifies each `exact` above, and
+what decides whether a further axis is worth building (#125).
+
 ### Where the three pieces live, and why the verdict is not the view
 
 | piece | where | why there |
@@ -913,8 +1007,10 @@ The interval is the one thing written twice, once in SQL and once in Python, bec
 the view's excluded-axis literal against the module's constant — a mirror nobody compares is just a
 second implementation.
 
-Nothing writes the ledger yet: the first-round axes are #283, and `unresolved_new` — the metric that
-reads this verdict — is #125.
+The ledger is written by `cosmai analyze launch`, which `analyze all` runs **last, after
+`aggregate`** — nothing in that run reads the ledger, so a failure there is folded into the outcome
+rather than costing a night's metrics (`entrypoints.md` §Analysis, #283). `unresolved_new` — the
+metric that reads this verdict — is #125.
 
 ## Verdict (the seven trend types and the two scores — `topic_quarter_judgement`, fork #40)
 

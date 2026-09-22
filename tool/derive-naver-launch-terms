@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Proposes the search terms of the launch-onset axis (#285), and prints the refusals.
+
+The term list is the axis. Round one of the 2026-09-20 DataLab experiment asked about a brand plus a
+category word and the signal disappeared -- the series answered for the brand's whole shelf, so its
+"onset" was the brand's, not the product's. Round two used product-line-specific terms and the onset
+landed 1-3 months after the MFDS filing on the cleanly named lines. So this tool proposes, and a
+person keeps or drops: nothing here can tell a line name from a marketing adjective, and a term
+nobody reviewed would put a claim about a product's launch into needs.product_launch_evidence with
+nothing behind it.
+
+What it derives, all from `needs.product_ref` and all in `collectors/naver/launch_terms.py`:
+
+  generic    a token of `name_norm` carried by the products of at least `generic_min_brands`
+             distinct brands is a category word. Derived from the catalogue rather than listed by
+             hand, so it keeps holding as the catalogue grows.
+  terms      the three shapes the experiment used -- brand+line+category, line+category, brand+line.
+  refusal    a product with no line token at all, whose only terms would be its brand and a
+             category word.
+  strength   `exact` when no other product_ref of the same brand holds every token of every term,
+             `partial` otherwise. #282's rule table reads it, so a generous `exact` is worth nothing.
+
+The database is only ever read: the session sets `default_transaction_read_only`, so a stray write
+here fails instead of landing in production.
+
+    uv run tool/derive-naver-launch-terms                 # production needs_runtime, read-only
+    uv run tool/derive-naver-launch-terms --url <url>
+    uv run tool/derive-naver-launch-terms --json          # the `products` block, ready to review
+    uv run tool/derive-naver-launch-terms --refused       # only the products that get no terms
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from sqlalchemy.engine import make_url  # noqa: E402
+
+from collectors.naver import launch_terms  # noqa: E402
+from db.runtime import runtime_url  # noqa: E402
+from db.seed._common import connect  # noqa: E402
+
+READ_ONLY = "-c default_transaction_read_only=on"
+REFS = "SELECT product_ref, brand, name_norm FROM product_ref ORDER BY product_ref"
+
+
+def read_only(url: str) -> str:
+    """Read-only at the session level, the same guard `tool/measure-mfds-join` puts on itself: a
+    tool that can write is a production write waiting for a typo. libpq takes one `options` string,
+    so the flag is joined onto whatever the caller's URL already carries."""
+    parsed = make_url(url)
+    existing = parsed.query.get("options", "")
+    joined = existing if isinstance(existing, str) else " ".join(existing)
+    options = " ".join(part for part in (joined, READ_ONLY) if part)
+    return parsed.update_query_dict({"options": options}).render_as_string(hide_password=False)
+
+
+def derive(url: str) -> dict[str, object]:
+    with connect(read_only(url)) as conn, conn.cursor() as cur:
+        cur.execute(REFS)
+        refs = [launch_terms.Ref(product_ref, brand, name_norm) for product_ref, brand, name_norm in cur]
+        conn.commit()
+
+    generic = launch_terms.generic_tokens(refs, extra=launch_terms.generic_extra())
+    products: dict[str, list[str]] = {}
+    strength: dict[str, str] = {}
+    refused: list[str] = []
+    for ref in refs:
+        terms = launch_terms.candidate_terms(ref, generic)
+        if not terms:
+            refused.append(ref.product_ref)
+            continue
+        products[ref.product_ref] = list(terms)
+        strength[ref.product_ref] = launch_terms.match_strength(terms, ref, refs)
+    return {
+        "refs": len(refs),
+        "generic": sorted(generic),
+        "products": products,
+        "match_strength": strength,
+        "refused": refused,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--url", default=None, help="SQLAlchemy URL; default is needs_runtime, read-only.")
+    parser.add_argument("--json", action="store_true", help="Print the `products` block alone.")
+    parser.add_argument("--refused", action="store_true", help="Print only the refused product_refs.")
+    args = parser.parse_args()
+
+    found = derive(args.url or runtime_url())
+    products: dict[str, list[str]] = found["products"]  # type: ignore[assignment]
+    strength: dict[str, str] = found["match_strength"]  # type: ignore[assignment]
+    refused: list[str] = found["refused"]  # type: ignore[assignment]
+
+    if args.json:
+        print(json.dumps({"generic": [], "products": products}, ensure_ascii=False, indent=2))
+        return 0
+    if args.refused:
+        for product_ref in refused:
+            print(product_ref)
+        return 0
+
+    print(f"refs      {found['refs']:,} needs.product_ref rows")
+    print(f"generic   {len(found['generic'])} category word(s) derived from the catalogue")
+    exact = sum(1 for value in strength.values() if value == "exact")
+    print(
+        f"proposed  {len(products)} product(s) -- {exact} would be an `exact` join, "
+        f"{len(products) - exact} `partial`"
+    )
+    print(f"refused   {len(refused)} product(s) whose only terms would be brand + category word")
+    for product_ref, terms in products.items():
+        print(f"  {product_ref}\t{strength[product_ref]}\t{' | '.join(terms)}")
+    print("\nReview each line, then put the ones you keep into collectors/naver/launch_terms.json.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

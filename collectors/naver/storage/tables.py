@@ -1,6 +1,9 @@
 """The tables this collector writes, as SQLAlchemy Core -- describes the 4 tables
 `contracts/ddl/needs/004_naver.sql` adds, plus `naver_datalab_anchor`
-(`contracts/ddl/needs/009_naver_datalab_anchor.sql`, #248). Those files are the one authority for
+(`contracts/ddl/needs/009_naver_datalab_anchor.sql`, #248), `naver_launch_series`
+(`011_naver_launch_onset.sql`, #285) and the evidence ledger `product_launch_evidence`
+(`010_product_launch_evidence.sql`, #282) that the launch-onset axis writes its claims into. Those
+files are the one authority for
 their actual shape (#7's completion bar: DDL diff = 0), so
 `tests/collectors/naver/test_naver_tables_match_ddl.py` reflects the applied DDL and diffs it
 against `metadata` here, the same shape as `collectors/commerce/storage/tables.py`.
@@ -68,6 +71,37 @@ naver_datalab_anchor = Table(
     sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+naver_launch_series = Table(
+    "naver_launch_series",
+    metadata,
+    sa.Column("product_ref", sa.Text, primary_key=True),
+    sa.Column("api", sa.Text, primary_key=True),
+    sa.Column("series_key", sa.Text, primary_key=True),
+    sa.Column("month", sa.Text, primary_key=True),
+    sa.Column("ratio", sa.Numeric),
+    sa.Column("terms", postgresql.JSONB, nullable=False),
+    sa.Column("request_key", sa.Text, nullable=False),
+    sa.Column("captured_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+#: #282's ledger, written here because the launch-onset axis lives in this collector (#285): the
+#: fetch is what knows which terms were sent, which of the two APIs answered and which products were
+#: refused, and `analysis/` only ever reads this table.
+product_launch_evidence = Table(
+    "product_launch_evidence",
+    metadata,
+    sa.Column("product_ref", sa.Text, primary_key=True),
+    sa.Column("axis", sa.Text, primary_key=True),
+    sa.Column("direction", sa.Text, nullable=False),
+    sa.Column("claimed_on", sa.Date, nullable=False),
+    sa.Column("claimed_precision", sa.Text, nullable=False),
+    sa.Column("source_ref", sa.Text, primary_key=True),
+    sa.Column("match_strength", sa.Text, nullable=False),
+    sa.Column("axis_version", sa.Text, nullable=False),
+    sa.Column("observed_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("note", sa.Text),
+)
+
 naver_blog_post = Table(
     "naver_blog_post",
     metadata,
@@ -90,5 +124,7 @@ __all__ = [
     "naver_fetch_log",
     "naver_datalab_point",
     "naver_datalab_anchor",
+    "naver_launch_series",
+    "product_launch_evidence",
     "naver_blog_post",
 ]

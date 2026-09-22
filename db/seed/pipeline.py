@@ -51,6 +51,10 @@ STAGES: tuple[Stage, ...] = (
     # monthly run. The values are filled in by fork cosmai-import-ydc#53 (DataLab 128-month collection).
     Stage("naver:datalab", "naver", "datalab", "1 mon", True, "검색어 트렌드 — 아직 0행"),
     Stage("naver:blog", "naver", "blog", "1 mon", True, "블로그 — 아직 0행"),
+    # #285. Enabled with a cron line like its two siblings, and never-fresh until the term list is
+    # filled: with an empty collectors/naver/launch_terms.json the run ends blocked (2) on purpose,
+    # which is the honest state of an axis nobody has reviewed terms for yet.
+    Stage("naver:launch_onset", "naver", "launch_onset", "1 mon", True, "발매 시점 축 — 용어 목록 대기"),
     Stage("analyze:all", "analyze", "all", "1 day", True, "규칙 전량 패스 05:00 UTC"),
     # analyze:polarity_missing (the gemma4 incremental pass) is gone rather than disabled: the crontab
     # carries no line for it at all now, unlike youtube:watch's profile gate above, which still has a
@@ -133,11 +137,16 @@ EDGES: tuple[Edge, ...] = (
     # -- naver
     _writes("naver:datalab", "needs.naver_datalab_point", "검색어 트렌드 -- 아직 0행"),
     _writes("naver:blog", "needs.naver_blog_post", "아직 0행"),
+    _writes("naver:launch_onset", "needs.naver_launch_series", "발매 시점 월별 시계열 -- 아직 0행"),
+    _writes("naver:launch_onset", "needs.product_launch_evidence", "axis='datalab_onset' 주장"),
     # -- analysis
     _writes("analyze:all", "needs.need_mention", "추출"),
     _writes("analyze:all", "needs.wish_mention", "추출"),
     _writes("analyze:all", "needs.metrics_need", "집계 -- 화면 1·3·4·5"),
     _writes("analyze:all", "needs.metrics_wish", "집계 -- 화면 2"),
+    # The launch-evidence axes (#283): one claim per axis and per matched source row, read by the
+    # needs.product_launch view and by #125's metric.
+    _writes("analyze:all", "needs.product_launch_evidence", "launch evidence claims"),
     # analyze:polarity_missing wrote needs.need_mention here -- gone with the stage (#242).
     # -- Reads. The reasoning on the source side is the per-line comment in
     # db/grants/needs_runtime_reader.sql.
@@ -154,6 +163,8 @@ EDGES: tuple[Edge, ...] = (
     _reads("needs.need_mention", "analyze:all", "집계가 자기 추출분을 다시 읽는다"),
     # analyze:polarity_missing read needs.need_mention here -- gone with the stage (#242).
     _reads("needs.wish_mention", "analyze:all", ""),
+    # The reference ledger the MFDS axis reads: a filing date is the one lower bound round one has.
+    _reads("needs.mfds_registration", "analyze:all", "MFDS report date -- the not_before axis"),
 )
 
 EDGE_UPSERT: LiteralString = """

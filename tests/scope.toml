@@ -153,8 +153,14 @@ none = [
 ]
 "analysis/launch/" = [
     "tests/test_launch_rules.py",
+    "tests/test_launch_axes.py",
+    "tests/test_launch_sample.py",
+    "tests/test_launch_writer.py",
     "tests/test_product_launch_view.py",
     "tests/test_version_strings.py",
+    # The axes are a stage of `analyze all` (#283), so a change here moves what that run writes.
+    "tests/test_analyze_all.py",
+    "tests/test_cli_analyze.py",
 ]
 "analysis/linker/" = [
     "tests/test_linker.py",
@@ -204,7 +210,13 @@ none = [
     "tests/collectors/commerce",
     "tests/test_cli_collect_commerce.py",
 ]
-"collectors/naver/" = ["tests/collectors/naver"]
+"collectors/naver/" = [
+    "tests/collectors/naver",
+    # #285: the launch-onset axis stamps `axis_version` from collectors/naver/launch.py, so the
+    # version-string guard reads this package too, and it declares a pipeline stage of its own.
+    "tests/test_version_strings.py",
+    "tests/test_pipeline_stage.py",
+]
 "collectors/youtube/" = [
     "tests/collectors/youtube",
     "tests/test_runtime_dsn.py",
@@ -224,8 +236,12 @@ none = [
     # carry to a database that already has that schema (#223).
     "tests/test_source_schema_ledger.py",
     # §Launch evidence's rule table and the ledger it reads (#282): the contract text, the DDL and
-    # the view are one statement, so a change to any of them is asked of both files.
+    # the view are one statement, so a change to any of them is asked of both files. Since #283 the
+    # same section fixes what each axis may claim and what `exact` means for it, so the axis rules
+    # and the writer answer to it too.
     "tests/test_launch_rules.py",
+    "tests/test_launch_axes.py",
+    "tests/test_launch_writer.py",
     "tests/test_product_launch_view.py",
 ]
 "cosmai/" = [
@@ -265,6 +281,9 @@ none = [
     "tests/test_cli_eval.py",
     "tests/test_eval_impl.py",
     "tests/test_eval_lexicon_url.py",
+    # eval/launch/launch_sample.csv: the loader refuses a row it cannot score, and the file itself
+    # is asserted to ship empty (#283 work 6).
+    "tests/test_launch_sample.py",
 ]
 # The hooks used to sit on the full-suite list; the map now answers for them on its own (#231).
 ".githooks/" = [

@@ -12,13 +12,16 @@ import sqlalchemy as sa
 from sqlalchemy import Engine
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from collectors.naver.models import BlogPost, DatalabPoint
+from collectors.naver.launch_terms import Ref
+from collectors.naver.models import BlogPost, DatalabPoint, LaunchClaim, LaunchSeriesPoint
 from collectors.naver.storage.tables import (
     naver_blog_post,
     naver_datalab_anchor,
     naver_datalab_point,
     naver_fetch_log,
+    naver_launch_series,
     naver_run,
+    product_launch_evidence,
 )
 from db.runtime import runtime_url as _needs_runtime_url
 
@@ -149,6 +152,109 @@ def write_datalab_anchors(connection: sa.Connection, anchor_points: Sequence[Dat
     connection.execute(statement, rows)
 
 
+def read_product_refs(connection: sa.Connection) -> list[Ref]:
+    """The catalogue the term rules read (#285). Plain SQL rather than a `metadata` table, because
+    `needs.product_ref` is `analysis/linker`'s to write and this collector only ever reads it --
+    declaring it beside the tables this module upserts into would say otherwise."""
+    rows = connection.execute(
+        sa.text("SELECT product_ref, brand, name_norm FROM product_ref ORDER BY product_ref")
+    ).all()
+    return [Ref(product_ref=r[0], brand=r[1], name_norm=r[2]) for r in rows]
+
+
+def write_launch_series(connection: sa.Connection, points: Sequence[LaunchSeriesPoint]) -> None:
+    """Upsert on (product_ref, api, series_key, month) -- a monthly re-run restates the same window
+    in place, and the last month of it moves as the window does."""
+    if not points:
+        return
+    rows = [
+        {
+            "product_ref": p.product_ref,
+            "api": p.api,
+            "series_key": p.series_key,
+            "month": p.month,
+            "ratio": p.ratio,
+            "terms": list(p.terms),
+            "request_key": p.request_key,
+            "captured_at": p.captured_at,
+        }
+        for p in points
+    ]
+    key = ["product_ref", "api", "series_key", "month"]
+    statement = pg_insert(naver_launch_series)
+    statement = statement.on_conflict_do_update(
+        index_elements=key,
+        set_={c: statement.excluded[c] for c in rows[0] if c not in key},
+    )
+    connection.execute(statement, rows)
+
+
+def write_launch_claims(connection: sa.Connection, claims: Sequence[LaunchClaim]) -> None:
+    """Upsert on the ledger's own natural key (product_ref, axis, source_ref) -- #282: an axis
+    re-reading the same source restates its claim rather than minting a second live one."""
+    if not claims:
+        return
+    rows = [
+        {
+            "product_ref": c.product_ref,
+            "axis": c.axis,
+            "direction": c.direction,
+            "claimed_on": c.claimed_on,
+            "claimed_precision": c.claimed_precision,
+            "source_ref": c.source_ref,
+            "match_strength": c.match_strength,
+            "axis_version": c.axis_version,
+            "observed_at": c.observed_at,
+            "note": c.note,
+        }
+        for c in claims
+    ]
+    key = ["product_ref", "axis", "source_ref"]
+    statement = pg_insert(product_launch_evidence)
+    statement = statement.on_conflict_do_update(
+        index_elements=key,
+        set_={c: statement.excluded[c] for c in rows[0] if c not in key},
+    )
+    connection.execute(statement, rows)
+
+
+def withdraw_launch_claims(
+    connection: sa.Connection, *, axis: str, product_ref: str, keep_source_ref: str | None
+) -> int:
+    """#282's DELETE duty, for one product: every claim **of this axis** on this ref except the one
+    just written. It is what a changed term list means -- the old term set's claim is not a second
+    opinion, it is a statement this axis no longer makes -- and `keep_source_ref=None` withdraws the
+    product entirely, which is what a series that yields no onset comes to.
+
+    Every DELETE this module issues is scoped to one axis by construction: the ledger is shared with
+    every other axis (#283's MFDS, vendor boards and reviews), and a withdrawal that reached past
+    `datalab_onset` would silently delete another axis's evidence."""
+    condition = sa.and_(
+        product_launch_evidence.c.axis == axis,
+        product_launch_evidence.c.product_ref == product_ref,
+    )
+    if keep_source_ref is not None:
+        condition = sa.and_(condition, product_launch_evidence.c.source_ref != keep_source_ref)
+    return connection.execute(sa.delete(product_launch_evidence).where(condition)).rowcount
+
+
+def withdraw_vacated_launch_claims(connection: sa.Connection, *, axis: str, considered: Sequence[str]) -> int:
+    """The other half of the DELETE duty: a `product_ref` is minted from its cluster's anchor and
+    **wobbles** when the catalogue is re-clustered, so a claim written under the old ref stays live
+    on a ref that no longer names the product while the metric reads the new one (#282,
+    `010_product_launch_evidence.sql`). A ref this pass no longer considers is exactly that case, so
+    its claims are withdrawn -- scoped to this axis, and only ever called by a pass that ran to the
+    end: a run cut short by a rate limit has not considered anything it did not reach."""
+    return connection.execute(
+        sa.delete(product_launch_evidence).where(
+            sa.and_(
+                product_launch_evidence.c.axis == axis,
+                product_launch_evidence.c.product_ref.notin_(list(considered)),
+            )
+        )
+    ).rowcount
+
+
 def write_blog_posts(connection: sa.Connection, posts: Sequence[BlogPost]) -> None:
     """Upsert on post_id -- the same post can turn up under more than one query term in one run
     (or a later run), and the newest fetch's title/excerpt/author win."""
@@ -186,6 +292,11 @@ __all__ = [
     "FetchJournal",
     "write_datalab_points",
     "write_datalab_anchors",
+    "read_product_refs",
+    "write_launch_series",
+    "write_launch_claims",
+    "withdraw_launch_claims",
+    "withdraw_vacated_launch_claims",
     "write_blog_posts",
     "COLLECTOR_VERSION",
 ]
