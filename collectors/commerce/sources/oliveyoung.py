@@ -110,7 +110,7 @@ _BOARDS: tuple[_Board, ...] = (
     _Board("nail", "10000010012"),
     _Board("tools", "10000010006"),
     _Board("dermo", "10000010008"),
-    _Board("mens", "10000010007"),
+    _Board("mens", "10000060002"),
     _Board("fragrance", "10000010005"),
     _Board("hair", "10000010004"),
     _Board("body", "10000010003"),
@@ -358,6 +358,9 @@ def _product_fetch(
         transport=Transport.BROWSER,
         click_before="text=상품정보 제공고시",
         wait_for=f"text={INGREDIENTS_LABEL}",
+        # The disclosure normally appears a few seconds after the tab click. A missing one must
+        # fail, but two 120-second waits per product held the source lock past later cron slots.
+        timeout_s=15.0,
         context=(
             ("kind", "product"),
             ("product", product_key),
