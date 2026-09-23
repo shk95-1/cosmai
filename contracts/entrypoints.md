@@ -1087,16 +1087,13 @@ overlap is the lock, not the interval. `analyze all` is a DB-only job with no ou
 harmless even overlapping the hourly run and is out of this rule. `analyze all` does have one interval
 rule, though, and the lock is what sets it: overlapping an owner's polarity pass that takes the same lock
 makes whichever arrived second skip that whole night, so the gap between that line and `0 5` has to be
-wider than that pass's worst-case duration T. **That line now exists** (`0 8`, #32) — the command is
-incremental (`--missing`, #98) and **that T is still unmeasured**: running in operations is the
-coordinator's part, so the work that put the line in could not measure it. So the time was chosen by
-widening the gap to its maximum instead of by knowing T — `0 8` gives `0 5` 3h and takes 21h for itself.
-The only value that has a measurement is the full pass's (run 16, going round 선블록 alone, at **6h44m**),
-and 21h is three times that. The coordinator measures T on the first night and on a normal night, and moves
-these two times if it threatens the 21h. The calculation and the GPU window (08:00–16:00 UTC, which
-`retrieval embed` avoids) are written down in `stack/crontab.d/analyze`.
+wider than that pass's worst-case duration T. The incremental (`--missing`, #98) `0 8` line from #32
+allowed 21h before the next run and 3h before `analyze all`. Its first-night T was measured at 2h34m
+(run 25, #131); a normal-night T was not measured before the line was suspended. The earlier full pass
+(run 16, going round 선블록 alone) took 6h44m. The calculation and its former GPU window
+(08:00–16:00 UTC) remain in `stack/crontab.d/analyze` as historical context.
 
-**Suspended as of 2026-09-06 (#242).** The `0 8` line above is gone: the model host is gone and this host
+**Suspended as of 2026-09-06 (#242).** The `0 8` line is gone: the model host is gone and this host
 cannot run the model, so `OWNERS` in `analysis/polarity/ownership.py` holds no gemma4 scope and the fenced
 schedule below carries no `--impl` line either — the two only ever move together. The paragraph above (T,
 the interval choice, the GPU window) is historical, kept in `stack/crontab.d/analyze` for the day the line
@@ -1106,6 +1103,11 @@ naver's DataLab line was commented out from #182 until #90: with no anchor in th
 monthly pull could not be compared with the one before it. #90 put the anchor in every request, so
 the line runs again and `db/seed/pipeline.py` declares `naver:datalab` enabled to match — the
 crontab and that declaration only ever move together (`tests/test_pipeline_stage.py`).
+
+The Olive Young `ingredients` pass reads the suncare board's top 10 product details after
+`review_low`. It uses the existing product upsert but has its own run and health stage: adding
+its 11 requests to the five-board `product` pass's 90 would exceed the source's 100-request cap
+(#73). The two passes retain their separate failure outcomes.
 
 youtube's `work` was added to this table on 2026-08-24 (before that there were three, and no line
 drained the queue). It is cron rather than a resident daemon because
@@ -1126,6 +1128,7 @@ beside them still run.
 0 * * * *   cosmai collect commerce --dataset ranking
 10 2 * * *  cosmai collect commerce --dataset product
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare   (the board is the scope.json list)
+45 3 * * *  cosmai collect commerce --dataset ingredients
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product

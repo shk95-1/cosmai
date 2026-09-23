@@ -61,6 +61,21 @@ def test_a_product_dataset_run_fetches_ingredients_not_ranking_rows():
     assert all(f.dataset is Dataset.PRODUCT for f in out.follow)
 
 
+def test_ingredient_pass_reads_the_low_review_board_under_its_own_budget():
+    (fetch,) = OliveYoung().seeds(Dataset.INGREDIENTS)
+    assert fetch.ctx("board") == "suncare"
+    body = (FIXTURES / "ranking/best-skincare.html").read_bytes()
+    out = OliveYoung().parse(_payload(fetch, body))
+    assert not out.records
+    assert len(out.follow) == 10
+    assert all(f.dataset is Dataset.INGREDIENTS and f.ctx("kind") == "product" for f in out.follow)
+    detail = (FIXTURES / "product/detail.html").read_bytes()
+    parsed = OliveYoung().parse(_payload(out.follow[0], detail))
+    assert len(parsed.records) == 1
+    assert isinstance(parsed.records[0], ProductRecord)
+    assert parsed.records[0].ingredients
+
+
 def test_ingredients_are_read_from_the_disclosure_table():
     fetch = Fetch(
         url="https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=X",

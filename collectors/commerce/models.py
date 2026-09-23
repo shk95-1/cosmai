@@ -29,12 +29,14 @@ class Dataset(StrEnum):
     is derived from a ranking response and has no member here, because no run ever asks a site for one.
 
     REVIEW_LOW is the same record types as REVIEW (bodies and the stats) from a different walk: one
-    board, its low-rated end read to exhaustion rather than sampled. A member of its own because a run
-    collects one dataset and its scope is recorded under that name.
+    board, its low-rated end read to exhaustion rather than sampled. INGREDIENTS likewise writes
+    ProductRecord rows, but its one-board/ten-detail walk has a separate budget and run outcome from
+    PRODUCT. Each run collects one dataset and records its scope under that name.
     """
 
     RANKING = "ranking"
     PRODUCT = "product"
+    INGREDIENTS = "ingredients"
     REVIEW = "review"
     REVIEW_LOW = "review_low"
     REVIEW_STATS = "review_stats"

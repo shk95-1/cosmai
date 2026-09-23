@@ -125,6 +125,7 @@ class OliveYoung:
         {
             Dataset.RANKING,
             Dataset.PRODUCT,
+            Dataset.INGREDIENTS,
             Dataset.REVIEW,
             Dataset.REVIEW_LOW,
             Dataset.REVIEW_STATS,
@@ -141,6 +142,7 @@ class OliveYoung:
             Dataset.PRODUCT: MappingProxyType(
                 {"boards": len(REVIEW_BOARDS), "product_products": PRODUCT_PRODUCTS}
             ),
+            Dataset.INGREDIENTS: MappingProxyType({"boards": 1, "low_products": LOW_PRODUCTS}),
             Dataset.REVIEW: MappingProxyType(
                 {
                     "review_boards": len(REVIEW_BOARDS),
@@ -189,6 +191,8 @@ class OliveYoung:
             if chosen not in _BOARD_NAMES:
                 raise ValueError(f"review_low board {chosen!r} is not a board this source walks")
             return (_seed(by_name[chosen], dataset),)
+        if dataset is Dataset.INGREDIENTS:
+            return (_seed(by_name[LOW_BOARDS[0]], dataset),)
         if dataset not in (Dataset.PRODUCT, Dataset.REVIEW, Dataset.REVIEW_STATS):
             return ()
         return tuple(_seed(by_name[name], dataset) for name in REVIEW_BOARDS)
@@ -230,7 +234,7 @@ def _parse_ranking(payload: Payload, source: str) -> Yield:
     wants_reviews = payload.fetch.dataset is Dataset.REVIEW
     wants_low = payload.fetch.dataset is Dataset.REVIEW_LOW
     wants_stats = payload.fetch.dataset is Dataset.REVIEW_STATS
-    wants_products = payload.fetch.dataset is Dataset.PRODUCT
+    wants_products = payload.fetch.dataset in (Dataset.PRODUCT, Dataset.INGREDIENTS)
 
     records: list[Record] = []
     follow: list[Fetch] = []
@@ -263,8 +267,17 @@ def _parse_ranking(payload: Payload, source: str) -> Yield:
             if wants_stats and rank <= REVIEW_STATS_PRODUCTS_PER_BOARD:
                 follow.append(_stats_fetch(record.product_key))
                 follow.append(_summary_fetch(record.product_key))
-            if wants_products and rank <= PRODUCT_PRODUCTS_PER_BOARD:
-                follow.append(_product_fetch(record.product_key, record.product_name, record.brand))
+            if wants_products and rank <= (
+                LOW_PRODUCTS if payload.fetch.dataset is Dataset.INGREDIENTS else PRODUCT_PRODUCTS_PER_BOARD
+            ):
+                follow.append(
+                    _product_fetch(
+                        record.product_key,
+                        record.product_name,
+                        record.brand,
+                        dataset=payload.fetch.dataset,
+                    )
+                )
             continue
         records.extend(record.records())
     return Yield(records=tuple(records), follow=tuple(follow))
@@ -336,10 +349,12 @@ def _summary_fetch(goods_number: str) -> Fetch:
     )
 
 
-def _product_fetch(product_key: str, name: str, brand: str | None) -> Fetch:
+def _product_fetch(
+    product_key: str, name: str, brand: str | None, *, dataset: Dataset = Dataset.PRODUCT
+) -> Fetch:
     return Fetch(
         url=DETAIL_URL.format(goods=product_key),
-        dataset=Dataset.PRODUCT,
+        dataset=dataset,
         transport=Transport.BROWSER,
         click_before="text=상품정보 제공고시",
         wait_for=f"text={INGREDIENTS_LABEL}",

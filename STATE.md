@@ -4,6 +4,7 @@
 
 ## 2. Facts (not computable) — §1 (boot) is `AGENTS.md`
 - **The new stack** (`stack/docker-compose.yml`) must be running: `cosmai-{analyze, collector-commerce, collector-naver, collector-youtube-work, collector-youtube-flatten, portal}`. `collector-youtube-watch` sits behind `profiles: ["youtube-watch"]` — the condition for restarting it is #39.
+- **Commerce ingredient coverage**: the daily Olive Young suncare `review_low` top 10 must receive their full ingredient text through a separate `ingredients` pass (#73). Its 11 requests cannot join the 90-request `product` pass under the source's 100-request cap; a ranking row alone does not satisfy ingredient coverage.
 - **Old-stack remnants (kept running until #181)**: postgrest ×1 · data-portal · trend-radar-dashboard · tubedepth-api — they reach the database through the transition alias `shared-postgres` on `db-net`. The `shared-postgres` container itself is gone (#177, 2026-09-03); the cosmai-old containers ×4, their `postgrest-cosmai` and the two images are gone (#18, 2026-09-04). **Must be stopped**: trend-radar-collector · tubedepth-worker · tubedepth-flatten.
 - The base of the images `cosmai-needs:local` and `cosmai-needs-cron:local` must be **trixie / OpenSSL ≥ 3.5** — bookworm (3.0) is blocked by the Cloudflare challenge on the oliveyoung review API (measured A/B, #35). `tests/stack/test_image_tls_stack.py` pins the lower bound.
 - `stack/.env` must exist (paths only, no secret values). Without it compose dies on an unset `COSMAI_SECRET_FILE_HOST`.
