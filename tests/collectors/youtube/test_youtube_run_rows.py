@@ -253,3 +253,105 @@ def test_every_run_row_carries_an_identifier_of_its_own(tubedepth_schema: str, t
     assert len({row.identifier for row in rows}) == len(rows) == 2
     for row in rows:
         assert uuid.UUID(hex=row.identifier), row.identifier
+
+
+# --- work -------------------------------------------------------------------------------------
+
+
+class _UnusedFetcher:
+    def fetch(self, spec: cli.FetchSpec) -> dict[str, Any]:
+        raise AssertionError(f"an empty queue must not fetch {spec}")
+
+
+def test_an_empty_work_queue_records_a_healthy_pass(tubedepth_schema: str, tmp_path: Path):
+    assert (
+        run(
+            "work",
+            database_url=tubedepth_schema,
+            fetcher=_UnusedFetcher(),
+            payload_root=tmp_path,
+            captured_at=NOW,
+        )
+        == 0
+    )
+
+    row = _one_run(tubedepth_schema)
+    assert (row.dataset, row.status) == ("work", "ok")
+    assert (row.attempted, row.succeeded, row.failed, row.skipped) == (0, 0, 0, 0)
+    assert "no queued jobs" in row.note
+
+
+def test_a_work_pass_that_cannot_claim_leaves_a_failed_row(
+    tubedepth_schema: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def cannot_claim(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("claim stopped")
+
+    monkeypatch.setattr(cli, "_claim", cannot_claim)
+    assert (
+        run(
+            "work",
+            database_url=tubedepth_schema,
+            fetcher=_UnusedFetcher(),
+            payload_root=tmp_path,
+            captured_at=NOW,
+        )
+        == 1
+    )
+
+    row = _one_run(tubedepth_schema)
+    assert (row.dataset, row.status) == ("work", "failed")
+    assert "claim stopped" in row.note
+
+
+def test_an_all_failed_work_batch_is_not_reported_as_partial(tubedepth_schema: str, tmp_path: Path):
+    class _FailingFetcher:
+        def fetch(self, spec: cli.FetchSpec) -> dict[str, Any]:
+            raise RuntimeError(f"no result for {spec.kind}")
+
+    watchlist = tmp_path / "watch.txt"
+    watchlist.write_text("video dQw4w9WgXcQ\n")
+    assert (
+        run(
+            "watch",
+            database_url=tubedepth_schema,
+            watchlist_path=watchlist,
+            read_roster=False,
+            captured_at=NOW,
+        )
+        == 0
+    )
+    assert (
+        run(
+            "work",
+            database_url=tubedepth_schema,
+            fetcher=_FailingFetcher(),
+            payload_root=tmp_path / "payloads",
+            captured_at=NOW,
+        )
+        == 1
+    )
+
+    row = _one_run(tubedepth_schema)
+    assert (row.dataset, row.status) == ("work", "failed")
+    assert (row.attempted, row.succeeded, row.failed) == (1, 0, 1)
+
+
+def test_work_completion_is_recorded_after_a_long_pass(
+    tubedepth_schema: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    completed = NOW + timedelta(minutes=6)
+    monkeypatch.setattr(cli, "_work_finished_at", lambda _injected_at: completed)
+    assert (
+        run(
+            "work",
+            database_url=tubedepth_schema,
+            fetcher=_UnusedFetcher(),
+            payload_root=tmp_path,
+            captured_at=NOW,
+        )
+        == 0
+    )
+
+    row = _one_run(tubedepth_schema)
+    assert (row.started_at, row.finished_at) == (NOW, completed)

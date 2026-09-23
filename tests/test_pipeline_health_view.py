@@ -54,7 +54,7 @@ STAGES = (
     # A stage with only runs that yielded to the source lock -- nothing was collected, so it did not run.
     ("commerce:review_stats", "commerce", "review_stats", "1 hour", True),
     ("naver:datalab", "naver", "datalab", "1 hour", True),  # never
-    ("youtube:watch", "youtube", "watch", "1 hour", False),  # disabled -- even with a recent success
+    ("youtube:watch", "youtube", "watch", "1 hour", True),  # active since #39
     ("youtube:work", "youtube", "work", "1 hour", True),
     ("analyze:all", "analyze", "all", "1 hour", True),
     ("analyze:polarity_missing", "analyze", "polarity_missing", "1 hour", True),
@@ -120,7 +120,14 @@ COLUMNS = (
 )
 
 
-def _build(url: str, schema: str, reference: datetime, view_sql: str | None = None) -> None:
+def _build(
+    url: str,
+    schema: str,
+    reference: datetime,
+    view_sql: str | None = None,
+    collector_rows: tuple[tuple[Any, ...], ...] = COLLECTOR_ROWS,
+    stage_rows: tuple[tuple[Any, ...], ...] = STAGES,
+) -> None:
     engine = create_engine(url)
     with engine.begin() as conn:
         conn.exec_driver_sql("SET ROLE needs_owner")
@@ -128,7 +135,7 @@ def _build(url: str, schema: str, reference: datetime, view_sql: str | None = No
             f'INSERT INTO "{schema}".pipeline_stage'
             " (stage_key, arm, dataset, expected_interval, enabled)"
             " VALUES (%s, %s, %s, %s::interval, %s)",
-            list(STAGES),
+            list(stage_rows),
         )
         # The upstream stubs. With the names and columns matching the real ones, this view sees no
         # difference.
@@ -141,7 +148,7 @@ def _build(url: str, schema: str, reference: datetime, view_sql: str | None = No
             f'INSERT INTO "{schema}".collector_health (collector, dataset, started_at, finished_at,'
             " status, requests, ok, blocked, failed, queued, p90_ms)"
             " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            _rows(reference, COLLECTOR_ROWS),
+            _rows(reference, collector_rows),
         )
         conn.exec_driver_sql(
             f'CREATE TABLE "{schema}".analysis_health (run_id bigint, stage text,'
@@ -197,7 +204,7 @@ FRESHNESS = (
     ("commerce:review_stats", "never"),
     ("commerce:product", "stalled"),
     ("naver:datalab", "never"),
-    ("youtube:watch", "disabled"),
+    ("youtube:watch", "ok"),
     ("youtube:work", "late"),
     ("analyze:all", "ok"),
     ("analyze:polarity_missing", "stalled"),
@@ -211,12 +218,41 @@ def test_freshness_reads_the_last_success_against_the_expected_interval(
     assert health[stage_key]["freshness"] == expected
 
 
-def test_disabled_wins_over_a_fresh_success(health: dict[str, Any]):
-    # youtube watch succeeded 5 minutes ago but is declared not to run behind the profile -- the declaration
-    # wins.
+def test_active_watch_uses_its_fresh_success(health: dict[str, Any]):
     row = health["youtube:watch"]
-    assert row["freshness"] == "disabled"
+    assert row["enabled"] is True
+    assert row["freshness"] == "ok"
     assert row["last_success_at"] is not None
+
+
+def test_recent_idle_work_pass_is_healthy_and_a_stopped_worker_ages(
+    needs_schema: str, needs_runtime_url: str, _schema_name: str, reference: datetime
+):
+    # The same view makes an old pass late; a new zero-job pass proves the worker itself ran.
+    idle = ("youtube", "work", ago(minutes=2), ago(minutes=1), "ok", 0, 0, 0, 0, None, None)
+    _build(needs_schema, _schema_name, reference, collector_rows=(*COLLECTOR_ROWS, idle))
+    row = _read(needs_runtime_url)["youtube:work"]
+    assert (row["freshness"], row["last_run_status"], row["requests"]) == ("ok", "ok", 0)
+
+
+def test_work_pass_finished_after_its_interval_is_fresh_at_completion(
+    needs_schema: str, needs_runtime_url: str, _schema_name: str, reference: datetime
+):
+    work_stages = tuple(
+        (key, arm, dataset, "5 min" if key == "youtube:work" else interval, enabled)
+        for key, arm, dataset, interval, enabled in STAGES
+    )
+    long_pass = ("youtube", "work", ago(minutes=8), ago(minutes=1), "ok", 1, 1, 0, 0, None, 50)
+    _build(
+        needs_schema,
+        _schema_name,
+        reference,
+        collector_rows=(*COLLECTOR_ROWS, long_pass),
+        stage_rows=work_stages,
+    )
+    row = _read(needs_runtime_url)["youtube:work"]
+    assert (row["freshness"], row["last_run_status"]) == ("ok", "ok")
+    assert row["last_run_at"] > reference - ago(minutes=2)
 
 
 def test_never_has_no_overdue_because_the_question_does_not_arise(health: dict[str, Any]):

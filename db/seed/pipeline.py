@@ -4,10 +4,9 @@ If the expected interval only lives in `stack/crontab.d/`, the portal cannot rea
 sees the DB). So instead of parsing the crontab, this **declares** it here, and a test catches any
 drift from the crontab (`tests/test_pipeline_stage.py`).
 
-The reason the crontab is not treated as the source of truth is `enabled`: `youtube watch` **has** a
-cron line but does not run because it sits behind a compose profile (`stack/docker-compose.yml`, the
-condition for turning it back on is #39). Neither the crontab nor the DB knows that fact, so someone
-has to declare it -- automation only removes half of the problem.
+The reason the crontab is not treated as the source of truth is `enabled`: `youtube watch` has a
+cron line behind a compose profile (`stack/docker-compose.yml`). #39 activated that profile, so
+its declared stage is now enabled. The cron line alone cannot say whether a profile is running.
 """
 
 from __future__ import annotations
@@ -51,9 +50,8 @@ STAGES: tuple[Stage, ...] = (
     Stage("youtube:work", "youtube", "work", "5 min", True, "일감 큐 소비"),
     Stage("youtube:flatten", "youtube", "flatten", "15 min", True, "수집분 평탄화"),
     Stage("youtube:prune", "youtube", "prune", "1 day", True, "오래된 산출물 정리"),
-    # A cron line exists but the container never starts because it sits behind a compose profile
-    # (STATE.md §2). The condition for turning it back on is #39.
-    Stage("youtube:watch", "youtube", "watch", "1 hour", False, "profiles: youtube-watch 뒤 — 재가동은 #39"),
+    # #39 started the profile; the stage must agree with the running hourly container (#153).
+    Stage("youtube:watch", "youtube", "watch", "1 hour", True, "Active hourly watch profile"),
     # #182 gated this stage while the anchor was missing; #90 put the anchor in every request and
     # uncommented the cron line, so it is enabled again and reads as never-fresh until the first
     # monthly run. The values are filled in by fork cosmai-import-ydc#53 (DataLab 128-month collection).
@@ -65,8 +63,8 @@ STAGES: tuple[Stage, ...] = (
     Stage("naver:launch_onset", "naver", "launch_onset", "1 mon", True, "발매 시점 축 — 용어 목록 대기"),
     Stage("analyze:all", "analyze", "all", "1 day", True, "규칙 전량 패스 05:00 UTC"),
     # analyze:polarity_missing (the gemma4 incremental pass) is gone rather than disabled: the crontab
-    # carries no line for it at all now, unlike youtube:watch's profile gate above, which still has a
-    # cron line to compare against. Suspended 2026-09-06 (#242) -- add it back in the same PR that
+    # carries no line for it at all now, unlike youtube:watch above, which still has a cron line.
+    # Suspended 2026-09-06 (#242) -- add it back in the same PR that
     # restores the `0 8` line in stack/crontab.d/analyze.
 )
 
@@ -140,7 +138,7 @@ EDGES: tuple[Edge, ...] = (
     _writes("commerce:review_stats", "trend_radar.review_stats", "ReviewStatsRecord = 모집단 분모"),
     _writes("commerce:new_product", "trend_radar.new_product", "daisomall"),
     # -- youtube runs three in sequence (the header of collectors/youtube/cli.py).
-    _writes("youtube:watch", "tubedepth.jobs", "일감을 넣는다 -- 지금 꺼져 있어 큐가 마른다(#39·#153)"),
+    _writes("youtube:watch", "tubedepth.jobs", "Enqueues listing jobs from the active watch profile"),
     _writes("youtube:work", "tubedepth.artifacts", "job 을 집어 원문을 적재한다"),
     _writes("youtube:flatten", "tubedepth.comments", "artifact 를 질의 가능한 표로 편다"),
     # -- naver

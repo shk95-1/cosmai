@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -145,11 +145,35 @@ def run(
     try:
         if wanted is Dataset.WORK:
             assert fetcher is not None  # noqa: S101 - set just above when the caller passed none
+
+            # In production freshness is measured from completion, which may be many minutes after
+            # this pass began. Fixture callers retain their injected timestamp unless a test supplies
+            # a later completion through this seam.
+            def finished_at() -> datetime:
+                return _work_finished_at(captured_at)
+
             # The engine, not a connection: #277: `work` is the one dataset that goes on the
             # network, and it opens a short transaction per step instead of holding one across the
             # batch. The role kills a transaction at 60s and an idle-in-transaction session at 30s,
             # and a connection is idle in transaction for exactly as long as a fetch takes.
-            return _run_work(engine, payloads, fetcher, now=now)
+            try:
+                return _run_work(engine, payloads, fetcher, now=now, finished_at=finished_at)
+            except Exception as error:  # noqa: BLE001 - a stopped pass must leave a health row
+                note = f"the work pass could not finish: {_pass_failed_note(error)}"
+                print(f"work: {note}")
+                _record_run(
+                    engine,
+                    dataset=Dataset.WORK.value,
+                    status="failed",
+                    attempted=0,
+                    succeeded=0,
+                    failed=0,
+                    skipped=0,
+                    note=note,
+                    now=now,
+                    finished_at=finished_at(),
+                )
+                return 1
         if wanted is Dataset.PRUNE:
             # The engine, not a connection: #279, and the same reasoning as `work` above. One
             # transaction per batch keeps every one of them far inside `transaction_timeout=60s`,
@@ -751,7 +775,18 @@ def _reclaim_stale(conn: Connection, *, now: datetime) -> int:
     ).rowcount
 
 
-def _run_work(engine: Engine, payloads: PayloadStore, fetcher: Fetcher, *, now: datetime) -> int:
+def _work_finished_at(injected_at: datetime | None) -> datetime:
+    return injected_at if injected_at is not None else datetime.now(UTC)
+
+
+def _run_work(
+    engine: Engine,
+    payloads: PayloadStore,
+    fetcher: Fetcher,
+    *,
+    now: datetime,
+    finished_at: Callable[[], datetime],
+) -> int:
     """#277: one short transaction to claim, then one or two per job, and none of them open while a
     route is on the network. The role kills a transaction at 60s and an idle-in-transaction session
     at 30s, and a `work` pass that met a slow kind spent longer than either inside one."""
@@ -765,6 +800,18 @@ def _run_work(engine: Engine, payloads: PayloadStore, fetcher: Fetcher, *, now: 
         print(f"reclaimed {reclaimed} job(s) whose claim was older than {STALE_CLAIM_AFTER}")
     if not claimed:
         print("no queued jobs")
+        _record_run(
+            engine,
+            dataset=Dataset.WORK.value,
+            status="ok",
+            attempted=0,
+            succeeded=0,
+            failed=0,
+            skipped=0,
+            note="no queued jobs",
+            now=now,
+            finished_at=finished_at(),
+        )
         return 0
 
     # What this process holds and has not finished. A claim is committed, so handing it back is this
@@ -797,6 +844,28 @@ def _run_work(engine: Engine, payloads: PayloadStore, fetcher: Fetcher, *, now: 
     print(f"worked {len(outcomes)} job(s), {failures} failed, {short} short")
     for note in _notes_of(fetcher):
         print(note)
+    succeeded = len(outcomes) - failures
+    status = (
+        "blocked"
+        if blocked
+        else "failed"
+        if failures and not succeeded
+        else "partial"
+        if failures or short
+        else "ok"
+    )
+    _record_run(
+        engine,
+        dataset=Dataset.WORK.value,
+        status=status,
+        attempted=len(outcomes),
+        succeeded=succeeded,
+        failed=failures,
+        skipped=len(claimed) - len(outcomes),
+        note=f"worked {len(outcomes)} job(s), {failures} failed, {short} short",
+        now=now,
+        finished_at=finished_at(),
+    )
     if blocked:
         print(f"blocked: {len(claimed) - len(outcomes)} claimed job(s) returned to the queue")
         return 2
@@ -847,6 +916,7 @@ def _record_run(
     skipped: int,
     note: str,
     now: datetime,
+    finished_at: datetime | None = None,
 ) -> None:
     """One row per pass, in a transaction of its own (#280).
 
@@ -854,10 +924,9 @@ def _record_run(
     the server ended leaves an aborted transaction in which no row can be written, and a run row
     that could only be written by a healthy pass would say nothing on exactly the night it matters.
 
-    `started_at` and `finished_at` are both the pass's injected clock, the same `now` every other
-    row this collector writes in a pass is stamped with (`_elapsed_ms` records that choice for a
-    job). So the wall clock of a pass is not measured here; what the health views ask of this row is
-    when it ran and how it ended, and both come from that one reading.
+    The short flatten/prune passes retain their injected clock for both columns. Work may run beyond
+    its five-minute interval, so it passes its actual completion time in production; otherwise a
+    just-completed batch would already look late. Fixture callers can inject that completion too.
     """
     with engine.begin() as conn:
         conn.execute(
@@ -866,7 +935,7 @@ def _record_run(
                 dataset=dataset,
                 status=status,
                 started_at=now,
-                finished_at=now,
+                finished_at=finished_at or now,
                 attempted=attempted,
                 succeeded=succeeded,
                 failed=failed,
