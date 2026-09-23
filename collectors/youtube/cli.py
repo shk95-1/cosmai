@@ -274,8 +274,8 @@ def _run_watch(
 def _claim(conn: Connection, *, limit: int, now: datetime) -> Sequence[Any]:
     """One atomic statement, not select-then-update: two `work` passes overlapping (a slow cron tick
     still running when the next fires, or a live worker daemon started alongside the batch CLI --
-    #10) raced select-then-update at READ COMMITTED and could both pick up the same queued row before
-    either's UPDATE landed. `FOR UPDATE SKIP LOCKED` on the candidate CTE is the archived
+    shk95-1/cosmai#10) raced select-then-update at READ COMMITTED and could both pick up the same
+    queued row before either's UPDATE landed. `FOR UPDATE SKIP LOCKED` on the candidate CTE is the archived
     `JobRepository.claim`'s own fix for exactly this (worker.py), applied here as one UPDATE .. FROM
     a locked subquery so no other connection can see this batch as still queued in between.
 
@@ -375,7 +375,7 @@ def _route_of(error: Exception) -> str:
 def _classify_error(error: Exception) -> str:
     """Bucket a fetch failure into a small vocabulary #77's collector_health view can count as
     `blocked` (403/429, the same statuses commerce's fetch_log.status already treats as blocked) vs
-    `failed` -- contracts/entrypoints.md 수집기 절 documents this vocabulary as the source #77 reads.
+    `failed` -- contracts/entrypoints.md §Collectors documents this vocabulary as the source #77 reads.
 
     #183: the route decides how the failure is read, because the same word means different things
     on different routes and one of the three has no status to read at all.
