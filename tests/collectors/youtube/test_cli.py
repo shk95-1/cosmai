@@ -87,7 +87,7 @@ def test_a_follow_up_job_fanned_out_during_work_inherits_watch(tubedepth_schema:
     """The follow-up job that `work` fans out from a listing job's `follow_up_kind` was still started
     by `watch` -- only `watch` ever sets `follow_up_kind`, so the fan-out has no other dataset to name."""
     from collectors.youtube.cli import FetchSpec
-    from collectors.youtube.storage.tables import jobs
+    from collectors.youtube.storage.tables import collector_runs, jobs
 
     listing_dump = {
         "id": "UUsome_channel_id",
@@ -125,8 +125,11 @@ def test_a_follow_up_job_fanned_out_during_work_inherits_watch(tubedepth_schema:
         follow_up = conn.execute(
             sa.select(jobs.c.dataset).where(jobs.c.kind == "video.metadata", jobs.c.target == "dQw4w9WgXcQ")
         ).one()
+        work_pass = conn.execute(sa.select(collector_runs)).one()
     engine.dispose()
     assert follow_up.dataset == "watch"
+    assert (work_pass.dataset, work_pass.status) == ("work", "ok")
+    assert (work_pass.attempted, work_pass.succeeded, work_pass.failed) == (2, 2, 0)
 
 
 def test_cosmai_collect_youtube_reaches_this_module():

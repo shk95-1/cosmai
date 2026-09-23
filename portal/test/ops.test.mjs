@@ -27,6 +27,13 @@ test('freshness 가 ok 여도 마지막 run 이 통째로 실패했으면 문제
   assert.equal(isProblem(row({ freshness: 'ok', last_run_status: 'ok' })), false);
 });
 
+test('an empty work pass is healthy; a stopped worker becomes late', () => {
+  const idle = row({ stage_key: 'youtube:work', arm: 'youtube', dataset: 'work',
+    freshness: 'ok', last_run_status: 'ok', requests: 0, ok: 0 });
+  assert.equal(isProblem(idle), false);
+  assert.equal(isProblem({ ...idle, freshness: 'late' }), true);
+});
+
 test('partial 은 배너를 빨갛게 만들지 않는다 — 돌았고 대부분을 걷었다 (#156)', () => {
   // commerce:product is partial 3 days out of 4 (collecting 84-86 of 89). Counting that as a stuck stage
   // would turn the banner red every day, and the trap #154 removed from the view would just move up one level to the screen.

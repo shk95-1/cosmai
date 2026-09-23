@@ -75,9 +75,8 @@ def interval_of(expr: str) -> str:
 
 def test_every_cron_line_is_declared():
     declared = {s.stage_key for s in STAGES}
-    # `enabled=False` is a stage gated on purpose, so the crontab need not schedule it at all:
-    # naver:datalab's line is commented out until #90, while youtube:watch keeps its line and is held
-    # by a compose profile. Both are accounted for here so a missing line is still caught below.
+    # A deliberately gated stage may omit its cron line. Every current upstream stage is active,
+    # including youtube:watch since #39 closed; this also catches a missing cron line.
     gated = {s.stage_key for s in STAGES if not s.enabled}
     from_cron = {stage_key_of(cmd) for _, cmd in cron_lines()} | gated
     assert from_cron - declared == set(), "크론에 있는데 선언되지 않은 단계"
@@ -94,10 +93,8 @@ def test_declared_interval_matches_the_cron_expression():
     assert not mismatched, f"선언과 크론이 어긋난다 (선언, 크론): {mismatched}"
 
 
-def test_the_only_disabled_stage_is_the_one_a_gate_names():
-    # One upstream stage is off on purpose: youtube:watch, behind a compose profile (STATE.md §2,
-    # restored by #39). naver:datalab came back with #90's anchor -- its cron line is live again.
-    # Another stage going quiet without an issue behind it is met here. The fork's disabled rows are
-    # answered by tests/test_archive_lineage.py, which knows which issue each one waits on.
+def test_every_upstream_stage_is_enabled():
+    # watch has run hourly since #39; keeping its old disabled declaration hides live failures.
+    # The fork's disabled rows are answered by tests/test_archive_lineage.py.
     off = {s.stage_key for s in UPSTREAM_STAGES if not s.enabled}
-    assert off == {"youtube:watch"}, off
+    assert not off, off
