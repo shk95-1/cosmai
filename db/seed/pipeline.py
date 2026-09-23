@@ -34,6 +34,14 @@ class Stage(NamedTuple):
 STAGES: tuple[Stage, ...] = (
     Stage("commerce:ranking", "commerce", "ranking", "1 hour", True, "매시 랭킹 스냅샷"),
     Stage("commerce:product", "commerce", "product", "1 day", True, "상세 페이지 렌더 — 보드 5개 × 상위 17"),
+    Stage(
+        "commerce:ingredients",
+        "commerce",
+        "ingredients",
+        "1 day",
+        True,
+        "Suncare low-review targets: ten ingredient detail pages",
+    ),
     Stage("commerce:review_low", "commerce", "review_low", "1 day", True, "선케어 저평점 리뷰 깊게"),
     Stage("commerce:review", "commerce", "review", "1 day", True, "리뷰 본문"),
     Stage(
@@ -125,6 +133,7 @@ EDGES: tuple[Edge, ...] = (
     _writes("commerce:ranking", "trend_radar.rank_snapshot", "RankRecord"),
     _writes("commerce:ranking", "trend_radar.product", "RankRecord.records() 가 함께 낸다"),
     _writes("commerce:product", "trend_radar.product", "상세 페이지 렌더"),
+    _writes("commerce:ingredients", "trend_radar.product", "Suncare ingredient detail pages"),
     _writes("commerce:review", "trend_radar.review", "ReviewRecord"),
     _writes("commerce:review_low", "trend_radar.review", "같은 레코드, 저평점 끝을 걷는다"),
     _writes("commerce:review_low", "trend_radar.review_stats", "같은 걸음이 stats 도 따라간다"),

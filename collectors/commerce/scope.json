@@ -3,6 +3,7 @@
   "oliveyoung": {
     "ranking": { "boards": 13 },
     "product": { "boards": 5, "product_products": 85 },
+    "ingredients": { "boards": 1, "low_products": 10 },
     "review": {
       "review_boards": 5,
       "review_products": 10,

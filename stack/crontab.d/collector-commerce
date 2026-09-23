@@ -11,7 +11,10 @@
 # interval 30s->60s (Gate._back_off), which makes it 292s. 02:05 left 98s of clearance, then 8s.
 # 02:10 leaves 398s, and product's own budget-tier runtime still clears review_low at 03:30.
 10 2 * * *  cosmai collect commerce --dataset product
+# The review_low suncare targets need detail-page ingredients. Their 11 requests would take the
+# existing product pass above 100, so keep them in a separate run after review_low.
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare
+45 3 * * *  cosmai collect commerce --dataset ingredients
 15 4 * * *  cosmai collect commerce --dataset review
 45 4 * * *  cosmai collect commerce --dataset review_stats
 30 5 * * *  cosmai collect commerce --dataset new_product
