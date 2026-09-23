@@ -42,6 +42,11 @@ ALTER_DROP = re.compile(
     rf"(?P<name>{IDENT})\s*$",
     re.IGNORECASE | re.DOTALL,
 )
+PRIOR_DROP = re.compile(
+    rf"^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<table>{TABLE})\s+DROP\s+CONSTRAINT\s+"
+    rf"(?:IF\s+EXISTS\s+)?(?P<name>{IDENT})\b",
+    re.IGNORECASE | re.DOTALL,
+)
 ALTER_ADD = re.compile(
     rf"^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<table>{TABLE})\s+ADD\s+CONSTRAINT\s+"
     rf"(?P<name>{IDENT})\s+(?P<body>.+?)\s*$",
@@ -97,7 +102,9 @@ def _old_check(path: Path, table: str, name: str) -> tuple[str, frozenset[str]] 
     found: tuple[str, frozenset[str]] | None = None
     for prior in files:
         for part in _sql_parts(prior):
-            drop = ALTER_DROP.fullmatch(part)
+            # Earlier DDL may spell a removal more broadly than this guard permits a new one.
+            # Any such removal invalidates the old definition; an ADD below may establish a new one.
+            drop = PRIOR_DROP.match(part)
             if drop and (drop["table"].lower(), drop["name"].lower()) == (table, name):
                 found = None
             add = ALTER_ADD.fullmatch(part)
@@ -341,3 +348,29 @@ def test_check_widening_finds_a_named_old_check_in_the_baseline(
     )
     monkeypatch.setitem(globals(), "DDL_ROOT", root)
     test_later_migrations_are_additive_only(path)
+
+
+def test_check_widening_does_not_reuse_a_definition_removed_in_earlier_ddl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "ddl"
+    needs = root / "needs"
+    needs.mkdir(parents=True)
+    (needs / "004_old.sql").write_text(
+        "CREATE TABLE needs.sample (dataset text CHECK (dataset IN ('a', 'b')));\n",
+        encoding="utf-8",
+    )
+    (needs / "008_removed.sql").write_text(
+        "ALTER TABLE needs.sample DROP CONSTRAINT IF EXISTS sample_dataset_check;\n",
+        encoding="utf-8",
+    )
+    path = needs / "012_change.sql"
+    path.write_text(
+        "ALTER TABLE needs.sample DROP CONSTRAINT sample_dataset_check;\n"
+        "ALTER TABLE needs.sample ADD CONSTRAINT sample_dataset_check "
+        "CHECK (dataset IN ('a', 'b', 'c'));\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DDL_ROOT", root)
+    with pytest.raises(AssertionError, match="012_change.sql.*old definition"):
+        test_later_migrations_are_additive_only(path)
