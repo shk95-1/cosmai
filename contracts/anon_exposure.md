@@ -17,8 +17,8 @@ The 23-relation count describes the current production database, where the separ
 does **not** apply that old-stack grants file. A database rebuilt by `db/migrate.sh` alone therefore
 does not promise `postgrest_anon` access to the nine `trend_radar` and three `tubedepth` relations
 listed below. That file records a one-time narrowing of the old stack's broader privileges;
-#180 retires the old PostgREST role and grants. The new portal's database access is a separate
-contract (#179).
+#180 retires the old PostgREST role and grants. The new portal's database access is tracked by
+#179.
 
 `#168` option B (user decision 2026-08-27) was **applied by the coordinator session on 2026-08-27** --
 `db/grants/postgrest_anon_old_stack.sql`, one command at a time. Before it there were 36
