@@ -1,6 +1,10 @@
 -- origin: db/bootstrap.sql, narrowed to the two schemas the collectors own -- trend_radar
 -- (collectors/commerce) and tubedepth (collectors/youtube). The old repos' init scripts made them
 -- and those repos are archived, so this file is what stands them up on an empty database (#178).
+-- A fresh db/migrate.sh build does not reproduce production's postgrest_anon access to these
+-- schemas: db/grants/postgrest_anon_old_stack.sql is a separate old-stack operation, not a
+-- migrate.sh step. The needs grants are applied by migrate.sh. See contracts/anon_exposure.md
+-- for the rebuild boundary; #180 retires this old-stack role.
 -- reuse: psql -v schema=<name> -v reader=<role name or ''> -v runtime_limit=<n or ''> and, from
 --        stdin, `\set runtime_password` / `\set reader_password` -- a password must never reach an
 --        argument, where the host's `ps` reads it for the length of the call (#20).
