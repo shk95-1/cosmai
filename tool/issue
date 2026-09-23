@@ -819,9 +819,7 @@ case "$cmd" in
                 "select stage_key || ': ' || freshness from needs.pipeline_health
                  where freshness in ('late', 'stalled') order by stage_key" 2>/dev/null) \
             && ops_collector=$(docker exec cosmai-postgres psql -U platform -d app -Atc \
-                "select collector || ':' || coalesce(dataset, '') || ' failed (run ' || run_id || ')'
-                 from needs.collector_health where status = 'failed'
-                 order by started_at desc limit 20" 2>/dev/null); then
+                "$(cat "$issue_tool_dir/sql/audit_collector_failures.sql")" 2>/dev/null); then
             ops_available=true
         else
             ops_available=false

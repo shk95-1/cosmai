@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -911,6 +912,52 @@ def test_audit_reports_a_failed_collector_run(run):
     )
     assert done.returncode == 0, done.stderr
     assert "naver:blog failed (run 42)" in _ops_block(done.stdout), done.stdout
+
+
+def test_audit_collector_query_reports_only_the_latest_completed_failure():
+    # Execute the same SQL the shell hands to psql, over the six columns it reads. This catches
+    # failures superseded by both successful and partial passes without faking the query's answer.
+    query = (REPO_ROOT / "tool/sql/audit_collector_failures.sql").read_text(encoding="utf-8")
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute(
+            "CREATE TABLE collector_health (collector text, dataset text, run_id text, "
+            "started_at text, finished_at text, status text)"
+        )
+        conn.executemany(
+            "INSERT INTO collector_health VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("commerce", "product", "old-product", "2026-09-23T01:00Z", "2026-09-23T01:20Z", "failed"),
+                (
+                    "commerce",
+                    "product",
+                    "partial-product",
+                    "2026-09-23T02:00Z",
+                    "2026-09-23T02:20Z",
+                    "partial",
+                ),
+                (
+                    "commerce",
+                    "ingredients",
+                    "old-ingredients",
+                    "2026-09-23T01:00Z",
+                    "2026-09-23T01:10Z",
+                    "failed",
+                ),
+                ("commerce", "ingredients", "ok-ingredients", "2026-09-23T02:00Z", "2026-09-23T02:10Z", "ok"),
+                ("naver", "blog", "first-failure", "2026-09-23T01:00Z", "2026-09-23T01:10Z", "failed"),
+                ("naver", "blog", "latest-failure", "2026-09-23T02:00Z", "2026-09-23T02:10Z", "failed"),
+                ("naver", "blog", "running", "2026-09-23T03:00Z", None, "running"),
+                ("youtube", "work", None, "2026-09-23T02:00Z", "2026-09-23T02:10Z", "failed"),
+            ],
+        )
+        rows = conn.execute(query.replace("needs.collector_health", "collector_health")).fetchall()
+    finally:
+        conn.close()
+    assert rows == [
+        ("naver:blog failed (run latest-failure)",),
+        ("youtube:work failed (run at 2026-09-23T02:00Z)",),
+    ]
 
 
 def test_audit_reports_ops_none_when_both_queries_come_back_clean(run):
