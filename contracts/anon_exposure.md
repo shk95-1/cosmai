@@ -9,6 +9,17 @@ anonymous, unauthenticated GET and read-only is `postgrest_anon`'s privileges, n
 every one of them. The comparison is `db/grants/postgrest_anon_check.sql` (read-only, seven
 sections) and `tests/test_anon_exposure_contract.py`.
 
+### Empty-database rebuild boundary
+
+The 23-relation count describes the current production database, where the separate
+`db/grants/postgrest_anon_old_stack.sql` operation was applied. `db/migrate.sh` alone creates
+`trend_radar` and `tubedepth` on an empty database and applies the `needs` anon whitelist, but
+does **not** apply that old-stack grants file. A database rebuilt by `db/migrate.sh` alone therefore
+does not promise `postgrest_anon` access to the nine `trend_radar` and three `tubedepth` relations
+listed below. That file records a one-time narrowing of the old stack's broader privileges;
+#180 retires the old PostgREST role and grants. The new portal's database access is tracked by
+#179.
+
 `#168` option B (user decision 2026-08-27) was **applied by the coordinator session on 2026-08-27** --
 `db/grants/postgrest_anon_old_stack.sql`, one command at a time. Before it there were 36
 (`trend_radar` 13 · `tubedepth` 12). Measured after: all 23 that were kept answer 200 and everything
