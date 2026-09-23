@@ -26,6 +26,7 @@ COPY . /srv/cosmai
 # reason: the browsers are installed as root and have to stay readable to whoever the container ends
 # up running as.
 ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_PYTHON_INSTALL_DIR=/opt/uv-python \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PATH=/opt/venv/bin:$PATH \
@@ -76,5 +77,11 @@ RUN cosmai --help >/dev/null \
 # builds green and the only source that needs a browser reports blocked at 03:00 for a reason that
 # has nothing to do with the site.
 RUN cd / && python -c 'import os, sys; from playwright.sync_api import sync_playwright; p = sync_playwright().start(); exe = p.chromium.executable_path; p.stop(); sys.exit(0 if os.access(exe, os.X_OK) else f"no runnable chromium at {exe}")'
+
+# Commerce runs as UID 1000 so its browser profile is writable. The CLI's venv interpreter must stay
+# outside root's private home; the root-only build checks above cannot catch that access failure.
+USER 1000:1000
+RUN cosmai --help >/dev/null
+USER root
 
 CMD ["cosmai", "--help"]
