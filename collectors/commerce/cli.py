@@ -19,6 +19,7 @@ from collectors.commerce.contract import Transport
 from collectors.commerce.engine import Fetcher, RunReport, collect, exit_code_for
 from collectors.commerce.models import Dataset, hour_bucket
 from collectors.commerce.registry import SOURCES
+from collectors.commerce.sources.oliveyoung import product_boards
 from collectors.commerce.storage import db as storage_db
 from collectors.commerce.storage.db import PostgresJournal, RunLog, create_engine
 from collectors.commerce.storage.locks import PostgresSourceLock
@@ -147,9 +148,16 @@ def run(
         print(f"no dataset named {dataset!r}; known: {known}")
         return 2
 
-    if board is not None and board not in review_low_boards():
-        print(f"no review_low board named {board!r}; known: {', '.join(review_low_boards())}")
-        return 2
+    if board is not None:
+        if wanted is Dataset.PRODUCT:
+            try:
+                product_boards(board)
+            except ValueError as exc:
+                print(exc)
+                return 2
+        elif wanted is not Dataset.REVIEW_LOW or board not in review_low_boards():
+            print(f"no review_low board named {board!r}; known: {', '.join(review_low_boards())}")
+            return 2
 
     chosen = [cls() for cls in SOURCES.values() if wanted in cls.datasets]
     if not chosen:

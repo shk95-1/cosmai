@@ -1106,8 +1106,12 @@ crontab and that declaration only ever move together (`tests/test_pipeline_stage
 
 The Olive Young `ingredients` pass reads the suncare board's top 10 product details after
 `review_low`. It uses the existing product upsert but has its own run and health stage: adding
-its 11 requests to the five-board `product` pass's 90 would exceed the source's 100-request cap
-(#73). The two passes retain their separate failure outcomes.
+its 11 requests to the former five-board `product` pass's 90 would exceed the source's
+100-request cap (#73). The daily product target remains five boards and 85 details, split into
+three board-scoped runs of at most two boards each (#305). Each two-board run costs at most
+2 + 34 × 2 = 70 requests with one retry per detail; `run_source.scope` records that run's
+actual board and product target count. The ingredient and product passes retain separate
+failure outcomes.
 
 youtube's `work` was added to this table on 2026-08-24 (before that there were three, and no line
 drained the queue). It is cron rather than a resident daemon because
@@ -1126,7 +1130,9 @@ zero, so its Data API jobs end `error_code='budget'` while the yt-dlp and timedt
 beside them still run.
 ```
 0 * * * *   cosmai collect commerce --dataset ranking
-10 2 * * *  cosmai collect commerce --dataset product
+10 2 * * *  cosmai collect commerce --dataset product --board skincare,makeup
+35 2 * * *  cosmai collect commerce --dataset product --board hair,masks
+10 3 * * *  cosmai collect commerce --dataset product --board dermo
 30 3 * * *  cosmai collect commerce --dataset review_low --board suncare   (the board is the scope.json list)
 45 3 * * *  cosmai collect commerce --dataset ingredients
 15 4 * * *  cosmai collect commerce --dataset review

@@ -14,6 +14,12 @@ import pytest
 import collectors.commerce.sources  # noqa: F401 -- registers every source
 from collectors.commerce.models import Dataset
 from collectors.commerce.registry import SOURCES
+from collectors.commerce.sources.oliveyoung import (
+    PRODUCT_PRODUCTS_PER_BOARD,
+    REVIEW_BOARDS,
+    OliveYoung,
+    product_boards,
+)
 from collectors.commerce.storage.db import MAX_CONCURRENT_LANES
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -99,6 +105,24 @@ def test_crontab_time_matches_the_contract(dataset: str):
         f"stack/crontab.d schedules {dataset} at {' '.join(CRONTAB_TIMES[dataset])}, "
         f"contracts/entrypoints.md §Schedule says {' '.join(CONTRACT_TIMES[dataset])}"
     )
+
+
+def test_product_schedule_covers_every_board_with_retry_room():
+    scheduled = [line for line in _commerce_cron_lines(crontab_text()) if line.dataset == "product"]
+    declared = [
+        line for line in _commerce_cron_lines(_entrypoints_schedule_block()) if line.dataset == "product"
+    ]
+    assert scheduled == declared
+    assert len(scheduled) == 3
+    boards = [name for line in scheduled for name in product_boards(line.board)]
+    assert len(boards) == len(set(boards))
+    assert set(boards) == set(REVIEW_BOARDS)
+    budget = OliveYoung.policy.max_requests_per_run
+    assert budget is not None
+    for line in scheduled:
+        count = len(product_boards(line.board))
+        worst_requests = count * (1 + PRODUCT_PRODUCTS_PER_BOARD * OliveYoung.policy.max_attempts)
+        assert worst_requests <= budget
 
 
 # --- schedule gap -------------------------------------------------------------------------------

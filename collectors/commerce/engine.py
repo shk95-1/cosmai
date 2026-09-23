@@ -310,7 +310,12 @@ class _Lane:
         self._report.configured_interval_s = self._policy.min_interval_s
         self._report.configured_concurrency = self._policy.concurrency
         self._report.request_budget = self._policy.max_requests_per_run
-        self._report.scope = narrowed(self._source.scope, [self._dataset])
+        run_scope = getattr(self._source, "run_scope", None)
+        self._report.scope = (
+            run_scope(self._dataset, board=self._board)
+            if run_scope is not None
+            else narrowed(self._source.scope, [self._dataset])
+        )
         return self._report
 
     def _halted(self) -> bool:
