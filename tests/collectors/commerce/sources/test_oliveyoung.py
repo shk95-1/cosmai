@@ -3,12 +3,16 @@ oliveyoung/ (origin: service/trend-radar/tests/fixtures/oliveyoung/, brought in 
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from collectors.commerce.contract import Fetch, Payload, Transport
+from collectors.commerce.engine import TransientError, collect
 from collectors.commerce.models import Dataset, ProductRecord, RankRecord, ReviewRecord
-from collectors.commerce.sources.oliveyoung import OliveYoung
+from collectors.commerce.sources.oliveyoung import OliveYoung, product_boards
 
 AT = datetime(2026, 8, 18, 9, tzinfo=UTC)
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "oliveyoung"
@@ -70,6 +74,61 @@ def test_a_product_dataset_run_fetches_ingredients_not_ranking_rows():
     assert not [r for r in out.records if isinstance(r, RankRecord)]
     assert out.follow
     assert all(f.dataset is Dataset.PRODUCT for f in out.follow)
+
+
+def test_product_group_records_its_actual_target_and_preserves_the_daily_target():
+    source = OliveYoung()
+    seeds = source.seeds(Dataset.PRODUCT, board="skincare,makeup")
+    assert [seed.ctx("board") for seed in seeds] == ["skincare", "makeup"]
+    assert source.run_scope(Dataset.PRODUCT, board="skincare,makeup") == {
+        "product": {"boards": 2, "product_products": 34}
+    }
+    assert source.run_scope(Dataset.PRODUCT) == {"product": {"boards": 5, "product_products": 85}}
+
+
+def test_two_board_pass_attempts_every_detail_even_when_each_needs_a_retry():
+    ranking = (FIXTURES / "ranking/best-skincare.html").read_bytes()
+
+    class RefusingDetails:
+        def __init__(self):
+            self.details: list[str] = []
+
+        def fetch(self, fetch: Fetch) -> Payload:
+            if fetch.ctx("kind") == "product":
+                self.details.append(fetch.ctx("product") or "")
+                raise TransientError("detail timed out")
+            body = ranking
+            if fetch.ctx("board") == "makeup":
+                body = re.sub(rb"A([0-9]{12})", rb"B\1", ranking)
+            return _payload(fetch, body)
+
+    class NullSink:
+        def write(self, records) -> None:
+            pass
+
+    now = [0.0]
+    fetcher = RefusingDetails()
+    report = collect(
+        sources=[OliveYoung()],
+        dataset=Dataset.PRODUCT,
+        board="skincare,makeup",
+        sink=NullSink(),
+        captured_at=AT,
+        fetcher=fetcher,
+        clock=lambda: now[0],
+        sleep=lambda seconds: now.__setitem__(0, now[0] + seconds),
+    ).sources["oliveyoung"]
+    assert len(set(fetcher.details)) == 34
+    assert all(fetcher.details.count(key) == 2 for key in set(fetcher.details))
+    assert report.requests == 70
+    assert not report.budget_exhausted
+    assert report.scope == {"product": {"boards": 2, "product_products": 34}}
+
+
+@pytest.mark.parametrize("board", ["", "skincare,", "skincare,skincare", "skincare,makeup,hair", "body"])
+def test_product_group_refuses_an_unbounded_or_unknown_scope(board: str):
+    with pytest.raises(ValueError, match="one or two distinct"):
+        product_boards(board)
 
 
 def test_ingredient_pass_reads_the_low_review_board_under_its_own_budget():

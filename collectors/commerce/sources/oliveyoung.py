@@ -23,7 +23,7 @@ from urllib.parse import urlencode
 
 from selectolax.parser import HTMLParser, Node
 
-from collectors.commerce.contract import Fetch, Payload, Scope, SourcePolicy, Transport, Yield
+from collectors.commerce.contract import Fetch, Payload, Scope, SourcePolicy, Transport, Yield, narrowed
 from collectors.commerce.models import (
     Dataset,
     ProductRecord,
@@ -118,6 +118,20 @@ _BOARDS: tuple[_Board, ...] = (
 _BOARD_NAMES = frozenset(b.name for b in _BOARDS)
 
 
+def product_boards(board: str | None) -> tuple[str, ...]:
+    """Select at most two daily product boards, leaving retry room within the 100-request cap."""
+    if board is None:
+        return REVIEW_BOARDS
+    names = tuple(name.strip() for name in board.split(","))
+    if (
+        not 1 <= len(names) <= 2
+        or len(set(names)) != len(names)
+        or any(name not in REVIEW_BOARDS for name in names)
+    ):
+        raise ValueError(f"product boards must be one or two distinct names from {REVIEW_BOARDS}")
+    return names
+
+
 @register
 class OliveYoung:
     key: ClassVar[str] = "oliveyoung"
@@ -195,7 +209,14 @@ class OliveYoung:
             return (_seed(by_name[LOW_BOARDS[0]], dataset),)
         if dataset not in (Dataset.PRODUCT, Dataset.REVIEW, Dataset.REVIEW_STATS):
             return ()
-        return tuple(_seed(by_name[name], dataset) for name in REVIEW_BOARDS)
+        names = product_boards(board) if dataset is Dataset.PRODUCT else REVIEW_BOARDS
+        return tuple(_seed(by_name[name], dataset) for name in names)
+
+    def run_scope(self, dataset: Dataset, *, board: str | None = None) -> dict[str, dict[str, int]]:
+        if dataset is Dataset.PRODUCT:
+            count = len(product_boards(board))
+            return {dataset.value: {"boards": count, "product_products": count * PRODUCT_PRODUCTS_PER_BOARD}}
+        return narrowed(self.scope, [dataset])
 
     def parse(self, payload: Payload) -> Yield:
         kind = payload.fetch.ctx("kind")

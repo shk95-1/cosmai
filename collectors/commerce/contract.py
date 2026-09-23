@@ -141,8 +141,8 @@ class Source(Protocol):
     # and tests/test_collection_lineage_view.py cries when the two drift apart.
     review_body_datasets: ClassVar[frozenset[Dataset]]
 
-    # `board` only means anything to a source that declares REVIEW_LOW (oliveyoung, #7); every other
-    # source ignores it. Part of the shared signature anyway so the engine can call it uniformly.
+    # `board` narrows oliveyoung REVIEW_LOW or PRODUCT; other sources ignore it. A source that narrows
+    # its declared scope may also expose run_scope(dataset, board=...) for the run_source ledger.
     def seeds(self, dataset: Dataset, *, board: str | None = None) -> Sequence[Fetch]: ...
 
     def parse(self, payload: Payload) -> Yield: ...

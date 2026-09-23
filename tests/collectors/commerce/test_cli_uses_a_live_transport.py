@@ -72,6 +72,11 @@ def test_the_one_browser_source_is_the_one_the_registry_declares():
     assert browser == {"oliveyoung"}
 
 
+@pytest.mark.parametrize("board", ["skincare,makeup,hair", "skincare,skincare", "unknown"])
+def test_product_cli_rejects_a_group_that_breaks_coverage_or_budget(board: str):
+    assert cli.run("product", board=board) == 2
+
+
 # --- and the run closes what it built --------------------------------------------------------------
 
 
