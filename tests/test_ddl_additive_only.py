@@ -62,7 +62,7 @@ PLAIN_CHECK = re.compile(
 )
 STRING_LIST = re.compile(r"\s*'(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*\s*", re.DOTALL)
 STRING_VALUE = re.compile(r"'(?:''|[^'])*'", re.DOTALL)
-INLINE_COLUMN = re.compile(rf"^\s*(?P<column>{IDENT})\s+[^\n]*\bCHECK\b", re.IGNORECASE)
+INLINE_COLUMN = re.compile(rf"^\s*(?P<column>{IDENT})\s+[^\n,]*\bCHECK\b", re.IGNORECASE)
 NAMED_CHECK = re.compile(rf"^\s*CONSTRAINT\s+(?P<name>{IDENT})\s+(?P<body>.+)$", re.IGNORECASE)
 
 
@@ -116,7 +116,11 @@ def _old_check(path: Path, table: str, name: str) -> tuple[str, frozenset[str]] 
             short_table = table.split(".", 1)[1]
             for line in part[create.end() :].splitlines():
                 inline = INLINE_COLUMN.match(line)
-                if inline and f"{short_table}_{inline['column'].lower()}_check" == name:
+                if (
+                    inline
+                    and inline["column"].lower() != "constraint"
+                    and f"{short_table}_{inline['column'].lower()}_check" == name
+                ):
                     found = _check_on_create_line(line)
                 named = NAMED_CHECK.match(line)
                 if named and named["name"].lower() == name:
@@ -369,6 +373,29 @@ def test_check_widening_does_not_reuse_a_definition_removed_in_earlier_ddl(
         "ALTER TABLE needs.sample DROP CONSTRAINT sample_dataset_check;\n"
         "ALTER TABLE needs.sample ADD CONSTRAINT sample_dataset_check "
         "CHECK (dataset IN ('a', 'b', 'c'));\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DDL_ROOT", root)
+    with pytest.raises(AssertionError, match="012_change.sql.*old definition"):
+        test_later_migrations_are_additive_only(path)
+
+
+def test_check_widening_does_not_borrow_another_columns_inline_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "ddl"
+    needs = root / "needs"
+    needs.mkdir(parents=True)
+    (needs / "004_old.sql").write_text(
+        "CREATE TABLE needs.sample (dataset text, other text "
+        "CONSTRAINT other_check CHECK (other IN ('a', 'b')));\n",
+        encoding="utf-8",
+    )
+    path = needs / "012_change.sql"
+    path.write_text(
+        "ALTER TABLE needs.sample DROP CONSTRAINT sample_dataset_check;\n"
+        "ALTER TABLE needs.sample ADD CONSTRAINT sample_dataset_check "
+        "CHECK (other IN ('a', 'b', 'c'));\n",
         encoding="utf-8",
     )
     monkeypatch.setitem(globals(), "DDL_ROOT", root)
