@@ -27,10 +27,10 @@
 #
 # **Permissible is not measured. T for this line is unknown, and the first pass is not the steady
 # state.** This file's rule is that the gap between two adjacent lines is wider than the earlier
-# line's worst-case T, and the `0 8` commentary below is what an unmeasured T already cost once
-# (#242). The two numbers here are different by orders of magnitude, because a backlog collected
-# before the 2026-08-25 cutover is sitting in tubedepth right now (measured on production
-# 2026-09-12): video_snapshots 27,318 rows / 5,908 distinct videos, 4,683 of them on the active
+# line's worst-case T. The `0 8` commentary below records its measured first-night T; this line
+# needs the same evidence. The two numbers here are different by orders of magnitude, because a
+# backlog collected before the 2026-08-25 cutover is sitting in tubedepth right now (measured on
+# production 2026-09-12): video_snapshots 27,318 rows / 5,908 distinct videos, 4,683 on the active
 # panel; listing_entries 166,957; comments 285,749, of which 239,487 hang on panel videos.
 #   T_first   one pass over that backlog -- on the order of a quarter-million corpus_document rows
 #             written in one go, paged and committed page by page.
@@ -86,35 +86,31 @@
 #
 # The commentary below (T, the GPU window, the two-step procedure) is kept for the day the line returns.
 #
-# **왜 0 8 인가 -- 이 명령의 T 는 아직 미측정이다.**
-# 규칙은 그대로다: 인접한 두 줄의 간격이 앞 줄의 **최악** 소요 T 보다 넓어야 한다. #16 의 analyze 락은
-# 기다리지 않는다 -- 뒤에 온 실행은 그 밤을 통째로 건너뛰고 partial(1)로 끝난다 (commerce 줄과 같은
-# 모양의 규칙이다, contracts/entrypoints.md §스케줄). 실측이 있는 T 는 전량 패스의 것 하나뿐이다:
-# 선블록 하나를 도는 run 16 이 2026-08-24 23:12 에 시작해 08-25 05:57 에 ok 로 끝났다 -- **6h44m**.
-# gemma4 가 규칙보다 45% 많은 문장에 aspect 를 붙이는 것이 그 시간의 정체다.
-# **그런데 이 줄이 돌리는 것은 전량이 아니라 `--missing`(#98)이고 그 T 는 아무도 재지 않았다** --
-# 운영 실행은 조정자의 몫이라 이 줄을 넣은 작업이 잴 수 없었다. 그래서 시각은 T 를 아는 대신 간격을
-# 최대로 벌려 골랐다:
-#     05:00 → 08:00   3h    analyze all 에 주는 몫. 규칙 극성은 정규식이라 LLM 패스와 자릿수가 다르고,
-#                           설령 넘겨도 손해를 보는 것은 락을 못 잡는 이 줄이지 05:00 이 아니다.
-#     08:00 → 05:00   21h   이 줄에 주어진 간격. T 가 21h 를 넘는 밤에만 05:00 이 skip 된다 -- run 16
-#                           (6h44m, 전량, 선블록 하나)의 3배이고, 코퍼스 전량 35k 언급을 그 실측 속도
-#                           (약 1.75s/문장)로 통째로 다시 판정해도 그 안에 든다.
-# 첫 밤만 다르다: 26개의 since 가 2026-08 이라(analysis/polarity/ownership.py) 그 달의 밀린 리뷰가 한
-# 번에 든다. 그 뒤의 밤은 그날 새로 들어온 것뿐이다 -- 고르는 기준이 날짜가 아니라 "내 판본 행이 없는
-# 원천 행"이라 늦게 도착한 리뷰도 그 하루에 잡힌다 (#98). **조정자가 두 T(첫 밤·정상)를 재고, 21h 를
-# 위협하면 이 시각을 옮긴다.** 간격이 모자랄 때 고칠 곳은 락이 아니라 간격이다 -- 두 줄을 벌리거나
-# 05:00 을 뒤로 민다. 넘긴 밤의 analyze all 은 skip 되고, 모든 단계가 자연키 upsert 라 다음 05:00 이
-# 그 밤의 몫까지 그대로 가져간다.
+# **Why 0 8 -- the first-night T of this `--missing` pass is 2h34m.** Run 25 started at
+# 2026-08-26 08:00 UTC and finished ok at 10:33:46 (2h33m46s): missing=1, units=16692,
+# need=14432, wish=0, replaced=0, captured_at_fallback=0. All 26 categories had since=2026-08
+# (analysis/polarity/ownership.py), so this first pass included that month's backlog. Later passes
+# select source rows without this version's result, including late arrivals (#98). The normal-night T
+# is unmeasured; whoever measures it next writes it here. For comparison, the full sunblock pass in
+# run 16 took 6h44m on 2026-08-24/25; that is a different workload.
+# The gap rule still holds: adjacent jobs need more separation than the earlier job's worst T. The
+# analyze lock (#16) does not wait; a later job that misses the lock skips that night with partial(1)
+# (contracts/entrypoints.md, Schedule). The measured first-night T fits the 21h interval:
+#     05:00 -> 08:00   3h    Reserved for analyze all. Its polarity work uses regex, not the LLM;
+#                           if it overruns, this gemma4 job is the one that misses the lock.
+#     08:00 -> 05:00   21h   Reserved for gemma4; run 25 used about 12% of this interval.
+# If a measured normal-night T threatens 21h, move the schedule by widening the gap or moving 05:00.
+# A skipped analyze all is caught by the next pass because its stages upsert by natural key.
 #
 # **GPU window: 08:00-16:00 UTC (17:00-01:00 KST) -- void while the `0 8` line is absent (#242).** There
 # is one GPU, and overlapping with another repo's (the fork's) `cosmai retrieval embed` (380k chunks, 20.6
 # minutes idle) stretches to 5h38m -- both sides pay the same cost (measured in #28). An advisory lock
 # cannot see another process, so the window is fixed by documentation instead: `embed` is run to avoid this
-# window. The 8h width is not a T, it is an **upper-bound estimate** -- margin added on top of the only
-# measured value (the full pass's 6h44m), and once T is pinned down this width narrows along with it. The
-# same sentence also appears in stack/README.md. The fork's `retrieval embed` has nothing to avoid until the
-# `0 8` line comes back.
+# window. The 8h width is not a T, it is an **upper-bound estimate** -- margin added on top of the
+# full pass's measured 6h44m. The first-night `--missing` T is 2h34m (run 25), but the
+# normal-night T is unmeasured. The two repos decide together whether to narrow this window after that
+# measurement. The same facts appear in stack/README.md. The fork's `retrieval embed` has nothing to
+# avoid until the `0 8` line comes back.
 #
 # Times are UTC (this file's own convention, and compose pins TZ=UTC). Moving the timezone to KST is
 # #36, and moving the whole file over in one go is #89 -- this line follows the file's current
