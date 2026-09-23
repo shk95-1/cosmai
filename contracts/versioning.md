@@ -140,6 +140,11 @@ reproduction claim are explanations, not proxy assertions.
   of what was already applied that is read only where the schema is present and has no ledger yet,
   and that is never appended to afterwards.
 - DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
+- A dropped CHECK is additive in effect only when the same migration adds the same-named constraint
+  on the same table, both definitions are plain `column IN ('value', ...)` checks on the same
+  column, and the new values include every old value. The old definition must be found in the
+  schema's baseline or an earlier numbered DDL file. `tests/test_ddl_additive_only.py` refuses a
+  rename, a narrower list, another expression, or a drop without its replacement (#287).
 - `needs.analysis_run.versions` gains three keys for the live lineage, declared by fork #94 and written by fork
   #95 and #96: `snapshot`, the `corpus_snapshot.snapshot_id` the run read; `cutoff`, the
   `corpus_document.collected_at` ceiling it applied — the same cutoff gives the same answer, which is what

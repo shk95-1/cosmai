@@ -54,11 +54,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON needs.naver_launch_series TO needs_runti
 -- The one widening. needs.naver_run.dataset (004) closes the collector's dataset vocabulary with a
 -- CHECK, and `launch_onset` is a third dataset of the same collector -- one run row, one fetch
 -- journal, one line in needs.collector_health and needs.pipeline_health, exactly like datalab and
--- blog. Widening a closed vocabulary is what pre-approval 2 prices at a human-approved DROP
--- CONSTRAINT (the same sentence 010 and 028 write about their own CHECKs), which is why this is
--- registered in tests/test_ddl_additive_only.py's SANCTIONED_DESTRUCTIVE rather than slipped past
--- it. Nothing is dropped but the constraint itself and no row changes: every existing value stays
--- legal under the replacement. **User approval 2026-09-20.**
+-- blog. Nothing is dropped but the constraint itself and no row changes: every existing value
+-- stays legal under the replacement. The user approved this instance on 2026-09-20; #287 then
+-- taught the additive-only guard to recognize same-named plain IN-list CHECK widenings as a class.
 --
 -- When not to apply it: not on the 1st of a month between 06:10 and 07:20 UTC, which is when
 -- stack/crontab.d/collector-naver runs the three naver passes and each of them holds a

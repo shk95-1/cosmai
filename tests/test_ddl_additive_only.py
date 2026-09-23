@@ -33,14 +33,114 @@ FORBIDDEN = re.compile(
 SANCTIONED_DESTRUCTIVE = {
     # 사용자 승인 2026-08-24 — #5 운영 실패(btree 2704B 상한) + #12 안 A(키에 extractor_version).
     "needs/005_need_mention_natural_key.sql": ("DROP CONSTRAINT",),
-    # user approval 2026-09-20 — widens needs.naver_run.dataset's CHECK from ('datalab','blog') to
-    # add 'launch_onset': DROP and ADD of the same-named constraint in one transaction, the new
-    # value set a superset of the old, no existing row changes (5 rows at approval), reverse is one
-    # ALTER. #285, the third dataset of the same collector -- one run row and one fetch journal like
-    # `datalab` and `blog`. The approval is this file's alone: teaching the guard that a same-named
-    # CHECK whose value list only grows is additive is its own issue, not an edit here.
-    "needs/011_naver_launch_onset.sql": ("DROP CONSTRAINT",),
 }
+
+IDENT = r"[a-z_][a-z_0-9]*"
+TABLE = rf"{IDENT}\.{IDENT}"
+ALTER_DROP = re.compile(
+    rf"^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<table>{TABLE})\s+DROP\s+CONSTRAINT\s+"
+    rf"(?P<name>{IDENT})\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+ALTER_ADD = re.compile(
+    rf"^\s*ALTER\s+TABLE\s+(?:ONLY\s+)?(?P<table>{TABLE})\s+ADD\s+CONSTRAINT\s+"
+    rf"(?P<name>{IDENT})\s+(?P<body>.+?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+CREATE_TABLE = re.compile(
+    rf"^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<table>{TABLE})\s*\(",
+    re.IGNORECASE | re.DOTALL,
+)
+PLAIN_CHECK = re.compile(
+    rf"^CHECK\s*\(\s*(?P<column>{IDENT})\s+IN\s*\((?P<values>[^()]*)\)\s*\)$",
+    re.IGNORECASE | re.DOTALL,
+)
+STRING_LIST = re.compile(r"\s*'(?:''|[^'])*'(?:\s*,\s*'(?:''|[^'])*')*\s*", re.DOTALL)
+STRING_VALUE = re.compile(r"'(?:''|[^'])*'", re.DOTALL)
+INLINE_COLUMN = re.compile(rf"^\s*(?P<column>{IDENT})\s+[^\n]*\bCHECK\b", re.IGNORECASE)
+NAMED_CHECK = re.compile(rf"^\s*CONSTRAINT\s+(?P<name>{IDENT})\s+(?P<body>.+)$", re.IGNORECASE)
+
+
+def _plain_check(body: str) -> tuple[str, frozenset[str]] | None:
+    match = PLAIN_CHECK.fullmatch(body.strip())
+    if match is None or STRING_LIST.fullmatch(match["values"]) is None:
+        return None
+    values = frozenset(
+        item.group(0)[1:-1].replace("''", "'") for item in STRING_VALUE.finditer(match["values"])
+    )
+    return match["column"].lower(), values
+
+
+def _sql_parts(path: Path) -> list[str]:
+    # The guard only accepts a plain ALTER TABLE statement. Semicolons inside an unrelated function
+    # may split that function, but can never make an unsupported DROP fit the anchored pattern below.
+    return [part.strip() for part in _statements(path).split(";") if part.strip()]
+
+
+def _check_on_create_line(line: str) -> tuple[str, frozenset[str]] | None:
+    body = line[line.upper().index("CHECK") :].strip()
+    for _ in range(3):
+        parsed = _plain_check(body)
+        if parsed is not None:
+            return parsed
+        if not body.endswith((",", ")")):
+            break
+        body = body[:-1].rstrip()
+    return None
+
+
+def _old_check(path: Path, table: str, name: str) -> tuple[str, frozenset[str]] | None:
+    schema = path.parent.name
+    baseline = DDL_ROOT / "current" / f"app.{schema}.sql"
+    earlier = sorted(p for p in (DDL_ROOT / schema).glob("*.sql") if p.name < path.name)
+    files = [*([baseline] if baseline.exists() else []), *earlier]
+    found: tuple[str, frozenset[str]] | None = None
+    for prior in files:
+        for part in _sql_parts(prior):
+            drop = ALTER_DROP.fullmatch(part)
+            if drop and (drop["table"].lower(), drop["name"].lower()) == (table, name):
+                found = None
+            add = ALTER_ADD.fullmatch(part)
+            if add and (add["table"].lower(), add["name"].lower()) == (table, name):
+                found = _plain_check(add["body"])
+            create = CREATE_TABLE.match(part)
+            if create is None or create["table"].lower() != table:
+                continue
+            short_table = table.split(".", 1)[1]
+            for line in part[create.end() :].splitlines():
+                inline = INLINE_COLUMN.match(line)
+                if inline and f"{short_table}_{inline['column'].lower()}_check" == name:
+                    found = _check_on_create_line(line)
+                named = NAMED_CHECK.match(line)
+                if named and named["name"].lower() == name:
+                    found = _check_on_create_line(named["body"])
+    return found
+
+
+def _check_widening_reason(path: Path, drop_part: str, parts: list[str]) -> str | None:
+    drop = ALTER_DROP.fullmatch(drop_part)
+    if drop is None:
+        return "unsupported DROP CONSTRAINT syntax"
+    table, name = drop["table"].lower(), drop["name"].lower()
+    later = parts[parts.index(drop_part) + 1 :]
+    replacements = [
+        add
+        for part in later
+        if (add := ALTER_ADD.fullmatch(part)) and (add["table"].lower(), add["name"].lower()) == (table, name)
+    ]
+    if len(replacements) != 1:
+        return "same-named replacement on the same table is missing or repeated"
+    new = _plain_check(replacements[0]["body"])
+    if new is None:
+        return "replacement is not a plain IN-list CHECK"
+    old = _old_check(path, table, name)
+    if old is None:
+        return "old definition is not a plain IN-list CHECK"
+    if old[0] != new[0]:
+        return "replacement changes the checked column"
+    if not old[1] <= new[1]:
+        return "replacement removes permitted values"
+    return None
 
 
 def additive_dirs() -> list[Path]:
@@ -82,7 +182,19 @@ def destructive(path: Path) -> list[str]:
 def unsanctioned(path: Path) -> list[str]:
     """승인 목록과 정확히 같을 때만 빈 목록 — 목록에 없는 파일은 허용치가 () 이라 DROP 하나로 걸린다."""
     hits = destructive(path)
-    return [] if hits == list(SANCTIONED_DESTRUCTIVE.get(sanction_key(path), ())) else hits
+    if hits == list(SANCTIONED_DESTRUCTIVE.get(sanction_key(path), ())):
+        return []
+    if not path.is_relative_to(DDL_ROOT) or not hits or any(hit != "DROP CONSTRAINT" for hit in hits):
+        return hits
+    parts = _sql_parts(path)
+    drops = [part for part in parts if re.search(r"\bDROP\s+CONSTRAINT\b", part, re.IGNORECASE)]
+    if len(drops) != len(hits):
+        return hits
+    for part in drops:
+        reason = _check_widening_reason(path, part, parts)
+        if reason is not None:
+            return [f"DROP CONSTRAINT: {reason}"]
+    return []
 
 
 @pytest.mark.parametrize("path", additive_files(), ids=sanction_key)
@@ -153,3 +265,79 @@ def test_the_guard_catches_the_other_ways_to_take_something_away(tmp_path: Path,
     path = tmp_path / "004_x.sql"
     path.write_text(statement + "\n", encoding="utf-8")
     assert unsanctioned(path), statement
+
+
+@pytest.mark.parametrize(
+    ("replacement", "reason"),
+    [
+        ("CHECK (dataset IN ('a', 'b', 'c'))", None),
+        ("CHECK (dataset IN ('a'))", "removes permitted values"),
+        ("CHECK (dataset <> '')", "plain IN-list"),
+        (None, "same-named replacement"),
+    ],
+)
+def test_check_widening_class_through_the_real_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: str | None, reason: str | None
+):
+    root = tmp_path / "ddl"
+    needs = root / "needs"
+    needs.mkdir(parents=True)
+    (needs / "004_old.sql").write_text(
+        "CREATE TABLE needs.sample (dataset text CHECK (dataset IN ('a', 'b')));\n",
+        encoding="utf-8",
+    )
+    path = needs / "012_change.sql"
+    body = "ALTER TABLE needs.sample DROP CONSTRAINT sample_dataset_check;\n"
+    if replacement is not None:
+        body += f"ALTER TABLE needs.sample ADD CONSTRAINT sample_dataset_check {replacement};\n"
+    path.write_text(body, encoding="utf-8")
+    monkeypatch.setitem(globals(), "DDL_ROOT", root)
+    if reason is None:
+        test_later_migrations_are_additive_only(path)
+    else:
+        with pytest.raises(AssertionError, match=f"012_change.sql.*{reason}"):
+            test_later_migrations_are_additive_only(path)
+
+
+def test_check_widening_rejects_a_renamed_constraint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    root = tmp_path / "ddl"
+    needs = root / "needs"
+    needs.mkdir(parents=True)
+    (needs / "004_old.sql").write_text(
+        "CREATE TABLE needs.sample (dataset text CHECK (dataset IN ('a', 'b')));\n",
+        encoding="utf-8",
+    )
+    path = needs / "012_change.sql"
+    path.write_text(
+        "ALTER TABLE needs.sample DROP CONSTRAINT sample_dataset_check;\n"
+        "ALTER TABLE needs.sample ADD CONSTRAINT sample_dataset_check_new "
+        "CHECK (dataset IN ('a', 'b', 'c'));\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DDL_ROOT", root)
+    with pytest.raises(AssertionError, match="012_change.sql.*same-named replacement"):
+        test_later_migrations_are_additive_only(path)
+
+
+def test_check_widening_finds_a_named_old_check_in_the_baseline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root = tmp_path / "ddl"
+    current = root / "current"
+    current.mkdir(parents=True)
+    (current / "app.tubedepth.sql").write_text(
+        "ALTER TABLE ONLY tubedepth.sample ADD CONSTRAINT sample_status_check "
+        "CHECK (status IN ('a', 'b'));\n",
+        encoding="utf-8",
+    )
+    new = root / "tubedepth"
+    new.mkdir()
+    path = new / "012_change.sql"
+    path.write_text(
+        "ALTER TABLE tubedepth.sample DROP CONSTRAINT sample_status_check;\n"
+        "ALTER TABLE tubedepth.sample ADD CONSTRAINT sample_status_check "
+        "CHECK (status IN ('a', 'b', 'c'));\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DDL_ROOT", root)
+    test_later_migrations_are_additive_only(path)
