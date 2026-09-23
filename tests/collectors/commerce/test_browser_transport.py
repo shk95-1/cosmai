@@ -51,6 +51,16 @@ def test_a_wait_selector_is_awaited_before_the_content_is_read(make_browser):
     assert context.pages[0].waited_for == [".product-list"]
 
 
+def test_a_detail_render_has_one_deadline_across_navigation_click_and_wait(make_browser):
+    fetcher, context = make_browser(page={"visible": frozenset({"text=trigger"})}, timeout_s=120.0)
+    fetcher.fetch(_fetch(click_before="text=trigger", wait_for="text=table", timeout_s=15.0))
+    page = context.pages[0]
+    budgets = page.goto_timeouts + page.click_timeouts + page.wait_timeouts
+    assert len(budgets) == 3
+    assert all(isinstance(budget, int) and 0 < budget <= 15000 for budget in budgets)
+    assert budgets == sorted(budgets, reverse=True)
+
+
 def test_a_collapsed_section_is_clicked_open_before_the_wait(make_browser):
     fetcher, context = make_browser(page={"visible": frozenset({"text=trigger"})})
     fetcher.fetch(_fetch(click_before="text=trigger", wait_for="text=table"))

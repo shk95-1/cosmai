@@ -48,8 +48,8 @@ class FakeLocator:
         return self.selector in self.page.visible
 
     def click(self, timeout: float | None = None) -> None:
-        del timeout
         self.page.clicked.append(self.selector)
+        self.page.click_timeouts.append(timeout)
 
 
 @dataclass
@@ -63,12 +63,16 @@ class FakePage:
     visible: frozenset[str] = frozenset()
     hidden: frozenset[str] = frozenset()
     waited_for: list[str] = field(default_factory=list)
+    wait_timeouts: list[object] = field(default_factory=list)
     clicked: list[str] = field(default_factory=list)
+    click_timeouts: list[float | None] = field(default_factory=list)
+    goto_timeouts: list[object] = field(default_factory=list)
     located: list[str] = field(default_factory=list)
     closed: bool = False
 
     def goto(self, url: str, **kwargs: object) -> FakeResponse:
-        del url, kwargs
+        del url
+        self.goto_timeouts.append(kwargs.get("timeout"))
         if self.goto_error is not None:
             raise self.goto_error
         return FakeResponse(self.status, dict(self.headers))
@@ -78,8 +82,8 @@ class FakePage:
         return FakeLocator(self, selector)
 
     def wait_for_selector(self, selector: str, **kwargs: object) -> None:
-        del kwargs
         self.waited_for.append(selector)
+        self.wait_timeouts.append(kwargs.get("timeout"))
 
     def content(self) -> str:
         return self.body

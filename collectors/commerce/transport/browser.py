@@ -119,14 +119,28 @@ class BrowserFetcher:
 
     def _render(self, page: Any, fetch: Fetch) -> tuple[int, dict[str, str], str]:
         timeout_ms = int(self._policy.timeout_s * 1000)
+        deadline = (
+            time.monotonic() + min(self._policy.timeout_s, fetch.timeout_s)
+            if fetch.timeout_s is not None
+            else None
+        )
+
+        def remaining_ms() -> int:
+            if deadline is None:
+                return timeout_ms
+            remaining = int((deadline - time.monotonic()) * 1000)
+            if remaining <= 0:
+                raise TimeoutError("browser render deadline exceeded")
+            return remaining
+
         try:
-            response = page.goto(fetch.url, wait_until="domcontentloaded", timeout=timeout_ms)
+            response = page.goto(fetch.url, wait_until="domcontentloaded", timeout=remaining_ms())
             if fetch.click_before is not None:
-                self._click_if_needed(page, fetch, timeout_ms)
+                self._click_if_needed(page, fetch, remaining_ms())
             if fetch.wait_for is not None:
                 # A single-page app answers 200 with an empty shell; without this the parser is
                 # handed the shell and reports nothing found.
-                page.wait_for_selector(fetch.wait_for, timeout=timeout_ms)
+                page.wait_for_selector(fetch.wait_for, timeout=remaining_ms())
             body = page.content()
         except ChallengeBlocked:
             raise

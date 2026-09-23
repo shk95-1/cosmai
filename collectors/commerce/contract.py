@@ -48,6 +48,7 @@ class Fetch:
     transport: Transport | None = None  # None -> the source's policy default
     wait_for: str | None = None  # browser only: CSS selector to await
     click_before: str | None = None  # browser only: clicked before wait_for, if not already visible
+    timeout_s: float | None = None  # browser only: an entire-render deadline within the source policy
     context: tuple[tuple[str, str], ...] = ()  # parser hints: category, page, parent key
     depth: int = 0
 

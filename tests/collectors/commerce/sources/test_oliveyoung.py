@@ -38,6 +38,17 @@ def test_the_whole_ranking_parses():
     assert len(_ranking_records()) == 100
 
 
+def test_mens_ranking_uses_the_current_site_category():
+    mens = next(fetch for fetch in OliveYoung().seeds(Dataset.RANKING) if fetch.ctx("board") == "mens")
+    assert "fltDispCatNo=10000060002" in mens.url
+    assert mens.wait_for == "ul.cate_prd_list > li"
+    body = (FIXTURES / "ranking/best-skincare.html").read_bytes()
+    parsed = OliveYoung().parse(_payload(mens, body))
+    ranks = [record for record in parsed.records if isinstance(record, RankRecord)]
+    assert len(ranks) == 100
+    assert all(record.board == "mens" and record.category_key == "10000060002" for record in ranks)
+
+
 def test_ranks_are_dense_and_start_at_one():
     assert [r.rank for r in _ranking_records()] == list(range(1, 101))
 
@@ -74,6 +85,7 @@ def test_ingredient_pass_reads_the_low_review_board_under_its_own_budget():
     assert len(parsed.records) == 1
     assert isinstance(parsed.records[0], ProductRecord)
     assert parsed.records[0].ingredients
+    assert out.follow[0].timeout_s == 15.0
 
 
 def test_ingredients_are_read_from_the_disclosure_table():
