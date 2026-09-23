@@ -502,7 +502,7 @@ def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[
     """
 
     def run(
-        database: str = "fleet", *, secrets_body: str = HARNESS_SECRETS
+        database: str = "fleet", *, secrets_body: str = HARNESS_SECRETS, cwd: Path = REPO_ROOT
     ) -> subprocess.CompletedProcess[str]:
         limit = float(os.environ.get(DEPLOY_SLOT_TIMEOUT_ENV) or DEPLOY_SLOT_TIMEOUT_S)
         deadline = time.monotonic() + limit
@@ -522,7 +522,7 @@ def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[
         try:
             return subprocess.run(
                 ["db/migrate.sh", "--container", harness_container, "--db", database, "--superuser", "fleet"],
-                cwd=REPO_ROOT,
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 env={**os.environ, "COSMAI_SECRET_FILE": str(secret)},
