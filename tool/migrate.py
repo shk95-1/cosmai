@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Verify and restore a password-encrypted Cosmai migration bundle (#330).
 
 Requires Python 3.11+, GnuPG, Git, and (for db-restore) Docker with PostgreSQL 18.
