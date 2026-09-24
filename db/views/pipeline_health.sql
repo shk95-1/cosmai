@@ -96,7 +96,12 @@ SELECT
          ELSE 'stalled' END                                     AS freshness,
     -- The last run's request statistics. What keeps "it ran, but half were 403" from reading as ok.
     -- The analysis arm makes no outside fetch, so all five columns are NULL for it.
-    r.requests, r.ok, r.blocked, r.failed, r.p90_ms
+    r.requests, r.ok, r.blocked, r.failed, r.p90_ms,
+    -- #157: the whole-history measurement found ordinary partial runs below this majority-missed
+    -- line, while seven extreme partial runs exceeded it. requests - ok counts each attempt once;
+    -- blocked + failed can count one 403/429 with an error twice. A disabled stage cannot alert.
+    coalesce(s.enabled AND r.status = 'partial' AND r.requests > 0
+             AND 2 * (r.requests - r.ok) > r.requests, false) AS partial_excessive
 FROM needs.pipeline_stage s
 LEFT JOIN last_run r USING (stage_key)
 LEFT JOIN last_ran o USING (stage_key);

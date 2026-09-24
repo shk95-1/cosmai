@@ -116,7 +116,7 @@ ANALYSIS_ROWS = (
 
 COLUMNS = (
     "stage_key, arm, dataset, enabled, expected_interval, last_success_at, last_run_at,"
-    " last_run_status, overdue_by, freshness, requests, ok, blocked, failed, p90_ms"
+    " last_run_status, overdue_by, freshness, requests, ok, blocked, failed, p90_ms, partial_excessive"
 )
 
 
@@ -283,6 +283,29 @@ def test_cancelled_is_the_last_run_but_not_a_success(health: dict[str, Any]):
 def test_the_run_statistics_come_from_the_last_run_not_the_last_success(health: dict[str, Any]):
     row = health["commerce:product"]
     assert (row["requests"], row["ok"], row["failed"]) == (5, 0, 5)
+
+
+def test_only_a_partial_that_misses_the_majority_of_requests_is_excessive(
+    needs_schema: str, needs_runtime_url: str, _schema_name: str, reference: datetime
+):
+    stages = (
+        ("commerce:ranking", "commerce", "ranking", "1 hour", True),
+        ("commerce:review", "commerce", "review", "1 hour", True),
+        ("youtube:work", "youtube", "work", "1 hour", True),
+        ("youtube:watch", "youtube", "watch", "1 hour", False),
+    )
+    rows = (
+        ("commerce", "ranking", ago(minutes=10), ago(minutes=9), "partial", 89, 9, 80, 80, None, 50),
+        ("commerce", "review", ago(minutes=10), ago(minutes=9), "partial", 89, 84, 5, 5, None, 50),
+        ("youtube", "work", ago(minutes=10), ago(minutes=9), "partial", 10, 5, 5, 5, None, 50),
+        ("youtube", "watch", ago(minutes=10), ago(minutes=9), "partial", 10, 0, 10, 10, None, 50),
+    )
+    _build(needs_schema, _schema_name, reference, collector_rows=rows, stage_rows=stages)
+    health = _read(needs_runtime_url)
+    assert health["commerce:ranking"]["partial_excessive"] is True
+    assert health["commerce:review"]["partial_excessive"] is False
+    assert health["youtube:work"]["partial_excessive"] is False  # exactly half is the boundary
+    assert health["youtube:watch"]["partial_excessive"] is False  # disabled stages do not alert
 
 
 def test_a_row_with_no_dataset_lands_on_no_stage(health: dict[str, Any], reference: datetime):

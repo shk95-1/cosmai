@@ -335,11 +335,22 @@ declaration and the crontab is guarded by `tests/test_pipeline_stage.py`.
 
 There is exactly one row per declared stage, and the columns are `stage_key` · `arm` · `dataset` ·
 `enabled` · `expected_interval` · `last_success_at` · `last_run_at` · `last_run_status` ·
-`overdue_by` · `freshness` · `requests` · `ok` · `blocked` · `failed` · `p90_ms`.
+`overdue_by` · `freshness` · `requests` · `ok` · `blocked` · `failed` · `p90_ms` ·
+`partial_excessive`.
 
 **Two facts are never folded into one.** `freshness` says "it did not run" only; `last_run_status`
-says "it ran, and this is how it ended" only. A third fact is not added because a stage that failed
-three days ago and has not run since would, in one value, look like only one of the two.
+says "it ran, and this is how it ended" only. `partial_excessive` is a separate boolean quality
+flag for the latest run; it does not change either time or status. A stage that failed three days
+ago and has not run since must still show both facts.
+
+`partial_excessive` is true only for an enabled collector stage whose latest run is `partial`, has
+at least one request, and has more unsuccessful than successful requests:
+`2 * (requests - ok) > requests`. The numerator counts each request once; `blocked + failed` can
+double-count a 403/429 response that also logged an error. The >50% threshold follows the
+full-history measurement on #157 (1,114 completed runs, 178 partial): seven partial runs exceeded
+it, while ordinary product, ranking, watch and work partial runs remained below it. Analysis
+stages have no request counts and receive false. The portal's banner and severity use this flag
+from the view; neither recalculates the threshold.
 
 `freshness` is one of five values, measured on the `finished_at` of the last run that **ran**. "Ran"
 includes `status = 'ok'` **and `partial`** — it ran and gathered most of it, and how well it finished

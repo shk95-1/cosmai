@@ -146,6 +146,7 @@ test('지도와 관제 표가 같은 행에 같은 색을 낸다 (#143)', () => 
   for (const row of [
     { freshness: 'stalled', last_run_status: 'failed' },
     { freshness: 'ok', last_run_status: 'partial' },
+    { freshness: 'ok', last_run_status: 'partial', partial_excessive: true },
     { freshness: 'never', last_run_status: null },
     { freshness: 'disabled', last_run_status: null },
     { freshness: 'ok', last_run_status: 'ok' },
@@ -155,7 +156,7 @@ test('지도와 관제 표가 같은 행에 같은 색을 낸다 (#143)', () => 
 });
 
 test('상태 질의가 색을 고르는 데 필요한 컬럼을 담는다', () => {
-  for (const key of ['stage_key', 'freshness', 'last_run_status']) {
+  for (const key of ['stage_key', 'freshness', 'last_run_status', 'partial_excessive']) {
     assert.ok(MAP_QUERIES.health.select.includes(key), `health select 에 ${key} 가 없다`);
   }
 });

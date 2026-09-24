@@ -55,7 +55,7 @@ export const OPS_QUERY = {
   select: [
     'stage_key', 'arm', 'dataset', 'enabled', 'expected_interval',
     'last_success_at', 'last_run_at', 'last_run_status', 'overdue_by', 'freshness',
-    'requests', 'ok', 'blocked', 'failed', 'p90_ms',
+    'requests', 'ok', 'blocked', 'failed', 'p90_ms', 'partial_excessive',
   ],
   order: 'stage_key',
 };
@@ -75,10 +75,10 @@ export const MAP_QUERIES = {
     select: ['stage_key', 'arm', 'dataset', 'enabled'],
     order: 'stage_key',
   },
-  // Puts status on the picture (#143). The judgement is already done by the view, so only two columns need to be fetched --
-  // those two are all severity.js, which picks the color, ever looks at.
+  // Puts status on the picture (#143). The view has already judged the excessive-partial flag (#157),
+  // and severity.js uses it with freshness and status to choose the color.
   health: {
-    select: ['stage_key', 'freshness', 'last_run_status'],
+    select: ['stage_key', 'freshness', 'last_run_status', 'partial_excessive'],
     order: 'stage_key',
   },
 };
