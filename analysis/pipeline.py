@@ -29,6 +29,7 @@ from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity import pipeline as polarity_stage
 from analysis.polarity.ownership import OWNERS, Owner
 from analysis.polarity.pipeline import MARKER
+from analysis.polarity.predictor import BudgetStop
 from analysis.types import Polarity
 
 __all__ = ["POPULATION", "StageOutcome", "run_stage"]
@@ -359,6 +360,9 @@ def run_all(
         )
         if run_id is not None:
             counts.update(_metrics_counts(conn, run_id))
+    except BudgetStop as stopped:
+        outcome = StageOutcome("all", PARTIAL, run_id, counts, _detail(stage, stopped))
+        return _close(conn, outcome, versions)
     except FAILURES as failure:
         outcome = StageOutcome("all", FAILED, run_id, counts, _detail(stage, failure))
         return _close(conn, outcome, versions)
@@ -504,6 +508,9 @@ def _one(
         # leaves two partial rows.
         reported = _reported(conn, _amend(counted, stale))
         return _amend_silent_scope(conn, reported, scope, close_run=True)
+    except BudgetStop as stopped:
+        outcome = StageOutcome(stage, PARTIAL, run_id, {}, _detail(stage, stopped))
+        return _close(conn, outcome, {}) if stage in OPENS_RUN else outcome
     except FAILURES as failure:
         outcome = StageOutcome(stage, FAILED, run_id, {}, _detail(stage, failure))
         if stage not in OPENS_RUN:

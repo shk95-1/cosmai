@@ -446,6 +446,17 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
 - Every step is idempotent by **natural-key upsert**. A re-run produces the same result.
 - An output row always carries a `*_version` (`versioning.md`).
 - `analyze --impl <spec>` uses the same registry and the same spec grammar as `eval` (`ollama:gemma4:latest`·`llm:claude-sonnet-5`). Without it the rules run; with it that implementation's version is recorded in `analysis_run.versions.polarity` and on the output rows. **An implementation with no slot of its own in the ownership table is refused without `--scope`** — even a free one (analyze defaults to everything, so one scope-less line of such an implementation is a full relabel, and it costs either money or GPU time). An implementation with a slot (= an owner) may run without `--scope`: that one line covers its own `(scope, period)` alone, and `--scope` only narrows it further. It is refused even when that `--scope` is a `lexicon_category` that still has no owner in the table: registration has to come before the pass, or the result is deleted at the next 05:00. A paid implementation (`registry.is_paid`) is caught once more, ahead of that, on the grounds of money — the same place as `eval`'s enforced `--split`. Both refusals happen before the run opens, so they are blocked (exit code 2), and the verdict is made by `analysis/polarity/ownership.py`.
+- `analyze polarity --impl chain --missing` is the configured whole-pass fallback (#113). It validates
+  every spec in `COSMAI_LLM_CHAIN` against the registry and ownership table before work, probes the first
+  implementation, and moves to the next only if the startup probe cannot reach its model. The selected
+  implementation then stays fixed for the pass: a failure after processing begins never switches model
+  inside that run. Without `--scope`, the command processes the owner's scopes in table insertion order
+  (sunblock first, then the 26 cron scopes when re-registered), opening one resumable run row per scope.
+  Each row and its mentions carry the selected implementation's version. A budget refusal before a paid
+  call closes that scope's row `partial` and ends the command with exit 1; the next `--missing` pass picks
+  up rows absent in the version it selects. `--impl chain` is restricted to `polarity`, so it cannot repeat
+  link and aggregate for every scope. The shipped owner table and LLM cron remain suspended (#242); this
+  mode spends nothing while there is no registered scope to run.
 - **`--impl` on `eval` and on `analyze` needs `COSMAI_LLM_BUDGET_USD` in the environment (#136).** Both
   build the shared `needs.llm_usage` ledger, the free `ollama:` specs included — the chain the knob names
   can fall back from ollama to the paid model inside one run, so the hard stop is resolved before anything
@@ -461,8 +472,9 @@ cosmai lexicon diff           --kind <kind> {--version <n> | --csv <path>} [--ag
 - The aggregate population of `analyze all` is the single `extractor_version` that run has just written
   — mixing a seed (`slice-*`) into the same scope counts one sentence twice. The chosen population is
   recorded in `versions.extractor`.
-- Within that population **there is one polarity implementation per (scope, period)**: the ownership
-  table (`analysis/polarity/ownership.py`) assigns one `lexicon_category` to one `polarity_version` and
+- Within that population **there is one polarity implementation per run and (scope, period)**: the ownership
+  table (`analysis/polarity/ownership.py`) assigns one `lexicon_category` to a primary
+  `polarity_version` and, when configured, one fallback version, plus
   the first month that version is responsible for (`since`, the same YYYY-MM as `need_mention.month`),
   and the `need_mention` rows of that scope with `month >= since` are written and deleted by **the
   owner alone**. The reverse holds too: **an owner neither writes nor deletes the months before its own

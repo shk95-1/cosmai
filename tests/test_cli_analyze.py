@@ -8,15 +8,19 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
 import analysis.pipeline
 import analysis.polarity.ownership as ownership
+import analysis.polarity.pricing as pricing
 from analysis import registry
 from analysis.polarity import SUNCARE_CATEGORY
 from analysis.polarity.ownership import ALWAYS, Owner
+from analysis.polarity.predictor import BudgetStop, _Blocking
+from analysis.polarity.pricing import BudgetExceeded
 from cosmai.cli import STAGES, main
 
 # OWNERS is suspended empty (#242): these tests patch it back in locally to prove the CLI wiring around a
@@ -193,6 +197,77 @@ def test_an_impl_the_registry_does_not_know_is_blocked_before_the_stage_runs(
     assert main(["analyze", "polarity", "--impl", "nope:x"]) == 2
     assert not recorded
     assert "no stage classifier" in capsys.readouterr().out
+
+
+def test_configured_chain_selects_fallback_once_before_scopes_run_in_owner_order(
+    recorded: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+):
+    primary = _StubPolarity()
+    fallback = _StubPolarity()
+    fallback.version = "fallback-v1"
+    attempts: list[str] = []
+
+    def unreachable() -> None:
+        attempts.append("primary")
+        raise LookupError("model host unavailable")
+
+    def ready() -> None:
+        attempts.append("fallback")
+
+    primary.preflight = unreachable  # type: ignore[attr-defined]
+    fallback.preflight = ready  # type: ignore[attr-defined]
+
+    @contextmanager
+    def open_stub(task: str, spec: str) -> Iterator[_StubPolarity]:
+        assert task == "polarity"
+        yield primary if spec == "ollama:primary" else fallback
+
+    monkeypatch.setattr(
+        ownership,
+        "OWNERS",
+        {
+            SUNCARE_CATEGORY: Owner(primary.version, ALWAYS, fallback_version=fallback.version),
+            "second-scope": Owner(primary.version, ALWAYS, fallback_version=fallback.version),
+        },
+    )
+    monkeypatch.setattr(pricing, "budget_usd", lambda: Decimal("10"))
+    monkeypatch.setattr(pricing, "llm_chain", lambda: ("ollama:primary", "llm:fallback"))
+    monkeypatch.setattr(registry, "load_implementations", lambda: None)
+    monkeypatch.setattr(
+        registry,
+        "build",
+        lambda task, spec: registry.Implementation(
+            primary.version if spec == "ollama:primary" else fallback.version, lambda rows: []
+        ),
+    )
+    monkeypatch.setattr(registry, "open_classifier", open_stub)
+
+    assert main(["analyze", "polarity", "--impl", "chain", "--missing"]) == 0
+    assert attempts == ["primary", "fallback"]
+    assert [call["scope"] for call in recorded] == [SUNCARE_CATEGORY, "second-scope"]
+    assert all(call["polarity"] is fallback for call in recorded)
+
+
+def test_configured_chain_cannot_repeat_link_for_every_scope(
+    recorded: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(registry, "load_implementations", lambda: None)
+    assert main(["analyze", "all", "--impl", "chain"]) == 2
+    assert not recorded
+
+
+def test_paid_budget_refusal_is_distinct_from_a_failed_model_call():
+    class _NoBudget:
+        version = "paid-v1"
+
+        def classify(self, sentence: Any, rating: Any, category: Any, aspects: Any) -> Any:
+            raise BudgetExceeded("hard stop before submission")
+
+        def classify_many(self, items: Any, aspects: Any) -> Any:
+            raise BudgetExceeded("hard stop before submission")
+
+    with pytest.raises(BudgetStop, match="hard stop"):
+        _Blocking(_NoBudget()).classify_many([], None)  # type: ignore[arg-type]
 
 
 def test_a_paid_impl_without_a_scope_is_refused_before_a_single_call_goes_out(

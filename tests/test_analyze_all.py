@@ -12,8 +12,9 @@ import re
 from collections.abc import Iterator, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import psycopg
 import pytest
 from psycopg import sql as pgsql
 from sqlalchemy import create_engine, text
@@ -26,12 +27,46 @@ from analysis.polarity import GENERIC_RULESET, SUNCARE_CATEGORY, SUNCARE_RULESET
 from analysis.polarity import VERSION as POLARITY_VERSION
 from analysis.polarity.ollama import OllamaPolarity
 from analysis.polarity.ownership import ALWAYS, NO_OWNERS, Owner
+from analysis.polarity.predictor import BudgetStop
 from analysis.types import AspectLexicon, PolarityRequest, PolarityResult
 from cosmai.cli import main
 from db import seed
 from db.seed._common import connect
 
 pytestmark = pytest.mark.postgres
+
+
+def test_budget_stop_closes_the_open_polarity_run_as_partial(monkeypatch: pytest.MonkeyPatch):
+    closed: list[pipeline.StageOutcome] = []
+
+    def stop(_conn: object, **kwargs: object) -> None:
+        kwargs["on_run_open"](41)  # type: ignore[operator]
+        raise BudgetStop("hard stop before submission")
+
+    def close(_conn: object, outcome: pipeline.StageOutcome, _versions: object) -> pipeline.StageOutcome:
+        closed.append(outcome)
+        return outcome
+
+    monkeypatch.setattr(pipeline.polarity_stage, "run", stop)
+    monkeypatch.setattr(pipeline, "_close", close)
+    outcome = pipeline._one(
+        cast("psycopg.Connection[Any]", None),
+        "polarity",
+        None,
+        None,
+        True,
+        "unused",
+        "unused",
+        None,
+        None,
+        {},
+        (),
+    )
+    assert outcome.status == "partial"
+    assert outcome.run_id == 41
+    assert "hard stop before submission" in outcome.note
+    assert closed == [outcome]
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DUMPS = REPO_ROOT / "contracts" / "ddl" / "current"

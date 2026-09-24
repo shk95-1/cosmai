@@ -327,12 +327,16 @@ def _run_analyze(args: argparse.Namespace) -> int:
     from analysis import predictors, registry
     from analysis.pipeline import run_stage
     from analysis.polarity.ownership import OWNERS, unready
+    from analysis.polarity.pricing import budget_usd, llm_chain
 
     if args.impl:
         registry.load_implementations()
+        if args.impl == "chain" and args.stage != "polarity":
+            print("--impl chain runs the polarity stage only")
+            return 2
         # eval 의 --split 강제에 대응하는 자리. analyze 에는 split 이 없고 전량이 기본이라, 유료 구현은
         # --scope 로 한 카테고리를 이름 붙여야 돈다 (재개 5번이 정확히 `--scope 선블록` 이다).
-        if args.scope is None and registry.is_paid("polarity", args.impl):
+        if args.impl != "chain" and args.scope is None and registry.is_paid("polarity", args.impl):
             print(f"--impl {args.impl} spends money; name the corpus with --scope <category>")
             return 2
     with contextlib.ExitStack() as stack:
@@ -341,9 +345,37 @@ def _run_analyze(args: argparse.Namespace) -> int:
             # The judge's dictionary and ledger connections must follow --url too, so one run does not
             # straddle two DBs (same as eval).
             predictors.set_lexicon_url(args.url)
-            polarity = (
-                stack.enter_context(registry.open_classifier("polarity", args.impl)) if args.impl else None
-            )
+            if args.impl == "chain":
+                # Validate every configured version before the first probe. A paid fallback with no owner
+                # must not turn a broken local model into a full-corpus relabel.
+                budget_usd()
+                specs = llm_chain()
+                for spec in specs:
+                    version = registry.build("polarity", spec).version
+                    if blocked := unready(OWNERS, version, args.scope):
+                        raise LookupError(blocked)
+                failures: list[str] = []
+                polarity = None
+                for spec in specs:
+                    candidate = stack.enter_context(registry.open_classifier("polarity", spec))
+                    probe = getattr(candidate, "preflight", None)
+                    try:
+                        if probe is not None:
+                            probe()
+                    except LookupError as unreachable:
+                        failures.append(f"{spec}: {unreachable}")
+                        continue
+                    polarity = candidate
+                    print(f"analyze polarity chain selected {spec}")
+                    break
+                if polarity is None:
+                    raise LookupError("configured polarity chain unavailable: " + "; ".join(failures))
+            else:
+                polarity = (
+                    stack.enter_context(registry.open_classifier("polarity", args.impl))
+                    if args.impl
+                    else None
+                )
             # An implementation that is not the rules runs only where the ownership table wrote its own
             # name — it is a command a person types by hand, so this is the only place that knows the
             # order (register → pass) (analysis/polarity/ownership.py).
@@ -355,11 +387,24 @@ def _run_analyze(args: argparse.Namespace) -> int:
         except (ValueError, LookupError, psycopg.Error) as refused:
             print(refused)
             return 2
+        if args.impl == "chain" and args.scope is None:
+            # Mapping order is the approved budget order: sunblock, then the 26 cron scopes when the
+            # suspended table is restored. Each scoped stage keeps its own resumable run row.
+            assert polarity is not None
+            scopes = [name for name, owner in OWNERS.items() if owner.accepts(polarity.version)]
+            for scope in scopes:
+                outcome = run_stage(
+                    conn, args.stage, since=since, scope=scope, missing=args.missing, polarity=polarity
+                )
+                print(outcome.note)
+                if outcome.status != "ok":
+                    return 1
+            return 0
         outcome = run_stage(
             conn, args.stage, since=since, scope=args.scope, missing=args.missing, polarity=polarity
         )
-    print(outcome.note)
-    return 0 if outcome.status == "ok" else 1
+        print(outcome.note)
+        return 0 if outcome.status == "ok" else 1
 
 
 def _run_retrieval(args: argparse.Namespace) -> int:

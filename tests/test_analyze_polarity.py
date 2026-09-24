@@ -31,6 +31,8 @@ from analysis.polarity.ownership import (
     NO_OWNERS,
     OWNERS,
     Owner,
+    may_write,
+    scopes_of,
     unready,
 )
 from analysis.polarity.pipeline import run
@@ -987,6 +989,26 @@ def test_a_run_without_a_scope_must_own_one():
     # With OWNERS suspended for real (#242), the same line is refused instead -- there is no scope for it to
     # own until re-registration.
     assert "ownership.py" in str(unready(OWNERS, GEMMA4, SUNBLOCK))
+
+
+def test_fallback_version_has_the_same_scope_period_but_not_the_unowned_rows():
+    fallback = "llm-claude-sonnet-5-test"
+    owners = {SUNBLOCK: Owner(GEMMA4, OWNER_SINCE, fallback_version=fallback)}
+    assert scopes_of(owners, fallback, mine=True) == ((SUNBLOCK, OWNER_SINCE),)
+    assert scopes_of(owners, fallback, mine=False) == ()
+    assert may_write(owners, fallback, SUNBLOCK, OWNER_SINCE)
+    assert not may_write(owners, fallback, SUNBLOCK, "2026-03")
+    assert not may_write(owners, fallback, "other-scope", OWNER_SINCE)
+    assert unready(owners, fallback, None) is None
+
+
+def test_fallback_version_reaches_the_owner_rows_through_the_sql_predicate(loaded: str, _schema_name: str):
+    owners = {SUNBLOCK: Owner(GEMMA4, ALWAYS, fallback_version=OwnerPolarity.version)}
+    _run(loaded, _schema_name, polarity=OwnerPolarity(), owners=owners, scope=SUNBLOCK)
+    rows = _by_scope(loaded)
+    assert len(rows) == 1
+    assert rows[0][0] == SUNBLOCK
+    assert rows[0][2] == OwnerPolarity.version
 
 
 # --- incremental run (#98): the owner classifies only "source rows with no row of my version" -----

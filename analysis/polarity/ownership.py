@@ -52,6 +52,11 @@ class Owner:
 
     version: str
     since: str
+    fallback_version: str | None = None
+
+    def accepts(self, version: str) -> bool:
+        """A fallback may write the owner's period, but only one version runs in one pass."""
+        return version == self.version or version == self.fallback_version
 
 
 Scopes = tuple[tuple[str, str], ...]  # (scope, since) pairs — the same shape on the way into SQL
@@ -124,9 +129,7 @@ def scopes_of(owners: Mapping[str, Owner], polarity_version: str, *, mine: bool)
     array into SQL."""
     return tuple(
         sorted(
-            (scope, owner.since)
-            for scope, owner in owners.items()
-            if (owner.version == polarity_version) == mine
+            (scope, owner.since) for scope, owner in owners.items() if owner.accepts(polarity_version) == mine
         )
     )
 
@@ -138,12 +141,12 @@ def may_write(owners: Mapping[str, Owner], version: str, lexicon_category: str |
     `DO UPDATE` use the `OWNED` predicate, the same meaning carried into SQL (it takes the same two
     (scope, since) arrays).
     """
-    owner = owner_of(owners, lexicon_category, month)
-    if owner is not None:
-        return owner == version
+    owner = owners.get(lexicon_category) if lexicon_category is not None else None
+    if owner is not None and month >= owner.since:
+        return owner.accepts(version)
     # A place with no owner belongs to the rules. A registered implementation never steps outside its own
     # (scope, period) — otherwise one scope-less line from an owner is a relabel of everything.
-    return not any(registered.version == version for registered in owners.values())
+    return not any(registered.accepts(version) for registered in owners.values())
 
 
 def unready(owners: Mapping[str, Owner], version: str, scope: str | None) -> str | None:

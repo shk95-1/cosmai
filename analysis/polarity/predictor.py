@@ -97,6 +97,10 @@ def build_ollama(model: str) -> Implementation:
 UNREACHABLE = (OSError, http.client.HTTPException)
 
 
+class BudgetStop(LookupError):
+    """The ledger refused a paid call before submission; retain the completed part of the pass."""
+
+
 class _Blocking:
     """Turns whatever stops this classifier into an exception the stage catches — neither the budget hard stop
     (BudgetExceeded, RuntimeError) nor a failed round trip (URLError and friends, OSError) is inside
@@ -107,17 +111,22 @@ class _Blocking:
     def __init__(self, inner: Polarity) -> None:
         self.inner = inner
         self.version = inner.version
+        self._preflight_ok = False
 
     def preflight(self) -> None:
         # The stage looks it up by this name — a probe on the wrapped classifier is invisible unless it is
         # exposed here.
+        if self._preflight_ok:
+            return
         probe = getattr(self.inner, "preflight", None)
         if probe is None:
+            self._preflight_ok = True
             return
         try:
             probe()
         except UNREACHABLE as unreachable:
             raise LookupError(f"{type(unreachable).__name__}: {unreachable}") from unreachable
+        self._preflight_ok = True
 
     def classify(
         self, sentence: str, rating: float | None, category: str | None, aspects: AspectLexicon
@@ -128,7 +137,7 @@ class _Blocking:
         try:
             return self.inner.classify_many(items, aspects)
         except BudgetExceeded as blocked:
-            raise LookupError(str(blocked)) from blocked
+            raise BudgetStop(str(blocked)) from blocked
         except UNREACHABLE as unreachable:
             raise LookupError(f"{type(unreachable).__name__}: {unreachable}") from unreachable
 
