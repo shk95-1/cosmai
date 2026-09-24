@@ -271,6 +271,7 @@ none = [
     "tests/test_collection_lineage_view.py",
     "tests/test_mention_lineage_view.py",
     "tests/test_pipeline_health_view.py",
+    "tests/test_union_filter_pushdown.py",
     "tests/test_product_launch_view.py",
     "tests/test_project_corpus.py",
     "tests/test_archive_lineage.py",
