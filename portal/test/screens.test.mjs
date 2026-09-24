@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { NEED_QUERIES } from '../public/query.js';
 import {
-  latestRuns, scopesForRun, needRowsForScope, wishRowsForScope, wishScreenScopes, wishDefaultScope,
+  latestRuns, scopesForRun, needRowsForScope, needPeriods, needRankingRows,
+  wishRowsForScope, wishScreenScopes, wishDefaultScope,
   wishCrossRows, wishCrossReconciliation, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, productLabel, truncateLabel, withProductNames, UNLINKED_LABEL,
@@ -444,6 +445,29 @@ const SERVED = {
   product: served(needFixture, NEED_QUERIES.product),
   month: served(needFixture, NEED_QUERIES.month),
 };
+const RANKING_SCOPE = SERVED.category[0].scope;
+const SCOPE_WITHOUT_MONTHS = SERVED.category.find((row) => row.scope !== RANKING_SCOPE).scope;
+
+test('screen 1 offers only months with rows in the selected run and scope (#147)', () => {
+  assert.deepEqual(needPeriods(SERVED.month, 2, RANKING_SCOPE), ['2026-08', '2026-07', '2026-06']);
+  assert.deepEqual(needPeriods(SERVED.month, 2, SCOPE_WITHOUT_MONTHS), []);
+  assert.deepEqual(needPeriods(SERVED.month, 1, RANKING_SCOPE), []);
+});
+
+test('screen 1 month ranking uses only that month and no product axis (#147)', () => {
+  const rows = needRankingRows(SERVED.category, SERVED.month, 2, RANKING_SCOPE, '2026-08');
+  assert.deepEqual(rows.map((r) => r.neg), [63, 86]);
+  assert.ok(rows.every((r) => r.run_id === 2 && r.scope === RANKING_SCOPE
+    && r.month === '2026-08' && r.product_ref === ''));
+  assert.deepEqual(needRankingRows(SERVED.category, SERVED.month, 2, RANKING_SCOPE, '2026-05'), []);
+});
+
+test('screen 1 cumulative ranking keeps the existing category rows (#147)', () => {
+  assert.deepEqual(
+    needRankingRows(SERVED.category, SERVED.month, 2, RANKING_SCOPE, ''),
+    needRowsForScope(SERVED.category, 2, RANKING_SCOPE),
+  );
+});
 
 // The contract between the select list and the consuming function. Dropping one column from the spec turns this red immediately.
 test('월 축: 질의가 실제로 돌려주는 행으로도 소비 함수가 돈다 (#130)', () => {

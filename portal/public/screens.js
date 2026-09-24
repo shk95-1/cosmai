@@ -32,6 +32,18 @@ export function needRowsForScope(need, runId, scope) {
   return (need || []).filter((r) => r.run_id === runId && r.product_ref === '' && r.month === '' && r.scope === scope);
 }
 
+// Screen 1's month options contain only periods with category-sum rows in this run and scope.
+// The empty value is reserved for the cumulative axis and is supplied by the select itself.
+export function needPeriods(needMonths, runId, scope) {
+  return [...new Set(monthRowsOf(needMonths, runId)
+    .filter((r) => r.scope === scope).map((r) => r.month))].sort().reverse();
+}
+
+export function needRankingRows(need, needMonths, runId, scope, period = '') {
+  if (!period) return needRowsForScope(need, runId, scope);
+  return monthRowsOf(needMonths, runId).filter((r) => r.scope === scope && r.month === period);
+}
+
 export function wishRowsForScope(wish, runId, scope) {
   return (wish || []).filter((r) => r.run_id === runId && r.scope === scope);
 }
@@ -239,7 +251,7 @@ export function withProductNames(rows, index, max = 20) {
   });
 }
 
-// ---- Screen 5: period (month) axis (#130) ---------------------------------------------
+// ---- Screens 1·5: period (month) axis (#130, #147) ---------------------------------------------
 
 // Month rows are attached only to the category sum (#129: month <> '' and product_ref = ''). Although the
 // query already narrows it that way, filtering again here guards against there being no guarantee the array
