@@ -347,7 +347,7 @@ ago and has not run since must still show both facts.
 at least one request, and has more unsuccessful than successful requests:
 `2 * (requests - ok) > requests`. The numerator counts each request once; `blocked + failed` can
 double-count a 403/429 response that also logged an error. The >50% threshold follows the
-full-history measurement on #157 (1,114 completed runs, 178 partial): seven partial runs exceeded
+full-history measurement on #157 (1,114 completed stage-result rows, 178 partial): seven partial rows exceeded
 it, while ordinary product, ranking, watch and work partial runs remained below it. Analysis
 stages have no request counts and receive false. The portal's banner and severity use this flag
 from the view; neither recalculates the threshold.
