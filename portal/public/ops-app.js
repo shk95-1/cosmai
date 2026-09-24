@@ -55,7 +55,7 @@ function rowHtml(row, now) {
     <td>${esc(describeInterval(row.expected_interval))}</td>
     <td title="${esc(row.last_success_at ?? '성공한 run 이 없음')}">${esc(when)}</td>
     <td><span class="badge">${esc(row.freshness)}</span></td>
-    <td><span class="badge">${esc(row.last_run_status ?? '—')}</span></td>
+    <td><span class="badge">${esc(row.partial_excessive ? 'partial (>50% unsuccessful)' : row.last_run_status ?? '—')}</span></td>
     <td class="num">${esc(statsOf(row))}</td>
   </tr>`;
 }

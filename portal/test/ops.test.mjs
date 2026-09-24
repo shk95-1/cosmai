@@ -10,7 +10,8 @@ const row = (over) => ({
   stage_key: 'commerce:ranking', arm: 'commerce', dataset: 'ranking', enabled: true,
   expected_interval: '01:00:00', last_success_at: null, last_run_at: null,
   last_run_status: null, overdue_by: null, freshness: 'ok',
-  requests: null, ok: null, blocked: null, failed: null, p90_ms: null, ...over,
+  requests: null, ok: null, blocked: null, failed: null, p90_ms: null,
+  partial_excessive: false, ...over,
 });
 
 const NOW = new Date('2026-08-26T12:00:00Z');
@@ -42,6 +43,13 @@ test('partial 은 배너를 빨갛게 만들지 않는다 — 돌았고 대부�
   assert.equal(problemCount([partial]), 0);
   // It does not disappear, though: it still stands out in the full list with the warning color, and the failed count stays in the stats.
   assert.equal(severityOf(partial), 1);
+});
+
+test('a partial that missed the majority enters the banner and has critical severity (#157)', () => {
+  const excessive = row({ last_run_status: 'partial', partial_excessive: true });
+  assert.equal(isProblem(excessive), true);
+  assert.equal(problemCount([excessive]), 1);
+  assert.equal(severityOf(excessive), 0);
 });
 
 test('cancelled is idle, not a failed-run banner problem (#112)', () => {
@@ -125,7 +133,7 @@ test('주기는 사람이 읽는 말로 바뀌고 모르는 모양은 그대로 
 test('select 가 소비 함수들이 거르는 컬럼을 빠짐없이 담는다 (#130 이 데인 자리)', () => {
   // Writing down here the keys a consuming function reads catches a change where the function starts reading a
   // new column but select was never updated. Without it in select, the response row has no such key and the comparison is always false.
-  for (const key of ['freshness', 'last_run_status', 'arm', 'stage_key', 'last_success_at']) {
+  for (const key of ['freshness', 'last_run_status', 'partial_excessive', 'arm', 'stage_key', 'last_success_at']) {
     assert.ok(OPS_QUERY.select.includes(key), `select 에 ${key} 가 없다`);
   }
 });

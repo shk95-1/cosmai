@@ -12,21 +12,19 @@ export { severityOf, severityClass } from './severity.js';
 import { severityOf } from './severity.js';
 
 // The set the banner and the "problems-only" bundle count. Since the question the banner answers is "what is
-// stuck right now," only two things belong here: it is not running · the last run failed outright.
+// stuck right now," three things belong here: it is late · the last run failed outright · a partial
+// missed the majority of its requests.
 //
 // never and disabled are not included -- never is the honest mark of a stage that has not run yet (naver
 // datalab·blog), not a failure, and a dashboard that is always red is one nobody looks at anymore (#138).
 //
-// partial is not included either (#156). commerce:product is partial 3 days out of 4 while still collecting
-// 84-86 of 89 -- counting that as a stuck stage would turn the banner red every day, and the trap #154 removed
-// from the view would just move up one level to the screen. It does not disappear, though: severityOf marks it
-// warning so the row still stands out, and the failed count stays in the request stats. It is true that a large
-// failure *rate* should raise the banner, but there is no measurement yet to set that threshold -- a separate issue.
+// An ordinary partial stays a warning (#156). The view marks a partial that missed the majority of
+// its requests (#157), so that one belongs in the banner without the screen recalculating a ratio.
 const BAD_FRESHNESS = new Set(['stalled', 'late']);
 const BAD_STATUS = new Set(['failed']);
 
 export function isProblem(row) {
-  return BAD_FRESHNESS.has(row.freshness) || BAD_STATUS.has(row.last_run_status);
+  return BAD_FRESHNESS.has(row.freshness) || BAD_STATUS.has(row.last_run_status) || row.partial_excessive === true;
 }
 
 export function problems(rows) {
