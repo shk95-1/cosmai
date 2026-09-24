@@ -263,7 +263,18 @@ def db_restore(args):
     try:
         for _ in range(120):
             ready = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-U", "migration_bootstrap", "-d", "postgres"],
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "pg_isready",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "migration_bootstrap",
+                    "-d",
+                    "postgres",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
