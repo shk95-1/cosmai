@@ -33,6 +33,7 @@ from collectors.youtube.models import ROUTES, JobState
 from collectors.youtube.storage import db as storage_db
 from collectors.youtube.storage.tables import artifacts, jobs
 from collectors.youtube.transport import Route
+from tests.collectors.youtube.role_settings import runtime_role_settings, timeout_seconds
 
 pytestmark = pytest.mark.postgres
 
@@ -56,6 +57,11 @@ def _under_the_roles_timeouts(url: str) -> str:
     session. `ALTER ROLE ... IN DATABASE` would say the same thing and would reach outside this
     test's own schema into every other test sharing the harness; `options` is the same server
     behaviour scoped to the one connection `run()` opens."""
+    declared = runtime_role_settings(url, "tubedepth_runtime")
+    assert timeout_seconds(ROLE_TIMEOUT) < min(
+        timeout_seconds(declared["transaction_timeout"]),
+        timeout_seconds(declared["idle_in_transaction_session_timeout"]),
+    ), "the compressed timeout probe must stay below both declared role limits"
     parsed = make_url(url)
     options = str(parsed.query.get("options", ""))
     timeouts = f"-ctransaction_timeout={ROLE_TIMEOUT} -cidle_in_transaction_session_timeout={ROLE_TIMEOUT}"

@@ -60,11 +60,28 @@ SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', :'schem
 SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT ON TABLES TO %I',
               :'schema' || '_owner', :'schema', :'reader') WHERE :'reader' <> '' \gexec
 
--- The four role-scoped limits production carries on trend_radar_runtime, read out of
--- pg_db_role_setting on 2026-08-24 (collectors/commerce/storage/locks.py records that reading).
+-- Keep fresh source roles identical to the production roles measured on 2026-09-24 (#284).
+-- The shorter tubedepth limits are the conditions under which the YouTube transaction repairs
+-- (#277–#280) were measured. trend_radar retains its old-fleet memory and session settings.
 -- idle_session_timeout stays unset: the lock connection sits `idle` for a whole walk, and setting it
 -- ends the walk's lock in the middle -- tests/collectors/commerce/test_source_lock.py measures that.
-SELECT format('ALTER ROLE %I IN DATABASE %I SET statement_timeout = ''30s''', :'schema' || '_runtime', :'database') \gexec
-SELECT format('ALTER ROLE %I IN DATABASE %I SET lock_timeout = ''5s''', :'schema' || '_runtime', :'database') \gexec
-SELECT format('ALTER ROLE %I IN DATABASE %I SET idle_in_transaction_session_timeout = ''15s''', :'schema' || '_runtime', :'database') \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET statement_timeout = %L', :'schema' || '_runtime', :'database',
+              CASE WHEN :'schema' = 'tubedepth' THEN '15s' ELSE '30s' END) \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET lock_timeout = %L', :'schema' || '_runtime', :'database',
+              CASE WHEN :'schema' = 'tubedepth' THEN '3s' ELSE '5s' END) \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET idle_in_transaction_session_timeout = %L', :'schema' || '_runtime', :'database',
+              CASE WHEN :'schema' = 'tubedepth' THEN '30s' ELSE '15s' END) \gexec
 SELECT format('ALTER ROLE %I IN DATABASE %I SET transaction_timeout = ''60s''', :'schema' || '_runtime', :'database') \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET search_path = pg_catalog, %I',
+              :'schema' || '_runtime', :'database', :'schema') WHERE :'schema' = 'trend_radar' \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET search_path = %I, pg_catalog',
+              :'schema' || '_runtime', :'database', :'schema') WHERE :'schema' = 'tubedepth' \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET TimeZone = ''UTC''', :'schema' || '_runtime', :'database') \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET work_mem = ''16MB''', :'schema' || '_runtime', :'database')
+WHERE :'schema' = 'trend_radar' \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET temp_file_limit = ''2GB''', :'schema' || '_runtime', :'database')
+WHERE :'schema' = 'trend_radar' \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET max_parallel_workers_per_gather = 2', :'schema' || '_runtime', :'database')
+WHERE :'schema' = 'trend_radar' \gexec
+SELECT format('ALTER ROLE %I IN DATABASE %I SET application_name = ''trend-radar/runtime''', :'schema' || '_runtime', :'database')
+WHERE :'schema' = 'trend_radar' \gexec
