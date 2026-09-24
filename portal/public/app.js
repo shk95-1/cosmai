@@ -11,7 +11,7 @@ import {
   groupByDocument, describeMatch,
 } from './lineage.js';
 import {
-  scopesForRun, needRowsForScope, wishRowsForScope, wishScreenScopes, wishDefaultScope, wishCrossRows,
+  scopesForRun, needPeriods, needRankingRows, wishRowsForScope, wishScreenScopes, wishDefaultScope, wishCrossRows,
   wishCrossReconciliation, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, withProductNames,
@@ -92,7 +92,9 @@ for (const btn of document.querySelectorAll('#tabs button')) {
 // ---- Screen 1: category needs ---------------------------------------------
 
 function renderNeedScreen(scope) {
-  const rows = sortRows(needRowsForScope(state.need, state.needRunId, scope), 'unresolved', 'desc');
+  const period = $('need-period').value;
+  const rows = sortRows(needRankingRows(state.need, state.needMonths, state.needRunId, scope, period), 'unresolved', 'desc');
+  $('need-period-caption').textContent = period ? `${period} 월` : '전체 기간 누적';
   // This is a full-width panel so the width must also be full-width — any mismatch in width enlarges the text too (#122).
   $('need-chart').innerHTML =
     '<div class="legend"><span><span class="swatch neg"></span>불만(neg)</span><span><span class="swatch pos"></span>만족(pos)</span></div>' +
@@ -100,10 +102,20 @@ function renderNeedScreen(scope) {
   $('need-chart-unresolved').innerHTML = renderMagnitudeBars(rows, {
     key: 'unresolved', hue: 'blue', fmt: (v) => v.toFixed(2), empty: '미해결비를 잴 행이 없음',
   });
-  $('need-chart-population').innerHTML = renderMagnitudeBars(rows, {
-    key: 'population_share_pct', hue: 'amber', fmt: (v) => `${v.toFixed(2)}%`, empty: '점유율을 잴 행이 없음',
-  });
-  renderNeedTable(rows);
+  $('need-chart-population').innerHTML = period
+    ? '<p class="empty-note">이 축에는 분모가 없다 (그 달의 모집단이 존재하지 않는다 — #129)</p>'
+    : renderMagnitudeBars(rows, {
+      key: 'population_share_pct', hue: 'amber', fmt: (v) => `${v.toFixed(2)}%`, empty: '점유율을 잴 행이 없음',
+    });
+  renderNeedTable(rows, period);
+}
+
+function fillNeedPeriods(scope) {
+  const select = $('need-period');
+  const previous = select.value;
+  const periods = needPeriods(state.needMonths, state.needRunId, scope);
+  select.replaceChildren(new Option('전체 누적', ''), ...periods.map((p) => new Option(p, p)));
+  if (periods.includes(previous)) select.value = previous;
 }
 
 // Draws one table. Cells pass through formatCell so raw floats never show up bare (#122),
@@ -138,18 +150,22 @@ function markPicked(tbody, tr) {
   tr.classList.add('picked');
 }
 
-function renderNeedTable(rows) {
-  const cols = ['need_key', 'neg', 'pos', 'unresolved', 'population_share_pct'];
-  fillTable($('need-table'), cols, rows, (c) => renderNeedTable(sortRows(rows, c, 'desc')),
+function renderNeedTable(rows, period) {
+  const cols = ['need_key', 'neg', 'pos', 'unresolved'];
+  if (!period) cols.push('population_share_pct');
+  fillTable($('need-table'), cols, rows, (c) => renderNeedTable(sortRows(rows, c, 'desc'), period),
     (r) => openDrill(r, 'need'));
   $('need-table')._rows = rows; // the CSV button picks up whatever sort was drawn last
 }
 
 function downloadNeedCsv() {
   const rows = $('need-table')._rows || [];
-  const cols = ['scope', 'need_key', 'neg', 'pos', 'unresolved', 'population_share_pct'];
+  const period = $('need-period').value;
+  const cols = ['scope', 'need_key', 'neg', 'pos', 'unresolved'];
+  if (!period) cols.push('population_share_pct');
   const text = fileBody(rowsToCsv(rows, cols));
-  saveFile(text, buildFileName('need', $('need-scope').value, 'csv', new Date()));
+  const label = period ? `${$('need-scope').value}-${period}` : $('need-scope').value;
+  saveFile(text, buildFileName('need', label, 'csv', new Date()));
 }
 
 // ---- Screen 2: wish ------------------------------------------------------
@@ -528,7 +544,8 @@ async function boot() {
     // make it impossible to even pick "this scope has no month axis," erasing that distinction from the screen.
     $('month-scope').replaceChildren(...needScopes.map((s) => new Option(s, s)));
     $('month-limit').textContent = String(MONTH_LIMIT); // the caption's number also comes from the source of truth
-    $('need-scope').onchange = () => renderNeedScreen($('need-scope').value);
+    $('need-scope').onchange = () => { fillNeedPeriods($('need-scope').value); renderNeedScreen($('need-scope').value); };
+    $('need-period').onchange = () => renderNeedScreen($('need-scope').value);
     $('wish-scope').onchange = () => renderWishScreen($('wish-scope').value);
     $('product-scope').onchange = () => renderProductScreen($('product-scope').value);
     $('character-scope').onchange = () => renderCharacterScreen($('character-scope').value);
@@ -538,7 +555,10 @@ async function boot() {
 
     // Opens with the scope defaultScope picks, not the first item in the order the select was filled (alphabetical) —
     // otherwise "01 > mask pack > sheet pack" would accidentally become the first screen (#122).
-    openScope('need-scope', defaultScope(need, needRunId), renderNeedScreen);
+    openScope('need-scope', defaultScope(need, needRunId), (scope) => {
+      fillNeedPeriods(scope);
+      renderNeedScreen(scope);
+    });
     openScope('wish-scope', wishDefaultScope(wish, wishRunId), renderWishScreen);
     openScope('character-scope', defaultScope(need, needRunId), renderCharacterScreen);
     if (productScopes.length) openScope('product-scope', defaultScope(needProducts, needRunId), renderProductScreen);

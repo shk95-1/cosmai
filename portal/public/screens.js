@@ -32,6 +32,18 @@ export function needRowsForScope(need, runId, scope) {
   return (need || []).filter((r) => r.run_id === runId && r.product_ref === '' && r.month === '' && r.scope === scope);
 }
 
+// Screen 1's month options contain only periods with category-sum rows in this run and scope.
+// The empty value is reserved for the cumulative axis and is supplied by the select itself.
+export function needPeriods(needMonths, runId, scope) {
+  return [...new Set(monthRowsOf(needMonths, runId)
+    .filter((r) => r.scope === scope).map((r) => r.month))].sort().reverse();
+}
+
+export function needRankingRows(need, needMonths, runId, scope, period = '') {
+  if (!period) return needRowsForScope(need, runId, scope);
+  return monthRowsOf(needMonths, runId).filter((r) => r.scope === scope && r.month === period);
+}
+
 export function wishRowsForScope(wish, runId, scope) {
   return (wish || []).filter((r) => r.run_id === runId && r.scope === scope);
 }
