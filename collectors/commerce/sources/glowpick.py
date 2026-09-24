@@ -17,7 +17,14 @@ from types import MappingProxyType
 from typing import Any, ClassVar
 
 from collectors.commerce.contract import Fetch, Payload, Scope, SourcePolicy, Transport, Yield
-from collectors.commerce.models import Dataset, NewProductRecord, RankRecord, Record, ReviewRecord
+from collectors.commerce.models import (
+    Dataset,
+    NewProductRecord,
+    ProductRecord,
+    RankRecord,
+    Record,
+    ReviewRecord,
+)
 from collectors.commerce.registry import register
 from collectors.commerce.scrub import author_hash, kst_date
 
@@ -138,7 +145,14 @@ class Glowpick:
             if price is not None:
                 records.append(price)
 
-        records.extend(_reviews(flight, source=self.key, captured_at=payload.captured_at))
+        # Recent reviews refer to products outside the ranked set. Their embedded product object is
+        # the only catalogue observation for those keys on this page.
+        seen_products = {r.product_key for r in records if isinstance(r, ProductRecord)}
+        for review, product in _reviews(flight, source=self.key, captured_at=payload.captured_at):
+            records.append(review)
+            if product is not None and product.product_key not in seen_products:
+                records.append(product)
+                seen_products.add(product.product_key)
         return Yield(records=tuple(records))
 
 
@@ -166,7 +180,9 @@ def _parse_new_products(flight: str, *, source: str, captured_at: Any) -> Yield:
     return Yield(records=tuple(records))
 
 
-def _reviews(flight: str, *, source: str, captured_at: Any) -> Iterator[ReviewRecord]:
+def _reviews(
+    flight: str, *, source: str, captured_at: Any
+) -> Iterator[tuple[ReviewRecord, ProductRecord | None]]:
     """The recent-review feed the category page carries alongside its ranking -- free, no extra request."""
     for match in _REVIEW.finditer(flight):
         span = _enclosing_object(flight, match.start())
@@ -182,14 +198,16 @@ def _reviews(flight: str, *, source: str, captured_at: Any) -> Iterator[ReviewRe
         review_key = _text(row.get("idreviewcomment"))
         body = _text(row.get("reviewText"))
         product = row.get("product")
-        product_key = _text(product.get("idProduct")) if isinstance(product, dict) else None
+        if not isinstance(product, dict):
+            continue
+        product_key = _text(product.get("idProduct"))
         if not review_key or not body or not product_key:
             continue
 
         editor = row.get("editor")
         author = _text(editor.get("idRegister")) if isinstance(editor, dict) else None
 
-        yield ReviewRecord(
+        review = ReviewRecord(
             source=source,
             captured_at=captured_at,
             product_key=product_key,
@@ -199,6 +217,22 @@ def _reviews(flight: str, *, source: str, captured_at: Any) -> Iterator[ReviewRe
             author_hash=author_hash(author),
             written_at=kst_date(row.get("createDate"), _WRITTEN_FORMAT),
         )
+        name = _text(product.get("productTitle"))
+        brand = product.get("brand")
+        catalogue = (
+            ProductRecord(
+                source=source,
+                captured_at=captured_at,
+                product_key=product_key,
+                name=name,
+                brand=_text(brand.get("brandTitle")) if isinstance(brand, dict) else None,
+                volume=_text(product.get("volume")),
+                url=PRODUCT_URL.format(product=product_key),
+            )
+            if name
+            else None
+        )
+        yield review, catalogue
 
 
 def _number(value: object) -> float | None:
