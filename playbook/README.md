@@ -1,6 +1,7 @@
 # playbook — a development-methodology catalog extracted from the 4 existing repos
 
 **Scope**: `service/trend-radar`, `service/yt-scrapper`(tubedepth), `service/cosmai`(cosmai-old), `service/Research_Paper`(paper-radar) + `service/stack`, as of 2026-08-23, their state right before archiving.
+The named source repositories were private at measurement time; their names and historical paths identify provenance, not checkouts required to use this playbook.
 **Principle**: only what is in the code, hooks, tests and git history is written down, not what a document claims. Every item has `path:line` evidence, and every number is in `metrics.md` together with the measurement script.
 **Use**: a record of what the new `cosmai` monorepo takes and what it drops, and a list to reuse the next time an unrelated project starts.
 
