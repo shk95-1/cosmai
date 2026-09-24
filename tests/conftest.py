@@ -491,6 +491,18 @@ def _needs_migrator_backends(container: str) -> list[str]:
 
 
 @pytest.fixture
+def committed_tree(tmp_path: Path) -> Path:
+    """An isolated committed checkout for tests that insert a DDL probe."""
+    archive = subprocess.Popen(["git", "archive", "HEAD"], cwd=REPO_ROOT, stdout=subprocess.PIPE)
+    assert archive.stdout is not None
+    extracted = subprocess.run(["tar", "-x", "-C", str(tmp_path)], stdin=archive.stdout, check=False)
+    archive.stdout.close()
+    assert archive.wait() == 0, "git archive failed"
+    assert extracted.returncode == 0, "extracting the committed tree failed"
+    return tmp_path
+
+
+@pytest.fixture
 def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Runs db/migrate.sh the way tool/checks/test runs it, once both of needs_migrator's connection
     slots are free.

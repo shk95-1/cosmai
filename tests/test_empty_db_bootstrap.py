@@ -37,7 +37,7 @@ PROBE = "zz_step_zero_probe"
 PROBE_DATABASE = "step_zero_probe"
 # A file that sorts after the real additive ones and cannot apply: the failure case, planted for one
 # test and removed again.
-BROKEN_DDL = REPO_ROOT / "contracts" / "ddl" / "tubedepth" / "999_zz_broken_probe.sql"
+BROKEN_DDL_RELATIVE = Path("contracts/ddl/tubedepth/999_zz_broken_probe.sql")
 
 # The roles db/bootstrap_source.sql makes, and whether each one logs in. trend_radar has the third:
 # trend_radar_reader, which trend-radar-dashboard logs in with (contracts/anon_exposure.md).
@@ -65,18 +65,6 @@ TABLES = """
     SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = '{schema}' AND c.relkind IN ('r', 'p')
 """
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _no_planted_ddl_outlives_the_session() -> Iterator[None]:
-    """The failure test below plants a broken additive file in contracts/ddl/tubedepth/ and removes
-    it in its own `finally` -- but a run killed in between would leave it in the checkout, where the
-    next deploy would fail on it and `git status` would offer it for commit. Removing it before this
-    file's first test and again at the end means an interrupted run is cleaned up by the next one
-    (#178 re-review 6)."""
-    BROKEN_DDL.unlink(missing_ok=True)
-    yield
-    BROKEN_DDL.unlink(missing_ok=True)
 
 
 def _psql(container: str, database: str, sql: str) -> list[list[str]]:
@@ -180,27 +168,27 @@ def test_the_roles_and_the_reader_grant_come_up_with_them(
 
 
 def test_a_build_that_fails_leaves_no_schema_behind(
-    harness_container: str, empty_database: str, deploy: Callable[..., subprocess.CompletedProcess[str]]
+    harness_container: str,
+    empty_database: str,
+    committed_tree: Path,
+    deploy: Callable[..., subprocess.CompletedProcess[str]],
 ):
     """The recovery path, and the reason the presence probe asks about the baseline table rather
     than the namespace: CREATE SCHEMA autocommits in the roles step while only the objects are in a
     transaction, so a schema left standing after a failed build would be read as "already there" by
     every later run -- and on production the only way out of that is a hand-approved DROP SCHEMA."""
-    BROKEN_DDL.write_text(
-        "-- Planted by tests/test_empty_db_bootstrap.py and removed in the same test.\n"
+    (committed_tree / BROKEN_DDL_RELATIVE).write_text(
+        "-- Planted by tests/test_empty_db_bootstrap.py in a temporary archive.\n"
         "ALTER TABLE tubedepth.jobs ADD COLUMN zz_broken_probe no_such_type_exists;\n",
         encoding="utf-8",
     )
-    try:
-        failed = deploy(empty_database)
-        assert failed.returncode != 0, "a broken additive file must fail the deploy"
-        assert "tubedepth" in failed.stderr
-        left = _psql(
-            harness_container, empty_database, "SELECT count(*) FROM pg_namespace WHERE nspname = 'tubedepth'"
-        )
-        assert left == [["0"]], "the failed build left a schema the next run would skip forever"
-    finally:
-        BROKEN_DDL.unlink(missing_ok=True)
+    failed = deploy(empty_database, cwd=committed_tree)
+    assert failed.returncode != 0, "a broken additive file must fail the deploy"
+    assert "tubedepth" in failed.stderr
+    left = _psql(
+        harness_container, empty_database, "SELECT count(*) FROM pg_namespace WHERE nspname = 'tubedepth'"
+    )
+    assert left == [["0"]], "the failed build left a schema the next run would skip forever"
 
     done = deploy(empty_database)
     assert done.returncode == 0, done.stderr

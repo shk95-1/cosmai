@@ -48,16 +48,6 @@ PROBE_DATABASE = "needs_verify_probe"
 CLOSED_TO = ("needs_runtime", "postgrest_anon")
 
 
-def _archive_head(destination: Path) -> None:
-    """Give the deploy a committed tree so its probe cannot outlive an interrupted test."""
-    archive = subprocess.Popen(["git", "archive", "HEAD"], cwd=REPO_ROOT, stdout=subprocess.PIPE)
-    assert archive.stdout is not None
-    extracted = subprocess.run(["tar", "-x", "-C", str(destination)], stdin=archive.stdout, check=False)
-    archive.stdout.close()
-    assert archive.wait() == 0, "git archive failed"
-    assert extracted.returncode == 0, "extracting the committed tree failed"
-
-
 def _psql(
     container: str, database: str, sql: str, *, role: str | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -97,16 +87,15 @@ def probe_database(harness_container: str) -> Iterator[str]:
 def test_only_the_verify_reader_reads_what_the_ddl_loop_put_in_needs_verify(
     harness_container: str,
     probe_database: str,
-    tmp_path: Path,
+    committed_tree: Path,
     deploy: Callable[..., subprocess.CompletedProcess[str]],
 ):
-    _archive_head(tmp_path)
-    (tmp_path / PROBE_DDL_RELATIVE).write_text(PROBE_DDL_BODY, encoding="utf-8")
+    (committed_tree / PROBE_DDL_RELATIVE).write_text(PROBE_DDL_BODY, encoding="utf-8")
     # Twice: db/migrate.sh is re-run on every deploy, so the new step has to be a no-op the
     # second time -- and the second run is also the one that would fail if CREATE ROLE or
     # CREATE SCHEMA were unguarded.
     for attempt in (1, 2):
-        done = deploy(probe_database, cwd=tmp_path)
+        done = deploy(probe_database, cwd=committed_tree)
         assert done.returncode == 0, f"deploy {attempt} failed: {done.stderr}"
 
     owner = _value(
