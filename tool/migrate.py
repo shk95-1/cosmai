@@ -177,7 +177,10 @@ def checkout(args):
         if path.exists():
             raise ValueError("Checkout path already exists; inspect partial operation before retrying")
         path.parent.mkdir(parents=True, exist_ok=True)
-        checked(["git", "clone", "--no-checkout", repo["url"], str(path)], log)
+        source = str(dest / safe_name(repo["bundle"])) if repo.get("bundle") else repo["url"]
+        checked(["git", "clone", "--no-checkout", source, str(path)], log)
+        if repo.get("bundle"):
+            checked(["git", "-C", str(path), "remote", "set-url", "origin", repo["url"]], log)
         checked(["git", "-C", str(path), "checkout", "--detach", repo["sha"]], log)
         if repo["path"] == "cosmai":
             checked(["git", "-C", str(path), "checkout", "-B", "main", repo["sha"]], log)
