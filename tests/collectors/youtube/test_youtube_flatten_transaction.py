@@ -11,8 +11,8 @@ This file asks it twice, and measures rather than argues:
                 bare `pg_stat_activity` filter, which under `-n` answers for another worker's pass --
                 says whether a transaction is open while flatten reads a payload off disk.
   the size      a full batch of 500 artifacts under the timeout family the role really carries
-                (`transaction_timeout=60s`, `idle_in_transaction_session_timeout=30s`, measured on
-                `tubedepth_runtime` for #277). If flatten's one transaction cannot hold a production
+                (read from `tubedepth_runtime` in the harness built by the source bootstrap).
+                If flatten's one transaction cannot hold a production
                 batch, this is what says so -- and the restructure is then its own issue, not a
                 change made under this one.
 """
@@ -32,28 +32,23 @@ from collectors.youtube import cli, flatten
 from collectors.youtube.cli import run
 from collectors.youtube.payload_store import PayloadStore
 from collectors.youtube.storage.tables import artifacts
+from tests.collectors.youtube.role_settings import runtime_role_settings, timeout_seconds
 from tests.collectors.youtube.test_youtube_work_transaction import _open_transactions
 
 pytestmark = pytest.mark.postgres
 
 AT = datetime(2026, 9, 20, 4, tzinfo=UTC)
 
-#: What `db/bootstrap_source.sql` sets on `tubedepth_runtime` and #277 measured in production. Not
-#: compressed the way the `work` file's 2s is: the question here is whether a *production-sized*
-#: batch fits inside the production number, so the production number is what is set.
-TRANSACTION_TIMEOUT = "60s"
-IDLE_IN_TRANSACTION_TIMEOUT = "30s"
 
-
-def _under_the_roles_timeouts(url: str) -> str:
+def _under_the_roles_timeouts(url: str, limits: dict[str, str]) -> str:
     """The same database and schema with the role's timeout family on the session -- `ALTER ROLE ...
     IN DATABASE` would reach every other test sharing the harness, `options` is the same server
     behaviour scoped to the connection the pass opens."""
     parsed = make_url(url)
     options = str(parsed.query.get("options", ""))
     timeouts = (
-        f"-ctransaction_timeout={TRANSACTION_TIMEOUT} "
-        f"-cidle_in_transaction_session_timeout={IDLE_IN_TRANSACTION_TIMEOUT}"
+        f"-ctransaction_timeout={limits['transaction_timeout']} "
+        f"-cidle_in_transaction_session_timeout={limits['idle_in_transaction_session_timeout']}"
     )
     return parsed.update_query_dict({"options": f"{options} {timeouts}".strip()}).render_as_string(
         hide_password=False
@@ -120,24 +115,27 @@ def test_flatten_holds_one_transaction_open_across_every_payload_read(
 def test_a_full_batch_fits_inside_the_roles_transaction_timeout(
     tubedepth_schema: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
-    """A production-sized batch under the production number. A pass that crossed 60s would be
+    """A production-sized batch under the declared role limit. A pass that crossed it would be
     terminated by the server here exactly as `work` was in production, and since #280 that ends the
     pass at exit 1 with a `failed` run row rather than as a traceback -- so the exit code is what
     says the batch fitted, and the flattened count beside it is what says it did the work."""
     payloads = PayloadStore(tmp_path)
     _seed(tubedepth_schema, payloads, count=flatten.DEFAULT_BATCH_SIZE)
+    limits = runtime_role_settings(tubedepth_schema, "tubedepth_runtime")
+    transaction_timeout = limits["transaction_timeout"]
 
     started = time.monotonic()
     code = run(
         "flatten",
-        database_url=_under_the_roles_timeouts(tubedepth_schema),
+        database_url=_under_the_roles_timeouts(tubedepth_schema, limits),
         payload_root=tmp_path,
         captured_at=AT,
     )
     elapsed = time.monotonic() - started
 
-    assert code == 0, f"a batch of {flatten.DEFAULT_BATCH_SIZE} did not finish inside {TRANSACTION_TIMEOUT}"
+    assert code == 0, f"a batch of {flatten.DEFAULT_BATCH_SIZE} did not finish inside {transaction_timeout}"
     assert f"flattened {flatten.DEFAULT_BATCH_SIZE} artifact(s)" in capsys.readouterr().out
-    # The margin, recorded rather than asserted tightly: the bound is 60s and a measurement that
-    # needed most of it would mean the batch size, not the machine, is what has to change.
-    assert elapsed < 30, f"a full batch took {elapsed:.1f}s of the role's {TRANSACTION_TIMEOUT}"
+    # Leave half the declared limit as a margin; a batch near the full limit needs a size change.
+    assert elapsed < timeout_seconds(transaction_timeout) / 2, (
+        f"a full batch took {elapsed:.1f}s of the role's {transaction_timeout}"
+    )

@@ -236,4 +236,31 @@ else
     status=1
 fi
 
+# Schema dumps do not contain ALTER ROLE ... IN DATABASE settings. Compare the roles that collect
+# and analyze against the same empty-database migration used above; sorting the GUC array makes
+# the result independent of the order in which the old fleet and this bootstrap set each value.
+# The files remain private to $work and only role names reach stderr if a setting differs.
+role_settings() { # container, superuser, database, role (the role names below are fixed literals)
+    docker exec "$1" psql -U "$2" -d "$3" -X -Atq -c "
+        SELECT setting FROM pg_db_role_setting s
+          JOIN pg_roles r ON r.oid = s.setrole
+          JOIN pg_database d ON d.oid = s.setdatabase
+          CROSS JOIN LATERAL unnest(s.setconfig) AS setting
+         WHERE r.rolname = '$4' AND d.datname = current_database()
+         ORDER BY setting"
+}
+for runtime in trend_radar_runtime tubedepth_runtime needs_runtime; do
+    role_settings "$name" drift drift "$runtime" > "$work/expected.role.$runtime"
+    role_settings "$container" "$superuser" "$needs_db" "$runtime" > "$work/actual.role.$runtime"
+    if [ ! -s "$work/expected.role.$runtime" ] || [ ! -s "$work/actual.role.$runtime" ]; then
+        echo "ddl-drift: $runtime settings MISSING" >&2
+        status=1
+    elif cmp -s "$work/expected.role.$runtime" "$work/actual.role.$runtime"; then
+        echo "ddl-drift: $runtime settings match the fresh database"
+    else
+        echo "ddl-drift: $runtime settings DRIFTED" >&2
+        status=1
+    fi
+done
+
 exit $status
