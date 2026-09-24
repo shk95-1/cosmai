@@ -1,11 +1,11 @@
-"""Verify and restore a password-encrypted Cosmai migration bundle (#330).
+"""Verify and restore a Cosmai migration archive (#330).
 
-Requires Python 3.11+, GnuPG, Git, and (for db-restore) Docker with PostgreSQL 18.
+Requires Python 3.11+, Git, and (for db-restore) Docker with PostgreSQL 18.
 No collector, paid API, old service, or production migration is started.
 """
 
 import argparse
-import getpass
+import gzip
 import hashlib
 import json
 import os
@@ -21,14 +21,6 @@ from pathlib import Path, PurePosixPath
 EXPECTED_ARCHIVE_SHA256 = ""
 
 
-def digest(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def safe_name(name):
     parts = PurePosixPath(name)
     if not name or parts.is_absolute() or ".." in parts.parts or "\\" in name:
@@ -36,48 +28,21 @@ def safe_name(name):
     return parts.as_posix()
 
 
-def password(args):
-    if args.passphrase_file:
-        p = Path(args.passphrase_file)
-        if p.is_symlink() or p.stat().st_mode & 0o077:
-            raise ValueError("Passphrase file must be private and not a symlink")
-        value = p.read_bytes()
-    else:
-        value = getpass.getpass("Migration password: ").encode()
-    if not value or b"\n" in value or b"\r" in value:
-        raise ValueError("Empty or multiline password")
-    return value
-
-
-def unpack(archive, target, secret):
-    """Stream authenticated decryption; publish nothing until GPG and hashes pass."""
-    if EXPECTED_ARCHIVE_SHA256 and digest(archive) != EXPECTED_ARCHIVE_SHA256:
-        raise ValueError("Archive SHA-256 differs from this delivery script")
-    readfd, writefd = os.pipe()
-    os.write(writefd, secret + b"\n")
-    os.close(writefd)
+def unpack(archive, target):
+    """Read once; publish nothing until gzip, archive and file checks pass."""
     seen = {}
     manifest = None
-    with tempfile.TemporaryFile() as errors:
-        proc = subprocess.Popen(
-            [
-                "gpg",
-                "--batch",
-                "--pinentry-mode",
-                "loopback",
-                "--no-symkey-cache",
-                "--passphrase-fd",
-                str(readfd),
-                "--decrypt",
-                str(archive),
-            ],
-            pass_fds=(readfd,),
-            stdout=subprocess.PIPE,
-            stderr=errors,
-        )
-        os.close(readfd)
-        try:
-            with tarfile.open(fileobj=proc.stdout, mode="r|gz") as tar:
+    archive_hash = hashlib.sha256()
+    with archive.open("rb", buffering=4 * 1024 * 1024) as raw:
+
+        class HashedInput:
+            def read(self, size=-1):
+                data = raw.read(size)
+                archive_hash.update(data)
+                return data
+
+        with gzip.GzipFile(fileobj=HashedInput(), mode="rb") as decoded:
+            with tarfile.open(fileobj=decoded, mode="r|") as tar:
                 for entry in tar:
                     name = safe_name(entry.name)
                     if not entry.isfile() or name in seen:
@@ -108,22 +73,18 @@ def unpack(archive, target, secret):
                     seen[name] = {"sha256": h.hexdigest(), "size": size}
                     if data is not None:
                         manifest = json.loads(data)
-            # Drain to authenticated EOF even if tar stopped at its end marker.
-            while proc.stdout.read(1024 * 1024):
+            # Reach gzip EOF to check its trailer even after the tar end marker.
+            while decoded.read(4 * 1024 * 1024):
                 pass
-            if proc.wait() != 0:
-                raise ValueError("Decryption/authentication failed")
-        finally:
-            proc.stdout.close()
-            if proc.poll() is None:
-                proc.kill()
-                proc.wait()
+    archive_sha = archive_hash.hexdigest()
+    if EXPECTED_ARCHIVE_SHA256 and archive_sha != EXPECTED_ARCHIVE_SHA256:
+        raise ValueError("Archive SHA-256 differs from this delivery script")
     if not manifest or manifest.get("format") != 1:
         raise ValueError("Unsupported or missing manifest")
     seen.pop("manifest.json", None)
     if seen != manifest["files"]:
         raise ValueError("Bundle file inventory or checksum mismatch")
-    return manifest
+    return manifest, archive_sha
 
 
 def private_json(path, value):
@@ -146,8 +107,8 @@ def restore(args):
     dest.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=".cosmai-restore-", dir=dest.parent))
     try:
-        manifest = unpack(Path(args.archive), temporary, password(args))
-        # The target only becomes visible after full authentication and checksum verification.
+        manifest, archive_sha = unpack(Path(args.archive), temporary)
+        # The target only becomes visible after full archive and checksum verification.
         if dest.exists() or dest.is_symlink():
             raise ValueError("Destination appeared while restoring")
         temporary.rename(dest)
@@ -157,7 +118,7 @@ def restore(args):
     private_json(
         dest / ".migration" / "verified.json",
         {
-            "archive_sha256": digest(args.archive),
+            "archive_sha256": archive_sha,
             "files": len(manifest["files"]),
             "capture": manifest["capture"],
         },
@@ -372,9 +333,6 @@ def main():
     for name in ("verify", "restore"):
         p = sub.add_parser(name)
         p.add_argument("archive")
-        p.add_argument(
-            "--passphrase-file", help="Private temporary file; omit to enter password interactively"
-        )
         if name == "restore":
             p.add_argument("--dest", required=True)
     p = sub.add_parser("checkout")
@@ -385,8 +343,8 @@ def main():
     p.add_argument("--offline", action="store_true", help="No network/host port; for isolated rehearsal")
     args = parser.parse_args()
     if args.command == "verify":
-        m = unpack(Path(args.archive), None, password(args))
-        print("Verified encrypted archive and " + str(len(m["files"])) + " file hashes.")
+        m, _ = unpack(Path(args.archive), None)
+        print("Verified archive and " + str(len(m["files"])) + " file hashes.")
         print("Snapshot: " + m["capture"])
     else:
         {"restore": restore, "checkout": checkout, "db-restore": db_restore}[args.command](args)
@@ -395,6 +353,13 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, tarfile.TarError) as error:
+    except (
+        ValueError,
+        RuntimeError,
+        OSError,
+        EOFError,
+        subprocess.SubprocessError,
+        tarfile.TarError,
+    ) as error:
         print("Migration stopped: " + str(error), file=sys.stderr)
         sys.exit(1)
