@@ -69,8 +69,8 @@ async function apiExists(basePath, spec) {
   return page.rows.length > 0;
 }
 
-// need comes in three sets — the category-sum rows screen 1·4 use, the product-axis rows screen 3
-// uses, and the month rows screen 5 uses. Since #41 added the product rows, receiving them as one
+// need comes in three sets — the category-sum rows screens 1·4 use, the product-axis rows screen 3
+// uses, and the month rows screens 1·5 use. Since #41 added the product rows, receiving them as one
 // set means the sum-row screen pulls in 13x its share, and once #129's month rows are stacked on that doubles again — that is why the query is split per axis.
 const state = {
   need: [], needProducts: [], needMonths: [], wish: [], productNames: new Map(),

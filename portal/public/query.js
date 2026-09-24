@@ -144,7 +144,7 @@ export const NEED_QUERIES = {
     ],
     order: NEED_ORDER,
   },
-  // Screen 5: month rows only — the exact complement of the two above. denominator·persist_* are NULL on
+  // Screens 1·5: month rows only — the exact complement of the two above. denominator·persist_* are NULL on
   // month rows and are not fetched (#129's decision: there is no such thing as that month's denominator).
   // product_ref's value is always an empty string but it is still fetched — screens.js's monthRowsOf filters
   // on it, and if it were missing from select the response row would have no such key, making that comparison

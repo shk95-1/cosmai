@@ -251,7 +251,7 @@ export function withProductNames(rows, index, max = 20) {
   });
 }
 
-// ---- Screen 5: period (month) axis (#130) ---------------------------------------------
+// ---- Screens 1·5: period (month) axis (#130, #147) ---------------------------------------------
 
 // Month rows are attached only to the category sum (#129: month <> '' and product_ref = ''). Although the
 // query already narrows it that way, filtering again here guards against there being no guarantee the array
