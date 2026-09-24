@@ -28,11 +28,11 @@ pytestmark = [pytest.mark.postgres, pytest.mark.serial]
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATE = REPO_ROOT / "db" / "migrate.sh"
 BOOTSTRAP = REPO_ROOT / "db" / "bootstrap_needs_verify.sql"
-# The fork's 029 is not in this checkout and is not added here: a file of that number is planted for
-# one test and removed again, so the loop creates the table and the test only reads it.
-PROBE_DDL = REPO_ROOT / "contracts" / "ddl" / "needs" / "029_zz_needs_verify_probe.sql"
+# This file exists only in a temporary archive of HEAD, never in the checkout. A high number avoids
+# colliding with the fork's real 029 when it lands upstream.
+PROBE_DDL_RELATIVE = Path("contracts/ddl/needs/999_zz_needs_verify_probe.sql")
 PROBE_TABLE = "needs_verify.zz_author_sample_probe"
-PROBE_DDL_BODY = f"""-- Planted by tests/test_needs_verify_closure.py and removed in the same test: the
+PROBE_DDL_BODY = f"""-- Planted by tests/test_needs_verify_closure.py in a temporary archive: the
 -- shape of the fork's DDL 029, a table inside needs_verify created under SET ROLE needs_owner.
 CREATE TABLE {PROBE_TABLE} (author_hash text PRIMARY KEY, channel_id text NOT NULL);
 INSERT INTO {PROBE_TABLE} VALUES ('hash', 'UC0');
@@ -46,18 +46,6 @@ PROBE_DATABASE = "needs_verify_probe"
 # and not a role in this checkout -- its grants go to needs_runtime and needs_owner, so needs_runtime
 # is what answers for it here.
 CLOSED_TO = ("needs_runtime", "postgrest_anon")
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _no_planted_ddl_outlives_the_session() -> Iterator[None]:
-    """The test below plants a DDL file in contracts/ddl/needs/ and removes it in its own `finally`
-    -- but a run killed in between would leave it in the checkout, where the next deploy would apply
-    it and `git status` would offer it for commit. Removing it before this file's first test and
-    again at the end means an interrupted run is cleaned up by the next one (the shape
-    tests/test_empty_db_bootstrap.py already uses for its broken-file probe)."""
-    PROBE_DDL.unlink(missing_ok=True)
-    yield
-    PROBE_DDL.unlink(missing_ok=True)
 
 
 def _psql(
@@ -99,18 +87,16 @@ def probe_database(harness_container: str) -> Iterator[str]:
 def test_only_the_verify_reader_reads_what_the_ddl_loop_put_in_needs_verify(
     harness_container: str,
     probe_database: str,
+    committed_tree: Path,
     deploy: Callable[..., subprocess.CompletedProcess[str]],
 ):
-    PROBE_DDL.write_text(PROBE_DDL_BODY, encoding="utf-8")
-    try:
-        # Twice: db/migrate.sh is re-run on every deploy, so the new step has to be a no-op the
-        # second time -- and the second run is also the one that would fail if CREATE ROLE or
-        # CREATE SCHEMA were unguarded.
-        for attempt in (1, 2):
-            done = deploy(probe_database)
-            assert done.returncode == 0, f"deploy {attempt} failed: {done.stderr}"
-    finally:
-        PROBE_DDL.unlink(missing_ok=True)
+    (committed_tree / PROBE_DDL_RELATIVE).write_text(PROBE_DDL_BODY, encoding="utf-8")
+    # Twice: db/migrate.sh is re-run on every deploy, so the new step has to be a no-op the
+    # second time -- and the second run is also the one that would fail if CREATE ROLE or
+    # CREATE SCHEMA were unguarded.
+    for attempt in (1, 2):
+        done = deploy(probe_database, cwd=committed_tree)
+        assert done.returncode == 0, f"deploy {attempt} failed: {done.stderr}"
 
     owner = _value(
         harness_container,

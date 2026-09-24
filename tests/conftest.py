@@ -491,6 +491,18 @@ def _needs_migrator_backends(container: str) -> list[str]:
 
 
 @pytest.fixture
+def committed_tree(tmp_path: Path) -> Path:
+    """An isolated committed checkout for tests that insert a DDL probe."""
+    archive = subprocess.Popen(["git", "archive", "HEAD"], cwd=REPO_ROOT, stdout=subprocess.PIPE)
+    assert archive.stdout is not None
+    extracted = subprocess.run(["tar", "-x", "-C", str(tmp_path)], stdin=archive.stdout, check=False)
+    archive.stdout.close()
+    assert archive.wait() == 0, "git archive failed"
+    assert extracted.returncode == 0, "extracting the committed tree failed"
+    return tmp_path
+
+
+@pytest.fixture
 def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Runs db/migrate.sh the way tool/checks/test runs it, once both of needs_migrator's connection
     slots are free.
@@ -502,7 +514,7 @@ def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[
     """
 
     def run(
-        database: str = "fleet", *, secrets_body: str = HARNESS_SECRETS
+        database: str = "fleet", *, secrets_body: str = HARNESS_SECRETS, cwd: Path = REPO_ROOT
     ) -> subprocess.CompletedProcess[str]:
         limit = float(os.environ.get(DEPLOY_SLOT_TIMEOUT_ENV) or DEPLOY_SLOT_TIMEOUT_S)
         deadline = time.monotonic() + limit
@@ -522,7 +534,7 @@ def deploy(harness_container: str) -> Callable[..., subprocess.CompletedProcess[
         try:
             return subprocess.run(
                 ["db/migrate.sh", "--container", harness_container, "--db", database, "--superuser", "fleet"],
-                cwd=REPO_ROOT,
+                cwd=cwd,
                 capture_output=True,
                 text=True,
                 env={**os.environ, "COSMAI_SECRET_FILE": str(secret)},

@@ -54,6 +54,16 @@ def _paths_for(pattern: str) -> list[Path]:
     return sorted(REPO_ROOT.glob(pattern))
 
 
+def _shared_owned_conflict(shared: str, owned: str) -> bool:
+    # A named shared file may narrow a fork-owned directory. In the reverse direction, a shared
+    # directory cannot swallow a fork-owned file, including one reached through a glob.
+    if _matches(owned, shared):
+        return not (owned.endswith("/") and not shared.endswith("/"))
+    return shared.endswith("/") and any(
+        _matches(shared, str(path.relative_to(REPO_ROOT))) for path in _paths_for(owned)
+    )
+
+
 @pytest.fixture(scope="module")
 def lists() -> dict[str, list[str]]:
     return {name: _read_section(name) for name in SECTIONS}
@@ -98,9 +108,14 @@ def test_a_shared_surface_is_never_claimed_as_fork_owned(lists):
         (shared, owned)
         for shared in lists["shared-surface"]
         for owned in lists["fork-owned"]
-        if _matches(owned, shared) and not (owned.endswith("/") and not shared.endswith("/"))
+        if _shared_owned_conflict(shared, owned)
     ]
     assert not claimed, f"a shared surface cannot also be fork-owned: {claimed}"
+
+
+def test_a_shared_directory_cannot_swallow_a_fork_owned_file():
+    assert _shared_owned_conflict("db/seed/", "db/seed/mfds.py")
+    assert not _shared_owned_conflict("analysis/retrieval/corpus.py", "analysis/retrieval/")
 
 
 def test_a_narrowed_shared_surface_names_a_file_and_not_a_second_directory(lists):
