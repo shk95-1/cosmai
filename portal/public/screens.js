@@ -44,6 +44,63 @@ export function needRankingRows(need, needMonths, runId, scope, period = '') {
   return monthRowsOf(needMonths, runId).filter((r) => r.scope === scope && r.month === period);
 }
 
+export const RISING_NEED_FLOOR = 20;
+
+function precedingMonth(month) {
+  const [year, number] = month.split('-').map(Number);
+  return number === 1 ? `${year - 1}-12` : `${year}-${String(number - 1).padStart(2, '0')}`;
+}
+
+// Composition share uses only the negative mentions in each month of this scope. The latest month
+// comes from the whole run so a scope with stale rows cannot masquerade as a current trend.
+export function risingNeeds(needMonths, runId, scope, floor = RISING_NEED_FLOOR) {
+  const all = monthRowsOf(needMonths, runId);
+  const recentMonth = all.map((r) => r.month).sort().at(-1) || null;
+  const previousMonth = recentMonth ? precedingMonth(recentMonth) : null;
+  const result = {
+    recentMonth, previousMonth, previousTotal: 0, recentTotal: 0,
+    candidateCount: 0, filteredCount: 0, rows: [], reason: null,
+  };
+  if (!recentMonth) return { ...result, reason: 'no-months' };
+
+  const matching = all.filter((r) => r.scope === scope && (r.month === recentMonth || r.month === previousMonth));
+  if (!matching.some((r) => r.month === previousMonth) || !matching.some((r) => r.month === recentMonth)) {
+    return { ...result, reason: 'missing-month' };
+  }
+
+  const counts = new Map();
+  for (const row of matching) {
+    const count = Number(row.neg) || 0;
+    const pair = counts.get(row.need_key) || { previous_count: 0, recent_count: 0 };
+    if (row.month === previousMonth) {
+      pair.previous_count += count;
+      result.previousTotal += count;
+    } else {
+      pair.recent_count += count;
+      result.recentTotal += count;
+    }
+    counts.set(row.need_key, pair);
+  }
+  if (result.previousTotal === 0 || result.recentTotal === 0) {
+    return { ...result, reason: 'zero-denominator' };
+  }
+
+  result.candidateCount = counts.size;
+  for (const [need_key, pair] of counts) {
+    if (pair.previous_count + pair.recent_count < floor) {
+      result.filteredCount += 1;
+      continue;
+    }
+    const previous_share_pct = 100 * pair.previous_count / result.previousTotal;
+    const recent_share_pct = 100 * pair.recent_count / result.recentTotal;
+    const delta_pp = recent_share_pct - previous_share_pct;
+    if (delta_pp > 0) result.rows.push({ need_key, ...pair, previous_share_pct, recent_share_pct, delta_pp });
+  }
+  result.rows.sort((a, b) => b.delta_pp - a.delta_pp || b.recent_count - a.recent_count
+    || (a.need_key < b.need_key ? -1 : a.need_key > b.need_key ? 1 : 0));
+  return { ...result, reason: result.rows.length ? null : 'no-rising' };
+}
+
 export function wishRowsForScope(wish, runId, scope) {
   return (wish || []).filter((r) => r.run_id === runId && r.scope === scope);
 }

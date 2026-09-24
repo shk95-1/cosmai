@@ -258,6 +258,13 @@ test('cellKind·isNumericCell: 숫자 셀만 우측 정렬 대상이다', () => 
   assert.equal(isNumericCell('unresolved', null), false);
 });
 
+test('rising-needs cells label percentage points and counts distinctly (#148)', () => {
+  assert.equal(formatCell('delta_pp', 3.071), '+3.07 pp');
+  assert.equal(formatCell('recent_share_pct', 15.279), '15.28%');
+  assert.equal(formatCell('previous_count', 1801), '1,801');
+  assert.equal(isNumericCell('delta_pp', 3.071), true);
+});
+
 
 // Screen 3's label is 'brand · product name', overflowing the 96px slot — both the label slot's width and
 // the column the tooltip reads are decided by the panel (since the truncated label and the full name live in different columns).

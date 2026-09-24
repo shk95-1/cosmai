@@ -278,12 +278,13 @@ export function renderScatter(rows, { xKey, yKey, sizeKey, labelKey = 'need_key'
 // on raw values, so this format is used on screen only.
 const CELL_KIND = {
   neg: 'int', pos: 'int', mentions: 'int', yt_neg: 'int', yt_pos: 'int',
+  previous_count: 'int', recent_count: 'int',
   persist_months: 'int', persist_months_total: 'int',
   persist_products: 'int', persist_products_total: 'int',
   denom_low: 'int', denom_site: 'int',
   unresolved: 'ratio', unresolved_new: 'ratio', new_ratio: 'ratio', low_share: 'ratio',
   persist_month_ratio: 'ratio', persist_product_ratio: 'ratio',
-  population_share_pct: 'pct',
+  population_share_pct: 'pct', previous_share_pct: 'pct', recent_share_pct: 'pct', delta_pp: 'pp',
 };
 
 export function cellKind(column) {
@@ -302,6 +303,7 @@ export function formatCell(column, value) {
   if (!Number.isFinite(n)) return String(value);
   if (kind === 'int') return n.toLocaleString('en-US');
   if (kind === 'pct') return `${n.toFixed(2)}%`;
+  if (kind === 'pp') return `${n > 0 ? '+' : ''}${n.toFixed(2)} pp`;
   return n.toFixed(2);
 }
 

@@ -11,7 +11,8 @@ import {
   groupByDocument, describeMatch,
 } from './lineage.js';
 import {
-  scopesForRun, needPeriods, needRankingRows, wishRowsForScope, wishScreenScopes, wishDefaultScope, wishCrossRows,
+  scopesForRun, needPeriods, needRankingRows, risingNeeds, RISING_NEED_FLOOR,
+  wishRowsForScope, wishScreenScopes, wishDefaultScope, wishCrossRows,
   wishCrossReconciliation, productRows, runCaptionParts,
   needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
   productNameIndex, withProductNames,
@@ -108,6 +109,33 @@ function renderNeedScreen(scope) {
       key: 'population_share_pct', hue: 'amber', fmt: (v) => `${v.toFixed(2)}%`, empty: '점유율을 잴 행이 없음',
     });
   renderNeedTable(rows, period);
+  $('need-rising').hidden = Boolean(period);
+  if (!period) renderRisingNeeds(scope);
+}
+
+function renderRisingNeeds(scope) {
+  const trend = risingNeeds(state.needMonths, state.needRunId, scope);
+  const caption = $('need-rising-caption');
+  if (!trend.recentMonth) {
+    caption.textContent = `최근 1개월 vs 직전 1개월 · 표본 기준: 두 달 합계 불만 ${RISING_NEED_FLOOR}건 이상`;
+  } else {
+    caption.textContent = `최근 1개월 vs 직전 1개월 (${trend.previousMonth} → ${trend.recentMonth}) · `
+      + `그 달 이 scope의 전체 불만 언급 대비 구성비 변화(pp) · `
+      + `니즈별 두 달 합계 ${RISING_NEED_FLOOR}건 미만 ${trend.filteredCount}개 제외`;
+  }
+  const empty = {
+    'no-months': '이 run에 월 행이 없어 최근 변화를 계산할 수 없습니다.',
+    'missing-month': '비교할 두 달의 행이 모두 있지 않아 최근 변화를 계산할 수 없습니다.',
+    'zero-denominator': '비교할 달의 전체 불만 언급이 0건이라 구성비를 계산할 수 없습니다.',
+    'no-rising': '표본 기준을 통과해 구성비가 오른 니즈가 없습니다.',
+  };
+  $('need-rising-chart').innerHTML = renderMagnitudeBars(trend.rows.slice(0, 10), {
+    key: 'delta_pp', width: CHART_W_WIDE, fmt: (v) => `+${v.toFixed(2)} pp`,
+    empty: empty[trend.reason] || '',
+  });
+  fillTable($('need-rising-table'),
+    ['need_key', 'previous_count', 'recent_count', 'previous_share_pct', 'recent_share_pct', 'delta_pp'],
+    trend.rows);
 }
 
 function fillNeedPeriods(scope) {

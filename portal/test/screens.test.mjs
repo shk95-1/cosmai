@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { NEED_QUERIES } from '../public/query.js';
 import {
   latestRuns, scopesForRun, needRowsForScope, needPeriods, needRankingRows,
+  risingNeeds, RISING_NEED_FLOOR,
   wishRowsForScope, wishScreenScopes, wishDefaultScope,
   wishCrossRows, wishCrossReconciliation, productRows, runCaptionParts,
   safeRatio, needCharacterRows, hasYoutubeMentions, rowsWithValue, defaultScope,
@@ -467,6 +468,39 @@ test('screen 1 cumulative ranking keeps the existing category rows (#147)', () =
     needRankingRows(SERVED.category, SERVED.month, 2, RANKING_SCOPE, ''),
     needRowsForScope(SERVED.category, 2, RANKING_SCOPE),
   );
+});
+
+const trendRows = [
+  { run_id: 9, scope: 'sample', month: '2026-08', product_ref: '', need_key: 'rising', neg: 10 },
+  { run_id: 9, scope: 'sample', month: '2026-09', product_ref: '', need_key: 'rising', neg: 20 },
+  { run_id: 9, scope: 'sample', month: '2026-08', product_ref: '', need_key: 'falling', neg: 10 },
+  { run_id: 9, scope: 'sample', month: '2026-09', product_ref: '', need_key: 'falling', neg: 10 },
+  { run_id: 9, scope: 'sample', month: '2026-08', product_ref: '', need_key: 'thin', neg: 5 },
+  { run_id: 9, scope: 'sample', month: '2026-09', product_ref: '', need_key: 'thin', neg: 10 },
+  { run_id: 9, scope: 'sample', month: '2026-09', product_ref: 'product', need_key: 'wrong-axis', neg: 100 },
+  { run_id: 8, scope: 'sample', month: '2026-09', product_ref: '', need_key: 'wrong-run', neg: 100 },
+];
+
+test('rising needs compare composition share with each month as its own denominator (#148)', () => {
+  assert.equal(RISING_NEED_FLOOR, 20);
+  const trend = risingNeeds(trendRows, 9, 'sample');
+  assert.equal(trend.previousMonth, '2026-08');
+  assert.equal(trend.recentMonth, '2026-09');
+  assert.equal(trend.previousTotal, 25);
+  assert.equal(trend.recentTotal, 40);
+  assert.equal(trend.filteredCount, 1); // 5 -> 10 is below the combined floor.
+  assert.deepEqual(trend.rows.map((row) => row.need_key), ['rising']);
+  assert.equal(trend.rows[0].previous_share_pct, 40);
+  assert.equal(trend.rows[0].recent_share_pct, 50);
+  assert.equal(trend.rows[0].delta_pp, 10);
+});
+
+test('rising needs explains missing and zero-denominator windows (#148)', () => {
+  assert.equal(risingNeeds([], 9, 'sample').reason, 'no-months');
+  assert.equal(risingNeeds(trendRows.filter((row) => row.month === '2026-09'), 9, 'sample').reason,
+    'missing-month');
+  const noNeg = trendRows.map((row) => ({ ...row, neg: row.month === '2026-08' ? 0 : row.neg }));
+  assert.equal(risingNeeds(noNeg, 9, 'sample').reason, 'zero-denominator');
 });
 
 // The contract between the select list and the consuming function. Dropping one column from the spec turns this red immediately.
