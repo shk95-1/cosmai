@@ -37,9 +37,10 @@ NO_REQUESTS_CLAIM = "외부 요청은 한 건도 나가지 않는다"
 
 
 def _services(*profiles: str) -> set[str]:
-    if shutil.which("docker") is None:
+    docker = shutil.which("docker")
+    if docker is None:
         pytest.skip("docker is not installed; compose cannot answer what it would start")
-    argv = ["docker", "compose"]
+    argv = [docker, "compose"]
     for profile in profiles:
         argv += ["--profile", profile]
     done = subprocess.run(
