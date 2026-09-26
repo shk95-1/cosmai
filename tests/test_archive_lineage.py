@@ -379,10 +379,10 @@ def test_only_the_stage_with_a_cron_line_is_enabled():
     """The archive ran once and never runs again (#93 D0); the three analysis stages and match:topic run
     inside fork #96's gated chain, which stays disabled until its gate can pass. An
     enabled stage with nothing scheduling it reads as stalled forever on the ops screen, and the
-    reverse -- a scheduled stage left disabled -- reads as 'disabled' while it really runs. Fork #95's
-    `project:corpus` landed its crontab line with this row, so it is the one enabled here and
-    tests/test_pipeline_stage.py is where the two are held against each other."""
-    assert {s.stage_key for s in pipeline_corpus.STAGES if s.enabled} == {"project:corpus"}
+    reverse -- a scheduled stage left disabled -- reads as 'disabled' while it really runs.
+    #181 pauses the project/topic rollout pending #328; tests/test_pipeline_stage.py holds
+    the declarations against the current cron lines."""
+    assert {s.stage_key for s in pipeline_corpus.STAGES if s.enabled} == set()
 
 
 def test_the_seed_puts_the_rows_in_and_a_second_run_changes_nothing(needs_runtime_url: str):

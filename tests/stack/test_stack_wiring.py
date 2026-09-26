@@ -438,12 +438,10 @@ def test_the_llm_knobs_are_passed_without_a_compose_level_default(key: str):
 
 
 @pytest.mark.parametrize("key", LLM_KNOBS)
-def test_the_llm_knobs_have_a_value_to_copy_in_env_example(key: str):
-    # env.example is the template an operator copies to stack/.env; nothing reads it at runtime, so a
-    # default there is a suggestion rather than a fallback that fires in production.
-    assert re.search(rf"^{key}=\S", ENV_EXAMPLE.read_text(encoding="utf-8"), re.MULTILINE), (
-        f"stack/env.example names no value for {key}, so an operator has nothing to copy"
-    )
+def test_the_llm_knobs_are_explicitly_disabled_in_env_example(key: str):
+    # #181/#321: copying the template must keep normal operation free of paid fallback calls.
+    expected = "0" if key == "COSMAI_LLM_BUDGET_USD" else ""
+    assert re.search(rf"^{key}={expected}$", ENV_EXAMPLE.read_text(encoding="utf-8"), re.MULTILINE)
 
 
 @pytest.mark.parametrize("key", LLM_KNOBS)

@@ -124,6 +124,7 @@ def test_fresh_cluster_restores_foreign_memberships_without_changing_role_option
         f"WHERE roleid = '{owner}'::regrole AND member = '{member}'::regrole;\nROLLBACK;\n"
     )
     run = subprocess.run
+    real_checked = migrate.checked
     checked_memberships = []
 
     def check(command, log, stdin=None):
@@ -131,7 +132,7 @@ def test_fresh_cluster_restores_foreign_memberships_without_changing_role_option
             assert (tmp_path / "database-data").stat().st_mode & 0o111 == 0o111
         if "psql" in command:
             assert stdin is not None
-            result = run(
+            real_checked(
                 [
                     "docker",
                     "exec",
@@ -147,14 +148,19 @@ def test_fresh_cluster_restores_foreign_memberships_without_changing_role_option
                     "-v",
                     "ON_ERROR_STOP=1",
                 ],
-                input=stdin.read(),
-                capture_output=True,
+                log,
+                stdin,
             )
-            assert result.returncode == 0, result.stderr.decode()
-            checked_memberships.append(b"f|f|t" in result.stdout)
+            checked_memberships.append("f|f|t" in log.read_text())
 
     monkeypatch.setattr(migrate, "checked", check)
-    monkeypatch.setattr(migrate.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0))
+
+    def restore_run(command, **kwargs):
+        if "pg_isready" in command:
+            return SimpleNamespace(returncode=0)
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(migrate.subprocess, "run", restore_run)
     previous_umask = os.umask(0o077)
     try:
         migrate.db_restore(SimpleNamespace(dest=str(tmp_path), port=55434, offline=True))

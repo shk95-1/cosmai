@@ -33,11 +33,9 @@ import psycopg
 from db.seed._common import counts, write
 from db.seed.pipeline import EDGE_UPSERT, STAGE, STORE, TABLES, UPSERT, Edge, Stage
 
-# Every row here but one is enabled = False. The archive stage is off because it ran once and must
-# never run again (#93 D0); the three analysis stages are off because their cron line is #96's to land,
-# and a stage declared enabled with nothing scheduling it reads as stalled forever on the ops screen.
-# `project:corpus` is the exception because fork #95 landed its cron line at the same time as this row
-# -- the two only ever move together (tests/test_pipeline_stage.py holds them against each other).
+# Every row is disabled while #181 pauses the unfinished rollout pending #328. A stage declared
+# enabled with nothing scheduling it reads as stalled forever on the ops screen. The declarations
+# and cron lines move together (tests/test_pipeline_stage.py); the archive is never rerun (#93 D0).
 STAGES: tuple[Stage, ...] = (
     # expected_interval '0' -- the archive is not periodic at all. A period cannot say "never", and
     # enabled = False is what the screen actually reads (pipeline_health colours a disabled stage
@@ -59,8 +57,8 @@ STAGES: tuple[Stage, ...] = (
         "analyze",
         "corpus",
         "1 hour",
-        True,
-        "live lineage: tubedepth -> needs.corpus_document (#93 D1)",
+        False,
+        "live lineage: tubedepth -> needs.corpus_document; paused under #181 pending #328 (#93 D1)",
     ),
     # Fork #96's gated live chain. Its cron line (`cosmai match topic`) is in stack/crontab.d/analyze, and all
     # four rows stay disabled until the chain's gate can pass -- the active snapshot live, its text carrying a

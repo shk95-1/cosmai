@@ -7,7 +7,6 @@ No collector, paid API, old service, or production migration is started.
 import argparse
 import gzip
 import hashlib
-import io
 import json
 import os
 import re
@@ -259,7 +258,9 @@ def db_restore(args):
             )
             + "\n"
         )
-        with io.BytesIO(roles.encode()) as source:
+        with tempfile.TemporaryFile() as source:
+            source.write(roles.encode())
+            source.seek(0)
             checked(
                 [
                     "docker",
