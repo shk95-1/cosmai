@@ -645,6 +645,29 @@ def test_insufficient_alternative_evidence_cannot_mask_a_fully_known_matrix(case
         select(sample, review)
 
 
+def test_contrastive_alternatives_keep_observed_need_without_claiming_case_release():
+    sample = json.loads((FIXTURES / "corroboration_sample.json").read_text())
+    review = json.loads((FIXTURES / "corroboration_review.json").read_text())
+    matrix = json.loads((FIXTURES / "corroboration_alternatives.json").read_text())
+    assert review["market_reviews"][matrix["candidate"]] == matrix
+    result = select(sample, review)
+    lip = next(c for c in result["candidates"] if c["candidate"] == matrix["candidate"])
+    assert lip["source_local_users"] == 3 and len(lip["dates"]) == 3
+    assert (
+        not lip["qualified"]
+        and lip["market_review"]["decision"]["basis"] == "insufficient_alternative_evidence"
+    )
+    assert all(c["status"] == "unknown" for a in matrix["alternatives"][1:] for c in a["comparisons"])
+    # Favorable actual use must survive the held decision, without becoming an invented
+    # no-wiping trial or increasing the frozen discovery population.
+    assert any(
+        c.get("evidence", {}).get("kind") == "user_self_report"
+        for a in matrix["alternatives"][1:]
+        for c in a["comparisons"]
+    )
+    assert len(sample["documents"]) == len(review["observations"]) == 386
+
+
 def test_corroboration_real_sql_excludes_seed_and_matches_only_latest_literal_snapshot(
     corroboration_case, database_url_for_tests, monkeypatch
 ):
