@@ -1,0 +1,327 @@
+{
+  "version": "technical-v1",
+  "candidate": "long-wear-lip-dose-without-tip-wiping",
+  "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+  "support_sha256": "9b1b7062041462e10c84813c0a3e1b467dd79f89b6577dfdf9ee800bf0fca258",
+  "market_sha256": "be986141d1a1501b626c739fbdc4676975ed905a298e1dacece26318b37a795e",
+  "release": {
+    "route": "user_provisional_adjudication",
+    "decision_url": "https://github.com/shk95-1/cosmai/issues/184#issuecomment-5847336264",
+    "recorded_at": "2026-09-26T15:07:39Z",
+    "rationale": "User judges that concrete inconvenience remains compared with alternatives and permits bounded technical assessment of this previously automatically selected candidate. Target is less manual reduction, not an absolute zero-wiping requirement.",
+    "automatic_market_disposition": {
+      "status": "reject",
+      "basis": "insufficient_alternative_evidence"
+    }
+  },
+  "sources": [
+    {
+      "id": "geka-wiper",
+      "url": "https://www.geka-world.com/en/competences-innovations/wipers",
+      "title": "GEKA Wipers",
+      "publisher": "GEKA",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Why a wiper makes the difference; De-blob",
+      "passage": "Aims to reduce the load on the brush tip.",
+      "conditions": "Supplier describes molded wiping systems and tip-load reduction. Formula and applicator-specific qualification is required.",
+      "limitations": "Commercial supplier claim without dose distribution, tested liquid-lip formula or matched current package. It supports an established development lever, not achieved performance.",
+      "reused_from_344": false
+    },
+    {
+      "id": "geka-catalogue",
+      "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/geka_product_catalogue.pdf",
+      "title": "GEKA Product Catalogue",
+      "publisher": "GEKA",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": "2026-06",
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "PDF page 23, printed 44-45, inspected visually",
+      "passage": "VISCOSITY medium",
+      "conditions": "044302 delicateLIPS lists diameter 2.7 mm and length 10.0 mm for medium viscosity; other tips have larger or reservoir-bearing geometries.",
+      "limitations": "Catalog size is not delivered dose. Supplier viscosity classes are unquantified. A smaller tip may require extra dips and must be matched to formula, wiper and stem; no recommendation to use this SKU untested.",
+      "reused_from_344": false
+    },
+    {
+      "id": "hcp-stock",
+      "url": "https://www.hcpackaging.com/product/13mm-standard-al-cap/",
+      "title": "13mm Standard Lip Gloss",
+      "publisher": "HCP Packaging",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Materials; Applicator options; Bottle injection process",
+      "passage": "Wiper: LDPE",
+      "conditions": "Stock 55D lists an LDPE wiper, POM rod, PET bottle and molded/flocked or tufted applicator options; bottle process is listed as IBM.",
+      "limitations": "This demonstrates existing components/process choices, not solvent, seal, flock/glue or dose compatibility with Laka or another film-forming formula. OFC is overflow capacity, not proposed fill volume.",
+      "reused_from_344": false
+    },
+    {
+      "id": "hcp-duo",
+      "url": "https://www.hcpackaging.com/inspiration/gloss-like-a-boss/",
+      "title": "Gloss Like a Boss",
+      "publisher": "HCP Packaging",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "13mm double-ended 6L7 stock pack",
+      "passage": "For 2-step application",
+      "conditions": "Supplier describes a stock double-ended color/gloss format with separate PET reservoirs.",
+      "limitations": "No low-loading, cross-contamination, scale cost, minimum order or current procurement conclusion. Reservoir separation does not prevent a gloss brush carrying color after use.",
+      "reused_from_344": false
+    },
+    {
+      "id": "hcp-match",
+      "url": "https://www.hcpackaging.com/category/lip-gloss-applicators/",
+      "title": "Lip Gloss Applicators",
+      "publisher": "HCP Packaging",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Introductory supplier description",
+      "passage": "work with the chosen formula",
+      "conditions": "Supplier explicitly matches applicator technology to the intended makeup claim and formula.",
+      "limitations": "Consultation offer is not a tested design or available partner. No outreach occurred.",
+      "reused_from_344": false
+    },
+    {
+      "id": "paddle-wiper",
+      "url": "https://patents.google.com/patent/US20130276817A1/en",
+      "title": "Cosmetic Applicator with Paddle-Shaped Applicator Tip",
+      "publisher": "HCP Packaging USA, patent specification",
+      "kind": "patent_specification",
+      "access": "body",
+      "published_on": "2013-10-24",
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Description of Figs 14-17; wiper/tip conformity",
+      "passage": "change shape to conform to the shape of the applicator tip",
+      "conditions": "Specification describes face/edge wiping and a conforming wiper. Some stated goals favor more material per dip.",
+      "limitations": "Mechanism only; no dose distribution, consumer comparison or verified relation to reviewed SKUs. Greater retention can conflict with the low-effort thin-layer goal. No novelty or patent-clearance conclusion.",
+      "reused_from_344": true
+    },
+    {
+      "id": "dior-droplet",
+      "url": "https://patents.google.com/patent/US20220354236A1/en",
+      "title": "Wiper for a liquid or pasty product applicator",
+      "publisher": "Parfums Christian Dior, patent specification",
+      "kind": "patent_specification",
+      "access": "body",
+      "published_on": "2022-11-10",
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Prior art and description of flexible sleeve/chamfer",
+      "passage": "a droplet may remain at the end of the applying member",
+      "conditions": "Specification links residual end droplets to product viscosity and applicator shape, and describes a more flexible wiping sleeve.",
+      "limitations": "Described geometry is not proven commercial behavior for this case. No quantitative comparison, applicable formulation or freedom-to-operate conclusion.",
+      "reused_from_344": false
+    },
+    {
+      "id": "loreal-force",
+      "url": "https://patents.google.com/patent/US12150538B2/en",
+      "title": "Wiper for a cosmetic product applicator",
+      "publisher": "LOreal, patent specification",
+      "kind": "patent_specification",
+      "access": "body",
+      "published_on": "2024-11-26",
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Background; wiping lip and withdrawal force trade-off",
+      "passage": "this would affect the loading of the product",
+      "conditions": "Specification discusses wiping-lip geometry, moldability and withdrawal force; examples include mascara.",
+      "limitations": "Supports a possible geometry/force trade-off, not measured lip performance. Applicability to a thin liquid color must be tested; no patent clearance asserted.",
+      "reused_from_344": false
+    },
+    {
+      "id": "film-tradeoff",
+      "url": "https://www.jstage.jst.go.jp/article/sccj/56/3/56_271/_article/-char/en",
+      "title": "Development of Long-Lasting Lipstick through the Molecular Design of a Novel Cross-Linked Silicone Resin",
+      "publisher": "Journal of Society of Cosmetic Chemists of Japan; KOSE authors",
+      "kind": "primary_research",
+      "access": "abstract_only",
+      "published_on": "2022-09-20",
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "DOI 10.5107/sccj.56.271; accessible abstract; PDF request timed out",
+      "passage": "film is brittle and easily peels off",
+      "conditions": "Abstract describes a resin/volatile-oil film mechanism and flexibility/hardness/dry-feeling trade-offs. The authors report comparison tests on their own novel resin formulation.",
+      "limitations": "Full methods were not inspected. The new resin is outside this existing-material MVP; no synthesis, concentration, recipe or efficacy result transferred. Use only as a trade-off warning and source of test endpoints, not proof for our product.",
+      "reused_from_344": false
+    },
+    {
+      "id": "existing-filmformer",
+      "url": "https://www.dow.com/en-us/pdp.dowsil-593-fluid.01225707z.html",
+      "title": "DOWSIL 593 Fluid",
+      "publisher": "Dow",
+      "kind": "supplier_specification",
+      "access": "body",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "What is DOWSIL 593 Fluid?",
+      "passage": "Dimethicone (and) Trimethylsiloxysilicate",
+      "conditions": "Manufacturer introduction identifies an existing silicone resin blend as a film former for color cosmetics and lipstick formulations.",
+      "limitations": "A commercial ingredient-family example, not a selected recipe or current-product composition. The page mixes cosmetic and industrial property/use entries; no viscosity, percentage, safety, shelf-life or procurement specification is adopted. Actual grade, formulation and compatibility require qualification.",
+      "reused_from_344": false
+    },
+    {
+      "id": "geka-old-catalogue",
+      "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/GEKA_BBS_Katalog_EN.pdf",
+      "title": "Earlier indexed GEKA catalogue",
+      "publisher": "GEKA",
+      "kind": "supplier_specification",
+      "access": "unavailable",
+      "published_on": null,
+      "retrieved_on": "2026-09-27",
+      "retrieval_timezone": "Asia/Seoul",
+      "locator": "Direct fetch returned 404; current catalogue retrieved separately",
+      "passage": null,
+      "conditions": "Old indexed product codes may differ from the current June 2026 catalogue.",
+      "limitations": "No cached dimension or dosing claim from this unavailable document supports a decisive claim.",
+      "reused_from_344": false
+    }
+  ],
+  "claims": [
+    {
+      "id": "established-package-lever",
+      "statement": "Existing molded wiping systems and stock lip applicators provide a plausible package-first development direction.",
+      "source_ids": [
+        "geka-wiper",
+        "hcp-stock"
+      ],
+      "material_or_component": "Wiper, tip and stem; existing molded/flocked components",
+      "conditions": "Supplier specifications, not an empirical matched trial.",
+      "applicability": "Directly addresses the observed repeated excess-removal action while initially holding the intended formula constant.",
+      "limits": "No achieved reduction, reliable dose or compatibility is demonstrated.",
+      "basis": "agent_inference"
+    },
+    {
+      "id": "geometry-formula-interaction",
+      "statement": "Evaluate tip, wiper and formula together; a smaller tip alone is not a demonstrated solution.",
+      "source_ids": [
+        "geka-catalogue",
+        "paddle-wiper",
+        "dior-droplet",
+        "hcp-match"
+      ],
+      "material_or_component": "Tip surface/reservoir, wiping contact and product rheology",
+      "conditions": "Commercial qualitative viscosity classes and patent mechanisms; actual fill state and withdrawal handling unknown.",
+      "applicability": "Can motivate a bounded comparison of existing component combinations.",
+      "limits": "Smaller loading may trade manual wiping for extra dipping, patchy coverage or force; proposed variables are hypotheses.",
+      "basis": "agent_inference"
+    },
+    {
+      "id": "force-and-tip-droplet",
+      "statement": "Track withdrawal force and end droplets alongside loaded mass.",
+      "source_ids": [
+        "dior-droplet",
+        "loreal-force"
+      ],
+      "material_or_component": "Flexible wiping lip/sleeve",
+      "conditions": "Patent descriptions, with mascara examples for some force discussions.",
+      "applicability": "An agent-proposed secondary failure mode for a package revision.",
+      "limits": "No quantitative lip-force limit or patented geometry is adopted as a design requirement.",
+      "basis": "agent_inference"
+    },
+    {
+      "id": "dual-format-boundary",
+      "statement": "Separate base-dose control from gloss-brush cleaning in the proposed case.",
+      "source_ids": [
+        "hcp-duo"
+      ],
+      "material_or_component": "Existing double-ended reservoir format",
+      "conditions": "Supplier offers two reservoirs; consumer source evidence records cleaning as a distinct action.",
+      "applicability": "Preserve the two-step option without claiming reservoir separation solves brush contamination.",
+      "limits": "A wiping-friendly gloss tip is a separate hypothesis and not established by this supplier claim.",
+      "basis": "agent_inference"
+    },
+    {
+      "id": "film-property-guard",
+      "statement": "Preserve film/finish behavior while testing packaging; changing formula can introduce different wear/comfort trade-offs.",
+      "source_ids": [
+        "film-tradeoff"
+      ],
+      "material_or_component": "Film-forming resin plus volatile carrier",
+      "conditions": "Abstract-only primary research on another formulation with a novel resin.",
+      "applicability": "Motivates endpoints and controls, with no direct formulation recommendation.",
+      "limits": "No current-product composition, concentration, process or human performance inferred; published effects remain specific to that study.",
+      "basis": "agent_inference"
+    },
+    {
+      "id": "existing-formulation-family",
+      "statement": "Commercial silicone film-former families exist; preserve or assess an established suitable base formula before introducing a new material.",
+      "source_ids": [
+        "existing-filmformer",
+        "film-tradeoff"
+      ],
+      "material_or_component": "Existing silicone-resin film-former family and carrier; no chosen concentration",
+      "conditions": "Supplier role statement and abstract-only mechanism/trade-off evidence on a different formulation.",
+      "applicability": "Provides a concrete existing-ingredient direction for the conditional brief while package loading remains the primary lever.",
+      "limits": "No finished-product performance or safe/compatible concentration inferred. The study-specific novel resin is excluded; the cited commercial listing is not a purchasing recommendation or adopted formula.",
+      "basis": "agent_inference"
+    }
+  ],
+  "proposed_tests": [
+    {
+      "id": "loading-and-effort",
+      "state": "proposed_not_run",
+      "objective": "Reduce repeated manual excess removal without replacing it with extra dipping or poor coverage.",
+      "control": "Same existing formula and defined fill/handling conditions in the baseline and candidate package; compare an acceptable existing alternative separately.",
+      "measure": "Record load per withdrawal, mass manually removed, wipe/dip counts, end droplets and standardized coating uniformity. Use exploratory repeated loading before choosing a powered design.",
+      "limitations": "No test performed or equipment assumed. Resolution/evaporation correction and acceptance targets must be set before mass claims; bench coating does not prove user satisfaction."
+    },
+    {
+      "id": "finish-and-wear",
+      "state": "proposed_not_run",
+      "objective": "Check that easier loading preserves the intended thin-layer result.",
+      "control": "Baseline formula/package and candidate package at matched applied amount; include the ordinary instructed routine for the existing alternative.",
+      "measure": "Record coating appearance, drying, transfer/rub behavior and gloss-overcoat interaction with stated substrate, load and time. Human wear/comfort would require a separately scoped later assessment.",
+      "limitations": "No numerical performance claim or safety conclusion. Abstract-only research provides endpoints, not a reproduced protocol or validated threshold."
+    },
+    {
+      "id": "package-compatibility",
+      "state": "proposed_not_run",
+      "objective": "Identify material, seal, flock and handling defects before selecting a package.",
+      "control": "Same formula, storage conditions and fill state, with baseline closure and existing material options.",
+      "measure": "Observe leaks, closure/withdrawal force, material/adhesive changes, fiber loss, product loss and loading drift over repeat use under a later qualified protocol.",
+      "limitations": "No stability, preservation, safety or regulatory acceptance established. Actual formula/solvent data and package specification are required; no purchasing or partner is assumed."
+    }
+  ],
+  "disposition": {
+    "status": "conditional_basis_for_brief",
+    "conclusion": "Package-first assessment using established wiper/tip/stock-pack options is technically plausible enough for a conditional brief. This does not validate a finished formula or resolve the remaining alternatives evidence.",
+    "next": "Consume in #325, preserve user intervention and comparison unknowns, then obtain the separate #327 usefulness evaluation.",
+    "unknowns": [
+      "Actual current formula rheology, current package geometry and material compatibility.",
+      "Acceptance targets, meaningful convenience gain and willingness to switch shade/formula/price.",
+      "Manufacturing fit, supplier qualification, minimum order and economics.",
+      "Matched alternative suitability, finished-product wear, safety and stability."
+    ]
+  },
+  "reuse": {
+    "decision": "No repository port or paper/ingredient scoring imported.",
+    "rationale": "Current task concerns package loading and a few directly accessible primary sources. Ingredient identity or bibliographic-score helpers cannot establish package compatibility or finished performance. Existing source fingerprints, discovery selection and provenance validation are reused."
+  },
+  "budget": {
+    "additional_document_limit": 10,
+    "additional_documents_examined": 10,
+    "reused_document_count": 1,
+    "counting": "Ten new distinct technical documents including one inaccessible older catalogue, plus one reused patent. Abstract and timed-out PDF are the same article; repeated requests and search listings add no documents. The bounded technical pass is complete.",
+    "paid_calls": 0,
+    "gpu_hours": 0,
+    "production_writes": 0,
+    "purchases": 0,
+    "outreach": 0
+  }
+}

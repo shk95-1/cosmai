@@ -1170,6 +1170,19 @@ and brand claims alone cannot establish a satisfactory existing alternative. A r
 lead still needs case-specific technical evidence and the user's evaluation; this is no
 performance or worldwide market-absence certification.
 
+`analysis.discovery.technical.validate_technical(sample, review, assessment)` binds a
+`technical-v1` evidence handoff to the original source/support and unchanged comparison
+digests (#184). A dated, linked `user_provisional_adjudication` may release the recorded
+pre-comparison automatic candidate to technical assessment while its automatic market
+disposition remains held. This is an explicit human intervention, not independent evidence
+or an automatic gate pass. The handoff distinguishes supplier/patent specifications from
+primary research, records access scope, supporting passages, conditions and applicability
+limits, and separates source statements from agent inferences. Unavailable sources cannot
+support decisive claims; proposed tests carry controls and limits but no invented results.
+Validation checks the artifact's provenance structure, not source truth, actual user
+authorization, scientific quality or finished performance. A conditional technical basis
+still requires the development brief and the separate user's usefulness evaluation.
+
 `cosmai discover sample --per-cue 3 --output sample.json` exports bounded behavior probes from
 canonical commerce reviews and latest corpus comment snapshots. It uses needs_runtime in
 read-only autocommit mode, leaves the database unchanged, and records source/cue coverage,
