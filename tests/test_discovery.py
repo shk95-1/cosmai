@@ -11,10 +11,124 @@ from pathlib import Path
 
 import pytest
 
+from analysis.discovery.alternatives import identity_relation
 from analysis.discovery.core import fingerprint, freeze, select
 
 FIXTURES = Path(__file__).parent / "fixtures" / "discovery"
 WINNER = "oily-skin-foundation-without-diy-blending"
+
+
+def market_review(review):
+    review = deepcopy(review)
+    review["market_reviews"] = {WINNER: json.loads((FIXTURES / "first_case_alternatives.json").read_text())}
+    return review
+
+
+def test_real_alternatives_reject_the_provisional_lead_without_inventing_a_satisfactory_product(case):
+    sample, review = case
+    result = select(sample, market_review(review))
+    assert result["selected"] is None
+    assert result["status"] == "no_qualified_candidate"
+    candidate = next(c for c in result["candidates"] if c["candidate"] == WINNER)
+    assert (
+        candidate["support"]
+        == next(c for c in select(*case)["candidates"] if c["candidate"] == WINNER)["support"]
+    )
+    assert candidate["counterevidence"]
+    assessment = candidate["market_review"]
+    assert assessment["decision"]["basis"] == "insufficient_common_requirement"
+    assert len(assessment["requirements"]) == 5
+    assert len(assessment["alternatives"]) == 4
+    assert all(a["identity"]["level"] == "listing" for a in assessment["alternatives"])
+    assert all(any(c["status"] == "unknown" for c in a["comparisons"]) for a in assessment["alternatives"])
+    assert "market review" in candidate["rejection_reasons"][-1]
+    assert result == select(sample, market_review(review))
+
+
+def test_uniform_followup_cannot_count_two_dated_cleanser_reviews_as_two_users():
+    sample = json.loads((FIXTURES / "followup_sample.json").read_text())
+    review = json.loads((FIXTURES / "followup_review.json").read_text())
+    assert len(sample["documents"]) == len(review["observations"]) == 208
+    assert sample["manifest"]["per_cue"] == 12
+    assert not sample["manifest"]["failures"]
+    result = select(sample, review)
+    assert result["status"] == "no_qualified_candidate"
+    cleanser = next(
+        c
+        for c in result["candidates"]
+        if c["candidate"] == "facial-cleanser-without-import-or-unwanted-bumps"
+    )
+    assert len(cleanser["support"]) == len(cleanser["dates"]) == 2
+    assert cleanser["source_local_users"] == 1
+    assert cleanser["rejection_reasons"] == ["fewer than two attributable source-local users"]
+    # The initial group is still present, with its market rejection; it was not silently
+    # removed or relabelled to produce a preferred new winner after expansion.
+    foundation = next(c for c in result["candidates"] if c["candidate"] == WINNER)
+    assert foundation["market_review"]["decision"]["status"] == "reject"
+    assert len(result["candidates"]) == 25
+
+
+@pytest.mark.parametrize(
+    "change",
+    ["snapshot", "support", "span", "missing_user", "comparison", "line_shade", "unknown_gap", "brand_proof"],
+)
+def test_market_feedback_refuses_evidence_drift_and_false_gap_or_variant_proof(case, change):
+    sample, review = case
+    review = market_review(review)
+    assessment = review["market_reviews"][WINNER]
+    if change in {"snapshot", "support"}:
+        assessment[change + "_sha256"] = "wrong"
+    elif change == "span":
+        assessment["requirements"][0]["span"] = "unsupported exact shade 21C"
+    elif change == "missing_user":
+        assessment["requirements"] = assessment["requirements"][:3]
+    elif change == "comparison":
+        assessment["alternatives"][0]["comparisons"].pop()
+    elif change == "line_shade":
+        comparison = assessment["alternatives"][0]["comparisons"][0]
+        comparison["status"] = "met"
+        comparison["evidence"] = assessment["alternatives"][0]["source"]
+    elif change == "unknown_gap":
+        assessment["decision"]["status"] = "retain_for_technical_review"
+    else:
+        assessment["decision"]["basis"] = "existing_alternative"
+    with pytest.raises(ValueError):
+        select(sample, review)
+
+
+def test_product_line_options_and_multi_variant_listings_never_collapse_to_identity():
+    line = {"source": "shop", "product_id": "base", "level": "line"}
+    listing = {**line, "level": "listing", "variant_keys": ["unscented-30", "lavender-50"]}
+    option = {**line, "level": "variant", "variant_key": "unscented-30"}
+    other = {**option, "variant_key": "lavender-50"}
+    assert identity_relation(line, option) == "unresolved"
+    assert identity_relation(listing, option) == "listing_contains_variant"
+    assert identity_relation(listing, other) == "listing_contains_variant"
+    assert identity_relation(option, other) == "distinct"  # shared listing is not transitive equality
+    assert identity_relation(option, option) == "same_variant"
+    assert identity_relation(option, {**option, "source": "other-shop"}) == "unresolved"
+    with pytest.raises(ValueError, match="option/SKU"):
+        identity_relation(line, {**line, "level": "variant"})
+
+
+@pytest.mark.parametrize(
+    "attribute,values",
+    [
+        ("spf", [30, 50]),
+        ("scent", ["unscented", "lavender"]),
+        ("generation", ["original", "renewed"]),
+        ("shade", ["21C", "21N"]),
+    ],
+)
+def test_known_conflicts_defeat_even_equal_source_option_keys(attribute, values):
+    option = {"source": "shop", "product_id": "base", "level": "variant", "variant_key": "shared"}
+    assert (
+        identity_relation(
+            {**option, "attributes": {attribute: values[0]}},
+            {**option, "attributes": {attribute: values[1]}},
+        )
+        == "distinct"
+    )
 
 
 @pytest.fixture

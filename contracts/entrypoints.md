@@ -1156,6 +1156,20 @@ naver:   datalab once a month (by the keyword dictionary) Â· blog once a month Â
 
 ## Agent-mediated need discovery (#323)
 
+An optional `market_reviews` object in the semantic review maps candidate keys to
+`alternatives-v1` assessments (#324). Each assessment binds the sample's
+`snapshot_sha256` and the fingerprint of that candidate's original `support`, and records
+requirements with original document spans, priority and variant uncertainty; source-key
+product identities at line/listing/variant level; a complete met/contradicted/unknown
+comparison for each alternative and requirement; dated sources and their evidence kind;
+availability, bounded coverage, limitations and an explicit decision with its falsifier.
+`analysis/discovery/alternatives.py` validates these inputs. A rejection returns to selection
+before ranking and retains the full matrix and original observations. Unknown suitability
+alone cannot establish a residual gap, a listing cannot satisfy a variant-specific claim,
+and brand claims alone cannot establish a satisfactory existing alternative. A retained
+lead still needs case-specific technical and customer review; this is no performance or
+worldwide market-absence certification.
+
 `cosmai discover sample --per-cue 3 --output sample.json` exports bounded behavior probes from
 canonical commerce reviews and latest corpus comment snapshots. It uses needs_runtime in
 read-only autocommit mode, leaves the database unchanged, and records source/cue coverage,
