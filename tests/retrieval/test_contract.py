@@ -107,8 +107,8 @@ def test_the_adoption_threshold_is_the_bm25_heldout_floor():
     assert "P@10 > .000" in INTERFACES.read_text(encoding="utf-8")
 
 
-def test_the_ddl_lives_in_this_branchs_number_block():
-    # While main keeps using 00N, a filename collision splits the apply order of db/migrate.sh.
+def test_the_imported_ddl_keeps_its_historical_filename():
+    # Renumbering an applied migration would lose its existing ledger identity.
     assert DDL.name.startswith("020_")
 
 

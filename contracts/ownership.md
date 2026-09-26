@@ -1,173 +1,34 @@
-# ownership — what the fork may change, must not change, and must send upstream
+# ownership — one active development and deployment repository
 
-Two checkouts write into one repository history and one production database: upstream `cosmai`
-and the fork `cosmai-import-ydc`. Incidents #150 · #103 · #115 are the record of what happens
-without a written boundary — objects the fork put into production that upstream did not know about
-were dropped, or killed a check — and #107 is the record of a view reverted because two checkouts
-deployed to one database. #192's methodology row 3 turned that into the rule this file
-carries; AGENTS.md names this file, `tests/test_ownership.py` and `tool/checks/ownership` as its
-enforcement sites.
+## Active owner
 
-## The rules
-
-1. **Fork DDL numbers are ≥ 020.** `contracts/ddl/needs/0[01]*.sql` is upstream's block and
-   `contracts/ddl/needs/0[2-9]*.sql` is the fork's. DDL stays additive on both sides
-   (`tests/test_ddl_additive_only.py`), and fork DDL reaches production only after it is merged
-   upstream through a wave PR — production DB actions run from the upstream checkout only
-   (#192 D7, `STATE.md` §3).
-2. **The fork changes its own modules, never the upstream guards.** The two lists below say which is
-   which. A path on the must-not-change list is changed by upstream and arrives in the fork by
-   merge, never the other way around.
-3. **A shared-surface change goes upstream in the same wave.** A file that exists on both sides is
-   not the fork's property. Changing one is allowed, and it obliges the fork to send that change
-   upstream in the same wave — never months of them in one PR (#192 methodology row 1, the gap
-   bound). The third list is the record of which surfaces the fork's PRs have already touched.
-
-Before opening a fork → upstream PR the fork runs `tool/checks/ownership upstream/main`, which
-intersects `git diff --name-only upstream/main...HEAD` with the must-not-change list and exits 1 on
-any hit. `tool/issue audit` prints the same result as an item on a checkout that has an `upstream`
-remote. It gates that one direction on purpose, and its header says why: upstream editing a
-fork-owned file is not the failure this gate is for (#264 did, under a green gate), and what upstream
-owes for it is the registration this file carries, not abstention.
-
-## Paths the fork owns
-
-Everything PR #59 (`3b464fa...5c04ef5`) added that upstream had no file for, grouped by directory,
-plus what the later wave PRs added (PR #219: the MFDS loader, its data and tests; PR #227: the
-ydc import pin test; waves 7 and 8, merged as PR #270: the archive and live lineage's views, seed
-and tests — ten files that were in no block at all, because a file nobody has listed is unregistered
-whether it is new or old, and the gate below cannot see that).
-The fork writes these without asking; upstream does not edit them outside a merge.
-
-```ownership:fork-owned
-analysis/cards/
-analysis/crosscheck/
-analysis/evidence/
-analysis/holdout/
-analysis/judge/
-analysis/retrieval/
-analysis/sensitivity/
-analysis/trend/
-contracts/ddl/needs/0[2-9]*.sql
-db/corpus/
-db/seed/mfds.py
-db/seed/panel.py
-db/seed/pipeline_corpus.py
-db/views/archive_metrics_topic_quarter.sql
-db/views/archive_topic_quarter_evidence.sql
-db/views/archive_topic_quarter_judgement.sql
-db/views/author_identifier_violation.sql
-db/views/live_listing_route.sql
-db/views/metrics_topic_quarter_violation.sql
-db/views/topic_quarter_evidence_quote.sql
-db/views/topic_quarter_evidence_violation.sql
-db/views/topic_quarter_judgement_violation.sql
-eval/mfds/
-eval/panel/
-tests/fixtures/mfds/
-tests/fixtures/trend_sample/
-tests/fixtures/yt_handoff/
-tests/retrieval/
-tests/test_archive_lineage.py
-tests/test_author_hash.py
-tests/test_cards_rules.py
-tests/test_corpus_import.py
-tests/test_crosscheck_*.py
-tests/test_evidence_*.py
-tests/test_holdout_*.py
-tests/test_judge_*.py
-tests/test_judgement_contract.py
-tests/test_match_topic.py
-tests/test_mfds_seed.py
-tests/test_month_grain_regression.py
-tests/test_panel_quarter_contract.py
-tests/test_panel_seed.py
-tests/test_project_corpus.py
-tests/test_sensitivity_*.py
-tests/test_trend_*.py
-tests/test_ydc_pin.py
-tool/compare-ydc-*
-tool/measure-*
-tool/show-lexicon-stamp
-tool/show-vector-stamp
+```ownership:active-repositories
+shk95-1/cosmai
 ```
 
-## Paths the fork must not change
+This repository owns every module, contract, guard and new migration. Production database actions
+are performed by the coordinator from the primary checkout only (`STATE.md` §3). Issue branches
+and same-channel waves remain the development model; there is no cross-repository wave or sync duty.
 
-The schema and its deployment path, the checks and hooks that enforce the rules, the boot page and
-the operating documents, and the agent definitions every session loads. A change here that only the
-fork has is a change production never sees, or a guard that silently stops guarding one side.
+## Migration numbers and provenance
 
-```ownership:must-not-change
-.claude/agents/
-.claude/settings.json
-.githooks/
-AGENTS.md
-CLAUDE.md
-README.ko.md
-README.md
-STATE.md
-contracts/ddl/needs/0[01]*.sql
-contracts/ownership.md
-db/bootstrap.sql
-db/bootstrap_source.sql
-db/grants/
-db/migrate.sh
-tests/tool/
-tool/checks/
-```
+New DDL uses one sequence per schema: choose an unused number greater than every existing migration
+in that schema. Historical files retain their names and contents; the former 020 boundary no longer
+allocates ownership. DDL remains additive under `contracts/versioning.md` and the existing guard.
 
-## Shared surfaces the fork has touched — go upstream in the same wave
+The temporary `shk95/cosmai-import-ydc` fork is retired as an executable queue. Its main and branch
+history has been absorbed; keep the checkout, issue dispositions and imported module lineage as
+historical inputs. There are no fork-owned paths or upstream-only guards within this repository.
+Fully qualified issue closures remain required. `tool/checks/foreign-closes` is a manual import
+check, not a recurring fork audit.
 
-These existed on both sides before PR #59 and the fork changed them anyway, which is exactly the case
-rule 3 governs. They are listed so the next fork → upstream PR knows what to diff first. PR #227
-added two of them (the `retrieval_ask` cap lives in the polarity ledger and its tests), and PR #270
-seven more: the production schedule and the pipeline graph, which the fork writes lines into and
-upstream deploys. `stack/crontab.d/` is the clearest of them — given to the fork outright, the
-session that deploys the schedule could not change it without a PR from the session that does not.
+## Historical boundary
 
-One of the seven sits under a directory the first list gives the fork, and a file entry here narrows a
-directory entry there: `analysis/retrieval/` is the fork's, but upstream #264 added
-`youtube_video_text` to `analysis/retrieval/corpus.py` and fork #95 imports it, so that one file is
-a surface both sides write. The narrower statement is the true one — the directory keeps every other
-file — and `tests/test_ownership.py` allows the narrowing in that direction only: a file the fork is
-told it owns outright cannot also be one it must send upstream.
+The former number blocks, ownership lists and shared-surface sync rules were introduced under
+#192 after incidents #150, #103 and #115. Their complete text remains in Git history before #322.
+The current rule removes that partition, not the secrets, additive-DDL, data-lineage, verification
+or deployment protections it accompanied. Historical DDL and the YDC import pin remain immutable.
 
-```ownership:shared-surface
-analysis/polarity/pricing.py
-analysis/retrieval/corpus.py
-analysis/types.py
-contracts/README.md
-contracts/entrypoints.md
-contracts/formats.md
-contracts/interfaces.md
-contracts/versioning.md
-cosmai/cli.py
-db/lexicon.py
-db/seed/__init__.py
-db/seed/lexicon.py
-db/views/pipeline_health.sql
-eval/README.md
-pyproject.toml
-stack/README.md
-stack/crontab.d/
-tests/scope.toml
-tests/snapshots/cosmai_help.txt
-tests/test_cli_help.py
-tests/test_cli_lexicon.py
-tests/test_contract_ddl.py
-tests/test_llm_polarity.py
-tests/test_migrate_ledger_and_grants.py
-tests/test_pipeline_health_view.py
-tests/test_pipeline_stage.py
-tests/test_seed.py
-tests/test_source_schema_ledger.py
-tool/checks/paths
-tool/checks/test
-uv.lock
-```
-
-Two of those, `tool/checks/paths` and `tool/checks/test`, are also on the must-not-change list. That
-overlap is the history, not a permission: those edits reached upstream only through PR #59's review,
-and under rule 2 the fork does not make them again. `tool/checks/ownership` would flag them today,
-which is the intended answer.
+Archived repositories remain read-only development inputs. The user's #181 restoration includes
+local runtime copies of the four legacy viewing services and the independent Run package; running
+those services does not reopen archived development queues or authorize pushes to those repositories.

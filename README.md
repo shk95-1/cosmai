@@ -6,7 +6,10 @@ A cosmetics consumer-needs analysis system — collect → keep the raw copy →
 
 **Boot from `AGENTS.md`** — boot order, absolute rules, and where each rule is enforced. The only work items are GitHub issues (`tool/issue ready`). `CLAUDE.md` is the one line that imports that file.
 
-This is a monorepo started fresh **without shared history**, per the 2026-08-23 rebuild spec. The old cosmai moved to `slopindustries/cosmai-old` (archived) and the assets worth keeping have already been migrated into `contracts/` and `playbook/` — fetching from an old clone fails for lack of a common ancestor, and that is expected. The previous repositories (`cosmai-old`, `trend-radar`, `yt-scrapper`, `Research_Paper`, `stack`, `data-portal`) are archived (read-only), and this repository replants **code only** — documents, hooks, meta-tests and development philosophy are not carried over; they are extracted separately into `playbook/`.
+This monorepo began without shared history in the 2026-08-23 rebuild. `shk95-1/cosmai` is now the only active development and deployment repository; the temporary `cosmai-import-ydc` fork is retained as history after absorption (#322). Historical repositories are reuse/reference inputs, not parallel queues: their actual archive status varies, so do not infer active ownership from a README or an archive flag. Canonical contracts, additive migrations and import provenance remain in this repository.
+
+The product objective is #321: discover niche cosmetics requirements and produce grounded development briefs. The user-selected Docker development/local runtime is restored under #181, including all fifteen formerly running containers; service simplification follows resolution of the remaining issue plans. The current destination provider and approval boundaries are in `STATE.md`, and executable work is in issues.
+
 
 ## Layout (contracts first)
 

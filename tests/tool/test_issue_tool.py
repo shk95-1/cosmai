@@ -283,6 +283,8 @@ def run(tmp_path: Path):
             "FAKE_DOCKER_OPS_PIPELINE": fixture_kwargs.get("ops_pipeline", ""),
             "FAKE_DOCKER_OPS_COLLECTOR": fixture_kwargs.get("ops_collector", ""),
         }
+        if fixture_kwargs.get("default_repo"):
+            env.pop("COSMAI_ISSUE_REPOS", None)
         return subprocess.run(
             [str(ISSUE), *args],
             capture_output=True,
@@ -316,7 +318,7 @@ def test_a_closed_blocker_does_not_hold_an_issue_back(run):
 
 
 def test_a_blocker_in_the_other_repo_blocks(run):
-    # cosmai#55 <- cosmai-import-ydc#6 is live today; one repo at a time would call #55 ready.
+    # An explicitly configured external blocker must remain visible during a bounded import.
     done = run(
         "ready",
         "--json",
@@ -1949,183 +1951,6 @@ def checkout_with_upstream_remote(tmp_path: Path) -> Path:
     return repo
 
 
-@pytest.fixture
-def fork_behind_upstream(tmp_path: Path) -> Path:
-    """A fork checkout whose `upstream/main` carries commits it does not have.
-
-    One of them touches a shared surface (db/) and one does not (portal/), which is the whole
-    judgment the audit item makes. No network: `upstream` is a sibling directory.
-    """
-    clean = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-
-    def run_git(cwd: Path, *args: str) -> None:
-        subprocess.run(
-            ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "-C", str(cwd), *args],
-            check=True,
-            capture_output=True,
-            env=clean,
-        )
-
-    origin = tmp_path / "upstream-repo"
-    origin.mkdir()
-    subprocess.run(
-        ["git", "init", "-q", "-b", "main", str(origin)], check=True, capture_output=True, env=clean
-    )
-    (origin / "seed.py").write_text("# seed\n", encoding="utf-8")
-    run_git(origin, "add", "-A")
-    run_git(origin, "commit", "-qm", "chore: seed")
-
-    fork = tmp_path / "fork-repo"
-    subprocess.run(["git", "clone", "-q", str(origin), str(fork)], check=True, capture_output=True, env=clean)
-    run_git(fork, "remote", "add", "upstream", str(origin))
-
-    (origin / "db").mkdir()
-    (origin / "db" / "bootstrap.sql").write_text("-- shared\n", encoding="utf-8")
-    run_git(origin, "add", "-A")
-    run_git(origin, "commit", "-qm", "feat(db): a shared surface")
-    (origin / "portal").mkdir()
-    (origin / "portal" / "app.js").write_text("// not shared\n", encoding="utf-8")
-    run_git(origin, "add", "-A")
-    run_git(origin, "commit", "-qm", "feat(portal): not a shared surface")
-
-    run_git(fork, "fetch", "-q", "upstream")
-    return fork
-
-
-FAKE_FOREIGN_CLOSES = """#!/bin/sh
-printf '%s\\n' "#43 · closed by a commit from the other repo · abc1234"
-exit 1
-"""
-
-
-def test_audit_carries_the_foreign_closes_output_verbatim(
-    run, monkeypatch, tmp_path: Path, checkout_with_upstream_remote: Path
-):
-    # #174 (B): audit calls tool/checks/foreign-closes rather than reimplementing its judgment --
-    # this proves the call happens and the block is exactly what the script printed.
-    fake = tmp_path / "fake-foreign-closes"
-    fake.write_text(FAKE_FOREIGN_CLOSES, encoding="utf-8")
-    fake.chmod(0o755)
-    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=checkout_with_upstream_remote,
-    )
-    assert done.returncode == 0, done.stderr
-    assert "#43 · closed by a commit from the other repo · abc1234" in done.stdout, done.stdout
-
-
-def test_audit_skips_foreign_closes_without_an_upstream_remote(run, checkout: Path):
-    # An upstream checkout has no `upstream` remote to compare against (there is nothing foreign
-    # relative to itself), so the section says it was skipped instead of erroring.
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=checkout,
-    )
-    assert done.returncode == 0, done.stderr
-    # Three fork items share the note: foreign closes, fork behind, ownership.
-    assert done.stdout.count("(no upstream remote — skipped)") == 3, done.stdout
-
-
-FAKE_OWNERSHIP = """#!/bin/sh
-printf '%s\\n' "db/migrate.sh" "STATE.md"
-exit 1
-"""
-
-
-def test_audit_carries_the_ownership_check_output_verbatim(
-    run, monkeypatch, tmp_path: Path, fork_behind_upstream: Path
-):
-    # #212: the boundary check is one script (tool/checks/ownership) and audit calls it rather than
-    # reimplementing the list, one line per file so the reader has the path and not just a count.
-    quiet = tmp_path / "fake-foreign-closes"
-    quiet.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    quiet.chmod(0o755)
-    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(quiet))
-    fake = tmp_path / "fake-ownership"
-    fake.write_text(FAKE_OWNERSHIP, encoding="utf-8")
-    fake.chmod(0o755)
-    monkeypatch.setenv("COSMAI_OWNERSHIP_CHECK", str(fake))
-    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", FORK)
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=fork_behind_upstream,
-    )
-    assert done.returncode == 0, done.stderr
-    block = done.stdout.split("fork changed a file upstream owns")[1].split("\n\n")[0]
-    listed = [line.strip() for line in block.splitlines() if line.strip()]
-    assert listed == ["db/migrate.sh", "STATE.md"], done.stdout
-
-
-def test_audit_skips_the_ownership_check_without_an_upstream_remote(run, checkout: Path):
-    # Same reason as foreign-closes: an upstream checkout owns everything, so there is no boundary
-    # to test and "none" would read as a verdict the check never made.
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=checkout,
-    )
-    assert done.returncode == 0, done.stderr
-    block = done.stdout.split("fork changed a file upstream owns")[1].split("\n\n")[0]
-    assert "(no upstream remote — skipped)" in block, done.stdout
-
-
-def test_audit_lists_upstream_commits_on_shared_surfaces_the_fork_lacks(
-    run, monkeypatch, tmp_path: Path, fork_behind_upstream: Path
-):
-    # #192 methodology row 1: the fork drifting behind on db/, tool/checks/, contracts/ddl/ and
-    # AGENTS.md is the gap the migration keeps reopening, so boot has to say it out loud.
-    fake = tmp_path / "fake-foreign-closes"
-    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    fake.chmod(0o755)
-    monkeypatch.setenv("COSMAI_FOREIGN_CLOSES", str(fake))
-    monkeypatch.setenv("COSMAI_ISSUE_PRIMARY", FORK)
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=fork_behind_upstream,
-    )
-    assert done.returncode == 0, done.stderr
-    block = done.stdout.split("fork behind on shared surfaces")[1].split("\n\n")[0]
-    listed = [line.strip() for line in block.splitlines() if line.strip()]
-    # The db/ commit, and only it: the portal/ one is not a surface the two repos share.
-    assert len(listed) == 1, done.stdout
-    shas = subprocess.run(
-        ["git", "-C", str(fork_behind_upstream), "log", "--format=%h", "upstream/main", "--not", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split()
-    assert listed[0] == shas[1], (listed, shas)
-
-
-def test_audit_skips_fork_behind_without_an_upstream_remote(run, checkout: Path):
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=checkout,
-    )
-    assert done.returncode == 0, done.stderr
-    block = done.stdout.split("fork behind on shared surfaces")[1]
-    assert "(no upstream remote — skipped)" in block.split("\n\n")[0], done.stdout
-
-
-def test_audit_says_so_when_the_upstream_ref_was_never_fetched(run, checkout_with_upstream_remote: Path):
-    # The remote exists but nothing was fetched, so there is no upstream/main to compare against.
-    # Printing "none" there would read as "the fork is up to date", which is not what is known.
-    done = run(
-        "audit",
-        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",), parent=10)],
-        cwd=checkout_with_upstream_remote,
-    )
-    assert done.returncode == 0, done.stderr
-    block = done.stdout.split("fork behind on shared surfaces")[1].split("\n\n")[0]
-    assert "no upstream/main" in block, done.stdout
-
-
 def test_recheck_d_skips_a_path_with_a_parenthetical_note_right_after(run):
     # #174 (C-1): a path the body already marks as not-yet-there or moved should not also be
     # reported as "missing from the checkout" -- that would just restate the same note as a defect.
@@ -2265,3 +2090,29 @@ def test_no_subcommand_prints_korean(run, monkeypatch, tmp_path: Path, checkout_
         done = run(*args, upstream=fixture, cwd=checkout_with_upstream_remote, fork_labels=["channel"])
         assert not HANGUL.search(done.stdout), (args, done.stdout)
         assert not HANGUL.search(done.stderr), (args, done.stderr)
+
+
+def test_default_queue_does_not_fetch_the_retired_fork(run):
+    done = run(
+        "ready",
+        "--json",
+        upstream=[epic(10, "tool", subs=(11,)), issue(11, "work", labels=("ch:tool",))],
+        fork=[issue(43, "retired work", labels=("ch:tool",), assignees=("retired-worker",))],
+        gh_fails_on="fork",
+        default_repo=True,
+    )
+    assert done.returncode == 0, done.stderr
+    model = json.loads(done.stdout)
+    assert model["held"]["in_progress"] == 0
+    assert [item["key"] for channel in model["channels"] for item in channel["items"]] == ["cosmai#11"]
+
+
+def test_audit_has_no_recurring_retired_fork_checks(run, checkout_with_upstream_remote):
+    done = run("audit", upstream=[], cwd=checkout_with_upstream_remote)
+    assert done.returncode == 0, done.stderr
+    for retired in (
+        "Closed by a commit that belongs to the other repo",
+        "fork behind on shared surfaces",
+        "fork changed a file upstream owns",
+    ):
+        assert retired not in done.stdout

@@ -18,7 +18,7 @@ header() {
 # issue tool (its own `require_command gh jq git` would turn a docker-only boot unverified). Same
 # default list, same match-by-name-alone rule (#174).
 status_primary() {
-    status_repos=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-ydc"}
+    status_repos=${COSMAI_ISSUE_REPOS:-"shk95-1/cosmai"}
     status_origin=${COSMAI_ISSUE_PRIMARY:-$(git -C "$repo_root" remote get-url origin 2>/dev/null || true)}
     status_origin_repo=$(printf '%s' "$status_origin" | sed -E 's#\.git$##; s#.*/##')
     for status_repo in $status_repos; do
