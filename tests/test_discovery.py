@@ -668,6 +668,48 @@ def test_contrastive_alternatives_keep_observed_need_without_claiming_case_relea
     assert len(sample["documents"]) == len(review["observations"]) == 386
 
 
+@pytest.fixture
+def technical_case():
+    sample = json.loads((FIXTURES / "corroboration_sample.json").read_text())
+    review = json.loads((FIXTURES / "corroboration_review.json").read_text())
+    pack = json.loads((Path(__file__).parents[1] / "analysis/discovery/lip_dose_technical.json").read_text())
+    return sample, review, pack
+
+
+def test_user_adjudicated_technical_handoff_preserves_the_failed_automatic_market_gate(technical_case):
+    from analysis.discovery.technical import validate_technical
+
+    sample, review, pack = technical_case
+    before = deepcopy(review)
+    candidate = validate_technical(sample, review, pack)
+    assert review == before
+    assert not candidate["qualified"]
+    assert candidate["market_review"]["decision"]["basis"] == "insufficient_alternative_evidence"
+    assert pack["release"]["route"] == "user_provisional_adjudication"
+    assert pack["budget"]["additional_documents_examined"] <= pack["budget"]["additional_document_limit"]
+    assert pack["sources"][-1]["access"] == "unavailable"
+    assert not any(pack["sources"][-1]["id"] in c["source_ids"] for c in pack["claims"])
+
+
+@pytest.mark.parametrize(
+    "defect", ["different_comparison", "missing_decision", "unavailable_claim", "invented_result"]
+)
+def test_technical_handoff_rejects_evidence_upgrades_and_untraceable_release(technical_case, defect):
+    from analysis.discovery.technical import validate_technical
+
+    sample, review, pack = technical_case
+    if defect == "different_comparison":
+        review["market_reviews"][pack["candidate"]]["limitations"].append("Changed after user review")
+    elif defect == "missing_decision":
+        pack["release"]["decision_url"] = ""
+    elif defect == "unavailable_claim":
+        pack["claims"][0]["source_ids"] = [pack["sources"][-1]["id"]]
+    else:
+        pack["proposed_tests"][0]["results"] = "Improved loading"
+    with pytest.raises(ValueError):
+        validate_technical(sample, review, pack)
+
+
 def test_corroboration_real_sql_excludes_seed_and_matches_only_latest_literal_snapshot(
     corroboration_case, database_url_for_tests, monkeypatch
 ):
