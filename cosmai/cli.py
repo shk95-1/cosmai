@@ -273,6 +273,24 @@ def _add_lexicon(subparsers: argparse._SubParsersAction) -> None:
             )
 
 
+def _add_discover(subparsers: argparse._SubParsersAction) -> None:
+    p = subparsers.add_parser(
+        "discover", help="Sample behavior evidence and replay agent-reviewed selection."
+    )
+    actions = p.add_subparsers(dest="action", required=True)
+    sample = actions.add_parser("sample", help="Export a bounded read-only local evidence snapshot.")
+    sample.add_argument("--per-cue", type=int, default=3, help="Maximum records per behavior cue and source.")
+    sample.add_argument("--output", required=True, help="Private JSON evidence snapshot.")
+    select = actions.add_parser(
+        "select", help="Validate grounded semantic reviews and select deterministically."
+    )
+    select.add_argument("--sample", required=True, help="Frozen evidence JSON from discover sample.")
+    select.add_argument(
+        "--review", required=True, help="Agent semantic observations, candidates and interventions."
+    )
+    select.add_argument("--output", required=True, help="Private JSON selection and rejection trail.")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cosmai")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -280,6 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_login(subparsers)
     _add_analyze(subparsers)
     _add_retrieval(subparsers)
+    _add_discover(subparsers)
     _add_trend(subparsers)
     _add_project(subparsers)
     _add_match(subparsers)
@@ -810,6 +829,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_analyze(args)
     if args.command == "retrieval":
         return _run_retrieval(args)
+    if args.command == "discover":
+        from analysis.discovery.cli import run
+
+        return run(args)
     if args.command == "trend":
         return _run_trend(args)
     if args.command == "project":

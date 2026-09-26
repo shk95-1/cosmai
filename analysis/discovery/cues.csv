@@ -1,0 +1,6 @@
+cue,pattern
+mix,"섞어|섞는|섞었|혼합|mix.{0,25}(together|with)|blend.{0,20}with"
+import,"직구|해외.?배송|import.{0,25}(buy|order)|ship.{0,20}overseas"
+hunt,"단종|찾아다니|discontinued|hunt.{0,20}(stock|product)"
+premium,웃돈|비싸도|불편해도|번거로|pay extra|premium price|inconvenien
+stockpile,쟁여|stockpil|hoard

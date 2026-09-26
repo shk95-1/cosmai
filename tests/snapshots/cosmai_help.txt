@@ -1,12 +1,13 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,login,analyze,retrieval,trend,project,match,eval,lexicon} ...
+usage: cosmai [-h] {collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon} ...
 
 positional arguments:
-  {collect,login,analyze,retrieval,trend,project,match,eval,lexicon}
+  {collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon}
     collect             Run one collector's dataset for one hour.
     login               Open a visible browser so a person can authorise one source's profile.
     analyze             Run one analysis stage over the needs schema.
     retrieval           Build the search corpus and query it.
+    discover            Sample behavior evidence and replay agent-reviewed selection.
     trend               Build the panel's quarterly topic series.
     project             Project a collector's tables into the corpus.
     match               Match the live corpus against a dictionary and analyse it.
@@ -156,6 +157,34 @@ options:
                         Repeatable.
   --top TOP             How many unmatched terms to print.
   --url URL             SQLAlchemy URL; default is needs_runtime.
+
+$ cosmai discover --help
+usage: cosmai discover [-h] {sample,select} ...
+
+positional arguments:
+  {sample,select}
+    sample         Export a bounded read-only local evidence snapshot.
+    select         Validate grounded semantic reviews and select deterministically.
+
+options:
+  -h, --help       show this help message and exit
+
+$ cosmai discover sample --help
+usage: cosmai discover sample [-h] [--per-cue PER_CUE] --output OUTPUT
+
+options:
+  -h, --help         show this help message and exit
+  --per-cue PER_CUE  Maximum records per behavior cue and source.
+  --output OUTPUT    Private JSON evidence snapshot.
+
+$ cosmai discover select --help
+usage: cosmai discover select [-h] --sample SAMPLE --review REVIEW --output OUTPUT
+
+options:
+  -h, --help       show this help message and exit
+  --sample SAMPLE  Frozen evidence JSON from discover sample.
+  --review REVIEW  Agent semantic observations, candidates and interventions.
+  --output OUTPUT  Private JSON selection and rejection trail.
 
 $ cosmai trend --help
 usage: cosmai trend [-h] {quarter,judge,sensitivity,evidence,crosscheck,holdout,cards} ...
