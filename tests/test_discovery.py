@@ -676,6 +676,84 @@ def technical_case():
     return sample, review, pack
 
 
+def test_brief_replays_discovery_without_promoting_user_adjudication_to_market_proof(technical_case):
+    from analysis.discovery.brief import build
+
+    sample, review, technical = technical_case
+    spec = json.loads((Path(__file__).parents[1] / "analysis/discovery/lip_dose_case.json").read_text())
+    before = deepcopy((sample, review, technical, spec))
+    report = build(sample, review, technical, spec)
+    assert (sample, review, technical, spec) == before
+    assert report == build(sample, review, technical, spec)
+    assert report["status"] == "conditional_brief_for_user_evaluation"
+    assert report["acceptance"] == "pending_separate_user_evaluation"
+    assert report["run"]["selection_before_candidate_comparison"] == technical["candidate"]
+    assert report["run"]["selection_with_recorded_comparisons"] != technical["candidate"]
+    assert not report["case"]["qualified"]
+    assert report["case"]["market_review"] == review["market_reviews"][technical["candidate"]]
+    assert len(report["run"]["candidates"]) == len(review["candidates"])
+    assert len(report["case"]["support"]) == 3
+    assert all(t["state"] == "proposed_not_run" for t in report["technical"]["proposed_tests"])
+    assert report["run"]["budget"]["gpu_hours"] == report["run"]["budget"]["paid_calls"] == 0
+    assert report["run"]["agent_research_seconds"] is None
+
+
+@pytest.mark.parametrize("defect", ["spec_drift", "unknown_consumer", "unknown_claim", "invented_result"])
+def test_brief_refuses_stale_or_untraceable_case_text(technical_case, defect):
+    from analysis.discovery.brief import build
+
+    sample, review, technical = technical_case
+    spec = json.loads((Path(__file__).parents[1] / "analysis/discovery/lip_dose_case.json").read_text())
+    if defect == "spec_drift":
+        spec["technical_sha256"] = "stale"
+    elif defect == "unknown_consumer":
+        spec["conditions"][0]["support_doc_ids"] = ["unobserved-review"]
+    elif defect == "unknown_claim":
+        spec["conditions"][0]["technical_claim_ids"] = ["unsourced-effect"]
+    else:
+        spec["conditions"][0]["results"] = "proved effective"
+    with pytest.raises(ValueError):
+        build(sample, review, technical, spec)
+
+
+def test_brief_command_exports_a_readable_private_packet_with_actual_replay_time(tmp_path):
+    root = Path(__file__).parents[1]
+    output = tmp_path / "case"
+    run = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "analysis.discovery.brief",
+            "--sample",
+            str(FIXTURES / "corroboration_sample.json"),
+            "--review",
+            str(FIXTURES / "corroboration_review.json"),
+            "--technical",
+            str(root / "analysis/discovery/lip_dose_technical.json"),
+            "--case",
+            str(root / "analysis/discovery/lip_dose_case.json"),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    record = json.loads(output.with_suffix(".json").read_text())
+    document = output.with_suffix(".md").read_text()
+    assert json.loads(run.stdout)["run_id"] == record["run_id"]
+    assert record["execution"]["elapsed_seconds"] >= 0
+    assert record["execution"]["mode"] == "offline_replay_of_agent_reviewed_inputs"
+    assert output.with_suffix(".json").stat().st_mode & 0o777 == 0o600
+    assert output.with_suffix(".md").stat().st_mode & 0o777 == 0o600
+    assert "Original automatic wording" in document
+    assert "user_provisional_adjudication" in document
+    assert "insufficient_alternative_evidence" in document
+    assert "Chanel" in document and "Maybelline" in document
+    assert "proposed_not_run" in document
+    assert "https://www.geka-world.com/en/competences-innovations/wipers" in document
+
+
 def test_user_adjudicated_technical_handoff_preserves_the_failed_automatic_market_gate(technical_case):
     from analysis.discovery.technical import validate_technical
 

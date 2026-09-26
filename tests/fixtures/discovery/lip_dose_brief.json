@@ -1,0 +1,2093 @@
+{
+  "version": "development-brief-v1",
+  "run_id": "08f188f4dcee3d0dd253989a5c49405b7e2bc97931acda3aaeb0068a447f2fd2",
+  "inputs": {
+    "sample": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+    "review": "5aee2e154f2746152785cb62b662d006a175fbffb15689d1703a5bfab5cc7541",
+    "technical": "96232f0269dfca329f385f53c85859bc263dd8664c8deb6e0626dc158078ed23",
+    "spec": "f2f741433acedd8d71fcaf5c74d5c20eb906b479a43c537565716bdf298740af"
+  },
+  "status": "conditional_brief_for_user_evaluation",
+  "acceptance": "pending_separate_user_evaluation",
+  "spec": {
+    "version": "brief-spec-v1",
+    "candidate": "long-wear-lip-dose-without-tip-wiping",
+    "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+    "review_sha256": "5aee2e154f2746152785cb62b662d006a175fbffb15689d1703a5bfab5cc7541",
+    "technical_sha256": "96232f0269dfca329f385f53c85859bc263dd8664c8deb6e0626dc158078ed23",
+    "title": "Thin-layer liquid lip color with less repeated amount adjustment",
+    "target": {
+      "statement": "Users seeking a thin wearable long-wear liquid color layer who repeatedly remove excess from the applicator. This is a behavior-based research segment; size and willingness to switch are unknown.",
+      "basis": "agent_inference",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ]
+    },
+    "objective": {
+      "statement": "Reduce the manual effort needed to obtain the desired thin color layer while preserving an acceptable finish and wear routine. Occasional adjustment is allowed; zero wiping is not a specification.",
+      "decision_url": "https://github.com/shk95-1/cosmai/issues/184#issuecomment-5847336264"
+    },
+    "conditions": [
+      {
+        "statement": "Loading should reduce repeated excess removal without requiring more dips or sacrificing even coverage.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "geometry-formula-interaction"
+        ]
+      },
+      {
+        "statement": "Keep the desired thin-layer appearance and wearable result; select actual shade, finish and acceptance targets before testing.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "film-property-guard"
+        ]
+      },
+      {
+        "statement": "Assess established formula and stock wiper/tip combinations first. Do not assume the observed commercial formula can be copied or a catalogue tip will work unchanged.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "established-package-lever",
+          "existing-formulation-family"
+        ]
+      },
+      {
+        "statement": "Treat gloss-brush pigment cleaning as a separate requirement; a double-ended reservoir does not itself solve it.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "dual-format-boundary"
+        ]
+      }
+    ],
+    "tradeoffs": [
+      {
+        "statement": "A smaller or more strongly wiped tip could exchange wiping effort for extra dips, uneven coverage or stronger withdrawal force.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "geometry-formula-interaction",
+          "force-and-tip-droplet"
+        ]
+      },
+      {
+        "statement": "Lower applied amount or a formula change could alter coverage, drying, comfort, transfer and wear. The cited study does not establish our formulation.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "film-property-guard"
+        ]
+      },
+      {
+        "statement": "An existing alternative or a preferred prior tint may be more useful than a new package. Reported shade and touch-up preferences are separate from loading inconvenience.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": []
+      }
+    ],
+    "failure_modes": [
+      {
+        "statement": "Variable loading with fill level, handling, viscosity or accumulated residue could erase the convenience gain.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "geometry-formula-interaction"
+        ]
+      },
+      {
+        "statement": "Tight wiping could leave end droplets, damage flock, increase withdrawal force or require extra dipping.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "force-and-tip-droplet",
+          "geometry-formula-interaction"
+        ]
+      },
+      {
+        "statement": "An easier-to-load package could still produce patchy color, poor wear or uncomfortable film.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [
+          "commerce_review:glowpick:7875575",
+          "commerce_review:oliveyoung:64286864",
+          "commerce_review:oliveyoung:64431208"
+        ],
+        "technical_claim_ids": [
+          "film-property-guard"
+        ]
+      },
+      {
+        "statement": "Solvent, seal, adhesive or material incompatibility could make a stock pack unsuitable.",
+        "basis": "design_hypothesis",
+        "support_doc_ids": [],
+        "technical_claim_ids": [
+          "established-package-lever"
+        ]
+      }
+    ],
+    "falsifiers": [
+      "Retire the new-product premise if an acceptable available alternative achieves the desired result with an ordinary routine the target user accepts.",
+      "Reject a package revision if it reduces removed mass but fails to reduce total effort, adds dips, or worsens the chosen coverage/wear result.",
+      "Reframe or stop if shade, finish, retouching or price dominates the amount-control benefit, or no practical compatible stock combination exists."
+    ],
+    "boundaries": [
+      "This is a conditional development concept, not demonstrated market absence or a validated formula.",
+      "No concentrations, dose targets, proprietary recipe, novel resin, patent clearance, MOQ, manufacturing cost or regulatory qualification are specified.",
+      "No prototype, purchase, outreach, human trial or laboratory measurement has occurred."
+    ]
+  },
+  "case": {
+    "candidate": "long-wear-lip-dose-without-tip-wiping",
+    "need": "Apply an extremely thin long-wear liquid lip film without wiping excess from an overloading applicator.",
+    "limitations": [
+      "Provisional source-specific self-report, not a market absence or performance claim.",
+      "Alternatives and scientific/formulation applicability remain unassessed."
+    ],
+    "technical": {
+      "status": "unassessed",
+      "references": [],
+      "reason": "No case-specific technical literature appraisal yet; assigned to the subsequent technical-evidence issue."
+    },
+    "feasibility": {
+      "status": "unassessed",
+      "reason": "Observed products use existing materials/processes, but a new single-product solution has not been technically assessed."
+    },
+    "qualified": false,
+    "rejection_reasons": [
+      "market review (insufficient_alternative_evidence): After one ten-document contrastive pass, hold release on insufficient alternative evidence. Favorable alternatives exist and must be preserved, but their no-removal suitability for the frozen thin-layer goal is unmeasured. Observed Laka inconvenience survives as research evidence, not proof of a worldwide market gap. Stop additional automatic expansion; #184 and #325 remain held."
+    ],
+    "source_local_users": 3,
+    "sources": [
+      "glowpick",
+      "oliveyoung"
+    ],
+    "dates": [
+      "2026-08-15",
+      "2026-08-18",
+      "2026-09-07"
+    ],
+    "rank": [
+      1,
+      3,
+      1,
+      0,
+      0
+    ],
+    "support": [
+      {
+        "doc_id": "commerce_review:glowpick:7875575",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": null,
+        "source": "glowpick",
+        "url": "https://www.glowpick.com/products/189624",
+        "published_at": "2026-09-07 09:09:25+00",
+        "text_sha256": "e0c38a7194da7bb2b8c54f8de1b3fdc59cd5d8549a6a9a3bef9937c5a8880638",
+        "observation": {
+          "doc_id": "commerce_review:glowpick:7875575",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "disposition": "observed",
+          "reason": "First-person executed effort with stated motivation and an unresolved standalone/access trade-off.",
+          "recurring": true,
+          "context": {
+            "summary": "Warm-toned base lip use",
+            "span": "갈웜의 베이스립"
+          },
+          "requirement": {
+            "summary": "Thin even film with durable wear",
+            "span": "정----말 소량으로 얇게 펴발라야한다"
+          },
+          "behavior": {
+            "summary": "Removes applicator excess each use",
+            "span": "매번 덜어써야하는"
+          },
+          "burden": {
+            "summary": "Repeated excess removal",
+            "span": "팁에 너무 많이 묻어나서"
+          },
+          "trade_off": {
+            "summary": "Applicator output mismatches the required tiny dose",
+            "span": "용기를 개선해야 편하게 쓸 수 있음"
+          },
+          "recurrence_span": "매번 덜어써야하는"
+        }
+      },
+      {
+        "doc_id": "commerce_review:oliveyoung:64286864",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": null,
+        "source": "oliveyoung",
+        "url": null,
+        "published_at": "2026-08-15 15:00:00+00",
+        "text_sha256": "d4c7e4323b251af1b0e7367dd90efba3285a88a858bae7898843b7e735034b49",
+        "observation": {
+          "doc_id": "commerce_review:oliveyoung:64286864",
+          "disposition": "observed",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Must remove an extreme amount before coating; uneven finish and harder touch-up remain.",
+          "recurring": false,
+          "context": {
+            "span": "비지코랄도 실험하고(?) 써봅니다",
+            "summary": "Actual long-wear liquid-lip shade trial"
+          },
+          "requirement": {
+            "span": "덜 촌스러운 풀립 됩니다",
+            "summary": "Apply a thin wearable lip layer"
+          },
+          "behavior": {
+            "span": "극! 소량 (이정도 덜어야",
+            "summary": "Removes most product before application"
+          },
+          "burden": {
+            "span": "그냥 싹 다 지우고 해야합니다",
+            "summary": "Additional removal and redo for touch-up"
+          },
+          "trade_off": {
+            "span": "얼룩덜룩 해지는게 문제",
+            "summary": "Wear still becomes uneven"
+          }
+        }
+      },
+      {
+        "doc_id": "commerce_review:oliveyoung:64431208",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": null,
+        "source": "oliveyoung",
+        "url": null,
+        "published_at": "2026-08-18 15:00:00+00",
+        "text_sha256": "01f727460aeac680b0b9f4cd3d059e6a093dcf4601f6a59f0d864d97942f6833",
+        "observation": {
+          "doc_id": "commerce_review:oliveyoung:64431208",
+          "disposition": "observed",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Excess base pickup requires quantity reduction; gloss-brush contamination adds wiping burden.",
+          "recurring": false,
+          "context": {
+            "span": "누드피치",
+            "summary": "Actual nude-peach dual-lip purchase"
+          },
+          "requirement": {
+            "span": "안 두껍게 발리고",
+            "summary": "Avoid excessively thick lip layer"
+          },
+          "behavior": {
+            "span": "양조절해서 써야",
+            "summary": "Controls excessive applicator pickup"
+          },
+          "burden": {
+            "span": "닦아내기 갱장히 기차나요",
+            "summary": "Cleans contaminated gloss brush"
+          },
+          "trade_off": {
+            "span": "그나마 들 촌스럽게 발림",
+            "summary": "Dose control only partly improves wearable appearance"
+          }
+        }
+      }
+    ],
+    "related_exclusions": [
+      {
+        "doc_id": "commerce_review:glowpick:7811204",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "ambiguous: Tip shedding and color complaint; layering is described but no dose-wiping requirement.",
+        "source": "glowpick",
+        "url": null,
+        "published_at": "2026-06-26 06:38:05+00",
+        "text_sha256": "2dd2139465e949fa75b0d9afb7cba3fc0d0a887d4c794c42d171b6ac46a47d99",
+        "observation": {
+          "doc_id": "commerce_review:glowpick:7811204",
+          "disposition": "ambiguous",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Tip shedding and color complaint; layering is described but no dose-wiping requirement.",
+          "span": "블러 매트 벨벳틴트 좋아하는데 이제품 블러리한 표현이 정말 예뻐서 망설이지않고 4컬러 바로 구매해봄 일단 이거 팁 양쪽 모서리 털거죽이 벗겨짐;; 몇번 안썻는데도 벗겨지는거면 완전불량인데 후기보니 나만 그런거 아닌가봄.. 무스같은 제형으로 정말 얇게 발리는 제품 한두번 슥슥 발라보면 닦이나? 싶을정도로 컬러가 안올라오는데 여러번 레이어드하면 컬러가 쌓임 이렇게 얇게 발리다보니 본연의 입술 컬러가 진한편이면 컬러가 입술에서 탁하고 칙칙해보임.. 얇고 맑게 올려야 예쁜 틴트니 베이스 필수!"
+        }
+      },
+      {
+        "doc_id": "commerce_review:glowpick:7876025",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "satisfied: Product renewal reportedly improves darkening; tip and package explicitly cause no inconvenience.",
+        "source": "glowpick",
+        "url": "https://www.glowpick.com/products/186649",
+        "published_at": "2026-09-07 12:05:24+00",
+        "text_sha256": "4c10e741a3344970329ba365c6cffb4f12ee2da76af74ccba2df3561c44b3d14",
+        "observation": {
+          "doc_id": "commerce_review:glowpick:7876025",
+          "disposition": "satisfied",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Product renewal reportedly improves darkening; tip and package explicitly cause no inconvenience.",
+          "span": "無️ 여쿨라 추천 컬러: 갓기천사 갓기요정 비주얼센터 말랑물복 저쩔복숭아 덜익피치 솔직히 올영에서도 1만원도 안하는 틴트라 학생들이나 가성비 생각하는 사람들에게는 더할나위 없는 선택이라고 생각함 제품명처럼 글로우 틴트임 제형 촉촉하고 끈적임 없이 가볍게 올라오는 타입 고발색 컬러 아닌 이상 약간 연하게 립글로스처럼 사용 가능 문제는 실 발색이랑 상세페이지랑 상당히 컬러가 달라서 속는 경우 빈번함... 글로우 제형 특성상 바르고 시간 지나면 광감 사라지고 수정 필요함 얘는 특히 착색이 있기 때문에 물티슈로 지우고 수정하는 걸 추천 원래는 다크닝이 심했었는데 리뉴얼하고 확실히 다크닝 개선되긴 함 근데 반면에 글로시함이 좀 죽은 것 같음 원래 쫀쫀광택이었는데 지금은 밀키틴트로 다운그레이드됨 픽업량은 넉넉하고 팁이나 용기도 평범해서 이 부분의 불편함은 없음"
+        }
+      },
+      {
+        "doc_id": "commerce_review:oliveyoung:64390256",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "ambiguous: Lip blend timing suggestion and accepted result; no actual excessive tip loading evidence.",
+        "source": "oliveyoung",
+        "url": null,
+        "published_at": "2026-08-17 15:00:00+00",
+        "text_sha256": "e7c4c7dbe44a1544e64fa1123d134b9001ff66837596e6a799d02c991e0e980f",
+        "observation": {
+          "doc_id": "commerce_review:oliveyoung:64390256",
+          "disposition": "ambiguous",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Lip blend timing suggestion and accepted result; no actual excessive tip loading evidence.",
+          "span": "- 같이 준 틴트 케이스는 모두 버렸어요. 가지고 다니기엔 부피 크고 무게만 더해져서요.. 이런 거 말고 샘플 증정이 훨씬 좋아요 ᅲᅲ 아니면 손거울 같은 실용성 있는 게 더 나은데 쓰레기만 발생한 거 같아 아쉬웠어요 - 좀만 기다리면 재고 남아돌 걸 알았지만 오픈 초기에 열심히 째려봐서 구했습니다. 재고 넉넉히 해주세요 품절 마케팅 ᄂᄂ해 <후기> 베이스 립으로 화사하게 사용하기 좋은 색상이에요 초기 리뷰에 묻어남 없다고 봤는데 전 묻어남 있었어요 약간 두께감 있고, 블렌딩해서 얇게 바르면 커버력이나 색 표현 약해져요 립글은 아래로 흐르는 제형이라 비호입니다 그래서 보통 매트 부분만 바르는데 아무것도 안 먹고 외출하고 들어온 날 지속력이 엄청 좋았어요! 밀착력은 좋은데 매트 부분만 사용하면 주름이 도드라져서 탱글탱글한 입술하고 결과물의 느낌이 좀 다르니 주름 많은 분들 참고하세용 꿀팁은 제품 반쯤 말랐을 때 테두리 손으로 톡톡 블렌딩하면 더 자연스럽고 이쁘게 됐어요☺️"
+        }
+      },
+      {
+        "doc_id": "youtube_comment:UgzVH7Z_yLYQjpSKDa94AaABAg",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "ambiguous: Actual lip wiping fails teeth/curdling issue, but applicator dose and same long-wear requirement absent.",
+        "source": "youtube_comment",
+        "url": "https://www.youtube.com/watch?v=D6qXuosDX3E",
+        "published_at": "2025-06-01 03:46:48+00",
+        "text_sha256": "705c5419bd4d0d7d149278a56e2ae1f463f7ded30b9eeeaf93e8014b0a3d578d",
+        "observation": {
+          "doc_id": "youtube_comment:UgzVH7Z_yLYQjpSKDa94AaABAg",
+          "disposition": "ambiguous",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Actual lip wiping fails teeth/curdling issue, but applicator dose and same long-wear requirement absent.",
+          "span": "속옷추천영상 본격 더위시작전에 올라오길 기대해봅니다!😂 그리고 마지막 스코님 입술 다시 바를때 보고 떠오른건데 제가 립을 바르고나면 요플레현상이랑 앞니에 묻는게 너무 심해요ᅮ 돌출입도 아닌데.. 닦아낸다고 신경써도 항상 그런데 담에 립스코나 립추천 혹은 메이크업중 립제품 바르실때라도 슬쩍 꿀팁 보여주심 넘나 감사할거같아요! 글로 백번 봐도 제대로 못하는것보니 전 봐야 아는 타입아가봐요😢ᄏᄏᄏ 점점 더워지는데 건강 조심하시고 매년 쉬어가셨던것처럼 이번 여름방학도 좋은곳에서 즐겁게 보내시길 바래요❤"
+        }
+      },
+      {
+        "doc_id": "youtube_comment:UgzXSS6vDu4MJYfpU6R4AaABAg",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "promotion: Creator product-rating catalog.",
+        "source": "youtube_comment",
+        "url": "https://www.youtube.com/watch?v=Vg0i4adTp28",
+        "published_at": "2025-02-21 09:57:57+00",
+        "text_sha256": "8c8b8e95d732738e539e9c35f505b05bf9b74f329d863e6e142a27dc1f909c28",
+        "observation": {
+          "doc_id": "youtube_comment:UgzXSS6vDu4MJYfpU6R4AaABAg",
+          "disposition": "promotion",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Creator product-rating catalog.",
+          "span": "화장품개발자의 ❤다이소X에뛰드 Play 101 총평❤ ✅기획 ‘제대로’ 컨셉과 쓰임새를 기획하고 나온 점이 매우 만족스러움 단순히 ‘싼’ 제품이 아니라 ‘패키지’와 ‘제형’적 차별점이 뚜렷해서 다이소 화장품도 이제는 ‘기획’ 싸움이라는 생각이 들었음. ✅퀄리티 전체적으로 상향평준화된 느낌 특히 섀도우, 립글로스는 가격 3-4배 비싼 제품들과 비교해도 꿀리지 않을 퀄리티(이래도 되나요..?!) 에뛰드가 잘 하는 품목 위주로 라인업이 전개되어 믿고 쓰게 됨 ✅패키지 다이소에서 패키지로 기발하다! 좋다! 생각 든 건 처음이야. 역시 대기업의 힘인가.. 고급진 패키지는 아니지만 군더더기 없고 실용성은 1000%! ❤카테고리별 찐리뷰!❤ ✔듀얼 아이피스 /3,000원 ⭐ ⭐⭐⭐⭐ 실용성 갑 컬러로만 구성 뭐 사지? 고민 하다가 8컬러(4세트) 다 들이게 될 운명.. 섀도우 발색력, 지속력 평균 이상 펄감은 전반적으로 은은한 느낌으로 데일리메이크업에 적합 ✔컬러링 글로스/ 3,000원 (스칼렛 원픽!!!) ⭐ ⭐⭐⭐⭐ 영~롱 꿀광 어디 얹어도 무조건 예쁜 컬러 3가지 웜, 쿨, 뉴트럴(레드) 모두 예쁨 진짜 예쁨 끈적임 없이 산뜻한 유리알광. 3천원으로 이게 가능? ✔블러셔 / 3,000원 ⭐ ⭐⭐☆☆ 파우더, 크림 제형 2가지 타입 웜,쿨 공평하게 한 컬러씩 출시 데일리 컬러로 호불호 없이 잘 쓸 수 있는 컬러 구성 ✔하이라이터 / 3,000원 ⭐ ⭐⭐☆☆ 파우더, 크림 제형 2가지 타입 파우더 타입은 입자가 곱고 얇게 발리는 은은한 느낌 크림 타입은 펄감이 꽤 크고 화려한 느낌 (존재감 뿜뿜) ✔쥬얼 글리터 라이너 /5,000원 ⭐ ⭐⭐☆☆ 반짝 눈물 라이너의 다이소 버전 얇은 브러쉬 팁으로 좁은 애교살 부위 콕콕 발라주기 쉬움! 사이버틱해지지 않으려면 선을 긋지 말고 콩콩 찍어 발라주기! ✔마스카라 /5,000원 ⭐ ☆☆☆☆ 슬림, 트위스트, 부스터 베이스 3종 출시! 전부 특색 있는 라인업! 드디어 다이소에도 슬림 마스카라가 출시되다니!! 언더 마스카라 박수!!!! 👏👏👏(감격) 👉기존 에뛰드 컬픽스 대비 컬링력은 살짝 아쉽지만, 가볍고 얇아서 더 세밀하게 연출 가능 부스터 베이스는 완전 직모 속눈썹에게는 비추천합니다.. (소신발언) ✔플럼핑 립 프라이머 / 3,000원 ⭐ ⭐⭐☆☆ 웜, 쿨 총 2컬러 출시! 립 라이너 보다는 도톰한 스틱 타입이라 자연스럽게 오버립하기 좋음! 전체적으로 탁한 입술 커버하기 좋음! ✔피니쉬 루스 파우더 /5,000원 ⭐ ⭐⭐☆☆ 반투명 톤업! 모공 잔주름 블러 깔끔하게 잘 되는 편! __________________ 👉 살?말? 추천템 총정리는 06:24 클릭!"
+        }
+      }
+    ],
+    "counterevidence": [
+      {
+        "doc_id": "commerce_review:glowpick:7876025",
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "reason": "satisfied: Product renewal reportedly improves darkening; tip and package explicitly cause no inconvenience.",
+        "source": "glowpick",
+        "url": "https://www.glowpick.com/products/186649",
+        "published_at": "2026-09-07 12:05:24+00",
+        "text_sha256": "4c10e741a3344970329ba365c6cffb4f12ee2da76af74ccba2df3561c44b3d14",
+        "observation": {
+          "doc_id": "commerce_review:glowpick:7876025",
+          "disposition": "satisfied",
+          "candidate": "long-wear-lip-dose-without-tip-wiping",
+          "reason": "Product renewal reportedly improves darkening; tip and package explicitly cause no inconvenience.",
+          "span": "無️ 여쿨라 추천 컬러: 갓기천사 갓기요정 비주얼센터 말랑물복 저쩔복숭아 덜익피치 솔직히 올영에서도 1만원도 안하는 틴트라 학생들이나 가성비 생각하는 사람들에게는 더할나위 없는 선택이라고 생각함 제품명처럼 글로우 틴트임 제형 촉촉하고 끈적임 없이 가볍게 올라오는 타입 고발색 컬러 아닌 이상 약간 연하게 립글로스처럼 사용 가능 문제는 실 발색이랑 상세페이지랑 상당히 컬러가 달라서 속는 경우 빈번함... 글로우 제형 특성상 바르고 시간 지나면 광감 사라지고 수정 필요함 얘는 특히 착색이 있기 때문에 물티슈로 지우고 수정하는 걸 추천 원래는 다크닝이 심했었는데 리뉴얼하고 확실히 다크닝 개선되긴 함 근데 반면에 글로시함이 좀 죽은 것 같음 원래 쫀쫀광택이었는데 지금은 밀키틴트로 다운그레이드됨 픽업량은 넉넉하고 팁이나 용기도 평범해서 이 부분의 불편함은 없음"
+        }
+      }
+    ],
+    "market_review": {
+      "version": "alternatives-v1",
+      "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+      "support_sha256": "9b1b7062041462e10c84813c0a3e1b467dd79f89b6577dfdf9ee800bf0fca258",
+      "candidate": "long-wear-lip-dose-without-tip-wiping",
+      "requirements": [
+        {
+          "id": "dose-0",
+          "doc_id": "commerce_review:glowpick:7875575",
+          "span": "매번 덜어써야하는",
+          "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+          "priority": "must_have",
+          "variant_specific": false,
+          "unknowns": [
+            "Acceptable pickup mass and variance are not measured.",
+            "Willingness to switch color/formula/price is unknown.",
+            "Gloss-brush cleaning and base-dose control are distinct problems."
+          ]
+        },
+        {
+          "id": "dose-1",
+          "doc_id": "commerce_review:oliveyoung:64286864",
+          "span": "극! 소량 (이정도 덜어야",
+          "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+          "priority": "must_have",
+          "variant_specific": false,
+          "unknowns": [
+            "Acceptable pickup mass and variance are not measured.",
+            "Willingness to switch color/formula/price is unknown.",
+            "Gloss-brush cleaning and base-dose control are distinct problems."
+          ]
+        },
+        {
+          "id": "dose-2",
+          "doc_id": "commerce_review:oliveyoung:64431208",
+          "span": "양조절해서 써야",
+          "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+          "priority": "must_have",
+          "variant_specific": false,
+          "unknowns": [
+            "Acceptable pickup mass and variance are not measured.",
+            "Willingness to switch color/formula/price is unknown.",
+            "Gloss-brush cleaning and base-dose control are distinct problems."
+          ]
+        }
+      ],
+      "alternatives": [
+        {
+          "name": "Laka Perfect Twin Lip, current reviewed package",
+          "identity": {
+            "source": "laka.co.kr",
+            "product_id": "196",
+            "level": "listing"
+          },
+          "source": {
+            "url": "https://m.laka.co.kr/product/%ED%95%9C%EC%A0%95%EC%88%98%EB%9F%89-%ED%8D%BC%ED%8E%99%ED%8A%B8-%ED%8A%B8%EC%9C%88-%EB%A6%BD-21/196/category/1/display/2/",
+            "kind": "manufacturer_claim",
+            "summary": "Perfect Twin Lip color/gloss dual-ended listing; instructions say apply a suitable amount. No dispensed-mass or wiper-geometry data. Options and availability vary; stock labels are not all-color availability proof.",
+            "retrieved_on": "2026-09-26"
+          },
+          "availability": "Bounded promotion listing includes sold-out options; regional current supply and package revisions unknown.",
+          "comparisons": [
+            {
+              "requirement": "dose-0",
+              "status": "contradicted",
+              "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+              "evidence": {
+                "url": "https://www.glowpick.com/products/189624",
+                "kind": "user_self_report",
+                "summary": "First-person executed effort with stated motivation and an unresolved standalone/access trade-off.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-1",
+              "status": "contradicted",
+              "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+              "evidence": {
+                "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000255256",
+                "kind": "user_self_report",
+                "summary": "Must remove an extreme amount before coating; uneven finish and harder touch-up remain.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-2",
+              "status": "contradicted",
+              "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+              "evidence": {
+                "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000255256",
+                "kind": "user_self_report",
+                "summary": "Excess base pickup requires quantity reduction; gloss-brush contamination adds wiping burden.",
+                "retrieved_on": "2026-09-26"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Chanel Le Rouge Duo Ultra Tenue",
+          "identity": {
+            "source": "chanel.com",
+            "product_id": "175106",
+            "level": "listing"
+          },
+          "source": {
+            "url": "https://www.chanel.com/us/makeup/p/175106/le-rouge-duo-ultra-tenue-ultrawear-liquid-lip-colour/",
+            "kind": "manufacturer_claim",
+            "summary": "Dual liquid color/gloss with precise-application claim, even application followed by drying and gloss. Published wear claims do not measure pickup or wiping. Current page shows favorable and unfavorable consumer experiences.",
+            "retrieved_on": "2026-09-26"
+          },
+          "availability": "US selected shade page can add to bag; Korean comparable shade and supply unknown.",
+          "comparisons": [
+            {
+              "requirement": "dose-0",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://monnibee.blog/2023/03/31/chanel-le-rouge-duo-ultra-tenue-lip-duos-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-1",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://monnibee.blog/2023/03/31/chanel-le-rouge-duo-ultra-tenue-lip-duos-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-2",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://monnibee.blog/2023/03/31/chanel-le-rouge-duo-ultra-tenue-lip-duos-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            }
+          ],
+          "contrastive_source_ids": [
+            "chanel-monni",
+            "chanel-beautylookbook",
+            "chanel-hwahae-access"
+          ]
+        },
+        {
+          "name": "NYX Shine Loud",
+          "identity": {
+            "source": "nyxcosmetics.com.mx",
+            "product_id": "800897207304",
+            "level": "listing"
+          },
+          "source": {
+            "url": "https://www.nyxcosmetics.com.mx/labios/lip-gloss/brillo-de-labios-shine-loud---movin'-up/LATAM_NYX_NGL_800897207304.html",
+            "kind": "manufacturer_claim",
+            "summary": "Dual color/gloss instructions specify applying color, drying approximately 60 seconds and adding gloss. One-swipe and wear claims do not establish low pickup without manual wiping.",
+            "retrieved_on": "2026-09-26"
+          },
+          "availability": "Mexico regional listing; Korean supply and identical package generation unknown. US page timed out. Current US base listing accessible in #344; selected regional shade stock does not establish Korean supply or generation identity.",
+          "comparisons": [
+            {
+              "requirement": "dose-0",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://www.nyxcosmetics.com/lip/lip-gloss/shine-loud-high-shine-lip-color-gloss/NYX_935.html",
+                "kind": "manufacturer_claim",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-1",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://www.nyxcosmetics.com/lip/lip-gloss/shine-loud-high-shine-lip-color-gloss/NYX_935.html",
+                "kind": "manufacturer_claim",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-2",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://www.nyxcosmetics.com/lip/lip-gloss/shine-loud-high-shine-lip-color-gloss/NYX_935.html",
+                "kind": "manufacturer_claim",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            }
+          ],
+          "contrastive_source_ids": [
+            "nyx-us",
+            "nyx-ulta-access",
+            "nyx-syndicated-cue"
+          ]
+        },
+        {
+          "name": "Maybelline Super Stay Vinyl Ink",
+          "identity": {
+            "source": "maybelline.co.jp",
+            "product_id": "super-stay-vinyl-ink",
+            "level": "listing"
+          },
+          "source": {
+            "url": "https://www.maybelline.co.jp/all-products/lip/lipstick/super-stay-vinyl-ink",
+            "kind": "manufacturer_claim",
+            "summary": "Single liquid-lip alternative instructs shaking, applying and drying. It changes the dual-product format; claimed wear does not measure pickup and cannot certify personal shade/finish suitability.",
+            "retrieved_on": "2026-09-26"
+          },
+          "availability": "Japanese regional listing; Korean supply, shades and package generation unknown.",
+          "comparisons": [
+            {
+              "requirement": "dose-0",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://glossnglitters.com/maybelline-superstay-vinyl-ink-liquid-lipstick-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-1",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://glossnglitters.com/maybelline-superstay-vinyl-ink-liquid-lipstick-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            },
+            {
+              "requirement": "dose-2",
+              "status": "unknown",
+              "reason": "Actual favorable use and adverse experiences are recorded separately. Neither establishes a suitable thin color layer without manual pickup reduction for this supporting consumer; shade, current package and acceptable amount remain unmatched.",
+              "evidence": {
+                "url": "https://glossnglitters.com/maybelline-superstay-vinyl-ink-liquid-lipstick-review/",
+                "kind": "user_self_report",
+                "summary": "Source and favorable counterevidence retained in contrastive ledger; matched no-removal adequacy remains unknown.",
+                "retrieved_on": "2026-09-26"
+              }
+            }
+          ],
+          "contrastive_source_ids": [
+            "maybelline-us",
+            "maybelline-reddit",
+            "maybelline-glossnglitters"
+          ]
+        }
+      ],
+      "coverage": {
+        "budget": "At most 20 free public consumer-evidence documents; no outreach or purchase.",
+        "examined": "Four manufacturer listings; two additional cached consumer pages considered as counterevidence, not added independent users. US NYX and direct Reddit fetch failures recorded. #344 then completed one contrastive pass over ten attempted source URLs; full ledger is contrastive_pass.",
+        "consumer_counterevidence": [
+          {
+            "url": "https://www.reddit.com/r/MUAontheCheap/comments/10zfrtd/",
+            "kind": "user_self_report",
+            "summary": "Search-indexed February 2023 report praises a thin Chanel formula and smaller applicator. Direct fetch failed; this is a weak counterexample cue requiring source confirmation, not measured low-dose adequacy.",
+            "retrieved_on": "2026-09-26"
+          },
+          {
+            "url": "https://www.hwahae.com/en/products/CHANEL-Le-Rouge-Duo-Ultra-Tiny-40-Light-Rose/2020018",
+            "kind": "user_self_report",
+            "summary": "Search-indexed December 2025 report says Chanel dispenses generously and recommends a light hand. Full review text was not retrieved; naming/translation and edition uncertain. This conflicts with inferring universal low-dose adequacy from favorable reports.",
+            "retrieved_on": "2026-09-26"
+          }
+        ],
+        "contrastive_pass": {
+          "issue": "shk95-1/cosmai#344",
+          "document_limit": 20,
+          "examined_documents": 10,
+          "counting": "Ten unique additional attempted source URLs, including failed/partial access; searches and repeated retrievals do not add documents. Each page and its comments count once. No additional corpus records or new people inferred.",
+          "sources": [
+            {
+              "id": "chanel-monni",
+              "url": "https://monnibee.blog/2023/03/31/chanel-le-rouge-duo-ultra-tenue-lip-duos-review/",
+              "kind": "user_self_report",
+              "published_on": "2023-03-31",
+              "access": "body",
+              "product": "Chanel Le Rouge Duo Ultra Tenue; seven named shades, not separate participants",
+              "summary": "The author reports repeated satisfactory wear after learning to wait for the color to dry. Initial home application failed. Small amounts suffice, but no statement establishes absence of manual pickup reduction.",
+              "provenance": "Original author experience; affiliate links disclosed; generation and per-shade loading unknown.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "chanel-beautylookbook",
+              "url": "https://thebeautylookbook.com/2025/03/chanel-le-rouge-duo-ultra-tenue-new-shades.html",
+              "kind": "user_self_report",
+              "published_on": "2025-03-06",
+              "access": "body",
+              "product": "Chanel shades 186 Pink Nude, 188 Caramel Beige, 192 Coral Pink; boutique purchase",
+              "summary": "The author favors these liquid lips, applies a thin even coat and warns that excess makes the dried layer look cracked. Gloss is essential to her comfort. Quantity removed from the applicator is unreported.",
+              "provenance": "Original purchased-product experience; affiliate links disclosed. The author distinguishes new Intense Nude 194 from older 152, so a repeated shade name cannot establish identity.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "nyx-ulta-access",
+              "url": "https://www.ulta.com/p/shine-loud-high-shine-lip-color-pimprod2020799",
+              "kind": "agent_inference",
+              "published_on": null,
+              "access": "failed",
+              "product": "NYX Shine Loud; attempted retailer listing, unverified URL/current generation",
+              "summary": "Direct access failed. No original retailer review body was available from this attempt.",
+              "provenance": "Failure is not absence of product or evidence; no login or access-control workaround.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "maybelline-us",
+              "url": "https://www.maybelline.com/lip-makeup/lipstick/super-stay-vinyl-ink-longwear-liquid-lipstick?variant=Witty",
+              "kind": "manufacturer_claim",
+              "published_on": null,
+              "access": "body",
+              "product": "Super Stay Vinyl Ink US listing; Witty URL parameter is not a verified consumer shade",
+              "summary": "Brand directions require shaking and drying; instant shine uses no separate gloss. The page notes possible tackiness. None of these statements measures pickup mass or proves the frozen consumers would accept its finish.",
+              "provenance": "Manufacturer source; aggregate ratings include incentivized reviews. Search-cached reviews mixed Matte Ink into Vinyl Ink; do not use them as product-specific evidence.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "nyx-us",
+              "url": "https://www.nyxcosmetics.com/lip/lip-gloss/shine-loud-high-shine-lip-color-gloss/NYX_935.html",
+              "kind": "manufacturer_claim",
+              "published_on": null,
+              "access": "partial_body",
+              "product": "Shine Loud US listing NYX_935; selected Global Citizen; regional package equivalence unknown",
+              "summary": "Current US listing was accessible, unlike the earlier timed-out option URL. It directs an even base coat, drying, then gloss. A promotional consumer testimonial is favorable but does not report loading or excess removal.",
+              "provenance": "Manufacturer listing. Reviews were announced but subsequent body retrieval failed; incentivized ratings and repeated page sections are not independent participants.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "component-paddle-wiper",
+              "url": "https://patents.google.com/patent/US20130276817A1/en",
+              "kind": "agent_inference",
+              "published_on": "2013-10-24",
+              "access": "body",
+              "product": "HCP Packaging paddle-tip/conforming-wiper patent application, not any compared commercial SKU",
+              "summary": "The specification describes matching a flexible wiper to a paddle tip to change product distribution across faces and edges. It also seeks greater retention per dip. This is a component hypothesis, not quantitative commercial low-dose performance.",
+              "provenance": "Primary patent specification, description of Figs 14-17. No pickup distributions, matched user trial or link to the compared packages. No patent clearance or freedom-to-operate conclusion.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "chanel-hwahae-access",
+              "url": "https://www.hwahae.com/en/products/CHANEL-Le-Rouge-Duo-Ultra-Tiny-40-Light-Rose/2020018",
+              "kind": "agent_inference",
+              "published_on": null,
+              "access": "shell_only",
+              "product": "Translated Chanel Light Rose 40 listing; Tiny/Tenue and generation unverified",
+              "summary": "Direct page provided a shell without review body. The previously indexed generous-dispensing cue remains unconfirmed and cannot determine a comparison.",
+              "provenance": "No new author or review added; cached snippet is not full-source confirmation.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "maybelline-reddit",
+              "url": "https://www.reddit.com/r/makeuptips/comments/1w7ybx7/maybelline_superstay_vinyl_ink/",
+              "kind": "user_self_report",
+              "published_on": "2026-09-05",
+              "access": "body",
+              "product": "Vinyl Ink, Walmart purchase, shade/lot not stated",
+              "summary": "The original poster reports repeated tackiness despite shaking, one dip and waiting; a commenter reports satisfactory gloss. Another proposes wiping the applicator, without a verified successful trial by the poster. This does not isolate excessive pickup.",
+              "provenance": "Original thread; displayed relative date implies September 5 at retrieval, exact timestamp not independently verified. Advice, replies and repeat attempts are not new independent users; favorable outcome does not establish no-wipe use.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "maybelline-glossnglitters",
+              "url": "https://glossnglitters.com/maybelline-superstay-vinyl-ink-liquid-lipstick-review/",
+              "kind": "user_self_report",
+              "published_on": "2023-10-17",
+              "access": "body",
+              "product": "Vinyl Ink, several listed shades; no per-shade application measurement",
+              "summary": "The author likes the comfortable long wear, reports eight-hour use and explicitly recommends removing applicator excess before a very thin coat. Shine later becomes semi-matte. Satisfactory wear with this routine does not establish the no-removal requirement.",
+              "provenance": "Original author experience, not sponsored according to disclosure; affiliate links. Older comments precede displayed article date, so date may reflect an update. No technical ingredient-effect claims adopted.",
+              "retrieved_on": "2026-09-26"
+            },
+            {
+              "id": "nyx-syndicated-cue",
+              "url": "https://buywisely.com.au/au/product/nyx-professional-makeup-shine-loud-high-shine-lip-colour-total-baller",
+              "kind": "agent_inference",
+              "published_on": null,
+              "access": "body",
+              "product": "Aggregator Total Baller listing, reviews include other shades",
+              "summary": "The aggregator labels reviews as originally from Ulta or NYX, with both favorable wear and failed application. Its search-cached wiping account could not be confirmed at the original retailer. Treat all as secondary leads, not decisive technical evidence.",
+              "provenance": "Syndicated/repeated blocks and pooled shades do not prove distinct people or Total Baller-specific experience. No increment to the frozen support count.",
+              "retrieved_on": "2026-09-26"
+            }
+          ],
+          "stopped": true,
+          "stop_reason": "Original consumer, manufacturer and component evidence still lacks matched no-removal adequacy. Stop this pass at ten documents; do not fill the quota with generic reviews or start another automatic search successor."
+        }
+      },
+      "limitations": [
+        "The requirement is coherent at behavior level but quantitative acceptance criteria and willingness to switch are unknown.",
+        "Different source-local authors are not proven globally distinct people.",
+        "These are listing-level identities; no cross-site SKU, shade or generation equivalence inferred.",
+        "Brand instructions and INCI are not dose-accuracy, wear-performance or safety evidence.",
+        "Other three provisionally qualified groups still lack complete alternatives and technical gates; ranking does not release them.",
+        "The ten additional URLs provide contrastive evidence, not ten independent users or an expanded frozen sample. Public authors are not linked across sites.",
+        "A satisfied user who accepts wiping, drying, gloss reapplication or a different finish does not prove the original no-removal goal is met. Unreported wiping is unknown, not evidence of its absence.",
+        "The component patent describes a possible mechanism without measured loading, commercial-SKU identification or product performance. It cannot release a new-product proposal."
+      ],
+      "decision": {
+        "status": "reject",
+        "basis": "insufficient_alternative_evidence",
+        "reason": "After one ten-document contrastive pass, hold release on insufficient alternative evidence. Favorable alternatives exist and must be preserved, but their no-removal suitability for the frozen thin-layer goal is unmeasured. Observed Laka inconvenience survives as research evidence, not proof of a worldwide market gap. Stop additional automatic expansion; #184 and #325 remain held.",
+        "falsifier": "Set the operational acceptance goal, then obtain attributable matched use or loading evidence for current variants. A satisfactory existing alternative retires the premise. Source-linked reproducible residual failure across examined alternatives permits narrow technical review. A user may instead decide this requirement is not worth pursuing; that is a scope decision, not fabricated evidence.",
+        "missing_input": [
+          "User decision: is removing applicator excess itself unacceptable, or is satisfactory wear after an ordinary application routine an acceptable solution? No preference is inferred from unrelated satisfied authors.",
+          "For the no-removal goal: exact available shade/package generation and an acceptable thin-film result, permissible wiping actions and acceptable wear/finish trade-offs for a comparative observation.",
+          "Matched repeated-use evidence on current Laka and actual alternative packages, including pickup before/after manual removal and thin-layer outcome. Public claims currently lack these measurements."
+        ],
+        "minimum_measurement": {
+          "state": "proposed_only_not_run_not_authorized_purchase",
+          "scope": "Screen current Laka and one acceptable available alternative first; record shade, lot/package generation, fill state, mixing instructions and handling conditions. Ten repeated loadings per package is an exploratory screen, not a statistical performance or safety claim.",
+          "measure": "With a verified-resolution balance, weigh applicator loaded versus clean/dry baseline under controlled withdrawal; record first/repeat loading, manual removal count and mass removed. Photograph a standardized thin-film application and record whether the chosen acceptance criterion is met. Include operator variability and evaporation limits.",
+          "limits": "Balance resolution must be demonstrably smaller than the differences under study; choose mass thresholds only after the acceptance target is set. A bench coating does not establish human wear, safety or satisfaction. No concentration or formula inferred.",
+          "release": "A suitable existing package retires the new-product premise. Contradictory matched evidence across examined alternatives can justify narrowly bounded technical assessment; unknowns keep release held."
+        }
+      }
+    }
+  },
+  "technical": {
+    "version": "technical-v1",
+    "candidate": "long-wear-lip-dose-without-tip-wiping",
+    "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+    "support_sha256": "9b1b7062041462e10c84813c0a3e1b467dd79f89b6577dfdf9ee800bf0fca258",
+    "market_sha256": "be986141d1a1501b626c739fbdc4676975ed905a298e1dacece26318b37a795e",
+    "release": {
+      "route": "user_provisional_adjudication",
+      "decision_url": "https://github.com/shk95-1/cosmai/issues/184#issuecomment-5847336264",
+      "recorded_at": "2026-09-26T15:07:39Z",
+      "rationale": "User judges that concrete inconvenience remains compared with alternatives and permits bounded technical assessment of this previously automatically selected candidate. Target is less manual reduction, not an absolute zero-wiping requirement.",
+      "automatic_market_disposition": {
+        "status": "reject",
+        "basis": "insufficient_alternative_evidence"
+      }
+    },
+    "sources": [
+      {
+        "id": "geka-wiper",
+        "url": "https://www.geka-world.com/en/competences-innovations/wipers",
+        "title": "GEKA Wipers",
+        "publisher": "GEKA",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Why a wiper makes the difference; De-blob",
+        "passage": "Aims to reduce the load on the brush tip.",
+        "conditions": "Supplier describes molded wiping systems and tip-load reduction. Formula and applicator-specific qualification is required.",
+        "limitations": "Commercial supplier claim without dose distribution, tested liquid-lip formula or matched current package. It supports an established development lever, not achieved performance.",
+        "reused_from_344": false
+      },
+      {
+        "id": "geka-catalogue",
+        "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/geka_product_catalogue.pdf",
+        "title": "GEKA Product Catalogue",
+        "publisher": "GEKA",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": "2026-06",
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "PDF page 23, printed 44-45, inspected visually",
+        "passage": "VISCOSITY medium",
+        "conditions": "044302 delicateLIPS lists diameter 2.7 mm and length 10.0 mm for medium viscosity; other tips have larger or reservoir-bearing geometries.",
+        "limitations": "Catalog size is not delivered dose. Supplier viscosity classes are unquantified. A smaller tip may require extra dips and must be matched to formula, wiper and stem; no recommendation to use this SKU untested.",
+        "reused_from_344": false
+      },
+      {
+        "id": "hcp-stock",
+        "url": "https://www.hcpackaging.com/product/13mm-standard-al-cap/",
+        "title": "13mm Standard Lip Gloss",
+        "publisher": "HCP Packaging",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Materials; Applicator options; Bottle injection process",
+        "passage": "Wiper: LDPE",
+        "conditions": "Stock 55D lists an LDPE wiper, POM rod, PET bottle and molded/flocked or tufted applicator options; bottle process is listed as IBM.",
+        "limitations": "This demonstrates existing components/process choices, not solvent, seal, flock/glue or dose compatibility with Laka or another film-forming formula. OFC is overflow capacity, not proposed fill volume.",
+        "reused_from_344": false
+      },
+      {
+        "id": "hcp-duo",
+        "url": "https://www.hcpackaging.com/inspiration/gloss-like-a-boss/",
+        "title": "Gloss Like a Boss",
+        "publisher": "HCP Packaging",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "13mm double-ended 6L7 stock pack",
+        "passage": "For 2-step application",
+        "conditions": "Supplier describes a stock double-ended color/gloss format with separate PET reservoirs.",
+        "limitations": "No low-loading, cross-contamination, scale cost, minimum order or current procurement conclusion. Reservoir separation does not prevent a gloss brush carrying color after use.",
+        "reused_from_344": false
+      },
+      {
+        "id": "hcp-match",
+        "url": "https://www.hcpackaging.com/category/lip-gloss-applicators/",
+        "title": "Lip Gloss Applicators",
+        "publisher": "HCP Packaging",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Introductory supplier description",
+        "passage": "work with the chosen formula",
+        "conditions": "Supplier explicitly matches applicator technology to the intended makeup claim and formula.",
+        "limitations": "Consultation offer is not a tested design or available partner. No outreach occurred.",
+        "reused_from_344": false
+      },
+      {
+        "id": "paddle-wiper",
+        "url": "https://patents.google.com/patent/US20130276817A1/en",
+        "title": "Cosmetic Applicator with Paddle-Shaped Applicator Tip",
+        "publisher": "HCP Packaging USA, patent specification",
+        "kind": "patent_specification",
+        "access": "body",
+        "published_on": "2013-10-24",
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Description of Figs 14-17; wiper/tip conformity",
+        "passage": "change shape to conform to the shape of the applicator tip",
+        "conditions": "Specification describes face/edge wiping and a conforming wiper. Some stated goals favor more material per dip.",
+        "limitations": "Mechanism only; no dose distribution, consumer comparison or verified relation to reviewed SKUs. Greater retention can conflict with the low-effort thin-layer goal. No novelty or patent-clearance conclusion.",
+        "reused_from_344": true
+      },
+      {
+        "id": "dior-droplet",
+        "url": "https://patents.google.com/patent/US20220354236A1/en",
+        "title": "Wiper for a liquid or pasty product applicator",
+        "publisher": "Parfums Christian Dior, patent specification",
+        "kind": "patent_specification",
+        "access": "body",
+        "published_on": "2022-11-10",
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Prior art and description of flexible sleeve/chamfer",
+        "passage": "a droplet may remain at the end of the applying member",
+        "conditions": "Specification links residual end droplets to product viscosity and applicator shape, and describes a more flexible wiping sleeve.",
+        "limitations": "Described geometry is not proven commercial behavior for this case. No quantitative comparison, applicable formulation or freedom-to-operate conclusion.",
+        "reused_from_344": false
+      },
+      {
+        "id": "loreal-force",
+        "url": "https://patents.google.com/patent/US12150538B2/en",
+        "title": "Wiper for a cosmetic product applicator",
+        "publisher": "LOreal, patent specification",
+        "kind": "patent_specification",
+        "access": "body",
+        "published_on": "2024-11-26",
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Background; wiping lip and withdrawal force trade-off",
+        "passage": "this would affect the loading of the product",
+        "conditions": "Specification discusses wiping-lip geometry, moldability and withdrawal force; examples include mascara.",
+        "limitations": "Supports a possible geometry/force trade-off, not measured lip performance. Applicability to a thin liquid color must be tested; no patent clearance asserted.",
+        "reused_from_344": false
+      },
+      {
+        "id": "film-tradeoff",
+        "url": "https://www.jstage.jst.go.jp/article/sccj/56/3/56_271/_article/-char/en",
+        "title": "Development of Long-Lasting Lipstick through the Molecular Design of a Novel Cross-Linked Silicone Resin",
+        "publisher": "Journal of Society of Cosmetic Chemists of Japan; KOSE authors",
+        "kind": "primary_research",
+        "access": "abstract_only",
+        "published_on": "2022-09-20",
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "DOI 10.5107/sccj.56.271; accessible abstract; PDF request timed out",
+        "passage": "film is brittle and easily peels off",
+        "conditions": "Abstract describes a resin/volatile-oil film mechanism and flexibility/hardness/dry-feeling trade-offs. The authors report comparison tests on their own novel resin formulation.",
+        "limitations": "Full methods were not inspected. The new resin is outside this existing-material MVP; no synthesis, concentration, recipe or efficacy result transferred. Use only as a trade-off warning and source of test endpoints, not proof for our product.",
+        "reused_from_344": false
+      },
+      {
+        "id": "existing-filmformer",
+        "url": "https://www.dow.com/en-us/pdp.dowsil-593-fluid.01225707z.html",
+        "title": "DOWSIL 593 Fluid",
+        "publisher": "Dow",
+        "kind": "supplier_specification",
+        "access": "body",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "What is DOWSIL 593 Fluid?",
+        "passage": "Dimethicone (and) Trimethylsiloxysilicate",
+        "conditions": "Manufacturer introduction identifies an existing silicone resin blend as a film former for color cosmetics and lipstick formulations.",
+        "limitations": "A commercial ingredient-family example, not a selected recipe or current-product composition. The page mixes cosmetic and industrial property/use entries; no viscosity, percentage, safety, shelf-life or procurement specification is adopted. Actual grade, formulation and compatibility require qualification.",
+        "reused_from_344": false
+      },
+      {
+        "id": "geka-old-catalogue",
+        "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/GEKA_BBS_Katalog_EN.pdf",
+        "title": "Earlier indexed GEKA catalogue",
+        "publisher": "GEKA",
+        "kind": "supplier_specification",
+        "access": "unavailable",
+        "published_on": null,
+        "retrieved_on": "2026-09-27",
+        "retrieval_timezone": "Asia/Seoul",
+        "locator": "Direct fetch returned 404; current catalogue retrieved separately",
+        "passage": null,
+        "conditions": "Old indexed product codes may differ from the current June 2026 catalogue.",
+        "limitations": "No cached dimension or dosing claim from this unavailable document supports a decisive claim.",
+        "reused_from_344": false
+      }
+    ],
+    "claims": [
+      {
+        "id": "established-package-lever",
+        "statement": "Existing molded wiping systems and stock lip applicators provide a plausible package-first development direction.",
+        "source_ids": [
+          "geka-wiper",
+          "hcp-stock"
+        ],
+        "material_or_component": "Wiper, tip and stem; existing molded/flocked components",
+        "conditions": "Supplier specifications, not an empirical matched trial.",
+        "applicability": "Directly addresses the observed repeated excess-removal action while initially holding the intended formula constant.",
+        "limits": "No achieved reduction, reliable dose or compatibility is demonstrated.",
+        "basis": "agent_inference"
+      },
+      {
+        "id": "geometry-formula-interaction",
+        "statement": "Evaluate tip, wiper and formula together; a smaller tip alone is not a demonstrated solution.",
+        "source_ids": [
+          "geka-catalogue",
+          "paddle-wiper",
+          "dior-droplet",
+          "hcp-match"
+        ],
+        "material_or_component": "Tip surface/reservoir, wiping contact and product rheology",
+        "conditions": "Commercial qualitative viscosity classes and patent mechanisms; actual fill state and withdrawal handling unknown.",
+        "applicability": "Can motivate a bounded comparison of existing component combinations.",
+        "limits": "Smaller loading may trade manual wiping for extra dipping, patchy coverage or force; proposed variables are hypotheses.",
+        "basis": "agent_inference"
+      },
+      {
+        "id": "force-and-tip-droplet",
+        "statement": "Track withdrawal force and end droplets alongside loaded mass.",
+        "source_ids": [
+          "dior-droplet",
+          "loreal-force"
+        ],
+        "material_or_component": "Flexible wiping lip/sleeve",
+        "conditions": "Patent descriptions, with mascara examples for some force discussions.",
+        "applicability": "An agent-proposed secondary failure mode for a package revision.",
+        "limits": "No quantitative lip-force limit or patented geometry is adopted as a design requirement.",
+        "basis": "agent_inference"
+      },
+      {
+        "id": "dual-format-boundary",
+        "statement": "Separate base-dose control from gloss-brush cleaning in the proposed case.",
+        "source_ids": [
+          "hcp-duo"
+        ],
+        "material_or_component": "Existing double-ended reservoir format",
+        "conditions": "Supplier offers two reservoirs; consumer source evidence records cleaning as a distinct action.",
+        "applicability": "Preserve the two-step option without claiming reservoir separation solves brush contamination.",
+        "limits": "A wiping-friendly gloss tip is a separate hypothesis and not established by this supplier claim.",
+        "basis": "agent_inference"
+      },
+      {
+        "id": "film-property-guard",
+        "statement": "Preserve film/finish behavior while testing packaging; changing formula can introduce different wear/comfort trade-offs.",
+        "source_ids": [
+          "film-tradeoff"
+        ],
+        "material_or_component": "Film-forming resin plus volatile carrier",
+        "conditions": "Abstract-only primary research on another formulation with a novel resin.",
+        "applicability": "Motivates endpoints and controls, with no direct formulation recommendation.",
+        "limits": "No current-product composition, concentration, process or human performance inferred; published effects remain specific to that study.",
+        "basis": "agent_inference"
+      },
+      {
+        "id": "existing-formulation-family",
+        "statement": "Commercial silicone film-former families exist; preserve or assess an established suitable base formula before introducing a new material.",
+        "source_ids": [
+          "existing-filmformer",
+          "film-tradeoff"
+        ],
+        "material_or_component": "Existing silicone-resin film-former family and carrier; no chosen concentration",
+        "conditions": "Supplier role statement and abstract-only mechanism/trade-off evidence on a different formulation.",
+        "applicability": "Provides a concrete existing-ingredient direction for the conditional brief while package loading remains the primary lever.",
+        "limits": "No finished-product performance or safe/compatible concentration inferred. The study-specific novel resin is excluded; the cited commercial listing is not a purchasing recommendation or adopted formula.",
+        "basis": "agent_inference"
+      }
+    ],
+    "proposed_tests": [
+      {
+        "id": "loading-and-effort",
+        "state": "proposed_not_run",
+        "objective": "Reduce repeated manual excess removal without replacing it with extra dipping or poor coverage.",
+        "control": "Same existing formula and defined fill/handling conditions in the baseline and candidate package; compare an acceptable existing alternative separately.",
+        "measure": "Record load per withdrawal, mass manually removed, wipe/dip counts, end droplets and standardized coating uniformity. Use exploratory repeated loading before choosing a powered design.",
+        "limitations": "No test performed or equipment assumed. Resolution/evaporation correction and acceptance targets must be set before mass claims; bench coating does not prove user satisfaction."
+      },
+      {
+        "id": "finish-and-wear",
+        "state": "proposed_not_run",
+        "objective": "Check that easier loading preserves the intended thin-layer result.",
+        "control": "Baseline formula/package and candidate package at matched applied amount; include the ordinary instructed routine for the existing alternative.",
+        "measure": "Record coating appearance, drying, transfer/rub behavior and gloss-overcoat interaction with stated substrate, load and time. Human wear/comfort would require a separately scoped later assessment.",
+        "limitations": "No numerical performance claim or safety conclusion. Abstract-only research provides endpoints, not a reproduced protocol or validated threshold."
+      },
+      {
+        "id": "package-compatibility",
+        "state": "proposed_not_run",
+        "objective": "Identify material, seal, flock and handling defects before selecting a package.",
+        "control": "Same formula, storage conditions and fill state, with baseline closure and existing material options.",
+        "measure": "Observe leaks, closure/withdrawal force, material/adhesive changes, fiber loss, product loss and loading drift over repeat use under a later qualified protocol.",
+        "limitations": "No stability, preservation, safety or regulatory acceptance established. Actual formula/solvent data and package specification are required; no purchasing or partner is assumed."
+      }
+    ],
+    "disposition": {
+      "status": "conditional_basis_for_brief",
+      "conclusion": "Package-first assessment using established wiper/tip/stock-pack options is technically plausible enough for a conditional brief. This does not validate a finished formula or resolve the remaining alternatives evidence.",
+      "next": "Consume in #325, preserve user intervention and comparison unknowns, then obtain the separate #327 usefulness evaluation.",
+      "unknowns": [
+        "Actual current formula rheology, current package geometry and material compatibility.",
+        "Acceptance targets, meaningful convenience gain and willingness to switch shade/formula/price.",
+        "Manufacturing fit, supplier qualification, minimum order and economics.",
+        "Matched alternative suitability, finished-product wear, safety and stability."
+      ]
+    },
+    "reuse": {
+      "decision": "No repository port or paper/ingredient scoring imported.",
+      "rationale": "Current task concerns package loading and a few directly accessible primary sources. Ingredient identity or bibliographic-score helpers cannot establish package compatibility or finished performance. Existing source fingerprints, discovery selection and provenance validation are reused."
+    },
+    "budget": {
+      "additional_document_limit": 10,
+      "additional_documents_examined": 10,
+      "reused_document_count": 1,
+      "counting": "Ten new distinct technical documents including one inaccessible older catalogue, plus one reused patent. Abstract and timed-out PDF are the same article; repeated requests and search listings add no documents. The bounded technical pass is complete.",
+      "paid_calls": 0,
+      "gpu_hours": 0,
+      "production_writes": 0,
+      "purchases": 0,
+      "outreach": 0
+    }
+  },
+  "run": {
+    "mode": "agent_mediated_workflow_with_offline_replay",
+    "selection_before_candidate_comparison": "long-wear-lip-dose-without-tip-wiping",
+    "selection_with_recorded_comparisons": "retinoid-tolerability-without-diy-dilution",
+    "release": {
+      "route": "user_provisional_adjudication",
+      "decision_url": "https://github.com/shk95-1/cosmai/issues/184#issuecomment-5847336264",
+      "recorded_at": "2026-09-26T15:07:39Z",
+      "rationale": "User judges that concrete inconvenience remains compared with alternatives and permits bounded technical assessment of this previously automatically selected candidate. Target is less manual reduction, not an absolute zero-wiping requirement.",
+      "automatic_market_disposition": {
+        "status": "reject",
+        "basis": "insufficient_alternative_evidence"
+      }
+    },
+    "documents": 386,
+    "observation_dispositions": {
+      "ambiguous": 84,
+      "observed": 45,
+      "satisfied": 141,
+      "wish": 51,
+      "off_topic": 15,
+      "promotion": 50
+    },
+    "candidates": [
+      {
+        "candidate": "base-spread-without-sunscreen-diy-dilution",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-05-31"
+        ]
+      },
+      {
+        "candidate": "body-moisture-without-long-rubbing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-20"
+        ]
+      },
+      {
+        "candidate": "cool-season-hydration-without-oil-mixing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-20"
+        ]
+      },
+      {
+        "candidate": "cooling-mask-without-two-product-mixing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2024-07-23"
+        ]
+      },
+      {
+        "candidate": "cream-use-without-fragrance-zone-avoidance",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-27"
+        ]
+      },
+      {
+        "candidate": "darker-skin-sun-bb-without-two-layer-routine",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-10"
+        ]
+      },
+      {
+        "candidate": "even-home-hair-color-with-less-breakage",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-15"
+        ]
+      },
+      {
+        "candidate": "facial-cleanser-without-import-or-unwanted-bumps",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          0,
+          1,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2024-06-30",
+          "2024-08-03"
+        ]
+      },
+      {
+        "candidate": "gentle-shampoo-without-import-and-dryness",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-27"
+        ]
+      },
+      {
+        "candidate": "jelly-blush-without-discontinuation-stockpiles",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2024-08-04"
+        ]
+      },
+      {
+        "candidate": "light-skin-base-without-brightening-diy-blends",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-10"
+        ]
+      },
+      {
+        "candidate": "lip-package-without-repeated-leaks",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-20"
+        ]
+      },
+      {
+        "candidate": "lip-packaging-without-breaking-to-empty",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-11"
+        ]
+      },
+      {
+        "candidate": "lip-pigment-uniformity-without-manual-remixing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-19"
+        ]
+      },
+      {
+        "candidate": "long-wear-lip-dose-without-tip-wiping",
+        "qualified": false,
+        "rejection_reasons": [
+          "market review (insufficient_alternative_evidence): After one ten-document contrastive pass, hold release on insufficient alternative evidence. Favorable alternatives exist and must be preserved, but their no-removal suitability for the frozen thin-layer goal is unmeasured. Observed Laka inconvenience survives as research evidence, not proof of a worldwide market gap. Stop additional automatic expansion; #184 and #325 remain held."
+        ],
+        "rank": [
+          1,
+          3,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 3,
+        "dates": [
+          "2026-08-15",
+          "2026-08-18",
+          "2026-09-07"
+        ]
+      },
+      {
+        "candidate": "long-wear-lip-shade-without-transfer-losing-blends",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-21"
+        ]
+      },
+      {
+        "candidate": "mineral-base-without-tool-dependent-pilling",
+        "qualified": true,
+        "rejection_reasons": [
+          "qualified but lower deterministic rank; retained for later review"
+        ],
+        "rank": [
+          0,
+          2,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 2,
+        "dates": [
+          "2025-12-04",
+          "2026-07-09"
+        ]
+      },
+      {
+        "candidate": "mineral-sunscreen-cleansing-without-double-wash",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2024-11-02"
+        ]
+      },
+      {
+        "candidate": "mineral-sunscreen-without-drying-diy-blends",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-07-26"
+        ]
+      },
+      {
+        "candidate": "mineral-sunscreen-without-extra-puff-application",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-06-01"
+        ]
+      },
+      {
+        "candidate": "non-greasy-scalp-sun-care-without-travel-purchase",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-06-23"
+        ]
+      },
+      {
+        "candidate": "oily-skin-foundation-without-diy-blending",
+        "qualified": false,
+        "rejection_reasons": [
+          "market review (insufficient_common_requirement): The two mixing reports have different motivations and unspecified target options. Existing shade choices and satisfactory standalone reports weaken a broad absence claim, but do not prove either participant has a satisfactory substitute. A shared specific new-product requirement is unestablished."
+        ],
+        "rank": [
+          1,
+          2,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 2,
+        "dates": [
+          "2026-08-20",
+          "2026-08-23"
+        ]
+      },
+      {
+        "candidate": "pearl-cream-dose-without-returning-excess",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-23"
+        ]
+      },
+      {
+        "candidate": "powder-wash-dose-without-repeat-squeezing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-17"
+        ]
+      },
+      {
+        "candidate": "retinoid-tolerability-without-diy-dilution",
+        "qualified": true,
+        "rejection_reasons": [],
+        "rank": [
+          1,
+          2,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 2,
+        "dates": [
+          "2026-07-22",
+          "2026-08-31"
+        ]
+      },
+      {
+        "candidate": "scalp-odor-without-fragrance-masking",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-22"
+        ]
+      },
+      {
+        "candidate": "sensitive-skin-seasonal-wear-without-zone-avoidance",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2025-01-14"
+        ]
+      },
+      {
+        "candidate": "shampoo-pump-without-repeat-delay",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-14"
+        ]
+      },
+      {
+        "candidate": "shampoo-use-without-rotation-for-reported-bumps",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-24"
+        ]
+      },
+      {
+        "candidate": "sheet-mask-without-manual-prewetting",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-26"
+        ]
+      },
+      {
+        "candidate": "summer-barrier-care-without-aloe-mixing",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-08-12"
+        ]
+      },
+      {
+        "candidate": "summer-glow-sun-base-without-oil-control-blends",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2025-07-03"
+        ]
+      },
+      {
+        "candidate": "sunscreen-base-without-failed-cream-dilution",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2024-09-28"
+        ]
+      },
+      {
+        "candidate": "sunscreen-dryness-reactivity-without-filter-switching",
+        "qualified": true,
+        "rejection_reasons": [
+          "qualified but lower deterministic rank; retained for later review"
+        ],
+        "rank": [
+          0,
+          2,
+          1,
+          0,
+          0
+        ],
+        "source_local_users": 2,
+        "dates": [
+          "2024-03-10",
+          "2025-08-22"
+        ]
+      },
+      {
+        "candidate": "tone-base-without-pilling-and-practice",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-05-23"
+        ]
+      },
+      {
+        "candidate": "water-glow-blush-without-import",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users"
+        ],
+        "rank": [
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2026-09-02"
+        ]
+      },
+      {
+        "candidate": "winter-body-hydration-without-diy-glycerin",
+        "qualified": false,
+        "rejection_reasons": [
+          "fewer than two attributable source-local users",
+          "repeatability unestablished"
+        ],
+        "rank": [
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "source_local_users": 1,
+        "dates": [
+          "2023-10-19"
+        ]
+      }
+    ],
+    "agent_interventions": [
+      {
+        "kind": "implementation_repair",
+        "detail": "Initial export rejected existing commerce 16-character author hashes; aligned validation with collectors.commerce.scrub. No database modification."
+      },
+      {
+        "kind": "sampling_expansion",
+        "detail": "First per-cue-3 sample gave no corroborated specific need; uniformly increased all source/cue limits to six without selecting a category."
+      },
+      {
+        "kind": "agent_semantic_review",
+        "detail": "Agent inspected all 109 exported full texts, supplied open-vocabulary groups and exact supporting spans; automatic selector alone declares winner."
+      },
+      "#324 uniform 12-per-source/cue follow-up: all 208 texts inspected, unchanged 109 annotations preserved and 99 new semantic annotations recorded; similar cleansing complaints share one stored author. No manually declared winner or medical causality inferred.",
+      "One equal-quota pass across all 25 observed seeds and four canonical sources; 178 new documents reviewed individually. New unrelated problems are distinct groups, not silently merged into old needs. Same-author partial copies and satisfied alternatives remain visible. Event-winner identifiers withheld in three shareable texts; private original capture preserved. Labels are agent research inputs, not independent labels or user evaluation."
+    ],
+    "agent_research_seconds": null,
+    "timing_limit": "Only capture and current offline replay are timed. Prior semantic review, public research and conversation time were not instrumented; no end-to-end speed or time saving is claimed.",
+    "stages": [
+      {
+        "stage": "uniform_source_capture",
+        "started_at": "2026-09-26T12:31:30.724406+00:00",
+        "finished_at": "2026-09-26T12:31:53.260000+00:00",
+        "elapsed_seconds": 22.535594,
+        "failures": []
+      },
+      {
+        "stage": "equal_quota_corroboration",
+        "started_at": "2026-09-26T13:07:24.400863+00:00",
+        "finished_at": "2026-09-26T13:09:00.553377+00:00",
+        "elapsed_seconds": 96.152514,
+        "new_documents": 178,
+        "group_source_queries": 100,
+        "failures": [],
+        "changed_documents": []
+      }
+    ],
+    "contrastive_access": [
+      {
+        "id": "chanel-monni",
+        "url": "https://monnibee.blog/2023/03/31/chanel-le-rouge-duo-ultra-tenue-lip-duos-review/",
+        "access": "body",
+        "provenance": "Original author experience; affiliate links disclosed; generation and per-shade loading unknown."
+      },
+      {
+        "id": "chanel-beautylookbook",
+        "url": "https://thebeautylookbook.com/2025/03/chanel-le-rouge-duo-ultra-tenue-new-shades.html",
+        "access": "body",
+        "provenance": "Original purchased-product experience; affiliate links disclosed. The author distinguishes new Intense Nude 194 from older 152, so a repeated shade name cannot establish identity."
+      },
+      {
+        "id": "nyx-ulta-access",
+        "url": "https://www.ulta.com/p/shine-loud-high-shine-lip-color-pimprod2020799",
+        "access": "failed",
+        "provenance": "Failure is not absence of product or evidence; no login or access-control workaround."
+      },
+      {
+        "id": "maybelline-us",
+        "url": "https://www.maybelline.com/lip-makeup/lipstick/super-stay-vinyl-ink-longwear-liquid-lipstick?variant=Witty",
+        "access": "body",
+        "provenance": "Manufacturer source; aggregate ratings include incentivized reviews. Search-cached reviews mixed Matte Ink into Vinyl Ink; do not use them as product-specific evidence."
+      },
+      {
+        "id": "nyx-us",
+        "url": "https://www.nyxcosmetics.com/lip/lip-gloss/shine-loud-high-shine-lip-color-gloss/NYX_935.html",
+        "access": "partial_body",
+        "provenance": "Manufacturer listing. Reviews were announced but subsequent body retrieval failed; incentivized ratings and repeated page sections are not independent participants."
+      },
+      {
+        "id": "component-paddle-wiper",
+        "url": "https://patents.google.com/patent/US20130276817A1/en",
+        "access": "body",
+        "provenance": "Primary patent specification, description of Figs 14-17. No pickup distributions, matched user trial or link to the compared packages. No patent clearance or freedom-to-operate conclusion."
+      },
+      {
+        "id": "chanel-hwahae-access",
+        "url": "https://www.hwahae.com/en/products/CHANEL-Le-Rouge-Duo-Ultra-Tiny-40-Light-Rose/2020018",
+        "access": "shell_only",
+        "provenance": "No new author or review added; cached snippet is not full-source confirmation."
+      },
+      {
+        "id": "maybelline-reddit",
+        "url": "https://www.reddit.com/r/makeuptips/comments/1w7ybx7/maybelline_superstay_vinyl_ink/",
+        "access": "body",
+        "provenance": "Original thread; displayed relative date implies September 5 at retrieval, exact timestamp not independently verified. Advice, replies and repeat attempts are not new independent users; favorable outcome does not establish no-wipe use."
+      },
+      {
+        "id": "maybelline-glossnglitters",
+        "url": "https://glossnglitters.com/maybelline-superstay-vinyl-ink-liquid-lipstick-review/",
+        "access": "body",
+        "provenance": "Original author experience, not sponsored according to disclosure; affiliate links. Older comments precede displayed article date, so date may reflect an update. No technical ingredient-effect claims adopted."
+      },
+      {
+        "id": "nyx-syndicated-cue",
+        "url": "https://buywisely.com.au/au/product/nyx-professional-makeup-shine-loud-high-shine-lip-colour-total-baller",
+        "access": "body",
+        "provenance": "Syndicated/repeated blocks and pooled shades do not prove distinct people or Total Baller-specific experience. No increment to the frozen support count."
+      }
+    ],
+    "technical_access": [
+      {
+        "id": "geka-wiper",
+        "url": "https://www.geka-world.com/en/competences-innovations/wipers",
+        "access": "body",
+        "limitations": "Commercial supplier claim without dose distribution, tested liquid-lip formula or matched current package. It supports an established development lever, not achieved performance."
+      },
+      {
+        "id": "geka-catalogue",
+        "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/geka_product_catalogue.pdf",
+        "access": "body",
+        "limitations": "Catalog size is not delivered dose. Supplier viscosity classes are unquantified. A smaller tip may require extra dips and must be matched to formula, wiper and stem; no recommendation to use this SKU untested."
+      },
+      {
+        "id": "hcp-stock",
+        "url": "https://www.hcpackaging.com/product/13mm-standard-al-cap/",
+        "access": "body",
+        "limitations": "This demonstrates existing components/process choices, not solvent, seal, flock/glue or dose compatibility with Laka or another film-forming formula. OFC is overflow capacity, not proposed fill volume."
+      },
+      {
+        "id": "hcp-duo",
+        "url": "https://www.hcpackaging.com/inspiration/gloss-like-a-boss/",
+        "access": "body",
+        "limitations": "No low-loading, cross-contamination, scale cost, minimum order or current procurement conclusion. Reservoir separation does not prevent a gloss brush carrying color after use."
+      },
+      {
+        "id": "hcp-match",
+        "url": "https://www.hcpackaging.com/category/lip-gloss-applicators/",
+        "access": "body",
+        "limitations": "Consultation offer is not a tested design or available partner. No outreach occurred."
+      },
+      {
+        "id": "paddle-wiper",
+        "url": "https://patents.google.com/patent/US20130276817A1/en",
+        "access": "body",
+        "limitations": "Mechanism only; no dose distribution, consumer comparison or verified relation to reviewed SKUs. Greater retention can conflict with the low-effort thin-layer goal. No novelty or patent-clearance conclusion."
+      },
+      {
+        "id": "dior-droplet",
+        "url": "https://patents.google.com/patent/US20220354236A1/en",
+        "access": "body",
+        "limitations": "Described geometry is not proven commercial behavior for this case. No quantitative comparison, applicable formulation or freedom-to-operate conclusion."
+      },
+      {
+        "id": "loreal-force",
+        "url": "https://patents.google.com/patent/US12150538B2/en",
+        "access": "body",
+        "limitations": "Supports a possible geometry/force trade-off, not measured lip performance. Applicability to a thin liquid color must be tested; no patent clearance asserted."
+      },
+      {
+        "id": "film-tradeoff",
+        "url": "https://www.jstage.jst.go.jp/article/sccj/56/3/56_271/_article/-char/en",
+        "access": "abstract_only",
+        "limitations": "Full methods were not inspected. The new resin is outside this existing-material MVP; no synthesis, concentration, recipe or efficacy result transferred. Use only as a trade-off warning and source of test endpoints, not proof for our product."
+      },
+      {
+        "id": "existing-filmformer",
+        "url": "https://www.dow.com/en-us/pdp.dowsil-593-fluid.01225707z.html",
+        "access": "body",
+        "limitations": "A commercial ingredient-family example, not a selected recipe or current-product composition. The page mixes cosmetic and industrial property/use entries; no viscosity, percentage, safety, shelf-life or procurement specification is adopted. Actual grade, formulation and compatibility require qualification."
+      },
+      {
+        "id": "geka-old-catalogue",
+        "url": "https://www.geka-world.com/fileadmin/user_upload/downloads/GEKA_BBS_Katalog_EN.pdf",
+        "access": "unavailable",
+        "limitations": "No cached dimension or dosing claim from this unavailable document supports a decisive claim."
+      }
+    ],
+    "budget": {
+      "paid_calls": 0,
+      "gpu_hours": 0,
+      "production_writes": 0,
+      "purchases": 0,
+      "outreach": 0,
+      "paid_currency_spend": 0,
+      "scope": "Case data/public-source work and offline generation only; provided agent subscription, host resources and implementation/test time are not priced."
+    },
+    "source_limits": [
+      "existing Korean commerce and channel-panel capture; no global coverage",
+      "cue lexicon misses unmentioned/other-language workarounds",
+      "live autocommit reads are not one transaction-wide DB snapshot",
+      "null commerce URLs retain table/source/review-key coordinates",
+      "latest source snapshot only; normalized copies deduplicated at selection",
+      "YouTube uses needs.corpus_document; later unprojected raw comments are outside this sample"
+    ]
+  },
+  "execution": {
+    "mode": "offline_replay_of_agent_reviewed_inputs",
+    "started_at": "2026-09-26T15:39:17.803410+00:00",
+    "finished_at": "2026-09-26T15:39:17.894298+00:00",
+    "elapsed_seconds": 0.09088909899583086
+  }
+}

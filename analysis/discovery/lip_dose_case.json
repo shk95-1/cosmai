@@ -1,0 +1,163 @@
+{
+  "version": "brief-spec-v1",
+  "candidate": "long-wear-lip-dose-without-tip-wiping",
+  "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+  "review_sha256": "5aee2e154f2746152785cb62b662d006a175fbffb15689d1703a5bfab5cc7541",
+  "technical_sha256": "96232f0269dfca329f385f53c85859bc263dd8664c8deb6e0626dc158078ed23",
+  "title": "Thin-layer liquid lip color with less repeated amount adjustment",
+  "target": {
+    "statement": "Users seeking a thin wearable long-wear liquid color layer who repeatedly remove excess from the applicator. This is a behavior-based research segment; size and willingness to switch are unknown.",
+    "basis": "agent_inference",
+    "support_doc_ids": [
+      "commerce_review:glowpick:7875575",
+      "commerce_review:oliveyoung:64286864",
+      "commerce_review:oliveyoung:64431208"
+    ]
+  },
+  "objective": {
+    "statement": "Reduce the manual effort needed to obtain the desired thin color layer while preserving an acceptable finish and wear routine. Occasional adjustment is allowed; zero wiping is not a specification.",
+    "decision_url": "https://github.com/shk95-1/cosmai/issues/184#issuecomment-5847336264"
+  },
+  "conditions": [
+    {
+      "statement": "Loading should reduce repeated excess removal without requiring more dips or sacrificing even coverage.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "geometry-formula-interaction"
+      ]
+    },
+    {
+      "statement": "Keep the desired thin-layer appearance and wearable result; select actual shade, finish and acceptance targets before testing.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "film-property-guard"
+      ]
+    },
+    {
+      "statement": "Assess established formula and stock wiper/tip combinations first. Do not assume the observed commercial formula can be copied or a catalogue tip will work unchanged.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "established-package-lever",
+        "existing-formulation-family"
+      ]
+    },
+    {
+      "statement": "Treat gloss-brush pigment cleaning as a separate requirement; a double-ended reservoir does not itself solve it.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "dual-format-boundary"
+      ]
+    }
+  ],
+  "tradeoffs": [
+    {
+      "statement": "A smaller or more strongly wiped tip could exchange wiping effort for extra dips, uneven coverage or stronger withdrawal force.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "geometry-formula-interaction",
+        "force-and-tip-droplet"
+      ]
+    },
+    {
+      "statement": "Lower applied amount or a formula change could alter coverage, drying, comfort, transfer and wear. The cited study does not establish our formulation.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "film-property-guard"
+      ]
+    },
+    {
+      "statement": "An existing alternative or a preferred prior tint may be more useful than a new package. Reported shade and touch-up preferences are separate from loading inconvenience.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": []
+    }
+  ],
+  "failure_modes": [
+    {
+      "statement": "Variable loading with fill level, handling, viscosity or accumulated residue could erase the convenience gain.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "geometry-formula-interaction"
+      ]
+    },
+    {
+      "statement": "Tight wiping could leave end droplets, damage flock, increase withdrawal force or require extra dipping.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "force-and-tip-droplet",
+        "geometry-formula-interaction"
+      ]
+    },
+    {
+      "statement": "An easier-to-load package could still produce patchy color, poor wear or uncomfortable film.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "technical_claim_ids": [
+        "film-property-guard"
+      ]
+    },
+    {
+      "statement": "Solvent, seal, adhesive or material incompatibility could make a stock pack unsuitable.",
+      "basis": "design_hypothesis",
+      "support_doc_ids": [],
+      "technical_claim_ids": [
+        "established-package-lever"
+      ]
+    }
+  ],
+  "falsifiers": [
+    "Retire the new-product premise if an acceptable available alternative achieves the desired result with an ordinary routine the target user accepts.",
+    "Reject a package revision if it reduces removed mass but fails to reduce total effort, adds dips, or worsens the chosen coverage/wear result.",
+    "Reframe or stop if shade, finish, retouching or price dominates the amount-control benefit, or no practical compatible stock combination exists."
+  ],
+  "boundaries": [
+    "This is a conditional development concept, not demonstrated market absence or a validated formula.",
+    "No concentrations, dose targets, proprietary recipe, novel resin, patent clearance, MOQ, manufacturing cost or regulatory qualification are specified.",
+    "No prototype, purchase, outreach, human trial or laboratory measurement has occurred."
+  ]
+}
