@@ -1191,3 +1191,26 @@ used. It preserves excluded observations, candidate rejection reasons and counte
 judgments do not prove unmet market demand. Actual alternative comparison and technical review
 remain subsequent acceptance steps. Artifacts default to mode 0600; commands make no paid/GPU
 calls and do not contact outside reviewers.
+
+
+`analysis.discovery.corroborate.corroborate_local(sample, review, queries, per_query=3)`
+performs one read-only requirement-led replication pass (#342). Its reviewer-declared
+queries bind the frozen seed digest, cover every observed seed group (at most 25), and
+anchor their reasoning to exact observed source spans. One to four groups of bounded
+literal synonyms are ANDed using SQL parameters and escaped regex terms. Each of the
+four canonical sources receives the same quota of at most three new documents per group;
+seed IDs are excluded and source IDs use stable MD5 order. All seed texts are preserved.
+The frozen manifest records the full queries and their digest, source/group coverage,
+access failures and conflicting live texts for repeated IDs. A conflicting text does not
+silently replace the first capture or acquire another query association. Autocommit reads
+are not a transaction-wide database snapshot. The maximum is 300 new documents in one
+pass, before ID deduplication. Matching terms do not establish shared requirements,
+independent users or residual gaps: every added document needs full semantic review and
+any proposed lead still passes the alternatives gate. There are no paid/GPU calls.
+
+A comparison can also reject release with `insufficient_alternative_evidence`: at least one
+must-have remains unknown for a compared alternative. This preserves a coherent observed
+requirement while withholding a residual-gap claim. It neither asserts the requirement is
+incoherent nor falsely certifies an existing product as sufficient. Closing this evidence
+gap requires the assessment's explicit falsifier; a brand's application claim alone does
+not establish dose accuracy or individual suitability.

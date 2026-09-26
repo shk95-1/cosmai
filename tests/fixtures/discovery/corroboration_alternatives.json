@@ -1,0 +1,226 @@
+{
+  "version": "alternatives-v1",
+  "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+  "support_sha256": "9b1b7062041462e10c84813c0a3e1b467dd79f89b6577dfdf9ee800bf0fca258",
+  "candidate": "long-wear-lip-dose-without-tip-wiping",
+  "requirements": [
+    {
+      "id": "dose-0",
+      "doc_id": "commerce_review:glowpick:7875575",
+      "span": "매번 덜어써야하는",
+      "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Acceptable pickup mass and variance are not measured.",
+        "Willingness to switch color/formula/price is unknown.",
+        "Gloss-brush cleaning and base-dose control are distinct problems."
+      ]
+    },
+    {
+      "id": "dose-1",
+      "doc_id": "commerce_review:oliveyoung:64286864",
+      "span": "극! 소량 (이정도 덜어야",
+      "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Acceptable pickup mass and variance are not measured.",
+        "Willingness to switch color/formula/price is unknown.",
+        "Gloss-brush cleaning and base-dose control are distinct problems."
+      ]
+    },
+    {
+      "id": "dose-2",
+      "doc_id": "commerce_review:oliveyoung:64431208",
+      "span": "양조절해서 써야",
+      "interpretation": "Research hypothesis: a wearable thin color layer with less manual excess removal; this is not an independently confirmed customer specification.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Acceptable pickup mass and variance are not measured.",
+        "Willingness to switch color/formula/price is unknown.",
+        "Gloss-brush cleaning and base-dose control are distinct problems."
+      ]
+    }
+  ],
+  "alternatives": [
+    {
+      "name": "Laka Perfect Twin Lip, current reviewed package",
+      "identity": {
+        "source": "laka.co.kr",
+        "product_id": "196",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://m.laka.co.kr/product/%ED%95%9C%EC%A0%95%EC%88%98%EB%9F%89-%ED%8D%BC%ED%8E%99%ED%8A%B8-%ED%8A%B8%EC%9C%88-%EB%A6%BD-21/196/category/1/display/2/",
+        "kind": "manufacturer_claim",
+        "summary": "Perfect Twin Lip color/gloss dual-ended listing; instructions say apply a suitable amount. No dispensed-mass or wiper-geometry data. Options and availability vary; stock labels are not all-color availability proof.",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "Bounded promotion listing includes sold-out options; regional current supply and package revisions unknown.",
+      "comparisons": [
+        {
+          "requirement": "dose-0",
+          "status": "contradicted",
+          "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+          "evidence": {
+            "url": "https://www.glowpick.com/products/189624",
+            "kind": "user_self_report",
+            "summary": "First-person executed effort with stated motivation and an unresolved standalone/access trade-off.",
+            "retrieved_on": "2026-09-26"
+          }
+        },
+        {
+          "requirement": "dose-1",
+          "status": "contradicted",
+          "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+          "evidence": {
+            "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000255256",
+            "kind": "user_self_report",
+            "summary": "Must remove an extreme amount before coating; uneven finish and harder touch-up remain.",
+            "retrieved_on": "2026-09-26"
+          }
+        },
+        {
+          "requirement": "dose-2",
+          "status": "contradicted",
+          "reason": "The corresponding frozen consumer explicitly removes or controls excess color pickup; this is a personal counterexample for the reviewed product, not a universal failure across all shades or future packages.",
+          "evidence": {
+            "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000255256",
+            "kind": "user_self_report",
+            "summary": "Excess base pickup requires quantity reduction; gloss-brush contamination adds wiping burden.",
+            "retrieved_on": "2026-09-26"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chanel Le Rouge Duo Ultra Tenue",
+      "identity": {
+        "source": "chanel.com",
+        "product_id": "175106",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.chanel.com/us/makeup/p/175106/le-rouge-duo-ultra-tenue-ultrawear-liquid-lip-colour/",
+        "kind": "manufacturer_claim",
+        "summary": "Dual liquid color/gloss with precise-application claim, even application followed by drying and gloss. Published wear claims do not measure pickup or wiping. Current page shows favorable and unfavorable consumer experiences.",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "US selected shade page can add to bag; Korean comparable shade and supply unknown.",
+      "comparisons": [
+        {
+          "requirement": "dose-0",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-1",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-2",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        }
+      ]
+    },
+    {
+      "name": "NYX Shine Loud",
+      "identity": {
+        "source": "nyxcosmetics.com.mx",
+        "product_id": "800897207304",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.nyxcosmetics.com.mx/labios/lip-gloss/brillo-de-labios-shine-loud---movin'-up/LATAM_NYX_NGL_800897207304.html",
+        "kind": "manufacturer_claim",
+        "summary": "Dual color/gloss instructions specify applying color, drying approximately 60 seconds and adding gloss. One-swipe and wear claims do not establish low pickup without manual wiping.",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "Mexico regional listing; Korean supply and identical package generation unknown. US page timed out.",
+      "comparisons": [
+        {
+          "requirement": "dose-0",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-1",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-2",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        }
+      ]
+    },
+    {
+      "name": "Maybelline Super Stay Vinyl Ink",
+      "identity": {
+        "source": "maybelline.co.jp",
+        "product_id": "super-stay-vinyl-ink",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.maybelline.co.jp/all-products/lip/lipstick/super-stay-vinyl-ink",
+        "kind": "manufacturer_claim",
+        "summary": "Single liquid-lip alternative instructs shaking, applying and drying. It changes the dual-product format; claimed wear does not measure pickup and cannot certify personal shade/finish suitability.",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "Japanese regional listing; Korean supply, shades and package generation unknown.",
+      "comparisons": [
+        {
+          "requirement": "dose-0",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-1",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        },
+        {
+          "requirement": "dose-2",
+          "status": "unknown",
+          "reason": "No matched consumer trial or quantitative applicator pickup result establishes this thin-layer/no-excess-removal requirement. Positive generic wear reports and precision claims are insufficient."
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "budget": "At most 20 free public consumer-evidence documents; no outreach or purchase.",
+    "examined": "Four manufacturer listings; two additional cached consumer pages considered as counterevidence, not added independent users. US NYX and direct Reddit fetch failures recorded.",
+    "consumer_counterevidence": [
+      {
+        "url": "https://www.reddit.com/r/MUAontheCheap/comments/10zfrtd/",
+        "kind": "user_self_report",
+        "summary": "Search-indexed February 2023 report praises a thin Chanel formula and smaller applicator. Direct fetch failed; this is a weak counterexample cue requiring source confirmation, not measured low-dose adequacy.",
+        "retrieved_on": "2026-09-26"
+      },
+      {
+        "url": "https://www.hwahae.com/en/products/CHANEL-Le-Rouge-Duo-Ultra-Tiny-40-Light-Rose/2020018",
+        "kind": "user_self_report",
+        "summary": "Search-indexed December 2025 report says Chanel dispenses generously and recommends a light hand. Full review text was not retrieved; naming/translation and edition uncertain. This conflicts with inferring universal low-dose adequacy from favorable reports.",
+        "retrieved_on": "2026-09-26"
+      }
+    ]
+  },
+  "limitations": [
+    "The requirement is coherent at behavior level but quantitative acceptance criteria and willingness to switch are unknown.",
+    "Different source-local authors are not proven globally distinct people.",
+    "These are listing-level identities; no cross-site SKU, shade or generation equivalence inferred.",
+    "Brand instructions and INCI are not dose-accuracy, wear-performance or safety evidence.",
+    "Other three provisionally qualified groups still lack complete alternatives and technical gates; ranking does not release them."
+  ],
+  "decision": {
+    "status": "reject",
+    "basis": "insufficient_alternative_evidence",
+    "reason": "Hold product-case release while preserving the observed dose inconvenience. Current Laka reviews contradict convenient pickup, but three available alternatives have unresolved suitability. Neither worldwide absence nor an adequate substitute is established.",
+    "falsifier": "Obtain attributable comparative use or published pickup evidence for the same thin-layer goal on the current package and actual alternatives, with explicit variant/generation, initial versus repeat loading and manual removal burden. A suitable existing option retires the new-product premise; reproducible residual failure permits technical assessment."
+  }
+}

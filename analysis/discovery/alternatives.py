@@ -112,8 +112,20 @@ def market_reason(sample: dict, candidate: dict, assessment: dict) -> str | None
         ):
             raise ValueError("unknown suitability alone cannot establish a residual gap")
         return None
-    if decision.get("basis") not in {"insufficient_common_requirement", "existing_alternative"}:
+    if decision.get("basis") not in {
+        "insufficient_common_requirement",
+        "existing_alternative",
+        "insufficient_alternative_evidence",
+    }:
         raise ValueError("rejection basis required")
+    if decision["basis"] == "insufficient_alternative_evidence":
+        required = {r["id"] for r in requirements if r["priority"] == "must_have"}
+        if not required or not any(
+            c["requirement"] in required and c["status"] == "unknown"
+            for a in alternatives
+            for c in a["comparisons"]
+        ):
+            raise ValueError("insufficient alternatives evidence needs an unresolved must-have")
     if decision["basis"] == "existing_alternative":
         required = {r["id"] for r in requirements if r["priority"] == "must_have"}
         if not required or not any(
