@@ -1183,6 +1183,22 @@ Validation checks the artifact's provenance structure, not source truth, actual 
 authorization, scientific quality or finished performance. A conditional technical basis
 still requires the development brief and the separate user's usefulness evaluation.
 
+`python -m analysis.discovery.brief --sample sample.json --review review.json
+--technical technical.json --case case.json --output brief` replays the complete frozen
+selection/comparison/technical chain offline and writes `brief.json` and `brief.md` with
+mode 0600 (#325). `brief-spec-v1` binds all three evidence inputs, the candidate and the
+actual release ledger; target/condition/trade-off/failure-mode references point to the
+original supporting documents or technical claim IDs. Case prose remains agent-authored
+hypotheses requiring real review, rather than source truth certified by reference checks.
+The `development-brief-v1` output retains the failed automatic market gate and both
+automatic selections, with the provisional user release separate. Its input-derived run
+ID is stable; per-invocation UTC times and replay duration are separate. Recorded capture
+times, access failures, excluded candidates, interventions and budget remain inspectable.
+Uninstrumented agent research duration is null, not invented time saving. Status
+`conditional_brief_for_user_evaluation` does not mean accepted or validated; all tests
+remain proposed and #327's separate user evaluation is pending. No database, network,
+paid model, GPU, purchase or outreach is invoked. Input files cannot be output targets.
+
 `cosmai discover sample --per-cue 3 --output sample.json` exports bounded behavior probes from
 canonical commerce reviews and latest corpus comment snapshots. It uses needs_runtime in
 read-only autocommit mode, leaves the database unchanged, and records source/cue coverage,
