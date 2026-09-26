@@ -437,3 +437,270 @@ def test_timestamp_or_timezone_differences_do_not_establish_multiple_days(case, 
     winner = next(c for c in result["candidates"] if c["candidate"] == WINNER)
     assert winner["dates"] == ["2026-08-20"]
     assert "repeatability unestablished" in winner["rejection_reasons"]
+
+
+@pytest.fixture
+def corroboration_case(case):
+    sample, review = deepcopy(case)
+    groups = {}
+    docs = {d["doc_id"]: d for d in sample["documents"]}
+    for observation in review["observations"]:
+        if observation["disposition"] == "observed":
+            groups.setdefault(
+                observation["candidate"],
+                {
+                    "reason": "A literal probe, never a semantic classification",
+                    "anchors": [
+                        {"doc_id": observation["doc_id"], "span": docs[observation["doc_id"]]["text"]}
+                    ],
+                    "all_of": [["[literal].*"], ["mix"]],
+                },
+            )
+    return (
+        sample,
+        review,
+        {"snapshot_sha256": sample["snapshot_sha256"], "reviewer": "test", "groups": groups},
+    )
+
+
+@pytest.mark.parametrize("change", ["missing_group", "anchor", "snapshot", "quota", "empty_terms"])
+def test_corroboration_refuses_biased_or_ungrounded_queries_before_db(
+    corroboration_case, monkeypatch, change
+):
+    from analysis.discovery import corroborate as adapter
+
+    sample, review, queries = corroboration_case
+    quota = 3
+    group = next(iter(queries["groups"].values()))
+    if change == "missing_group":
+        queries["groups"].pop(next(iter(queries["groups"])))
+    elif change == "anchor":
+        group["anchors"][0]["span"] = "invented common requirement"
+    elif change == "snapshot":
+        queries["snapshot_sha256"] = "wrong"
+    elif change == "quota":
+        quota = 4
+    else:
+        group["all_of"] = [[]]
+
+    def unexpected_db():
+        pytest.fail("Invalid research input must not connect to a database")
+
+    monkeypatch.setattr(adapter, "runtime_url", unexpected_db)
+    with pytest.raises(ValueError):
+        adapter.corroborate_local(sample, review, queries, quota)
+
+
+def test_corroboration_preserves_seed_caps_queries_and_detects_live_text_changes(
+    corroboration_case, monkeypatch
+):
+    from analysis.discovery import corroborate as adapter
+
+    sample, review, queries = corroboration_case
+    monkeypatch.setattr(adapter, "COMMERCE", ())
+    monkeypatch.setattr(adapter, "runtime_url", lambda: "unused")
+    calls = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql, params):
+            calls.append((sql.as_string(), params))
+
+        def fetchone(self):
+            return {"matching": 10}
+
+        def fetchall(self):
+            return [
+                {
+                    "source_item_id": "new-item",
+                    "text": "first text" if len(calls) == 2 else "changed text",
+                    "author_hash": "a" * 24,
+                    "published_at": None,
+                }
+            ]
+
+    class Connection:
+        autocommit = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql):
+            assert self.autocommit and sql == "SET default_transaction_read_only = on"
+
+        def cursor(self, **kwargs):
+            return Cursor()
+
+    monkeypatch.setattr(adapter, "connect", lambda _: Connection())
+    result = adapter.corroborate_local(sample, review, queries)
+    assert result["documents"][: len(sample["documents"])] == sample["documents"]
+    assert result["documents"][-1]["text"] == "first text"
+    assert len(result["documents"][-1]["corroboration_queries"]) == 1
+    ledger = result["manifest"]["corroboration"]
+    assert ledger["new_documents"] == 1
+    assert len(ledger["changed_documents"]) == len(queries["groups"]) - 1
+    assert ledger["queries"] == queries
+    assert not ledger["failures"]
+    for sql, params in calls:
+        assert "[literal]" not in sql and "NOT (source_item_id = ANY(%s))" in sql
+        assert params[0] == r"(\[literal\]\.\*)"
+        assert params[2] == [
+            d["source_item_id"] for d in sample["documents"] if d["source"] == adapter.YOUTUBE
+        ]
+        if "LIMIT" in sql:
+            assert params[-1] == 3
+
+
+def test_corroboration_records_every_failed_source_group_without_sensitive_error(
+    corroboration_case, monkeypatch
+):
+    from analysis.discovery import corroborate as adapter
+
+    sample, review, queries = corroboration_case
+
+    class Connection:
+        autocommit = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def execute(self, sql):
+            pass
+
+        def cursor(self, **kwargs):
+            raise RuntimeError("sensitive connection detail")
+
+    monkeypatch.setattr(adapter, "runtime_url", lambda: "unused")
+    monkeypatch.setattr(adapter, "connect", lambda _: Connection())
+    result = adapter.corroborate_local(sample, review, queries)
+    ledger = result["manifest"]["corroboration"]
+    assert len(ledger["failures"]) == 4 * len(queries["groups"])
+    assert result["documents"] == sample["documents"]
+    assert "sensitive connection detail" not in json.dumps(result)
+
+
+def test_equal_budget_real_replication_preserves_negative_seed_and_does_not_release_unknown_alternatives():
+    sample = json.loads((FIXTURES / "corroboration_sample.json").read_text())
+    review = json.loads((FIXTURES / "corroboration_review.json").read_text())
+    queries = json.loads((FIXTURES / "corroboration_queries.json").read_text())
+    old_sample = json.loads((FIXTURES / "followup_sample.json").read_text())
+    old_review = json.loads((FIXTURES / "followup_review.json").read_text())
+    from analysis.discovery.corroborate import validate_queries
+
+    validate_queries(old_sample, old_review, queries, 3)
+    assert len(sample["documents"]) == len(review["observations"]) == 386
+    old_docs = {d["doc_id"]: d for d in old_sample["documents"]}
+    assert {d["doc_id"]: d for d in sample["documents"] if d["doc_id"] in old_docs} == old_docs
+    assert [o for o in review["observations"] if o["doc_id"] in old_docs] == old_review["observations"]
+    ledger = sample["manifest"]["corroboration"]
+    assert ledger["new_documents"] == 178 and len(ledger["coverage"]) == 100
+    assert not ledger["failures"] and not ledger["changed_documents"]
+    assert all(c["returned"] <= 3 for c in ledger["coverage"])
+    assert len(ledger["shareable_redactions"]) == 3
+    without_market = deepcopy(review)
+    without_market["market_reviews"].pop("long-wear-lip-dose-without-tip-wiping")
+    initial = select(sample, without_market)
+    assert initial["selected"] == "long-wear-lip-dose-without-tip-wiping"
+    result = select(sample, review)
+    lip = next(c for c in result["candidates"] if c["candidate"] == initial["selected"])
+    assert lip["source_local_users"] == 3 and len(lip["dates"]) == 3
+    assert not lip["qualified"]
+    assert lip["market_review"]["decision"]["basis"] == "insufficient_alternative_evidence"
+    assert len(lip["market_review"]["alternatives"]) == 4
+    pigment = next(
+        c for c in result["candidates"] if c["candidate"] == "lip-pigment-uniformity-without-manual-remixing"
+    )
+    assert pigment["source_local_users"] == 1
+    original = next(c for c in result["candidates"] if c["candidate"] == WINNER)
+    assert original["market_review"]["decision"]["basis"] == "insufficient_common_requirement"
+    # The selector still has provisional runners-up. They are not accepted product cases,
+    # and cannot bypass their own alternatives/technical/user-evaluation gates.
+    assert result["selected"] != initial["selected"]
+    assert result == select(sample, review)
+
+
+def test_insufficient_alternative_evidence_cannot_mask_a_fully_known_matrix(case):
+    sample, review = case
+    review = market_review(review)
+    assessment = review["market_reviews"][WINNER]
+    assessment["decision"]["basis"] = "insufficient_alternative_evidence"
+    # Current matrix legitimately holds release because must-have suitability is unknown.
+    assert select(sample, review)["selected"] is None
+    for alternative in assessment["alternatives"]:
+        for comparison in alternative["comparisons"]:
+            comparison["status"] = "contradicted"
+            comparison["evidence"] = alternative["source"]
+    with pytest.raises(ValueError, match="unresolved must-have"):
+        select(sample, review)
+
+
+def test_corroboration_real_sql_excludes_seed_and_matches_only_latest_literal_snapshot(
+    corroboration_case, database_url_for_tests, monkeypatch
+):
+    from analysis.discovery import corroborate as adapter
+    from db.runtime import connect
+
+    sample, review, queries = corroboration_case
+    for query in queries["groups"].values():
+        query["all_of"] = [["literal.[x]"], ["mix"]]
+    seed_ids = [d["source_item_id"] for d in sample["documents"] if d["source"] == adapter.YOUTUBE]
+    # Include a real seed ID even if the fixture happens to contain no YouTube evidence.
+    if not seed_ids:
+        seed_doc = deepcopy(sample["documents"][0])
+        seed_doc.update(doc_id="youtube_comment:seed", source=adapter.YOUTUBE, source_item_id="seed")
+        sample = freeze(sample["manifest"], sample["documents"] + [seed_doc])
+        review["observations"].append(
+            {
+                "doc_id": seed_doc["doc_id"],
+                "disposition": "off_topic",
+                "candidate": None,
+                "reason": "Test seed",
+                "span": seed_doc["text"],
+            }
+        )
+        review["snapshot_sha256"] = queries["snapshot_sha256"] = sample["snapshot_sha256"]
+        seed_ids = ["seed"]
+    with connect(database_url_for_tests) as conn:
+        conn.execute(
+            "CREATE TABLE corpus_document (snapshot_id text, source text, source_item_id text, text text, "
+            "source_metadata jsonb, published_at timestamptz, url text, parent_item_id text, "
+            "source_run text, collected_at timestamptz)"
+        )
+        for item, snapshot, text, collected in [
+            (seed_ids[0], "seed", "literal.[x] mix", "2026-01-01"),
+            ("keep", "old", "literal.[x] mix old", "2026-01-01"),
+            ("keep", "new", "literal.[x] mix latest", "2026-02-01"),
+            ("stale", "old", "literal.[x] mix", "2026-01-01"),
+            ("stale", "new", "latest no match", "2026-02-01"),
+            ("regex-trap", "new", "literalax mix", "2026-02-01"),
+        ]:
+            conn.execute(
+                "INSERT INTO corpus_document VALUES (%s,'youtube_comment',%s,%s,'{}',"
+                "'2026-01-01',NULL,NULL,'test',%s)",
+                (snapshot, item, text, collected),
+            )
+        conn.commit()
+    monkeypatch.setattr(adapter, "COMMERCE", ())
+    monkeypatch.setattr(
+        adapter, "YOUTUBE_BASE", adapter.YOUTUBE_BASE.replace("needs.corpus_document", "corpus_document")
+    )
+    monkeypatch.setattr(adapter, "runtime_url", lambda: database_url_for_tests)
+    result = adapter.corroborate_local(sample, review, queries)
+    ledger = result["manifest"]["corroboration"]
+    assert not ledger["failures"]
+    assert ledger["new_documents"] == 1
+    assert all(c["matching"] == c["returned"] == 1 for c in ledger["coverage"])
+    kept = next(d for d in result["documents"] if d["doc_id"] == "youtube_comment:keep")
+    assert kept["text"] == "literal.[x] mix latest"
+    assert len(kept["corroboration_queries"]) == len(queries["groups"])

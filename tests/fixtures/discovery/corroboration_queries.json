@@ -1,0 +1,733 @@
+{
+  "snapshot_sha256": "636e76a662e8355de90bd97bb51ced3f0fc08a3e10b6de6d3675966e6b2d871e",
+  "reviewer": "provided-agent-environment",
+  "groups": {
+    "cool-season-hydration-without-oil-mixing": {
+      "all_of": [
+        [
+          "크림",
+          "보습"
+        ],
+        [
+          "겨울",
+          "건조",
+          "건성"
+        ],
+        [
+          "섞",
+          "오일"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:daisomall:10059386",
+          "span": "수분만으로는 부족할 듯해요"
+        },
+        {
+          "doc_id": "commerce_review:daisomall:10059386",
+          "span": "오일이랑 섞어서 사용하니까"
+        }
+      ]
+    },
+    "shampoo-pump-without-repeat-delay": {
+      "all_of": [
+        [
+          "샴푸"
+        ],
+        [
+          "펌프",
+          "펌핑",
+          "눌러"
+        ],
+        [
+          "느리",
+          "돌아",
+          "기다",
+          "연속"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:daisomall:8406221",
+          "span": "거품이 잘 안나서"
+        },
+        {
+          "doc_id": "commerce_review:daisomall:8406221",
+          "span": "두번 펌핑하는데"
+        }
+      ]
+    },
+    "retinoid-tolerability-without-diy-dilution": {
+      "all_of": [
+        [
+          "레티놀",
+          "레티날",
+          "레티노"
+        ],
+        [
+          "섞",
+          "혼합",
+          "희석"
+        ],
+        [
+          "자극",
+          "껍질",
+          "각질",
+          "따갑",
+          "따가",
+          "붉"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:daisomall:9214907",
+          "span": "피부 다 껍질 일어난"
+        },
+        {
+          "doc_id": "commerce_review:daisomall:9214907",
+          "span": "조금씩 섞어가면서 쓰고 있습니다"
+        }
+      ]
+    },
+    "sensitive-skin-seasonal-wear-without-zone-avoidance": {
+      "all_of": [
+        [
+          "여름",
+          "더워",
+          "더운"
+        ],
+        [
+          "민감",
+          "예민"
+        ],
+        [
+          "피하",
+          "이마",
+          "트러블",
+          "따갑"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7308500",
+          "span": "날씨가 더워지니 트러블"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7308500",
+          "span": "이마, 코, 입술쪽은 제외하고 바르는중입니다"
+        }
+      ]
+    },
+    "oily-skin-foundation-without-diy-blending": {
+      "all_of": [
+        [
+          "파데",
+          "파운데이션"
+        ],
+        [
+          "지성",
+          "수부지"
+        ],
+        [
+          "섞",
+          "혼합"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7858181",
+          "span": "톤이 옐로 베이스에 좀 어두운"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7858181",
+          "span": "다른 파운데이션 섞어서 쓰고있어요"
+        }
+      ]
+    },
+    "gentle-shampoo-without-import-and-dryness": {
+      "all_of": [
+        [
+          "샴푸"
+        ],
+        [
+          "직구",
+          "해외",
+          "일본"
+        ],
+        [
+          "민감",
+          "건조",
+          "퍼석",
+          "뻣뻣"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7864172",
+          "span": "기름 꼈을 때 세정력도 괜찮고"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7864172",
+          "span": "직구만 아니라면"
+        }
+      ]
+    },
+    "water-glow-blush-without-import": {
+      "all_of": [
+        [
+          "블러셔",
+          "블러쉬"
+        ],
+        [
+          "직구",
+          "해외"
+        ],
+        [
+          "요철",
+          "물광",
+          "한정"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7870355",
+          "span": "요철부각 전혀 없음"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7870355",
+          "span": "출시하자마자 직구해서 사용하고 있음"
+        }
+      ]
+    },
+    "long-wear-lip-dose-without-tip-wiping": {
+      "all_of": [
+        [
+          "립",
+          "틴트"
+        ],
+        [
+          "팁",
+          "어플리케이터"
+        ],
+        [
+          "닦",
+          "덜",
+          "소량",
+          "얇"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7875575",
+          "span": "정----말 소량으로 얇게 펴발라야한다"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7875575",
+          "span": "매번 덜어써야하는"
+        }
+      ]
+    },
+    "lip-packaging-without-breaking-to-empty": {
+      "all_of": [
+        [
+          "립",
+          "틴트"
+        ],
+        [
+          "깨",
+          "부수",
+          "뜯",
+          "잘라",
+          "해체"
+        ],
+        [
+          "용기",
+          "통",
+          "내용물",
+          "안나",
+          "안 나"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7881871",
+          "span": "가볍고 얇게 발리는데"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7881871",
+          "span": "뿌개서 싹싹 꺼내 쓰고있는중"
+        }
+      ]
+    },
+    "powder-wash-dose-without-repeat-squeezing": {
+      "all_of": [
+        [
+          "파우더",
+          "가루",
+          "효소"
+        ],
+        [
+          "클렌저",
+          "세안",
+          "클렌징"
+        ],
+        [
+          "나오",
+          "양",
+          "용기"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7886829",
+          "span": "얼굴에 자극 거의 없다는"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7886829",
+          "span": "항상 두 번씩 짜는 듯"
+        }
+      ]
+    },
+    "body-moisture-without-long-rubbing": {
+      "all_of": [
+        [
+          "바디로션",
+          "바디 로션"
+        ],
+        [
+          "하얗",
+          "백탁"
+        ],
+        [
+          "문질",
+          "흡수",
+          "발라",
+          "발림"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7888427",
+          "span": "보습력도 꽤 좋고 끈적임이나 미끌거림이 없어요"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7888427",
+          "span": "흡수되기까지 시간과 수고가 좀 듭니다"
+        }
+      ]
+    },
+    "mineral-sunscreen-without-extra-puff-application": {
+      "all_of": [
+        [
+          "무기자차"
+        ],
+        [
+          "퍼프",
+          "스펀지",
+          "스펀",
+          "펴발"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:60662919",
+          "span": "잘 먹어서"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:60662919",
+          "span": "한 번 펴바르고 퍼프로 두드려야"
+        }
+      ]
+    },
+    "even-home-hair-color-with-less-breakage": {
+      "all_of": [
+        [
+          "탈색",
+          "염색"
+        ],
+        [
+          "셀프",
+          "직접"
+        ],
+        [
+          "끊",
+          "손상",
+          "얼룩"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:64269977",
+          "span": "얼룩진 곳 없이 잘 됐어요"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64269977",
+          "span": "버블탈색(프라이머 버블)을 진행한 상태에서 버블염색을 또"
+        }
+      ]
+    },
+    "mineral-sunscreen-without-drying-diy-blends": {
+      "all_of": [
+        [
+          "무기자차"
+        ],
+        [
+          "건조",
+          "속건조",
+          "땡",
+          "당김"
+        ],
+        [
+          "섞",
+          "크림",
+          "오일"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:63360304",
+          "span": "미칠 것 같은 속건조"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:63360304",
+          "span": "촉촉한 비비랑 섞어서도 발라보고"
+        }
+      ]
+    },
+    "summer-barrier-care-without-aloe-mixing": {
+      "all_of": [
+        [
+          "크림"
+        ],
+        [
+          "여름"
+        ],
+        [
+          "알로에",
+          "섞"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:64147602",
+          "span": "피부 보들보들해지는 느낌"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64147602",
+          "span": "알로에랑 섞어서 쓰니까"
+        }
+      ]
+    },
+    "jelly-blush-without-discontinuation-stockpiles": {
+      "all_of": [
+        [
+          "젤리",
+          "크림"
+        ],
+        [
+          "블러셔",
+          "블러쉬"
+        ],
+        [
+          "단종",
+          "쟁",
+          "직구"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "youtube_comment:Ugz5iE4MmmR7Bz48aBJ4AaABAg",
+          "span": "전색상 사서 너무 좋아하다가"
+        },
+        {
+          "doc_id": "youtube_comment:Ugz5iE4MmmR7Bz48aBJ4AaABAg",
+          "span": "쟁여놓고 썼는데"
+        }
+      ]
+    },
+    "cooling-mask-without-two-product-mixing": {
+      "all_of": [
+        [
+          "모델링",
+          "고무팩"
+        ],
+        [
+          "쿨링",
+          "시원"
+        ],
+        [
+          "섞",
+          "앰플"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "youtube_comment:Ugz9vvdqsorw6EH8FU54AaABAg",
+          "span": "쿨링감에 미친 사람들은"
+        },
+        {
+          "doc_id": "youtube_comment:Ugz9vvdqsorw6EH8FU54AaABAg",
+          "span": "마스크팩 세럼이랑 섞어쓰면"
+        }
+      ]
+    },
+    "non-greasy-scalp-sun-care-without-travel-purchase": {
+      "all_of": [
+        [
+          "두피",
+          "정수리"
+        ],
+        [
+          "선",
+          "썬",
+          "자차",
+          "자외선"
+        ],
+        [
+          "직구",
+          "일본",
+          "끈적",
+          "기름",
+          "모자",
+          "양산"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "youtube_comment:Ugzc1rIcCWlfis31D1l4AaABAg",
+          "span": "두피에 뿌려도 산뜻한 제형"
+        },
+        {
+          "doc_id": "youtube_comment:Ugzc1rIcCWlfis31D1l4AaABAg",
+          "span": "이번 일본 여행에서 찾은"
+        }
+      ]
+    },
+    "tone-base-without-pilling-and-practice": {
+      "all_of": [
+        [
+          "톤",
+          "파데",
+          "파운데이션"
+        ],
+        [
+          "밀리",
+          "밀림",
+          "때"
+        ],
+        [
+          "단독",
+          "연습",
+          "양",
+          "모공"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7778634",
+          "span": "이거 바르고 파데 올리니까 때가 밀리더라구요"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7778634",
+          "span": "단독으로만 소량 사용하고 가볍게 파우더 처리하니까 쓸만해요"
+        }
+      ]
+    },
+    "pearl-cream-dose-without-returning-excess": {
+      "all_of": [
+        [
+          "펄",
+          "구슬"
+        ],
+        [
+          "크림"
+        ],
+        [
+          "우르르",
+          "다시 넣",
+          "덜어",
+          "번거"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:glowpick:7860049",
+          "span": "피부 상태에 따라 펄 개수로 조절"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7860049",
+          "span": "여러개가 우르르 나와서 다시 넣어야해요"
+        }
+      ]
+    },
+    "facial-cleanser-without-import-or-unwanted-bumps": {
+      "all_of": [
+        [
+          "클렌징",
+          "클렌저",
+          "세안",
+          "폼"
+        ],
+        [
+          "직구",
+          "일본",
+          "해외"
+        ],
+        [
+          "트러블",
+          "좁쌀",
+          "건조",
+          "민감"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:29564491",
+          "span": "얼굴에 뭐가 올라오네요"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:29564491",
+          "span": "직구하기 힘들어서 이걸로 사봤는데"
+        }
+      ]
+    },
+    "darker-skin-sun-bb-without-two-layer-routine": {
+      "all_of": [
+        [
+          "선비비",
+          "선크림",
+          "썬",
+          "자차"
+        ],
+        [
+          "23호",
+          "어두운",
+          "어둡"
+        ],
+        [
+          "양",
+          "하얘",
+          "백탁",
+          "섞",
+          "토시오"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:64084422",
+          "span": "정량대로 바르면 너무 토시오가 될듯해"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64084422",
+          "span": "에이에이치씨 선크림을 바르고 얘는 비비처럼 써요"
+        }
+      ]
+    },
+    "lip-pigment-uniformity-without-manual-remixing": {
+      "all_of": [
+        [
+          "틴트",
+          "립"
+        ],
+        [
+          "분리"
+        ],
+        [
+          "섞",
+          "안료",
+          "침전"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "commerce_review:oliveyoung:64487626",
+          "span": "안료가 분리되더라구요"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64487626",
+          "span": "팁으로 내용물 충분히 섞어주고 바르면"
+        }
+      ]
+    },
+    "sunscreen-dryness-reactivity-without-filter-switching": {
+      "all_of": [
+        [
+          "무기자차"
+        ],
+        [
+          "유기자차",
+          "혼합자차"
+        ],
+        [
+          "건조",
+          "트러블",
+          "열감",
+          "민감"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+          "span": "열감이나 트러블 때문에 고민"
+        },
+        {
+          "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+          "span": "결국 유기자차로 바꿨는데"
+        }
+      ]
+    },
+    "winter-body-hydration-without-diy-glycerin": {
+      "all_of": [
+        [
+          "바디로션",
+          "바디 로션"
+        ],
+        [
+          "겨울",
+          "가을",
+          "건조"
+        ],
+        [
+          "글리세린",
+          "섞",
+          "오일"
+        ]
+      ],
+      "reason": "Look for independent context/requirement/behavior corroboration of the observed seed; literal synonyms are agent hypotheses, not semantic labels or a chosen winner.",
+      "anchors": [
+        {
+          "doc_id": "youtube_comment:Ugy9kt7HxLsmeeHSjfJ4AaABAg",
+          "span": "보습에 좋다는 거 다 사서 사용해봐도 아무 효과가 없었는데"
+        },
+        {
+          "doc_id": "youtube_comment:Ugy9kt7HxLsmeeHSjfJ4AaABAg",
+          "span": "글리세린 바로 사와서 바디로션에 섞어 발랐는데"
+        }
+      ]
+    }
+  }
+}
