@@ -184,6 +184,19 @@ def select(sample: dict, review: dict) -> dict:
                 ],
             }
         )
+    market_reviews = review.get("market_reviews", {})
+    if not isinstance(market_reviews, dict) or not set(market_reviews) <= set(specs):
+        raise ValueError("market reviews must target declared candidates")
+    for c in candidates:
+        if c["candidate"] in market_reviews:
+            from analysis.discovery.alternatives import market_reason
+
+            assessment = market_reviews[c["candidate"]]
+            reason = market_reason(sample, c, assessment)
+            c["market_review"] = assessment
+            if reason:
+                c["qualified"] = False
+                c["rejection_reasons"].append(reason)
     qualified = sorted(
         (c for c in candidates if c["qualified"]),
         key=lambda c: (tuple(-x for x in c["rank"]), c["candidate"]),

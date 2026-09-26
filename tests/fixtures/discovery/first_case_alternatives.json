@@ -1,0 +1,316 @@
+{
+  "version": "alternatives-v1",
+  "snapshot_sha256": "ce6796d6c491dc93c18710dc7c58e3d2335f50a5dd17c0931aaf1c2324e255e2",
+  "support_sha256": "3bd6951829d6ab34d303e2fb3041d223839323c98229327cdc8aee9e84db8ba8",
+  "candidate": "oily-skin-foundation-without-diy-blending",
+  "requirements": [
+    {
+      "id": "A-shade",
+      "doc_id": "commerce_review:glowpick:7858181",
+      "span": "톤이 옐로 베이스에 좀 어두운",
+      "interpretation": "User A adjusts an overly yellow/dark shade.",
+      "priority": "must_have",
+      "variant_specific": true,
+      "unknowns": [
+        "Purchased and target shades are unspecified; no evidence all available shades were tried."
+      ]
+    },
+    {
+      "id": "A-coverage",
+      "doc_id": "commerce_review:glowpick:7858181",
+      "span": "커버력이 좋고 발림성이 좋아요",
+      "interpretation": "User A values existing coverage and spreadability.",
+      "priority": "preferred",
+      "variant_specific": false,
+      "unknowns": [
+        "No measured coverage, application dose or required finish."
+      ]
+    },
+    {
+      "id": "A-oil",
+      "doc_id": "commerce_review:glowpick:7858181",
+      "span": "습할땐 기름이 더 올라와서",
+      "interpretation": "User A reports more oil in humid summer conditions.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "No wear-duration, oil measurement or complete comparison routine."
+      ]
+    },
+    {
+      "id": "B-standalone",
+      "doc_id": "commerce_review:glowpick:7860436",
+      "span": "지성이라 단독으로 쓰지는 못하고 다른 제품이랑 섞어서 쓰는데",
+      "interpretation": "User B cannot use this foundation alone with oily skin and mixes another base.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "The particular standalone failure and the other product are unspecified."
+      ]
+    },
+    {
+      "id": "B-glow",
+      "doc_id": "commerce_review:glowpick:7860436",
+      "span": "색상도 예쁘고 광도 예뻐요",
+      "interpretation": "User B likes color and glow in the reported routine.",
+      "priority": "preferred",
+      "variant_specific": false,
+      "unknowns": [
+        "No target shade, finish metric or report of all alternatives failing."
+      ]
+    }
+  ],
+  "alternatives": [
+    {
+      "title": "Sulwhasoo Perfecting Foundation SPF17/PA+ shade alternatives",
+      "identity": {
+        "source": "sulwhasoo-sg",
+        "level": "listing",
+        "attributes": {
+          "spf": "17",
+          "pa": "+"
+        },
+        "product_id": "sulwhasoo-perfecting-foundation-spf17-pa"
+      },
+      "source": {
+        "url": "https://sg.sulwhasoo.com/products/sulwhasoo-perfecting-foundation-spf17-pa",
+        "summary": "The Singapore brand listing offers cool, neutral and warm shades and describes buildable coverage. Some selectable options are marked out of stock; the displayed selection and narrative shade lists differ.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "Public regional listing exists; displayed option stock varies. No checkout or Korean delivery verification.",
+      "comparisons": [
+        {
+          "requirement": "A-shade",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "A-coverage",
+          "status": "met",
+          "reason": "Brand coverage description is plausible, not a test on User A.",
+          "evidence": {
+            "url": "https://sg.sulwhasoo.com/products/sulwhasoo-perfecting-foundation-spf17-pa",
+            "summary": "The Singapore brand listing offers cool, neutral and warm shades and describes buildable coverage. Some selectable options are marked out of stock; the displayed selection and narrative shade lists differ.",
+            "kind": "manufacturer_claim",
+            "retrieved_on": "2026-09-26"
+          }
+        },
+        {
+          "requirement": "A-oil",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-standalone",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-glow",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        }
+      ]
+    },
+    {
+      "title": "espoir BeGlow Foundation SPF27/PA++ used alone by other oily-skin users",
+      "identity": {
+        "source": "glowpick",
+        "level": "listing",
+        "attributes": {
+          "spf": "27",
+          "pa": "++"
+        },
+        "product_id": "177814"
+      },
+      "source": {
+        "url": "https://www.glowpick.com/products/177814/expression?expressionId=575",
+        "summary": "A June 19, 2026 review describes using this base without another mixed base and liking its appearance as facial oil develops; other reports describe satisfactory glow on oily skin. Reviews remain self-reports and are not controlled trials.",
+        "kind": "user_self_report",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "The current product page exists. Exact shade, generation linkage to the captured reviews and purchasable stock remain unverified.",
+      "comparisons": [
+        {
+          "requirement": "A-shade",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "A-coverage",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "A-oil",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-standalone",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-glow",
+          "status": "met",
+          "reason": "Other users report the broad glow preference, not User B satisfaction with a known option.",
+          "evidence": {
+            "url": "https://www.glowpick.com/products/177814/expression?expressionId=575",
+            "summary": "A June 19, 2026 review describes using this base without another mixed base and liking its appearance as facial oil develops; other reports describe satisfactory glow on oily skin. Reviews remain self-reports and are not controlled trials.",
+            "kind": "user_self_report",
+            "retrieved_on": "2026-09-26"
+          }
+        }
+      ]
+    },
+    {
+      "title": "HERA Black Cushion Foundation SPF34/PA++",
+      "identity": {
+        "source": "hera-int",
+        "level": "listing",
+        "attributes": {
+          "spf": "34",
+          "pa": "++"
+        },
+        "product_id": "black-cushion-foundation"
+      },
+      "source": {
+        "url": "https://int.hera.com/products/black-cushion-foundation",
+        "summary": "Brand listing describes a soft satin finish, coverage and oil-balance benefits, with cool and neutral shade options. The disclosed brand trial has 33 women aged 20-40; it does not establish this case-specific outcome.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "International brand listing and purchase link are present; local option stock and delivery were not tested.",
+      "comparisons": [
+        {
+          "requirement": "A-shade",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "A-coverage",
+          "status": "met",
+          "reason": "Brand describes lightweight pore/blemish coverage; participant comparison is absent.",
+          "evidence": {
+            "url": "https://int.hera.com/products/black-cushion-foundation",
+            "summary": "Brand listing describes a soft satin finish, coverage and oil-balance benefits, with cool and neutral shade options. The disclosed brand trial has 33 women aged 20-40; it does not establish this case-specific outcome.",
+            "kind": "manufacturer_claim",
+            "retrieved_on": "2026-09-26"
+          }
+        },
+        {
+          "requirement": "A-oil",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-standalone",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-glow",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        }
+      ]
+    },
+    {
+      "title": "Estee Lauder Double Wear Stay-in-Place Foundation (Original Formula)",
+      "identity": {
+        "source": "esteelauder-us",
+        "level": "listing",
+        "attributes": {
+          "generation": "Original Formula",
+          "finish": "matte"
+        },
+        "product_id": "643/22830"
+      },
+      "source": {
+        "url": "https://www.esteelauder.com/product/643/22830/product-catalog/makeup/face/foundation/double-wear/stay-in-place-foundation-original-formula",
+        "summary": "The US brand listing describes a matte medium-to-full coverage liquid foundation with cool, neutral and warm options, oil control and resistance to heat and humidity. Claims belong to the Original Formula page, not every Double Wear product or generation.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-09-26"
+      },
+      "availability": "US brand listing is available. No specific shade purchase, Korean shipping, or stock verification.",
+      "comparisons": [
+        {
+          "requirement": "A-shade",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "A-coverage",
+          "status": "met",
+          "reason": "Medium-to-full coverage is a brand description, not measured on the participant.",
+          "evidence": {
+            "url": "https://www.esteelauder.com/product/643/22830/product-catalog/makeup/face/foundation/double-wear/stay-in-place-foundation-original-formula",
+            "summary": "The US brand listing describes a matte medium-to-full coverage liquid foundation with cool, neutral and warm options, oil control and resistance to heat and humidity. Claims belong to the Original Formula page, not every Double Wear product or generation.",
+            "kind": "manufacturer_claim",
+            "retrieved_on": "2026-09-26"
+          }
+        },
+        {
+          "requirement": "A-oil",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-standalone",
+          "status": "unknown",
+          "reason": "No evidence this product/option satisfies this particular participant requirement; lack of evidence is not a product defect.",
+          "evidence": null
+        },
+        {
+          "requirement": "B-glow",
+          "status": "contradicted",
+          "reason": "Its stated matte finish differs from the glow User B likes; no proof of personal acceptability.",
+          "evidence": {
+            "url": "https://www.esteelauder.com/product/643/22830/product-catalog/makeup/face/foundation/double-wear/stay-in-place-foundation-original-formula",
+            "summary": "The US brand listing describes a matte medium-to-full coverage liquid foundation with cool, neutral and warm options, oil control and resistance to heat and humidity. Claims belong to the Original Formula page, not every Double Wear product or generation.",
+            "kind": "manufacturer_claim",
+            "retrieved_on": "2026-09-26"
+          }
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "checked_on": "2026-09-26",
+    "product_page_limit": 8,
+    "product_pages_examined": 6,
+    "scope": "Two originating product keys, current Singapore shade listing, same-product counterexamples, Korean-brand satin cushion and US matte liquid foundation. No worldwide market census.",
+    "paid_calls": 0,
+    "gpu_hours": 0
+  },
+  "limitations": [
+    "This is agent-mediated research, not independent semantic labels or a customer/expert review.",
+    "Different mixing motives do not prove a common specific unmet color/coverage/glow combination.",
+    "Source product keys establish listing identity; participant variant/SKU and generation are unresolved.",
+    "Brand claims and other users cannot establish suitability for either participant.",
+    "Catalogue absence, unknown stock, INCI and unspecified shades are not evidence of worldwide absence or a formulation gap.",
+    "Counterevidence retains known source coordinates without copying names, demographics or raw author identifiers."
+  ],
+  "decision": {
+    "status": "reject",
+    "basis": "insufficient_common_requirement",
+    "reason": "The two mixing reports have different motivations and unspecified target options. Existing shade choices and satisfactory standalone reports weaken a broad absence claim, but do not prove either participant has a satisfactory substitute. A shared specific new-product requirement is unestablished.",
+    "falsifier": "Reopen this lead if attributable repeated users document the same target shade/finish and wear condition, actual alternative trials, and a common residual failure rather than different mixing motives."
+  }
+}
