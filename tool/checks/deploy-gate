@@ -21,7 +21,7 @@ deploy_gate_ref=${1:-HEAD}
 # Same match-by-name-alone rule as tool/issue's pick_primary and tool/status's status_primary
 # (#174) -- kept here rather than shared because none of the three sources the others.
 deploy_gate_primary() {
-    dg_repos=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-ydc"}
+    dg_repos=${COSMAI_ISSUE_REPOS:-"shk95-1/cosmai"}
     dg_origin=${COSMAI_ISSUE_PRIMARY:-$(git remote get-url origin 2>/dev/null || true)}
     dg_origin_repo=$(printf '%s' "$dg_origin" | sed -E 's#\.git$##; s#.*/##')
     for dg_repo in $dg_repos; do

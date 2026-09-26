@@ -114,12 +114,20 @@ section_cron() {
         echo "(unavailable)"
         return
     fi
-    lines=$(grep -h -v '^[[:space:]]*#' "$dir"/* 2>/dev/null | grep -v '^[[:space:]]*$')
-    if [ -z "$lines" ]; then
-        echo "(none)"
-    else
-        printf '%s\n' "$lines"
-    fi
+    for file in "$dir"/*; do
+        service=${file##*/}
+        container=cosmai-$service-1
+        source=checkout
+        if command -v docker >/dev/null 2>&1 \
+            && [ "$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null)" = true ] \
+            && contents=$(docker exec "$container" cat "/srv/cosmai/stack/crontab.d/$service" 2>/dev/null); then
+            source=running
+        else
+            contents=$(cat "$file" 2>/dev/null)
+        fi
+        printf '%s (%s)\n' "$service" "$source"
+        printf '%s\n' "$contents" | grep -v '^[[:space:]]*#' | grep -v '^[[:space:]]*$' || echo '(none)'
+    done
 }
 
 # Compose substitutes ${VAR} from the shell environment first and from stack/.env second, so this reads

@@ -1059,8 +1059,8 @@ cosmai trend holdout [--url <url>]
   answer on the issue.
 
 ## Schedule (stack/crontab.d/, UTC)
-- `match:topic` runs nightly at `50 3 * * *` (`stack/crontab.d/analyze`) as `cosmai match topic`, and exits 2 every night until its gate passes — that is the gate working, and since exit 1 and exit 2 look alike to supercronic the stdout line is the signal. **Its T is unmeasured**; a first and a second run are timed by hand once the gate passes, together with one dictionary re-match.
-- `project:corpus` runs hourly at `:41` (`stack/crontab.d/analyze`). **Its T is unmeasured**: the first pass
+- `match:topic` scheduling is paused under #181 pending #328's archive/live decision. Its historical nightly line `50 3 * * *` remains commented in `stack/crontab.d/analyze`; manual `cosmai match topic` still enforces its gate and returns 2 until it passes. **Its T is unmeasured**; a first and a second run are timed by hand once the gate passes, together with one dictionary re-match.
+- `project:corpus` scheduling is paused under #181 pending #328; its historical hourly `:41` line remains commented in `stack/crontab.d/analyze`. **Its T is unmeasured**: the first pass
   runs over the pre-cutover backlog and every pass after it over one flatten hour's increment, and those are
   not the same number. Each pass re-reads every panel video and comment and re-issues the no-op inserts the
   conflict clause discards, so "almost nothing" describes what is *written*, not what is *read*. The

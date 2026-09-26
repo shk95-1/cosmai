@@ -7,8 +7,10 @@ No collector, paid API, old service, or production migration is started.
 import argparse
 import gzip
 import hashlib
+import io
 import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -198,6 +200,8 @@ def db_restore(args):
     )
     bootstrap.chmod(0o600)
     database.mkdir(mode=0o700)
+    # PostgreSQL 18 chowns PGDATA, but its postgres user must also traverse the mounted parent.
+    database.chmod(0o755)
     command = [
         "docker",
         "run",
@@ -244,7 +248,18 @@ def db_restore(args):
             time.sleep(1)
         else:
             raise RuntimeError("Fresh database did not become ready")
-        with (dest / "database" / "roles.sql").open("rb") as source:
+        roles = (dest / "database" / "roles.sql").read_text()
+        # A fresh cluster cannot grant as the source admin; retain memberships/options under its own.
+        roles = (
+            "\n".join(
+                re.sub(r' GRANTED BY (?:"(?:[^"]|"")*"|[^;\s]+);\s*$', ";", line)
+                if line.startswith("GRANT ")
+                else line
+                for line in roles.splitlines()
+            )
+            + "\n"
+        )
+        with io.BytesIO(roles.encode()) as source:
             checked(
                 [
                     "docker",

@@ -20,6 +20,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
 # duplicating contract SQL into the wheel. tests/test_image_payload.py asserts the two agree.
 WORKDIR /srv/cosmai
 COPY . /srv/cosmai
+RUN chmod -R a+rX /srv/cosmai
 
 # Outside the checkout on purpose: a bind mount over /srv/cosmai (a dev override) must not take the
 # interpreter with it. PLAYWRIGHT_BROWSERS_PATH is outside any home directory for the same kind of
@@ -81,7 +82,8 @@ RUN cd / && python -c 'import os, sys; from playwright.sync_api import sync_play
 # Commerce runs as UID 1000 so its browser profile is writable. The CLI's venv interpreter must stay
 # outside root's private home; the root-only build checks above cannot catch that access failure.
 USER 1000:1000
-RUN cosmai --help >/dev/null
+RUN cosmai --help >/dev/null \
+    && test -r /srv/cosmai/stack/crontab.d/collector-commerce
 USER root
 
 CMD ["cosmai", "--help"]

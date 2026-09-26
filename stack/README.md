@@ -2,6 +2,33 @@
 
 The contract is `contracts/entrypoints.md` §Schedule·§DB connection knobs, the intent and the approval boundaries are `STATE.md`, and what is running now is `tool/status`. Only the **traps** those three do not mention are written here. A defect is an issue — it is not written here.
 
+## Restored Docker environment (#181, 2026-09-26)
+
+The destination runs fifteen containers: eight in `cosmai`, four retained viewers in `cosmai-legacy`, and three in `cosmai-run`. The main PostgreSQL endpoint is `127.0.0.1:5434`; Run has a separate captured database and no published DB port. The native provider is stopped with user-login startup disabled. Docker boot and `unless-stopped` policies own normal restart behavior.
+
+The retained viewing paths are the portal at port 3003, main PostgREST at 3000, data-portal at 3001, trend-radar-dashboard at 8000, TubeDepth API at 8080, and the independent Run landing/portal/YDC/API at 8090. Legacy viewers have no dependency on old collectors or old Alembic migrations. Main owns the shared `db-net` network and its `shared-postgres` compatibility alias. Use `stop`/`up`; never remove networks or volumes as part of an ordinary restart.
+
+`stack/docker-compose.legacy.yml` and `stack/docker-compose.run.yml` are the canonical retained-service templates. Local source/runtime inputs live beside the checkout under `../service/`; the archived development queues remain closed. Main build order remains `tool/stack-build`. Supply the private legacy/Run env files explicitly when rendering or starting those templates. The TubeDepth runtime accepts the main collector's plain JSON payloads as well as its historical gzip files, and reads the shared payload volume without writing it. The compatibility diff is `stack/legacy-tubedepth-json.patch`, applied only to the local runtime input with `git -C ../service/yt-scrapper apply - < stack/legacy-tubedepth-json.patch`. Runtime source pins are trend-radar `5bb268d`, data-portal `02c6951` and TubeDepth `7fd5143`; never push the local compatibility patch to those repositories.
+
+Set COSMAI_HOST_UID and COSMAI_HOST_GID to `id -u` and `id -g` before starting commerce or the legacy API. A fixed 1000 fails on hosts with another user ID. Images normalize readability of source/static assets; private secret files and browser profiles retain their host permissions. All 28,616 captured payload references were present with matching content digests before collection resumed.
+
+Only daily rules analysis is scheduled in the analyze container. `project corpus`, `match topic`, paid fallback/ask and GPU schedules stay paused. COSMAI_LLM_BUDGET_USD is zero and COSMAI_LLM_CHAIN empty. New browser sessions were omitted from the capture; if a source requires a human challenge/session, use the existing `cosmai login` flow rather than bypassing access controls.
+
+During restoration the primary tree was kept unchanged: `../service/runtime.override.yml` selects permission-repaired commerce/portal images, host UID/GID and the rules-only crontab. Invoke it with the base file while that runtime override is selected:
+
+```sh
+docker compose --profile commerce --profile youtube-watch \
+  -f stack/docker-compose.yml -f ../service/runtime.override.yml up -d --no-build
+docker compose --env-file ../service/legacy/.env -f stack/docker-compose.legacy.yml up -d --no-build
+docker compose --env-file ../service/Run/.env -f stack/docker-compose.run.yml up -d --no-build
+```
+
+The fixed base Dockerfiles and crontab make those temporary image/crontab repairs unnecessary after the approved tree is built and recreated. Do not discard working volumes, captured dumps or native rollback data when removing an override.
+
+`stack/rollback.sh --dry-run` rehearses an emergency scheduler pause. Executing it stops only the six current schedulers; viewers and both Docker DBs stay running. It never revives old collectors. Provider rollback is separate: first preserve the current Docker DB/roles/payload changes in private dumps, stop current writers/viewers and `cosmai-postgres`, then enable/start the native service only after confirming port 5434 is free. The native directory is the original capture, not current Docker data; restoring a fresh dump or explicitly accepting the older snapshot is required before resuming writers. Never point native PostgreSQL at Docker PGDATA. The captured originals and #288/#329 retention conditions remain unchanged.
+
+The historical cutover notes below do not authorize re-enabling disposed platforms or old collectors; #181 and the current rules above supersede that workflow.
+
 - **Starting with `docker start` runs the old image.** If the image changed, use `docker compose up -d --force-recreate <service>`. Recreating the new stack (`cosmai-*`) is done directly by the coordinator (`STATE.md` §3).
 - **`tool/stack-build`'s second stage dies inside compose interpolation without `stack/.env`** — that is a missing variable, not a build failure. `.env` only carries paths, no secret values (`stack/env.example`).
 - **The analyze concurrency lock (`analysis/locks.py`) cannot see a process that started before the lock existed.** Every cron run after cutover sits inside the lock, so this only matters when running the old checkout by hand on the host.
