@@ -1,0 +1,29 @@
+diff --git a/src/tubedepth/payload_store.py b/src/tubedepth/payload_store.py
+index e283f01..4d8de58 100644
+--- a/src/tubedepth/payload_store.py
++++ b/src/tubedepth/payload_store.py
+@@ -44,7 +44,10 @@ class PayloadStore:
+         a miss.
+         """
+         path = self._path_for(kind, digest)
+-        return path if path.exists() else None
++        if path.exists():
++            return path
++        plain = path.with_suffix("")
++        return plain if plain.exists() else None
+ 
+     def delete(self, kind: str, digest: str) -> bool:
+         """Remove a payload. Returns whether there was one to remove."""
+@@ -67,6 +70,9 @@ class PayloadStore:
+ 
+     def read(self, digest: str) -> bytes:
+         matches = list(self._root.glob(f"*/{digest[:2]}/{digest}.json.gz"))
+-        if not matches:
+-            raise FileNotFoundError(f"payload not stored: {digest}")
+-        return gzip.decompress(matches[0].read_bytes())
++        if matches:
++            return gzip.decompress(matches[0].read_bytes())
++        plain = list(self._root.glob(f"*/{digest[:2]}/{digest}.json"))
++        if plain:
++            return plain[0].read_bytes()
++        raise FileNotFoundError(f"payload not stored: {digest}")

@@ -8,6 +8,7 @@ FROM nginx:alpine
 # share style.css and query.js but each boots on its own -- opening only the ops page must never also fetch
 # metrics, and opening only the structure page must never fetch metrics or ops either.
 COPY public/ /usr/share/nginx/html/
+RUN chmod -R a+rX /usr/share/nginx/html/
 
 # This container has neither DB credentials nor a backend — the browser calls PostgREST (3000) directly.
 EXPOSE 80

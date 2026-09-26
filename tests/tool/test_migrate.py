@@ -100,3 +100,70 @@ def test_database_restore_refuses_existing_database_before_docker(tmp_path):
     (tmp_path / "database-data").mkdir()
     with pytest.raises(ValueError, match="already exists"):
         migrate.db_restore(SimpleNamespace(dest=str(tmp_path), port=55434, offline=True))
+
+
+@pytest.mark.postgres
+def test_fresh_cluster_restores_foreign_memberships_without_changing_role_options(
+    tmp_path, monkeypatch, harness_container
+):
+    import os
+    import subprocess
+
+    suffix = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:10]
+    owner, member, grantor = (f"restore_{name}_{suffix}" for name in ("owner", "member", "grantor"))
+    (tmp_path / ".migration").mkdir()
+    (tmp_path / ".migration/verified.json").write_text("{}")
+    (tmp_path / "database").mkdir()
+    (tmp_path / "database/app.dump").write_bytes(b"unused")
+    (tmp_path / "manifest.json").write_text(json.dumps({"postgres_image": "unused", "table_counts": {}}))
+    (tmp_path / "database/roles.sql").write_text(
+        f'BEGIN;\nCREATE ROLE "{owner}" NOLOGIN;\n'
+        f'CREATE ROLE "{member}" NOLOGIN;\nCREATE ROLE "{grantor}" SUPERUSER NOLOGIN;\n'
+        f'GRANT "{owner}" TO "{member}" WITH INHERIT FALSE GRANTED BY "{grantor}";\n'
+        "SELECT admin_option, inherit_option, set_option FROM pg_auth_members "
+        f"WHERE roleid = '{owner}'::regrole AND member = '{member}'::regrole;\nROLLBACK;\n"
+    )
+    run = subprocess.run
+    real_checked = migrate.checked
+    checked_memberships = []
+
+    def check(command, log, stdin=None):
+        if command[1] == "run":
+            assert (tmp_path / "database-data").stat().st_mode & 0o111 == 0o111
+        if "psql" in command:
+            assert stdin is not None
+            real_checked(
+                [
+                    "docker",
+                    "exec",
+                    "-i",
+                    harness_container,
+                    "psql",
+                    "-X",
+                    "-U",
+                    "fleet",
+                    "-d",
+                    "fleet",
+                    "-At",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                ],
+                log,
+                stdin,
+            )
+            checked_memberships.append("f|f|t" in log.read_text())
+
+    monkeypatch.setattr(migrate, "checked", check)
+
+    def restore_run(command, **kwargs):
+        if "pg_isready" in command:
+            return SimpleNamespace(returncode=0)
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(migrate.subprocess, "run", restore_run)
+    previous_umask = os.umask(0o077)
+    try:
+        migrate.db_restore(SimpleNamespace(dest=str(tmp_path), port=55434, offline=True))
+    finally:
+        os.umask(previous_umask)
+    assert checked_memberships == [True]

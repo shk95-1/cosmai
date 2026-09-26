@@ -1,0 +1,63 @@
+# Retained local viewing services; no legacy collector or migration dependency is revived.
+name: cosmai-legacy
+services:
+  postgrest:
+    image: postgrest/postgrest:latest
+    environment:
+      PGRST_DB_URI: postgresql://postgrest_authenticator:${POSTGREST_AUTH_PASSWORD:?}@shared-postgres:5432/app
+      PGRST_DB_SCHEMAS: needs,trend_radar,tubedepth
+      PGRST_DB_ANON_ROLE: postgrest_anon
+      PGRST_DB_POOL: 5
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_OPENAPI_MODE: follow-privileges
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    networks: [db-net]
+  data-portal:
+    build: ${LEGACY_SOURCE_ROOT:-../../service}/data-portal
+    image: data-portal:restored
+    ports:
+      - "3001:80"
+    depends_on: [postgrest]
+    restart: unless-stopped
+    networks: [db-net]
+  trend-radar-dashboard:
+    build: ${LEGACY_SOURCE_ROOT:-../../service}/trend-radar
+    image: trend-radar:restored
+    command: [trend-radar, serve, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      TREND_RADAR_READONLY_DATABASE_URL: postgresql+asyncpg://trend_radar_reader:${TREND_RADAR_READER_PASSWORD:?}@shared-postgres:5432/app
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    networks: [db-net]
+  tubedepth-api:
+    build: ${LEGACY_SOURCE_ROOT:-../../service}/yt-scrapper
+    image: tubedepth:restored
+    user: "${COSMAI_HOST_UID:-1000}:${COSMAI_HOST_GID:-1000}"
+    command: [serve, --host, 0.0.0.0, --port, "8080"]
+    env_file: ${LEGACY_RUNTIME_DIR:-../../service/legacy}/tubedepth.env
+    environment:
+      TUBEDEPTH_DATA_DIR: /var/lib/tubedepth
+      TUBEDEPTH_REQUIRE_API_KEY: "0"
+      HOME: /tmp
+    volumes:
+      - youtube-payloads:/var/lib/tubedepth/payloads:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [db-net]
+networks:
+  db-net:
+    external: true
+    name: db-net
+volumes:
+  youtube-payloads:
+    external: true
+    name: cosmai_youtube-payloads

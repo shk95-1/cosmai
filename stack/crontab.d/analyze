@@ -54,7 +54,8 @@
 # flatten batch is harmless rather than something to schedule around -- the projection then sees fewer
 # rows and the next hour picks up the rest -- so the phase is about not starting two statements against
 # the same tables at the same instant, not about correctness.
-41 * * * *  cosmai project corpus
+# #181: paused pending #328 archive/live decision.
+# 41 * * * *  cosmai project corpus
 #
 # fork #96: the live analysis chain -- match:topic, then trend quarter, judge and evidence. **Gated**: the one
 # command exits 2 (blocked), naming the reason on stdout and writing nothing, unless the active snapshot's
@@ -73,7 +74,8 @@
 # The phase: :50 is nine minutes after the :41 projection and two before the :52 flatten tick, so a pass
 # reads the hour's projection rather than racing it. 03:50 sits 70 minutes before the 05:00 `analyze all`,
 # which it shares no lock and no table with; the gap is a margin, not a measured T.
-50 3 * * *  cosmai match topic
+# #181: paused with the unfinished statistical rollout.
+# 50 3 * * *  cosmai match topic
 #
 # Suspended 2026-09-06 (#242): the `0 8` gemma4 line that used to stand here is gone. The Tailscale GPU
 # host it depended on no longer answers /api/tags, and this host's own ollama is CPU-only with too little

@@ -39,8 +39,18 @@ case "$1" in
     exit 0
     ;;
   exec)
+    case "$*" in
+      *"cat /srv/cosmai/stack/crontab.d/analyze")
+        echo "17 5 * * * cosmai analyze all"
+        exit 0
+        ;;
+    esac
     echo "020_retrieval_chunk 2026-08-24 23:47:02"
     exit 0
+    ;;
+  inspect)
+    if [ -n "$STATUS_LIVE_CRON" ] && [ "$4" = cosmai-analyze-1 ]; then echo true; exit 0; fi
+    exit 1
     ;;
   *)
     echo "fake docker: no fixture for: $*" >&2
@@ -162,6 +172,14 @@ def test_no_docker_at_all_still_prints_every_header(tmp_path: Path):
 def test_takes_no_arguments_and_still_exits_zero(run):
     done = run()
     assert done.returncode == 0
+
+
+def test_cron_reports_the_running_override_instead_of_the_checkout(run):
+    done = run(env_extra={"STATUS_LIVE_CRON": "1"})
+    body = done.stdout.split(header_of("cron"))[1].split(header_of("llm"))[0]
+    assert "analyze (running)" in body
+    assert "17 5 * * * cosmai analyze all" in body
+    assert not any(line.startswith("0 5 * * *") for line in body.splitlines())
 
 
 # ---------------------------------------------------------------------------------------------

@@ -33,9 +33,8 @@ SNAPSHOT_UPDATE = "--snapshot-update"
 FULL_SUITE_ENV = "COSMAI_FULL_SUITE"
 
 
-# stack/env.example's defaults, restated. #136 left the knobs no default in code, so a test that builds a
-# ledger has to be handed them the way compose hands them to the analyze container; keeping the amount at
-# env.example's 10.00 is what lets the budget tests' arithmetic keep the meaning it was written with.
+# Explicit test-only knobs for #136's pricing arithmetic. Production uses a zero budget and empty
+# chain under #321/#181; these fixtures model a separately approved bounded experiment.
 LLM_BUDGET_FOR_TESTS = "10.00"
 LLM_CHAIN_FOR_TESTS = "ollama:gemma4:latest,llm:claude-sonnet-5"
 
