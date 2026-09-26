@@ -1153,3 +1153,27 @@ beside them still run.
 youtube: watch 1h · work 5m · flatten 15m · prune 1d  (after the fan-out cap is applied)
 naver:   datalab once a month (by the keyword dictionary) · blog once a month · launch_onset once a month (by the term list)
 ```
+
+## Agent-mediated need discovery (#323)
+
+`cosmai discover sample --per-cue 3 --output sample.json` exports bounded behavior probes from
+canonical commerce reviews and latest corpus comment snapshots. It uses needs_runtime in
+read-only autocommit mode, leaves the database unchanged, and records source/cue coverage,
+selection bias and access failures. The cue CSV contains behavior probes, not category names.
+
+`cosmai discover select --sample sample.json --review review.json --output selection.json`
+works offline. An agent reviews every sampled document, anchors actual context/requirement,
+workaround, burden and remaining trade-off in exact source spans, and proposes open-vocabulary
+candidate groups. The review declares its reviewer, manual interventions, preliminary technical
+and feasibility uncertainty; it never declares a winner. A snapshot digest binds the review to
+its full texts and provenance. Missing authors and normalized copies do not corroborate demand.
+Source-local hashed users are not asserted to be globally distinct people.
+
+Selection is deterministic and provisional. The pilot requires two attributable source-local
+users and repeatability, then ranks recurrence, capped corroboration, date diversity, technical
+evidence and an existing-process hypothesis. No growth, topic taxonomy, or market-size gate is
+used. It preserves excluded observations, candidate rejection reasons and counterevidence;
+`no_qualified_candidate` is a successful honest research outcome. Keyword matches or agent
+judgments do not prove unmet market demand. Actual alternative comparison and technical review
+remain subsequent acceptance steps. Artifacts default to mode 0600; commands make no paid/GPU
+calls and do not contact outside reviewers.

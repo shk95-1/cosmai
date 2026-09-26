@@ -105,6 +105,7 @@ none = [
     "tests/test_version_strings.py",
     "tests/test_analyze_all.py",
 ]
+"analysis/discovery/" = ["tests/test_discovery.py"]
 "analysis/aggregate/" = [
     "tests/test_aggregate.py",
     "tests/test_aggregate_golden.py",
