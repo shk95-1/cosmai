@@ -313,7 +313,7 @@
       "need": "Too much tone cream catches in pores; layering foundation pills; uses small standalone dose and practice.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -329,7 +329,7 @@
       "need": "Actual manual return of excess cream pearls; packaging dose rather than proven efficacy.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -345,7 +345,7 @@
       "need": "Actual switch away from imported Japanese cleanser followed by unwanted bumps; causal irritancy is unverified.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -361,7 +361,7 @@
       "need": "User adds separate sunscreen and limits sun-BB because full stated amount is too pale; SPF of this routine is not established.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -377,7 +377,7 @@
       "need": "Manually stirs separated pigment before application, with continuing packaging/price dissatisfaction.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -393,7 +393,7 @@
       "need": "Actual switch from mineral to organic sunscreen with another reported problem; symptoms do not establish causal diagnoses.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -409,7 +409,7 @@
       "need": "Adds glycerin to body lotion after failed purchases, with positive self-reported hydration; mixing effort remains, no efficacy proof.",
       "limitations": [
         "Single source-local observer or unspecified exact target; not a market-absence claim.",
-        "Agent semantic interpretation, not customer or expert validation."
+        "Agent semantic interpretation, not independent labels or measured product performance."
       ],
       "technical": {
         "status": "unassessed",
@@ -2733,7 +2733,7 @@
         "gpu_hours": 0
       },
       "limitations": [
-        "This is agent-mediated research, not independent semantic labels or a customer/expert review.",
+        "This is agent-mediated research, not independent semantic labels or measured product performance.",
         "Different mixing motives do not prove a common specific unmet color/coverage/glow combination.",
         "Source product keys establish listing identity; participant variant/SKU and generation are unresolved.",
         "Brand claims and other users cannot establish suitability for either participant.",
