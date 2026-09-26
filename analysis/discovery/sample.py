@@ -32,8 +32,8 @@ SELECT DISTINCT ON (source_item_id) source_item_id, text,
        source_metadata->>'author_channel_hash' AS author_hash,
        published_at::text AS published_at, url, parent_item_id,
        source_run, collected_at::text AS collected_at
-FROM needs.corpus_document WHERE source='youtube_comment'
-ORDER BY source_item_id, collected_at DESC, snapshot_id DESC
+FROM needs.corpus_document d WHERE source='youtube_comment'
+ORDER BY source_item_id, d.collected_at DESC, snapshot_id DESC
 """
 
 
@@ -58,6 +58,7 @@ def sample_local(per_cue: int = 3) -> dict:
             "live autocommit reads are not one transaction-wide DB snapshot",
             "null commerce URLs retain table/source/review-key coordinates",
             "latest source snapshot only; normalized copies deduplicated at selection",
+            "YouTube uses needs.corpus_document; later unprojected raw comments are outside this sample",
         ],
     }
     documents: dict[str, dict] = {}

@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 from analysis.retrieval.normalize import normalize_text
@@ -52,6 +53,13 @@ def validate_snapshot(sample: dict) -> None:
         ids.add(d["doc_id"])
         if d.get("author_hash") and not HASH.fullmatch(d["author_hash"]):
             raise ValueError("invalid author hash")
+
+
+def _utc_date(value: str) -> str:
+    when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if when.tzinfo is None:
+        raise ValueError("evidence timestamp needs an explicit timezone")
+    return when.astimezone(UTC).date().isoformat()
 
 
 def select(sample: dict, review: dict) -> dict:
@@ -139,7 +147,7 @@ def select(sample: dict, review: dict) -> dict:
         # One author at one site can write many reviews; that remains one user. Different-site
         # identities cannot be reconciled: report this instead of claiming global unique users.
         users = {(docs[r["doc_id"]]["source"], docs[r["doc_id"]]["author_hash"]) for r in support}
-        dates = sorted({r["published_at"] for r in support if r["published_at"]})
+        dates = sorted({_utc_date(r["published_at"]) for r in support if r["published_at"]})
         reasons = []
         if len(users) < 2:
             reasons.append("fewer than two attributable source-local users")

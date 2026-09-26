@@ -298,3 +298,28 @@ def test_access_failures_are_reported_without_driver_error_text(monkeypatch):
     result = select(exported, review)
     assert result["status"] == "no_qualified_candidate"
     assert result["manifest"]["failures"]
+
+
+@pytest.mark.parametrize(
+    "times",
+    [
+        ("2026-08-20T08:00:00+00:00", "2026-08-20T23:00:00+00:00"),
+        ("2026-08-20T08:00:00-05:00", "2026-08-21T02:00:00+09:00"),
+    ],
+)
+def test_timestamp_or_timezone_differences_do_not_establish_multiple_days(case, times):
+    sample, review = case
+    sample, review = subset(
+        sample, review, {"commerce_review:glowpick:7858181", "commerce_review:glowpick:7860436"}
+    )
+    for d, timestamp in zip(sample["documents"], times, strict=True):
+        d["published_at"] = timestamp
+    for o in review["observations"]:
+        o["recurring"] = False
+    sample = freeze(sample["manifest"], sample["documents"])
+    review["snapshot_sha256"] = sample["snapshot_sha256"]
+    result = select(sample, review)
+    assert result["status"] == "no_qualified_candidate"
+    winner = next(c for c in result["candidates"] if c["candidate"] == WINNER)
+    assert winner["dates"] == ["2026-08-20"]
+    assert "repeatability unestablished" in winner["rejection_reasons"]
