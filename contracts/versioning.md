@@ -139,7 +139,7 @@ reproduction claim are explanations, not proxy assertions.
   gets its first rows from `contracts/ddl/<schema>/applied_before_the_ledger.txt`, a one-time record
   of what was already applied that is read only where the schema is present and has no ledger yet,
   and that is never appended to afterwards.
-- DDL file number blocks: upstream holds `contracts/ddl/needs/006~019` and the fork `cosmai-import-ydc` holds `020~`. Someone else's number in the ledger (`needs.schema_migration`) is harmless to a deploy because `db/migrate.sh` walks only the files in the checkout — instead that object is declared in `tool/checks/ddl-drift`'s exclusion list (#75).
+- DDL numbers use one sequence per schema under the single active owner (`contracts/ownership.md`). Choose an unused number greater than every existing migration in that schema; keep all historical names, contents and imported provenance. The former upstream/fork number blocks are retired. Foreign ledger entries remain an explicit drift/import concern, not a second allocation authority.
 - A dropped CHECK is additive in effect only when the same migration adds the same-named constraint
   on the same table, both definitions are plain `column IN ('value', ...)` checks on the same
   column, and the new values include every old value. The old definition must be found in the

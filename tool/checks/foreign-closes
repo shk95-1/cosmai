@@ -1,16 +1,10 @@
 #!/bin/sh
-# #175: a bare `Closes #n` in an upstream commit re-resolves against whichever repo receives the
-# merge, so once a fork merges upstream it can close an unrelated fork issue with the same number.
-# The hook (`.githooks/commit-msg`) stops NEW bare closes; this finds damage from OLD ones already
-# on upstream main. Run it in the fork clone after merging upstream, before closing the merge issue:
-#   tool/checks/foreign-closes shk95/cosmai-import-ydc upstream
+# Manual safety check for imported history: bare closing directives can resolve against the
+# receiving repository and close an unrelated issue. New commits remain subject to the qualified
+# closure rule in .githooks/commit-msg. This is not a recurring fork-sync requirement (#322).
 #
-# Usage: tool/checks/foreign-closes <this-repo owner/repo> <other-repo remote name>
-#
-# #190: the same collision the other direction -- a PR about to MERGE INTO this repo can carry
-# bare `Closes #n` commits meant for some other repo, closing this repo's issues by accident.
-# --predict answers it BEFORE the merge instead of finding the damage after:
-#   tool/checks/foreign-closes <owner/repo> --predict <ref>
+# Before an import: tool/checks/foreign-closes <owner/repo> --predict <ref>
+# Historical damage audit: tool/checks/foreign-closes <owner/repo> <other-repo remote>
 
 repo=$1
 mode=$2

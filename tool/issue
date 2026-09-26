@@ -1,5 +1,5 @@
 #!/bin/sh
-# Reads both repos as one issue graph and answers the four questions the rules in
+# Reads the active repository as one issue graph and answers the four questions the rules in
 # AGENTS.md need answered: what is startable and what resources are already held,
 # what should be looked at again, what breaks a rule, what has drifted.
 #
@@ -10,9 +10,8 @@
 #
 # audit and recheck test the checkout's own TODO(#n) markers and paths, so both pick a "primary" repo
 # from the checkout's `origin` remote rather than always the first of REPOS (#174) --
-# COSMAI_ISSUE_PRIMARY overrides that read. audit's foreign-closes and fork-behind sections read the
-# checkout's `upstream` remote (COSMAI_FOREIGN_CLOSES overrides which script the first one calls),
-# and are skipped when there is no such remote. Nothing here fetches.
+# COSMAI_ISSUE_PRIMARY overrides that read. Historical import checks are manual; audit does not
+# maintain the retired fork or fetch Git refs.
 
 set -e
 
@@ -22,8 +21,8 @@ case "$0" in */*) issue_tool_dir=${0%/*} ;; *) issue_tool_dir=. ;; esac
 . "$issue_tool_dir/checks/prerequisite"
 require_command gh jq git
 
-# One graph, two repos: the fork's issues block upstream's (cosmai#55 <- fork#6).
-REPOS=${COSMAI_ISSUE_REPOS:-"slopindustries/cosmai slopindustries/cosmai-import-ydc"}
+# One active queue; explicit graph overrides remain available for fixtures and bounded imports.
+REPOS=${COSMAI_ISSUE_REPOS:-"shk95-1/cosmai"}
 
 # The checked-out repo, not the first entry of REPOS, is what audit's TODO(#n)/path checks must test
 # against -- a fork checkout's TODO(#n) markers point at fork issues, not upstream's (#174).
@@ -41,7 +40,7 @@ pick_primary() {
         fi
     done
     # Falls back to the old fixed choice rather than failing: a checkout whose origin is renamed
-    # or missing should not lose audit/recheck entirely, only the fork-vs-upstream distinction.
+    # or missing should not lose audit/recheck entirely, only the configured primary-repo distinction.
     printf 'tool/issue: checkout origin repo (%s) matches no REPOS entry by name; defaulting to %s\n' \
         "$origin_repo" "${REPOS%% *}" >&2
     printf '%s' "${REPOS%% *}"
@@ -155,7 +154,7 @@ wave epic is written with tool/journal, not here: this tool never writes.
 
 env:
   COSMAI_ISSUE_PRIMARY   overrides the checkout's origin repo (tests only; default: git remote get-url origin)
-  COSMAI_FOREIGN_CLOSES  overrides the foreign-closes script audit's last section calls
+  COSMAI_ISSUE_REPOS     explicit graph override (fixtures or bounded imports; default: shk95-1/cosmai)
 EOF
     exit 64
 }
@@ -659,9 +658,6 @@ AUDIT='
     | [$mwc[] as $ch | select([$unmerged_all[] | select(is_issue_branch_for($ch))] | length == 0) | $ch]
   ),
   missing_labels: [$repos[] | {repo: .repo, missing: ('"$SHARED_LABELS"' - .labels)} | select((.missing | length) > 0)],
-  foreign_closes: $foreign_closes,
-  fork_behind: $fork_behind,
-  ownership: $ownership,
   # #232 Work 3: the nightly is a warning the moment it is red, missing, or older than 36h -- a
   # green run from two days ago is not evidence today ran clean, it is evidence the schedule died.
   nightly: (
@@ -708,9 +704,6 @@ def block($title; $lines): ["", $title] + (if ($lines | length) == 0 then ["  no
 + block("Worktree left behind after its branch was merged"; [.merged_worktrees[] | "  " + .path + " (" + .branch + ")"])
 + block("Merged wave branch left behind"; [.merged_wave_channels[] | "  wave/" + .])
 + block("Shared label missing from a repo"; [.missing_labels[] | "  " + .repo + ": " + (.missing | join(", "))])
-+ block("Closed by a commit that belongs to the other repo"; [.foreign_closes[] | "  " + .])
-+ block("fork behind on shared surfaces"; [.fork_behind[] | "  " + .])
-+ block("fork changed a file upstream owns"; [.ownership[] | "  " + .])
 | .[]
 '
 
@@ -827,37 +820,6 @@ case "$cmd" in
             ops_collector=""
         fi
         ops_lines=$(printf '%s\n%s\n' "$ops_pipeline" "$ops_collector" | grep -v '^$' || true)
-        # #175's own detector, called rather than reimplemented: judging "foreign" is one script's
-        # job. `upstream` is the fork-checkout remote name; on an upstream checkout it does not
-        # exist, so there is nothing to compare against and the section says so instead of erroring.
-        if git remote get-url upstream >/dev/null 2>&1; then
-            foreign_closes_cmd=${COSMAI_FOREIGN_CLOSES:-"$issue_tool_dir/checks/foreign-closes"}
-            foreign_closes=$("$foreign_closes_cmd" "$primary" upstream 2>&1 || true)
-            # The surfaces both repos have to keep identical: schema, the checks that enforce the
-            # rules, the DDL contract and the boot page. A fork that falls behind on one of these
-            # re-opens the same gap every migration wave closes, and only the checkout can see it.
-            # Read, never fetched -- a boot command that reaches the network is a boot command that
-            # hangs -- so a ref nobody has fetched is reported as unknown rather than as "up to date".
-            if git rev-parse --verify -q upstream/main >/dev/null 2>&1; then
-                behind=$(git log --format=%h upstream/main --not HEAD -- db/ tool/checks/ contracts/ddl/ AGENTS.md || true)
-                behind_count=$(printf '%s' "$behind" | grep -c . || true)
-                fork_behind=$(printf '%s' "$behind" | head -20)
-                [ "$behind_count" -le 20 ] \
-                    || fork_behind=$(printf '%s\n… and %s more' "$fork_behind" "$((behind_count - 20))")
-                # The ownership boundary is one script's judgment too (#212, contracts/ownership.md).
-                # Its stdout is one path per line and its exit code is the fork's pre-PR gate, not
-                # this report's: audit stays exit 0 and prints what the check found.
-                ownership_cmd=${COSMAI_OWNERSHIP_CHECK:-"$issue_tool_dir/checks/ownership"}
-                ownership=$("$ownership_cmd" upstream/main 2>/dev/null || true)
-            else
-                fork_behind='(no upstream/main ref — nothing has been fetched from upstream)'
-                ownership='(no upstream/main ref — nothing has been fetched from upstream)'
-            fi
-        else
-            foreign_closes='(no upstream remote — skipped)'
-            fork_behind='(no upstream remote — skipped)'
-            ownership='(no upstream remote — skipped)'
-        fi
         printf '%s' "$graph_json" | jq -r --argjson now "$now" --argjson stale_hours "$STALE_HOURS" \
             --argjson memo_days "$MEMO_DAYS" \
             --argjson nightly "$nightly_json" \
@@ -870,9 +832,6 @@ case "$cmd" in
             --argjson worktrees "$(printf '%s' "$worktrees" | jq -R -s "$to_lines")" \
             --argjson todos "$(printf '%s' "$todos" | jq -R -s "$to_lines")" \
             --argjson unreachable "$(printf '%s' "$unreachable" | jq -R -s "$to_lines")" \
-            --argjson foreign_closes "$(printf '%s' "$foreign_closes" | jq -R -s "$to_lines")" \
-            --argjson fork_behind "$(printf '%s' "$fork_behind" | jq -R -s "$to_lines")" \
-            --argjson ownership "$(printf '%s' "$ownership" | jq -R -s "$to_lines")" \
             "$JQ_LIB $AUDIT | $RENDER_AUDIT"
         ;;
     *) usage ;;
