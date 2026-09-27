@@ -769,6 +769,109 @@ def test_user_adjudicated_technical_handoff_preserves_the_failed_automatic_marke
     assert not any(pack["sources"][-1]["id"] in c["source_ids"] for c in pack["claims"])
 
 
+@pytest.fixture
+def value_case(technical_case):
+    sample, review, _ = technical_case
+    return (
+        sample,
+        review,
+        json.loads((FIXTURES / "lip_dose_brief.json").read_text()),
+        json.loads(Path("analysis/discovery/development_value_review.json").read_text()),
+    )
+
+
+def test_actual_negative_evaluation_preserves_evidence_and_releases_comparison_only(value_case):
+    from analysis.discovery.value import screen
+
+    before = deepcopy(value_case)
+    result = screen(*value_case)
+    assert value_case == before
+    assert result == screen(*value_case)
+    assert result["original_selection"] == select(*value_case[:2])
+    assert len(result["original_selection"]["candidates"]) == 37
+    assert len(result["candidates"]) == 4
+    assert result["selected"] == "retinoid-tolerability-without-diy-dilution"
+    assert result["release"] == "bounded_alternative_research_only"
+    stopped = next(c for c in result["candidates"] if c["status"] == "stopped_delivered_direction")
+    assert stopped["candidate"] == "long-wear-lip-dose-without-tip-wiping"
+    assert result["evaluation"]["brief_run_id"] == value_case[2]["run_id"]
+    assert "consumer complaint" not in result["evaluation"]["reason"]
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "different_review",
+        "different_brief",
+        "missing_candidate",
+        "omit_counterevidence",
+        "invented_span",
+        "foreign_doc",
+        "promote_stopped",
+        "claim_market_gap",
+        "claim_accepted",
+    ],
+)
+def test_value_screen_refuses_drift_hidden_evidence_and_false_release(value_case, defect):
+    from analysis.discovery.value import screen
+
+    sample, review, brief, assessment = value_case
+    item = next(c for c in assessment["candidates"] if c["candidate"].startswith("retinoid-"))
+    if defect == "different_review":
+        review["interventions"].append("Changed grouping after evaluation")
+    elif defect == "different_brief":
+        brief["spec"]["title"] = "A different direction"
+    elif defect == "missing_candidate":
+        assessment["candidates"].pop()
+    elif defect == "omit_counterevidence":
+        item["reviewed_counterevidence_doc_ids"].pop()
+    elif defect == "invented_span":
+        item["observations"][0]["span"] = "Patients paid an extra 200 dollars every month"
+    elif defect == "foreign_doc":
+        item["observations"][0]["doc_id"] = "commerce_review:glowpick:7875575"
+    elif defect == "promote_stopped":
+        assessment["candidates"][0]["status"] = "research_value_hypothesis"
+    elif defect == "claim_market_gap":
+        item["value_hypothesis"]["alternative_adequacy"] = "no_solution_available"
+    else:
+        assessment["evaluation"]["decision"] = "accepted"
+    with pytest.raises(ValueError):
+        screen(sample, review, brief, assessment)
+
+
+def test_no_value_hypothesis_cannot_manufacture_a_next_case(value_case):
+    from analysis.discovery.value import screen
+
+    for candidate in value_case[3]["candidates"]:
+        if candidate["status"] == "research_value_hypothesis":
+            candidate["status"] = "hold_common_requirement"
+            candidate["disposition_reason"] = "Common context not established; hold for research."
+    result = screen(*value_case)
+    assert result["selected"] is None
+    assert result["status"] == "no_qualified_value_hypothesis"
+    assert result["release"] == "none"
+
+
+def test_value_replay_preserves_stop_history_and_cannot_overwrite_inputs(value_case, tmp_path):
+    inputs = []
+    for name, payload in zip(("sample", "review", "brief", "assessment"), value_case, strict=True):
+        path = tmp_path / (name + ".json")
+        path.write_text(json.dumps(payload))
+        inputs.extend(["--" + name, str(path)])
+    command = [sys.executable, "-m", "analysis.discovery.value", *inputs, "--output"]
+    original = (tmp_path / "sample.json").read_bytes()
+    rejected = subprocess.run(command + [str(tmp_path / "sample")], capture_output=True)
+    assert rejected.returncode != 0
+    assert (tmp_path / "sample.json").read_bytes() == original
+    output = tmp_path / "screening"
+    subprocess.run(command + [str(output)], capture_output=True, check=True)
+    record = json.loads(output.with_suffix(".json").read_text())
+    assert record["evaluation"]["decision"] == "stop_delivered_direction"
+    assert record["original_selection"]["selected"] == select(*value_case[:2])["selected"]
+    assert output.with_suffix(".json").stat().st_mode & 0o777 == 0o600
+    assert output.with_suffix(".md").stat().st_mode & 0o777 == 0o600
+
+
 @pytest.mark.parametrize(
     "defect", ["different_comparison", "missing_decision", "unavailable_claim", "invented_result"]
 )

@@ -1156,6 +1156,25 @@ naver:   datalab once a month (by the keyword dictionary) Â· blog once a month Â
 
 ## Agent-mediated need discovery (#323)
 
+`python -m analysis.discovery.value --sample sample.json --review review.json
+--brief delivered-brief.json --assessment value-review.json --output screening`
+replays the offline `value-review-v1` handoff (#349), writing JSON and Markdown
+with mode 0600. `analysis.discovery.value.screen` binds the unchanged source,
+complete review, delivered brief and actual case-specific stop decision. The
+review covers every corroborated current candidate using common qualitative
+criteria, exact consumer spans and all grouped counterevidence. Hypotheses remain
+agent inferences; provenance checks cannot certify interpretation quality or
+authenticate the referenced user's decision. The original 37-group pilot ranking,
+support and exclusions remain replayable and intact. The stopped delivered
+direction is retained for calibration; its rejection does not invalidate the
+consumer complaint or all packaging ideas. Other market rejections remain gates.
+`selected_for_alternative_research` uses the original deterministic ranking among
+surviving value hypotheses and releases bounded alternatives research only.
+`no_qualified_value_hypothesis` releases nothing. Neither outcome establishes
+market absence, problem severity, causal diagnosis, technical readiness, new-product
+value or usefulness acceptance, and neither releases #179/#176. The actual
+alternative comparison and a later case evaluation remain separate requirements.
+
 An optional `market_reviews` object in the semantic review maps candidate keys to
 `alternatives-v1` assessments (#324). Each assessment binds the sample's
 `snapshot_sha256` and the fingerprint of that candidate's original `support`, and records
