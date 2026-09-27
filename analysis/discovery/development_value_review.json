@@ -1,0 +1,272 @@
+{
+  "version": "value-review-v1",
+  "inputs": {
+    "sample": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+    "review": "5aee2e154f2746152785cb62b662d006a175fbffb15689d1703a5bfab5cc7541",
+    "brief": "299c678d560c6a4f1f0fd90a4fff094c7114bf2c06db7e77f72fc910190e00ce"
+  },
+  "reviewer": "coordinator agent; semantic interpretations are research inputs, not validated severity",
+  "criteria": [
+    "executed effort or recovery rather than an imagined inconvenience",
+    "desired result still compromised in actual use",
+    "explicitly retained benefits and rejected routines or products",
+    "plausible incremental benefit, with actual alternative adequacy still unverified"
+  ],
+  "evaluation": {
+    "candidate": "long-wear-lip-dose-without-tip-wiping",
+    "direction": "Thin-layer liquid lip color with less repeated amount adjustment",
+    "brief_run_id": "08f188f4dcee3d0dd253989a5c49405b7e2bc97931acda3aaeb0068a447f2fd2",
+    "brief_sha256": "299c678d560c6a4f1f0fd90a4fff094c7114bf2c06db7e77f72fc910190e00ce",
+    "decision": "stop_delivered_direction",
+    "reason": "insufficient_problem_importance_or_new_product_value",
+    "decision_url": "https://github.com/shk95-1/cosmai/issues/327#issuecomment-5851599252",
+    "recorded_at": "2026-09-27T01:23:03Z"
+  },
+  "candidates": [
+    {
+      "candidate": "long-wear-lip-dose-without-tip-wiping",
+      "support_sha256": "9b1b7062041462e10c84813c0a3e1b467dd79f89b6577dfdf9ee800bf0fca258",
+      "reviewed_support_doc_ids": [
+        "commerce_review:glowpick:7875575",
+        "commerce_review:oliveyoung:64286864",
+        "commerce_review:oliveyoung:64431208"
+      ],
+      "reviewed_counterevidence_doc_ids": [
+        "commerce_review:glowpick:7876025"
+      ],
+      "status": "stopped_delivered_direction",
+      "observations": [
+        {
+          "doc_id": "commerce_review:glowpick:7875575",
+          "kind": "executed_action",
+          "span": "\ub9e4\ubc88 \ub35c\uc5b4\uc368\uc57c\ud558\ub294 \ubc88\uac70\ub85c\uc6c0",
+          "summary": "Repeated excess removal is actual reported effort; time/cost magnitude is unknown.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7875575",
+          "kind": "retained_benefit",
+          "span": "\uc815----\ub9d0 \uc18c\ub7c9\uc73c\ub85c \uc587\uac8c \ud3b4\ubc1c\ub77c\uc57c\ud55c\ub2e4 \uadf8\ub7ec\uba74 \uc575\uac04\ud55c \ub9e4\ud2b8\ub9bd \uc800\ub9ac\uac00\ub294 \uc9c0\uc18d\ub825\uc774\ub2e4",
+          "summary": "The user values thin-layer long wear, not simply wiping avoidance.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64286864",
+          "kind": "compromised_result",
+          "span": "\uc5bc\ub8e9\ub35c\ub8e9 \ud574\uc9c0\ub294\uac8c \ubb38\uc81c",
+          "summary": "Uneven wear is reported, but a wiper change has not been shown to fix it.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64286864",
+          "kind": "rejected_choice",
+          "span": "\uc5b8\uc820\uac00\ub294 \ub2e4\uc2dc \u1109 \u1163\u1102 \ub85c \uac08\uc544\ud0c8\uac70 \uac19\uc544\uc694",
+          "summary": "A return to a known alternative is contemplated; it has not been verified as a matched solution.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64431208",
+          "kind": "rejected_choice",
+          "span": "\uac4d \uc4f0\ub358\uac70 \uc4f8\ub798\uc694",
+          "summary": "A preferred prior tint may resolve value better than packaging redesign.",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "beneficiary": "Consumers wanting the observed long-wear thin-layer result.",
+        "incremental_gain": "Reduce repeated amount adjustment while preserving the desired thin-layer finish; this delivered wiper/tip direction was judged insufficiently valuable by the user.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "Effort saved, dominant shade/finish preference, price, switching value and actual alternative adequacy are unknown. The observed complaint and conditional technical feasibility remain intact.",
+        "falsifier": "The actual #327 rejection stops this delivered direction. Any materially different direction needs its own evidence and case evaluation; do not relabel the same concept."
+      },
+      "counterevidence_assessment": "The satisfied tip/package review concerns another product and cannot erase the observed loading problem. Preferred prior products and the actual negative usefulness evaluation defeat promotion of this delivered concept.",
+      "disposition_reason": "Actual user stop for insufficient inconvenience importance or new-product value takes precedence over a merely feasible convenience improvement."
+    },
+    {
+      "candidate": "retinoid-tolerability-without-diy-dilution",
+      "support_sha256": "de883f7136a0d32d1b4cc86a63628204054192640fe3efd550a3f57047eecfb7",
+      "reviewed_support_doc_ids": [
+        "commerce_review:daisomall:9214907",
+        "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg"
+      ],
+      "reviewed_counterevidence_doc_ids": [
+        "commerce_review:oliveyoung:64041911",
+        "commerce_review:oliveyoung:64280302",
+        "commerce_review:oliveyoung:64307284"
+      ],
+      "status": "research_value_hypothesis",
+      "observations": [
+        {
+          "doc_id": "commerce_review:daisomall:9214907",
+          "kind": "executed_action",
+          "span": "\uc870\uae08\uc529 \uc11e\uc5b4\uac00\uba74\uc11c \uc4f0\uace0 \uc788\uc2b5\ub2c8\ub2e4",
+          "summary": "After reported peeling, this user changed to ongoing small-amount mixing.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:daisomall:9214907",
+          "kind": "compromised_result",
+          "span": "\ud53c\ubd80 \ub2e4 \uaecd\uc9c8 \uc77c\uc5b4\ub09c",
+          "summary": "Peeling is self-reported after standalone use; cause, dose and duration are unverified.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg",
+          "kind": "retained_benefit",
+          "span": "\uc8fc\ub984\uc5d0 \uc88b\ub2e4\uace0 \uadc0\uac00 \ucad1\uae0b\ud574\uc11c",
+          "summary": "The intended benefit was wrinkle improvement; efficacy is not demonstrated.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg",
+          "kind": "compromised_result",
+          "span": "\ud53c\ubd80\uac00 \ub530\uac11\uace0 \ud64d\uc870, \uac00\ub824\uc6c0, \uac01\uc9c8\uae4c\uc9c0 \uc62c\ub77c\uc640\uc11c",
+          "summary": "This user reports symptoms even after following an understood small-amount mixing routine; this is not a diagnosis.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg",
+          "kind": "executed_action",
+          "span": "\ub354\ub9c8\ube0c\ub9ad \uc2dc\uce74\uc570\ud50c\uc774\ub791 \uc5d0\uc2a4\ud2b8\ub77c \ud06c\ub9bc\ub9cc \uafb8\uc900\ud788 \ubc14\ub974\uba74\uc11c \uaca8\uc6b0 \ud68c\ubcf5\ud588\uc2b5\ub2c8\ub2e4",
+          "summary": "The user describes switching to a recovery-only routine; monetary cost and duration are unknown.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:64280302",
+          "kind": "retained_benefit",
+          "span": "\uc790\uadf9 \uc5c6\uc774 \uc798 \uc37c\uc2b5\ub2c8\ub2e4",
+          "summary": "Another user reports tolerating an existing blended product, providing a credible alternative to inspect.",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "beneficiary": "Users who reported trouble and modified or interrupted retinoid use; concentration, prior exposure, skin context and benefit targets need alignment.",
+        "incremental_gain": "Investigate whether an available beginner-oriented product/routine already permits the desired retinoid-related use without the observed self-adjustment or interruption. A new product is not yet justified.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "Two source-local users are not a validated target segment. Product strength/identity, causation, clinical severity, recovery cost/duration, efficacy and adequacy of existing milder or blended products are unknown. This is no dosing or mixing advice.",
+        "falsifier": "Stop the new-product premise if a suitable existing product or ordinary accepted routine solves the same user/context requirements. Hold if the two reports cannot support a coherent comparable requirement."
+      },
+      "counterevidence_assessment": "Three other consumers report accepted designed capsule/blended application. These are real existing alternatives, not dismissible positive reviews; exact product/variant, use context and comparable outcomes must be investigated before any technical brief.",
+      "disposition_reason": "Actual changed/interrupted use and compromised desired use support a bounded problem-value hypothesis beyond convenience alone. Existing alternatives remain untested against the same requirements; release comparison only."
+    },
+    {
+      "candidate": "mineral-base-without-tool-dependent-pilling",
+      "support_sha256": "e0bf7f493e34ecd49a1d96aba5a04448216404b72050534daf5658d108c1c2a2",
+      "reviewed_support_doc_ids": [
+        "commerce_review:glowpick:7827714",
+        "commerce_review:oliveyoung:52452038"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_common_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:glowpick:7827714",
+          "kind": "executed_action",
+          "span": "\ub9e4\ud2b8 \ud37c\ud504\ub85c \ubc1c\ub790\uc744\ub54c \uc81c\uc77c \uc2ec\ud558\uace0, \ucd09\ucd09\ud55c \uc2a4\ud380\uc9c0\ub294 \uc0b4\uc9dd \ub098\uc544\uc838\ub3c4 \uc5ec\uc804\ud788 \uc2ec\ud558\uace0, \uadf8\ub098\ub9c8 \uc190\uc73c\ub85c \ub3c4\ud1b0\ud558\uac8c \uc62c\ub838\uc744\ub54c \uc880 \ub098\uc544\uc694",
+          "summary": "This user tested multiple application tools, with unresolved pilling or a thicker application compromise.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7827714",
+          "kind": "compromised_result",
+          "span": "\ud53c\ubd80\ud45c\ud604\uc774 \ub108\ubb34 \uc548\uc88b\ub124\uc694",
+          "summary": "Desired appearance remains poor; occurrence is not an invented tool-effort problem.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:52452038",
+          "kind": "rejected_choice",
+          "span": "\uc774\uac70 \uc774\ud2c0\uc4f0\uace0 \ub2e4\uc2dc \uc560\uc2a4\ud2b8\ub77c\ub85c \ub3cc\uc544\uac11\ub2c8\ub2e4",
+          "summary": "A second user reports returning to an already used alternative after two days.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:52452038",
+          "kind": "compromised_result",
+          "span": "\ud37c\ud504\ub2ff\uc744\ub54c\ub9c8\ub2e4 \uc804\uc7c1\uc774\uc5d0\uc694",
+          "summary": "Layering concealer with a puff is reportedly difficult; shared BB/tone-up requirements are not established.",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "beneficiary": "Mineral-base users experiencing pilling; BB coverage versus tone-up sunscreen requirements are not yet aligned.",
+        "incremental_gain": "A base that preserves acceptable appearance with ordinary tools might matter, but the two reports do not yet establish the same mineral BB/coverage and layering requirement or value over the accepted prior product.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "Product contexts and coverage requirements differ. The second user identifies a prior satisfactory sunscreen; its adequacy for the first user is unknown. No monetary burden or market-wide missing solution is established.",
+        "falsifier": "Reject a common new-product requirement if these are different needs or the known prior product satisfies the matching need. Revisit only with source-bound common requirements and actual alternative inadequacy."
+      },
+      "counterevidence_assessment": "No satisfied observations are grouped under this candidate, but the observed second support itself reports a successful prior product and return. Empty grouped counterevidence must not be treated as market absence.",
+      "disposition_reason": "Hold for common-requirement clarification and the reported existing solution. Current grouping is insufficient to prioritize another product concept."
+    },
+    {
+      "candidate": "sunscreen-dryness-reactivity-without-filter-switching",
+      "support_sha256": "28056c8325d17d1934cde12ca09926f1bdf9deb013878cbdd28d894cc73b1dc4",
+      "reviewed_support_doc_ids": [
+        "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+        "youtube_comment:UgyaVCjHevOzDhS4xqh4AaABAg"
+      ],
+      "reviewed_counterevidence_doc_ids": [
+        "commerce_review:glowpick:7858699",
+        "commerce_review:glowpick:7881120"
+      ],
+      "status": "research_value_hypothesis",
+      "observations": [
+        {
+          "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+          "kind": "executed_action",
+          "span": "\uacb0\uad6d \uc720\uae30\uc790\ucc28\ub85c \ubc14\uafe8\ub294\ub370",
+          "summary": "An actual filter-type switch is reported; products and filter compositions are unverified.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+          "kind": "compromised_result",
+          "span": "\uc5f4\uac10\uc774\ub098 \ud2b8\ub7ec\ube14 \ub54c\ubb38\uc5d0 \uace0\ubbfc\uc785\ub2c8\ub2e4",
+          "summary": "The user reports another discomfort after switching; this does not establish its cause.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:UgyaVCjHevOzDhS4xqh4AaABAg",
+          "kind": "executed_action",
+          "span": "\ub208\uc2dc\ub9bc \ub54c\ubb38\uc5d0 \ubb34\uae30\uc790\ucc28\ub85c \ub118\uc5b4\uc654\ub294\ub370",
+          "summary": "A second user reports the opposite switch after eye discomfort.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:UgyaVCjHevOzDhS4xqh4AaABAg",
+          "kind": "compromised_result",
+          "span": "\uc810\uc2ec \uc2dc\uac04\ub9cc \ub418\uba74 \uac74\uc870\ud574\uc9c0\ub294",
+          "summary": "Dryness remains in the changed routine.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7858699",
+          "kind": "retained_benefit",
+          "span": "\uc774 \uc81c\ud488\uc740 \ud655\uc2e4\ud788 \uc548\uac74\uc870\ud574\uc694",
+          "summary": "A satisfied consumer reports an available mineral sunscreen without the prior dryness.",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7881120",
+          "kind": "retained_benefit",
+          "span": "\uadf8\ub0e5 \ud63c\ud569\uc790\ucc28 \uc77c\ub9ac\uc724\uc774 \ub354 \uc790\uadf9\ub3c4 \uc5c6\uace0 \uc798 \ubc1c\ub824\uc11c",
+          "summary": "An available mixed-filter alternative is preferred by another user.",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "beneficiary": "Users reporting opposite filter-class switches with remaining discomfort; exact products, contexts and desired protection requirements need matching.",
+        "incremental_gain": "Investigate whether an available sunscreen already meets the same eye-comfort and daytime skin-comfort requirements. The value hypothesis is sustaining acceptable use, not inventing a universal filter-class solution.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "Self-reported symptoms do not diagnose sensitive skin or implicate filters. Different individual problems may not support one common requirement. Available mineral/mixed products may fully solve them; no efficacy or SPF measurement is available.",
+        "falsifier": "Stop if a matched available product meets the desired use context, or hold if reports cannot support a common requirement. Do not infer safety, SPF, causal mechanisms or a new formula from these comments."
+      },
+      "counterevidence_assessment": "Two satisfied reviews directly oppose a blanket filter dilemma: one mineral product removes dryness/pilling and an existing mixed-filter product is preferred. Their contexts must be matched before claiming residual need.",
+      "disposition_reason": "Executed switching leaves a compromised result in both reports, making comparison reasonable. It ranks after the retinoid hypothesis under the unchanged original ranking; no technical release follows."
+    }
+  ]
+}
