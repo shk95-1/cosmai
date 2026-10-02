@@ -1,0 +1,372 @@
+{
+  "version": "alternatives-v1",
+  "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+  "support_sha256": "de883f7136a0d32d1b4cc86a63628204054192640fe3efd550a3f57047eecfb7",
+  "candidate": "retinoid-tolerability-without-diy-dilution",
+  "requirements": [
+    {
+      "id": "tolerance-0",
+      "doc_id": "commerce_review:daisomall:9214907",
+      "span": "단독으로 썼다가 피부 다 껍질",
+      "interpretation": "Source-local hypothesis: pursue the originally desired use without the reported adverse outcome; a no-mixing preference or common efficacy target is not confirmed.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Acceptable tolerance, use duration, prior exposure and other products are unmeasured.",
+        "No measured causal attribution or diagnosis follows from this report.",
+        "Desired benefit is unspecified for Daiso; YouTube mentions wrinkles without a success criterion.",
+        "Avoiding mixing is an agent hypothesis, not an explicit shared requirement."
+      ]
+    },
+    {
+      "id": "tolerance-1",
+      "doc_id": "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg",
+      "span": "피부가 따갑고 홍조, 가려움, 각질까지",
+      "interpretation": "Source-local hypothesis: pursue the originally desired use without the reported adverse outcome; a no-mixing preference or common efficacy target is not confirmed.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Acceptable tolerance, use duration, prior exposure and other products are unmeasured.",
+        "No measured causal attribution or diagnosis follows from this report.",
+        "Desired benefit is unspecified for Daiso; YouTube mentions wrinkles without a success criterion.",
+        "Avoiding mixing is an agent hypothesis, not an explicit shared requirement."
+      ]
+    }
+  ],
+  "context_alignment": [
+    {
+      "doc_id": "commerce_review:daisomall:9214907",
+      "context": {
+        "summary": "Initially unfamiliar application",
+        "span": "사용법을 몰라서"
+      },
+      "behavior": {
+        "summary": "Now mixes small amounts",
+        "span": "조금씩 섞어가면서 쓰고 있습니다"
+      },
+      "trade_off": {
+        "summary": "Prior standalone use caused reported peeling",
+        "span": "단독으로 썼다가 피부 다 껍질"
+      },
+      "desired_benefit": "unspecified",
+      "original_identity": {
+        "source": "daisomall",
+        "product_id": "1055168",
+        "level": "listing"
+      },
+      "original_strength": "2500 IU in frozen product name; quantity basis and applicability unverified.",
+      "usage_alignment": "Instructions initially unknown; subsequent mixing outcome not reported."
+    },
+    {
+      "doc_id": "youtube_comment:UgwxiURJtCWSD4MFBZ94AaABAg",
+      "context": {
+        "span": "고함량 레티놀을 샀더랬죠",
+        "summary": "First high-strength retinol purchase"
+      },
+      "behavior": {
+        "span": "아주 소량을 크림에 섞어서",
+        "summary": "Dilutes in cream"
+      },
+      "trade_off": {
+        "span": "피부가 따갑고 홍조, 가려움, 각질까지",
+        "summary": "Adverse self-report despite dilution"
+      },
+      "desired_benefit": "Wrinkle motivation, without a measurable efficacy target.",
+      "original_identity": null,
+      "original_strength": "Unknown product and strength; do not identify it from the video or other comments.",
+      "usage_alignment": "Reports understood mixing instructions and symptoms; clearer instructions alone do not explain this away."
+    }
+  ],
+  "reviewed_counterevidence": [
+    {
+      "doc_id": "commerce_review:oliveyoung:64041911",
+      "product_key": "A000000259386",
+      "span": "레티날 제품은 자극이 있을까 봐 쉽게 못 쓰고 있었는데 모공이랑 탄력이 동시에 신경 쓰여서 도전해봤어요. 처음부터 욕심내지 않고 저녁에 소량씩 사용 중이에요. 캡슐을 손으로 살짝 풀어주면 크림과 자연스럽게 섞이면서 발림성이 부드러워지고 얼굴 전체에 얇게 펴 바르기 편해요. 저는 볼 모공이랑 팔자, 이마 쪽을 중심으로 발라주는데 사용 후 끈적끈적하게 남기보다는 촉촉하면서 피부가 쫀득하게 감싸지는 느낌이 마음에 들어요. 단기간 변화보다는 꾸준히 사용하면서 피부결과 모공 컨디션을 지켜보려고 해요.",
+      "interpretation": "Preserve favorable first-person experience and designed capsule/dual-phase handling; efficacy, original exposure and similarity to the two support contexts remain unverified."
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:64280302",
+      "product_key": "A000000261065",
+      "span": "원래 레티놀 쓰다가 레티날이 효과가 더 좋다고 해서 갈아타 봤어요! 레티놀 보다 10배인가 강하다 그래서 살짝 걱정했는데 이거는 믹스된 제품이라 그런지 자극 없이 잘 썼습니다. 확실히 바른 다음날은 피부결이 맨들맨들해져서 기분이 좋아용 아직은 격일로 바르는데 익숙해지면 매일 바를 예정 바닥을 세 번 정도 두드리고 특정 부분을 눌러주면 잘 섞여서 나오는데 신기해요 처음에 글을 제대로 안 봐서 잘못 눌렀지만.. 이젠 마스터했습니다.",
+      "interpretation": "Preserve favorable first-person experience and designed capsule/dual-phase handling; efficacy, original exposure and similarity to the two support contexts remain unverified."
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:64307284",
+      "product_key": "A000000261065",
+      "span": "친구가 셀리맥스 레티날 크림을 쓰고 피부결이 아예 달라졌다는 말을 듣고 셀리맥스 제품을 꼭 써보고 싶었어요!! 요즘 주름과 모공이 걱정인지라 이제품을 선택했구요! 일단 패키지를 뜯으면 아주 상세하게 사용방법이 써있어서 레티날 처음 접하시는 분들도 자극없게 잘 사용하실수 있을 것 같아요. 일단 제품 사용전 탁탁 두드려서 사진속처럼 press here부분을 누르면 아주 예쁜 컬러의 크림이 나와요 :) 처음엔 덜 두드리고 짰더니 블루컬러의 크림만 나왔는데 더 두드리니 옐로우컬러가 섞여서 아주 예쁜 크림이 나오더라구요 ! 크림 제형은 아주 부드럽게 빨리고 수분감도 가득해서 발림성이 아주 좋은 편이에요! 패키지에 써있는 방법대로 사용해보니 다음날 피부가 아주 매끈해진 느낌이고 건성이라 꾸준히 사용하면 속건조도 잡히고 탱탱한 피부가 될 것 같아서 아주 기대중입니다 !!",
+      "interpretation": "Preserve favorable first-person experience and designed capsule/dual-phase handling; efficacy, original exposure and similarity to the two support contexts remain unverified."
+    }
+  ],
+  "reviewed_exclusion_doc_ids": [
+    "commerce_review:glowpick:7857890",
+    "commerce_review:oliveyoung:64041911",
+    "commerce_review:oliveyoung:64280302",
+    "commerce_review:oliveyoung:64307284",
+    "youtube_comment:UgwnNtCqf5uRaPE83Md4AaABAg",
+    "youtube_comment:Ugx3nxi4qFcYrueMeKZ4AaABAg"
+  ],
+  "sources": [
+    {
+      "id": "daiso",
+      "url": "https://www.daisomall.co.kr/pd/pdr/SCR_PDR_0001?pdNo=1055168",
+      "access": "unavailable",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "HTTP 403; no current instructions, concentration basis or availability recovered. Frozen product key/name identifies 1055168 only in the captured retailer data."
+    },
+    {
+      "id": "podl-listing",
+      "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000259386",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Retailer title identifies PODL retinal capsule cream 55g at A000000259386. Supplier-provided detail is not readable instructions or matched tolerance proof."
+    },
+    {
+      "id": "celimax-listing",
+      "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000261065",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Retailer title identifies celimax dual cream 50ml at A000000261065. Readable shell does not establish a particular option, instructions or matched tolerance."
+    },
+    {
+      "id": "celimax-set",
+      "url": "https://celimax001.cafe24.com/product/%EB%9F%B0%EC%B9%AD%ED%8A%B9%EA%B0%80-%EB%A0%88%ED%8B%B0%EB%82%A0-%EB%A3%A8%ED%8B%B4-%EC%84%B8%ED%8A%B8/436/category/31/display/1/",
+      "access": "partial",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Search/open initially exposed a routine-set page; subsequent lookup redirected to the official homepage. Set pricing/contents are not treated as stable current product evidence."
+    },
+    {
+      "id": "podl-home",
+      "url": "https://podl.co.kr/",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Official homepage links a retinal pore/elasticity cream. Equivalence to the frozen capsule listing and historical variant is unresolved."
+    },
+    {
+      "id": "celimax-home",
+      "url": "https://celimax.co.kr/",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Redirect destination links the named retinal dual cream; counted as an additional inspected page conservatively."
+    },
+    {
+      "id": "celimax-product",
+      "url": "https://celimax.co.kr/product/%EB%A0%88%ED%8B%B0%EB%82%A0-%EC%83%B7-%ED%83%80%EC%9D%B4%ED%8A%B8%EB%8B%9D-%EB%93%80%EC%96%BC-%ED%81%AC%EB%A6%BC-50ml/415/category/1/display/3/?icid=MAIN.product_listmain_2",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Official disclosure: 50ml dual cream; phase 1 lists retinal 0.05%, phase 2 includes panthenol and guaiazulene. Final dispensed concentration/mixing ratio unknown. Use field refers to detail; operational instructions not verified in extracted text."
+    },
+    {
+      "id": "cosrx",
+      "url": "https://www.cosrx.com/products/the-retinol-0-1-cream-1",
+      "access": "available",
+      "retrieved_on": "2026-10-02",
+      "method": "web search/open/click/find; readable extracted text only",
+      "summary": "Official 20ml cream lists retinol 0.1%, first-user positioning and gradual introduction. No cream premixing in readable instructions. Same-context tolerance unproven; single quantity explicitly backordered."
+    }
+  ],
+  "budget": {
+    "inspected_page_limit": 8,
+    "inspected_pages": 8,
+    "counting": "Unique attempted pages plus the observed redirect destination; a denied page still counts. Search discovery and re-reading the same page are not additional inspected pages.",
+    "stop": "Page limit reached; denied Daiso page not bypassed."
+  },
+  "alternatives": [
+    {
+      "name": "Boncept Retinol 2500 IU Wrinkle Shot Perfector 15ml",
+      "identity": {
+        "source": "daisomall",
+        "product_id": "1055168",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.daisomall.co.kr/pd/pdr/SCR_PDR_0001?pdNo=1055168",
+        "summary": "Frozen original listing identity; current primary-source fetch denied. Current instructions and IU basis remain unverified.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-10-02"
+      },
+      "source_ids": [
+        "daiso"
+      ],
+      "availability": "Current inspected listing/shell is not verified variant stock or supply.",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "contradicted",
+          "reason": "Frozen standalone use personally failed this tolerance outcome; later mixing outcome is unknown. This does not condemn accepted instructions or all variants.",
+          "evidence": {
+            "url": "https://www.daisomall.co.kr/pd/pdr/SCR_PDR_0001?pdNo=1055168",
+            "summary": "Captured original consumer reports peeling after standalone use; exact span is retained in the frozen snapshot.",
+            "kind": "user_self_report",
+            "retrieved_on": "2026-10-02"
+          }
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        }
+      ]
+    },
+    {
+      "name": "PODL retinal capsule cream 55g",
+      "identity": {
+        "source": "oliveyoung",
+        "product_id": "A000000259386",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000259386",
+        "summary": "Identified frozen retailer listing; one satisfied consumer report. Capsule handling is product-designed operation, not proof of no manual operation.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-10-02"
+      },
+      "source_ids": [
+        "podl-listing"
+      ],
+      "availability": "Current inspected listing/shell is not verified variant stock or supply.",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        }
+      ]
+    },
+    {
+      "name": "celimax retinal dual cream 50ml",
+      "identity": {
+        "source": "oliveyoung",
+        "product_id": "A000000261065",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=A000000261065",
+        "summary": "Two satisfied frozen reports on one listing; two-phase product design is established by official disclosure, but dispensed ratio, identity across options and same-context tolerance remain unknown.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-10-02"
+      },
+      "source_ids": [
+        "celimax-product"
+      ],
+      "availability": "Current inspected listing/shell is not verified variant stock or supply.",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        }
+      ]
+    },
+    {
+      "name": "COSRX The Retinol 0.1 Cream 20ml",
+      "identity": {
+        "source": "cosrx.com",
+        "product_id": "the-retinol-0-1-cream-1",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://www.cosrx.com/products/the-retinol-0-1-cream-1",
+        "summary": "Manufacturer-positioned ready-to-use beginner cream; gradual-introduction instructions, not a recommended personal regimen or proven tolerated replacement.",
+        "kind": "manufacturer_claim",
+        "retrieved_on": "2026-10-02"
+      },
+      "source_ids": [
+        "cosrx"
+      ],
+      "availability": "Single quantity backordered on the inspected official page; Korean supply/options unknown.",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "Neither manufacturer positioning nor another satisfied user proves tolerance or the desired benefit for this supporting context; original strength/context are unmatched."
+        }
+      ]
+    }
+  ],
+  "routine_alternatives": [
+    {
+      "name": "Original accepted use and clearer instructions",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "Daiso current instructions blocked; misunderstood original use is plausible but subsequent tolerated outcome is absent."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "YouTube already reports understood instructions; cannot assume explanation alone restores desired use."
+        }
+      ]
+    },
+    {
+      "name": "Existing designed capsule or dual-phase handling",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "Three favorable reports across two listings demonstrate accepted handling in other users, not matched tolerance in this supporting context."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "Three favorable reports across two listings demonstrate accepted handling in other users, not matched tolerance in this supporting context."
+        }
+      ]
+    },
+    {
+      "name": "Manufacturer-positioned ready-to-use introduction",
+      "comparisons": [
+        {
+          "requirement": "tolerance-0",
+          "status": "unknown",
+          "reason": "An existing introduction alternative is visible, but efficacy/tolerance for the observed user remains untested."
+        },
+        {
+          "requirement": "tolerance-1",
+          "status": "unknown",
+          "reason": "An existing introduction alternative is visible, but efficacy/tolerance for the observed user remains untested."
+        }
+      ]
+    }
+  ],
+  "coverage": "One bounded primary-source pass for observed products and one justified ready-to-use introduction comparator. Three favorable reviews are two listings, not three alternatives. No product purchase/use or extra sampling.",
+  "limitations": [
+    "No shared efficacy specification or confirmed no-mixing preference.",
+    "Different histories and unknown original YouTube product/strength prevent matched comparison.",
+    "No IU-to-percent, retinol-to-retinal potency or phase-to-final-blend conversion.",
+    "Frozen retail product names and current official names do not establish same historical variant.",
+    "Symptom reports are not measured diagnoses or causal attribution.",
+    "Other satisfied users are counterevidence, not same-context adequacy or efficacy proof.",
+    "Manufacturer positioning and unclear suitability prove neither market absence nor a residual gap.",
+    "No regimen/mixing recipe, paid/GPU work, outreach, production mutation or technical/usefulness/web acceptance."
+  ],
+  "decision": {
+    "status": "reject",
+    "basis": "insufficient_common_requirement",
+    "reason": "Hold this value hypothesis: one observed benefit is unspecified, the other original product/strength is unidentified, and an explicit shared no-mixing constraint is absent. Tolerance complaints support problem significance but not a coherent residual product specification. Existing instructional/designed/ready-to-use alternatives have preserved favorable evidence; their matched adequacy remains unknown.",
+    "falsifier": "Separately authorized evidence establishing shared desired outcome, relevant product/exposure context and which actual alternatives fail that same requirement. No new evidence pass is released by this record."
+  }
+}

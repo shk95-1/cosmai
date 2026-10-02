@@ -18,6 +18,51 @@ FIXTURES = Path(__file__).parent / "fixtures" / "discovery"
 WINNER = "oily-skin-foundation-without-diy-blending"
 
 
+def test_alternative_followup_keeps_favorable_evidence_and_returns_to_the_value_ranking(value_case):
+    from analysis.discovery.followup import compare
+
+    assessment = json.loads((FIXTURES / "retinoid_alternatives.json").read_text())
+    sample, review, brief, value_review = value_case
+    inputs = (*value_case, assessment)
+    before = deepcopy(inputs)
+    report = compare(sample, review, brief, value_review, assessment)
+    assert inputs == before
+    assert report == compare(sample, review, brief, value_review, assessment)
+    assert report["disposition"] == "hold_common_requirement"
+    assert report["release"] == "none"
+    assert report["next_candidate"] == "sunscreen-dryness-reactivity-without-filter-switching"
+    assert report["original_selection"] == select(*value_case[:2])
+    positives = assessment["reviewed_counterevidence"]
+    assert len(positives) == 3
+    assert len({c["product_key"] for c in positives}) == 2
+    assert assessment["budget"]["inspected_pages"] == 8
+    assert all(c["status"] == "unknown" for c in assessment["alternatives"][-1]["comparisons"])
+
+
+@pytest.mark.parametrize(
+    "defect", ["unselected", "omit_positive", "false_identity", "hide_exclusion", "context", "budget"]
+)
+def test_alternative_followup_refuses_cherry_picking_or_expanded_research(value_case, defect):
+    from analysis.discovery.followup import compare
+
+    assessment = json.loads((FIXTURES / "retinoid_alternatives.json").read_text())
+    if defect == "unselected":
+        assessment["candidate"] = WINNER
+    elif defect == "omit_positive":
+        assessment["reviewed_counterevidence"].pop()
+    elif defect == "false_identity":
+        assessment["reviewed_counterevidence"][0]["product_key"] = "unrelated"
+    elif defect == "hide_exclusion":
+        assessment["reviewed_exclusion_doc_ids"].pop()
+    elif defect == "context":
+        assessment["context_alignment"][0]["context"] = {"span": "invented", "summary": "invented"}
+    else:
+        assessment["budget"]["inspected_pages"] = 9
+    sample, review, brief, value_review = value_case
+    with pytest.raises(ValueError):
+        compare(sample, review, brief, value_review, assessment)
+
+
 def market_review(review):
     review = deepcopy(review)
     review["market_reviews"] = {WINNER: json.loads((FIXTURES / "first_case_alternatives.json").read_text())}
