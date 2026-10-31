@@ -8,7 +8,7 @@ from pathlib import Path
 
 from psycopg.rows import dict_row
 
-from analysis.discovery.core import fingerprint, freeze
+from analysis.discovery.core import fingerprint, freeze, validate_snapshot
 from analysis.retrieval.corpus import review_doc_id
 from db.runtime import connect, runtime_url
 
@@ -37,9 +37,19 @@ ORDER BY source_item_id, d.collected_at DESC, snapshot_id DESC
 """
 
 
-def sample_local(per_cue: int = 3) -> dict:
+def sample_local(per_cue: int = 3, *, exclude_sample: dict | None = None) -> dict:
     if not 1 <= per_cue <= 20:
         raise ValueError("per-cue limit must be between 1 and 20")
+    excluded: dict[str, list[str]] = {}
+    if exclude_sample is not None:
+        validate_snapshot(exclude_sample)
+        for document in exclude_sample["documents"]:
+            source = document["source"]
+            item = document["source_item_id"]
+            expected = f"{YOUTUBE}:{item}" if source == YOUTUBE else review_doc_id(source, item)
+            if source not in (*COMMERCE, YOUTUBE) or document["doc_id"] != expected:
+                raise ValueError("exclusion needs canonical source-local document coordinates")
+            excluded.setdefault(source, []).append(item)
     with CUES.open(newline="") as f:
         cues = list(csv.DictReader(f))
     manifest: dict = {
@@ -62,12 +72,22 @@ def sample_local(per_cue: int = 3) -> dict:
         ],
     }
     documents: dict[str, dict] = {}
+    if exclude_sample is not None:
+        manifest["exclusion"] = {
+            "snapshot_sha256": exclude_sample["snapshot_sha256"],
+            "document_count": len(exclude_sample["documents"]),
+            "document_ids_sha256": fingerprint(sorted(d["doc_id"] for d in exclude_sample["documents"])),
+        }
     with connect(runtime_url()) as conn:
         conn.autocommit = True
         conn.execute("SET default_transaction_read_only = on")
         for source in (*COMMERCE, YOUTUBE):
             base = YOUTUBE_BASE if source == YOUTUBE else COMMERCE_BASE
             params = () if source == YOUTUBE else (source,)
+            if exclude_sample is not None:
+                # Exclude before counting and LIMIT so prior hits cannot consume the new quota.
+                base = "SELECT * FROM (" + base + ") prior WHERE NOT (source_item_id = ANY(%s))"
+                params = (*params, sorted(excluded.get(source, [])))
             coverage: dict = {"source": source, "cues": []}
             try:
                 with conn.cursor(row_factory=dict_row) as cur:
@@ -114,3 +134,42 @@ def sample_local(per_cue: int = 3) -> dict:
             manifest["coverage"].append(coverage)
     manifest["finished_at"] = datetime.now(UTC).isoformat()
     return freeze(manifest, list(documents.values()))
+
+
+def main() -> None:
+    import argparse
+    import json
+    import os
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--exclude-sample", type=Path)
+    parser.add_argument("--per-cue", type=int, default=3)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if args.exclude_sample and args.output.resolve() == args.exclude_sample.resolve():
+        parser.error("output cannot overwrite the prior evidence snapshot")
+    if args.output.exists():
+        parser.error("output already exists; preserve the frozen capture")
+    try:
+        previous = json.loads(args.exclude_sample.read_text()) if args.exclude_sample else None
+        result = sample_local(args.per_cue, exclude_sample=previous)
+        # Exclusive creation preserves existing evidence and never exposes hashes in stdout.
+        fd = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            json.dump(result, output, ensure_ascii=True, indent=2)
+            output.write("\n")
+    except Exception as exc:
+        parser.exit(2, f"{type(exc).__name__}: discovery capture blocked\n")
+    print(
+        json.dumps(
+            {
+                "documents": len(result["documents"]),
+                "snapshot_sha256": result["snapshot_sha256"],
+                "failures": result["manifest"]["failures"],
+            }
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

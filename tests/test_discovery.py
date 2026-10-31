@@ -459,6 +459,93 @@ def test_access_failures_are_reported_without_driver_error_text(monkeypatch):
     assert result["manifest"]["failures"]
 
 
+def test_disjoint_capture_rejects_changed_exclusion_before_connect(case, monkeypatch):
+    from analysis.discovery import sample as adapter
+
+    previous, _ = case
+    previous["documents"][0]["text"] += " changed"
+    monkeypatch.setattr(adapter, "connect", lambda _: pytest.fail("invalid snapshot reached DB"))
+    with pytest.raises(ValueError, match="snapshot was changed"):
+        adapter.sample_local(3, exclude_sample=previous)
+
+
+def test_disjoint_capture_command_preserves_private_frozen_output(tmp_path, monkeypatch, capsys):
+    from analysis.discovery import sample as adapter
+
+    output = tmp_path / "new.json"
+    expected = freeze({"failures": []}, [])
+    monkeypatch.setattr(adapter, "sample_local", lambda *args, **kwargs: expected)
+    monkeypatch.setattr(sys, "argv", ["sample", "--output", str(output)])
+    adapter.main()
+    assert json.loads(output.read_text()) == expected
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert "author_hash" not in capsys.readouterr().out
+    with pytest.raises(SystemExit) as refused:
+        adapter.main()
+    assert refused.value.code == 2
+    assert json.loads(output.read_text()) == expected
+
+
+@pytest.mark.postgres
+def test_disjoint_capture_excludes_before_limit_and_keeps_source_local_ids(
+    database_url_for_tests, monkeypatch
+):
+    import hashlib
+
+    from analysis.discovery import sample as adapter
+    from db.runtime import connect
+
+    ids = sorted(["a", "b", "c", "d"], key=lambda x: hashlib.md5(x.encode()).hexdigest())
+    text = "mix with cream import buy discontinued pay extra stockpile"
+    sources = ["glowpick", "daisomall", "youtube_comment"]
+    with connect(database_url_for_tests) as conn:
+        conn.execute("CREATE TABLE evidence (source text, source_item_id text, text text)")
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO evidence VALUES (%s, %s, %s)",
+                [(source, item, text) for source in sources for item in ids],
+            )
+    base = (
+        "SELECT source_item_id, text, 'aaaaaaaaaaaaaaaa' AS author_hash, "
+        "'2026-01-01T00:00:00+00:00' AS published_at, NULL::text AS url, "
+        "NULL::text AS product_name, NULL::text AS product_key, "
+        "'2026-01-01T00:00:00+00:00' AS collected_at FROM evidence WHERE source="
+    )
+    monkeypatch.setattr(adapter, "COMMERCE", tuple(sources[:2]))
+    monkeypatch.setattr(adapter, "COMMERCE_BASE", base + "%s")
+    monkeypatch.setattr(adapter, "YOUTUBE_BASE", base + "'youtube_comment'")
+    monkeypatch.setattr(adapter, "runtime_url", lambda: database_url_for_tests)
+    previous = freeze(
+        {},
+        [
+            {
+                "doc_id": f"{source}:{ids[0]}"
+                if source == "youtube_comment"
+                else f"commerce_review:{source}:{ids[0]}",
+                "source": source,
+                "source_item_id": ids[0],
+                "text": text,
+            }
+            for source in ["glowpick", "youtube_comment"]
+        ],
+    )
+    exported = adapter.sample_local(1, exclude_sample=previous)
+    assert not exported["manifest"]["failures"]
+    assert {(d["source"], d["source_item_id"]) for d in exported["documents"]} == {
+        ("glowpick", ids[1]),
+        ("daisomall", ids[0]),
+        ("youtube_comment", ids[1]),
+    }
+    assert exported["manifest"]["exclusion"] == {
+        "snapshot_sha256": previous["snapshot_sha256"],
+        "document_count": 2,
+        "document_ids_sha256": fingerprint(sorted(d["doc_id"] for d in previous["documents"])),
+    }
+    for coverage in exported["manifest"]["coverage"]:
+        assert coverage["documents"] == (4 if coverage["source"] == "daisomall" else 3)
+        assert all(c["matching"] == coverage["documents"] and c["sampled"] == 1 for c in coverage["cues"])
+
+
 @pytest.mark.parametrize(
     "times",
     [

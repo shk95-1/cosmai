@@ -1156,6 +1156,20 @@ naver:   datalab once a month (by the keyword dictionary) Â· blog once a month Â
 
 ## Agent-mediated need discovery (#323)
 
+`python -m analysis.discovery.sample --exclude-sample prior-sample.json
+--per-cue 3 --output next-sample.json` captures a disjoint cohort from existing
+canonical source evidence (#355). The optional prior snapshot must pass the existing
+snapshot validator and use canonical source-local document coordinates. Its IDs are
+excluded before source/cue counting, stable MD5 ordering and LIMIT; another source's
+same item ID remains eligible. The frozen manifest records the prior snapshot digest,
+excluded document count and sorted-ID fingerprint, along with eligible and sampled
+source/cue counts. The default sampler without exclusion retains its original behavior.
+The standalone output is created exclusively with mode 0600 and cannot overwrite the
+prior snapshot or an existing capture. Reads remain read-only; no collection or paid/GPU
+call occurs. The authorized #355 pass is one capture with three documents per source/cue,
+at most 60 before cross-cue deduplication; every document still needs semantic review.
+Exclusion does not establish new independent demand, coherent requirements or usefulness.
+
 `python -m analysis.discovery.value --sample sample.json --review review.json
 --brief delivered-brief.json --assessment value-review.json --output screening`
 replays the offline `value-review-v1` handoff (#349), writing JSON and Markdown
