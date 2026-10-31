@@ -1,0 +1,241 @@
+{
+  "version": "alternatives-v1",
+  "snapshot_sha256": "fa5bdf076e99f39cb24cc452b49fe6d951fad613cb9ea89ed6cff3de279b79b9",
+  "support_sha256": "28056c8325d17d1934cde12ca09926f1bdf9deb013878cbdd28d894cc73b1dc4",
+  "candidate": "sunscreen-dryness-reactivity-without-filter-switching",
+  "selection_provenance": {
+    "value_run_id": "233a5fa0d2f1696183f627a2dd0e66d8742032a897accb489629ae7d2f3a189f",
+    "prior_comparison_run_id": "59cd956950c4ff334e16fc3826f1aca856369eddacbcd6ca7758eb058546f762",
+    "prior_candidate": "retinoid-tolerability-without-diy-dilution",
+    "prior_disposition": "hold_common_requirement",
+    "next_candidate": "sunscreen-dryness-reactivity-without-filter-switching",
+    "prior_assessment_sha256": "2707a4b3b9f265f1c9053b8d7f609527da4ca2678040f1dda6a2398f9d221a72",
+    "authorization": "https://github.com/shk95-1/cosmai/issues/321#issuecomment-6545324543",
+    "original_groups": 37
+  },
+  "requirements": [
+    {
+      "id": "comfort-0",
+      "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+      "span": "\uc5f4\uac10\uc774\ub098 \ud2b8\ub7ec\ube14 \ub54c\ubb38\uc5d0 \uace0\ubbfc\uc785\ub2c8\ub2e4",
+      "interpretation": "After a self-reported mineral-to-organic switch, avoid the reported remaining skin discomfort while retaining acceptable sun-care use; exact products, cause and efficacy target unknown.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Original and replacement product/variant identities are absent.",
+        "Application amount, exposure, accompanying routine, SPF/UVA performance and acceptable use criteria are unmeasured.",
+        "Opposite filter-class labels are individual beliefs/reports, not causal diagnoses or matched formulation evidence.",
+        "No explicit shared prohibition on switching or common new-product specification is established."
+      ]
+    },
+    {
+      "id": "comfort-1",
+      "doc_id": "youtube_comment:UgyaVCjHevOzDhS4xqh4AaABAg",
+      "span": "\uc810\uc2ec \uc2dc\uac04\ub9cc \ub418\uba74 \uac74\uc870\ud574\uc9c0\ub294 \uac8c \uac71\uc815\uc785\ub2c8\ub2e4",
+      "interpretation": "After an opposite switch prompted by eye discomfort, avoid daytime dryness without repeating eye discomfort; exact products, exposure and protection target unknown.",
+      "priority": "must_have",
+      "variant_specific": false,
+      "unknowns": [
+        "Original and replacement product/variant identities are absent.",
+        "Application amount, exposure, accompanying routine, SPF/UVA performance and acceptable use criteria are unmeasured.",
+        "Opposite filter-class labels are individual beliefs/reports, not causal diagnoses or matched formulation evidence.",
+        "No explicit shared prohibition on switching or common new-product specification is established."
+      ]
+    }
+  ],
+  "context_alignment": [
+    {
+      "doc_id": "youtube_comment:Ugxcvb2Qlc85uBi3pwJ4AaABAg",
+      "context": {
+        "summary": "Dry skin reports discomfort",
+        "span": "\uac74\uc870\ud55c \ud53c\ubd80\ub77c \uc5bc\uad74\uc774 \uc544\ud504\ub124\uc694"
+      },
+      "behavior": {
+        "summary": "Switches filter class",
+        "span": "\uacb0\uad6d \uc720\uae30\uc790\ucc28\ub85c \ubc14\uafe8\ub294\ub370"
+      },
+      "trade_off": {
+        "summary": "Replacement still dissatisfies; mixed-filter option untried",
+        "span": "\ubbfc\uac10\uc131\uc774\ub77c\uc11c \uc5f4\uac10\uc774\ub098 \ud2b8\ub7ec\ube14 \ub54c\ubb38\uc5d0 \uace0\ubbfc\uc785\ub2c8\ub2e4"
+      },
+      "desired_benefit": "Comfortable continued sun-care use is an inference; no source-defined common efficacy/protection target.",
+      "original_identity": null,
+      "original_strength": "Product identity, formulation and protection claims unknown.",
+      "usage_alignment": "Actual switch is reported; correct application, accompanying routine and effectiveness are unknown. No personal regimen is proposed."
+    },
+    {
+      "doc_id": "youtube_comment:UgyaVCjHevOzDhS4xqh4AaABAg",
+      "context": {
+        "span": "\uc720\uae30\uc790\ucc28 \uc4f0\ub2e4\uac00",
+        "summary": "Previously used organic-filter sunscreen"
+      },
+      "behavior": {
+        "span": "\ubb34\uae30\uc790\ucc28\ub85c \ub118\uc5b4\uc654\ub294\ub370",
+        "summary": "Switches filter/product choice"
+      },
+      "trade_off": {
+        "span": "\uac74\uc870\ud574\uc9c0\ub294 \uac8c \uac71\uc815\uc785\ub2c8\ub2e4",
+        "summary": "Current choice does not meet hydration need"
+      },
+      "desired_benefit": "Comfortable continued sun-care use is an inference; no source-defined common efficacy/protection target.",
+      "original_identity": null,
+      "original_strength": "Product identity, formulation and protection claims unknown.",
+      "usage_alignment": "Actual switch is reported; correct application, accompanying routine and effectiveness are unknown. No personal regimen is proposed."
+    }
+  ],
+  "reviewed_counterevidence": [
+    {
+      "doc_id": "commerce_review:glowpick:7858699",
+      "product_key": "163685",
+      "span": "\ubb34\uae30\uc790\ucc28 \uc911\uc5d0 \uc824 \uc88b\uc740 \uac83 \uac19\uc544\uc694! \ubb34\uae30\uc790\ucc28\ub97c \ubcc4\ub85c \uc120\ud638\ud558\uc9c4 \uc54a\ub294\ub370 \ud53c\ubd80\uac00 \ub610 \uc608\ubbfc\ud574\uc11c \uc720\uae30\uc790\ucc28 \uc4f0\uba74 \ub530\uac00\uc6b4 \ub0a0\uc774 \uc788\uc5b4\uc11c \ubb34\uae30\uc790\ucc28 \uc5b5\uc9c0\ub85c \uc4f8 \ub54c\uac00 \ub9ce\uc544\uc694 \uc774 \uc81c\ud488\uc740 \ub2e4\ub978 \ubb34\uae30\uc790\ucc28\ubcf4\ub2e4 \ubed1\ubed1\ud568\ub3c4 \ub35c\ud558\uace0 \ubd80\ub4dc\ub7fd\uac8c \ubc1c\ub824\uc694 \uc774\ub54c\ub3d9\uc548 \ub2e4\ub978 \ubb34\uae30\uc790\ucc28\ub4e4\uc740 \ubc14\ub978 \ud6c4 \uc2dc\uac04\uc774 \uc9c0\ub098\uba74 \ubc14\uc9dd \ub9c8\ub974\uba74\uc11c \uc18d\uac74\uc870\uac00 \uc5c4\uccad \ub290\uaef4\uc84c\ub294\ub370 \uc774 \uc81c\ud488\uc740 \ud655\uc2e4\ud788 \uc548\uac74\uc870\ud574\uc694 \ubc31\ud0c1\ub3c4 \uc5c6\uace0 \ubc14\ub978 \ud6c4 \ud654\uc7a5 \ubc00\ub9ac\uac70\ub098 \uac01\uc9c8 \ub728\ub294\uac8c \uc5c6\uc5b4\uc11c \ub118 \uc88b\uc544\uc694 \uc55e\uc73c\ub85c\ub3c4 \uc798 \uc4f8 \uac83 \uac19\uc544\uc694",
+      "interpretation": "Existing mineral listing is reported non-drying and easier to apply by another user; name/variant and matched supporting-user outcome unknown."
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7881120",
+      "product_key": "163778",
+      "span": "\uc5d0\uc2a4\ud2b8\ub77c \uae30\ucd08\ud654\uc7a5\ud488\ub4e4\uc740 \ub300\ubd80\ubd84 \uc88b\uc740\ub370, \uc790\uc678\uc120 \ucc28\ub2e8\uc81c\ub294 \uc9c4\uc9dc \ubbfc\uac10\ud53c\ubd80\uc5d0 \uc548\ub9de\uc544\uc694. \ubb34\uae30\uc790\ucc28\ub77c \ubc14\ub97c\ub54c \ubed1\ubed1\ud574\uc11c \ud53c\ubd80\uc5d0 \uc790\uadf9\uc744 \uc90d\ub2c8\ub2e4. \ubc31\ud0c1\uc740 \ub2f9\uc5f0\ud788 \uc788\uace0\uc694. \uae30\ub300\uac10\uc774\ucee4\uc11c \uadf8\ub7f0\uc9c0 \uc800\uc5d0\uac90 \uc9c4\uc9dc \uc548\ub9de\uc544\uc694. \uadf8\ub0e5 \ud63c\ud569\uc790\ucc28 \uc77c\ub9ac\uc724\uc774 \ub354 \uc790\uadf9\ub3c4 \uc5c6\uace0 \uc798 \ubc1c\ub824\uc11c \uadf8\uac8c \ubbfc\uac10\ud53c\ubd80\uc5d0 \ub354 \ub098\uc740\uac70 \uac19\uc544\uc694",
+      "interpretation": "Observed Aestura listing is disliked by this reviewer, who prefers an unidentified Illiyoon mixed-filter product. Product_key 163778 identifies the criticized Aestura listing, NOT the preferred Illiyoon product."
+    }
+  ],
+  "reviewed_exclusion_doc_ids": [
+    "commerce_review:glowpick:7858699",
+    "commerce_review:glowpick:7881036",
+    "commerce_review:glowpick:7881120",
+    "commerce_review:oliveyoung:48670807",
+    "commerce_review:oliveyoung:63584199",
+    "youtube_comment:UgzD2yBWYIFbG6zHcsV4AaABAg"
+  ],
+  "sources": [],
+  "budget": {
+    "inspected_page_limit": 8,
+    "inspected_pages": 0,
+    "counting": "No external search/open/denied/redirect page inspected. Only unchanged Git-tracked frozen inputs read.",
+    "stop": "Early frozen-context common-requirement hold, before external source research.",
+    "paid_calls": 0,
+    "gpu_hours": 0,
+    "production_writes": 0
+  },
+  "alternatives": [
+    {
+      "name": "Unidentified mineral sunscreen at captured Glowpick listing 163685",
+      "identity": {
+        "source": "glowpick",
+        "product_id": "163685",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://github.com/shk95-1/cosmai/blob/fcd19b9a3d8efff4263eb9cb107630a6bfa5819a/tests/fixtures/discovery/corroboration_sample.json",
+        "summary": "Existing mineral listing is reported non-drying and easier to apply by another user; name/variant and matched supporting-user outcome unknown. Frozen document commerce_review:glowpick:7858699; observed 2026-08-21 06:40:07+00; captured 2026-08-21 07:00:00+00. Original URL None. No live page inspected.",
+        "kind": "user_self_report",
+        "retrieved_on": "2026-08-21"
+      },
+      "frozen_source_doc_ids": [
+        "commerce_review:glowpick:7858699"
+      ],
+      "availability": "Historical source-local listing only; current stock, formula and variant not researched because the frozen common-context gate held.",
+      "comparisons": [
+        {
+          "requirement": "comfort-0",
+          "status": "unknown",
+          "reason": "Different individual/context and unidentified original products prevent matched adequacy or failure; this favorable/critical report cannot establish the supporting user outcome."
+        },
+        {
+          "requirement": "comfort-1",
+          "status": "unknown",
+          "reason": "Different individual/context and unidentified original products prevent matched adequacy or failure; this favorable/critical report cannot establish the supporting user outcome."
+        }
+      ]
+    },
+    {
+      "name": "Captured Aestura mineral sunscreen listing 163778, criticized by the reviewer",
+      "identity": {
+        "source": "glowpick",
+        "product_id": "163778",
+        "level": "listing"
+      },
+      "source": {
+        "url": "https://github.com/shk95-1/cosmai/blob/fcd19b9a3d8efff4263eb9cb107630a6bfa5819a/tests/fixtures/discovery/corroboration_sample.json",
+        "summary": "Observed Aestura listing is disliked by this reviewer, who prefers an unidentified Illiyoon mixed-filter product. Product_key 163778 identifies the criticized Aestura listing, NOT the preferred Illiyoon product. Frozen document commerce_review:glowpick:7881120; observed 2026-09-11 00:20:28+00; captured 2026-09-12 01:00:00+00. Original URL https://www.glowpick.com/products/163778. No live page inspected.",
+        "kind": "user_self_report",
+        "retrieved_on": "2026-09-12"
+      },
+      "frozen_source_doc_ids": [
+        "commerce_review:glowpick:7881120"
+      ],
+      "availability": "Historical source-local listing only; current stock, formula and variant not researched because the frozen common-context gate held.",
+      "comparisons": [
+        {
+          "requirement": "comfort-0",
+          "status": "unknown",
+          "reason": "Different individual/context and unidentified original products prevent matched adequacy or failure; this favorable/critical report cannot establish the supporting user outcome."
+        },
+        {
+          "requirement": "comfort-1",
+          "status": "unknown",
+          "reason": "Different individual/context and unidentified original products prevent matched adequacy or failure; this favorable/critical report cannot establish the supporting user outcome."
+        }
+      ]
+    }
+  ],
+  "routine_alternatives": [
+    {
+      "name": "Existing consumer-reported mixed-filter alternative",
+      "comparisons": [
+        {
+          "requirement": "comfort-0",
+          "status": "unknown",
+          "reason": "One support considers mixed-filter sun care but reports no trial. Another reviewer prefers an unidentified Illiyoon product; neither verifies the same product/context or the supporting outcomes."
+        },
+        {
+          "requirement": "comfort-1",
+          "status": "unknown",
+          "reason": "One support considers mixed-filter sun care but reports no trial. Another reviewer prefers an unidentified Illiyoon product; neither verifies the same product/context or the supporting outcomes."
+        }
+      ]
+    },
+    {
+      "name": "Existing non-drying mineral listing",
+      "comparisons": [
+        {
+          "requirement": "comfort-0",
+          "status": "unknown",
+          "reason": "The favorable 163685 review preserves a reported existing solution for another consumer. Same-context eye comfort, skin comfort and desired protection remain unknown."
+        },
+        {
+          "requirement": "comfort-1",
+          "status": "unknown",
+          "reason": "The favorable 163685 review preserves a reported existing solution for another consumer. Same-context eye comfort, skin comfort and desired protection remain unknown."
+        }
+      ]
+    },
+    {
+      "name": "Existing application instructions and accompanying routine",
+      "comparisons": [
+        {
+          "requirement": "comfort-0",
+          "status": "unknown",
+          "reason": "Products, application and accompanying routine are unspecified. No evidence establishes an instruction failure or that a routine change solves either report; no personal regimen/mixing instructions are supplied."
+        },
+        {
+          "requirement": "comfort-1",
+          "status": "unknown",
+          "reason": "Products, application and accompanying routine are unspecified. No evidence establishes an instruction failure or that a routine change solves either report; no personal regimen/mixing instructions are supplied."
+        }
+      ]
+    }
+  ],
+  "coverage": "Both supporting contexts, both favorable counterexamples and all six related exclusions retained; no new consumer sample or live source pass. The captured 163778 key is the criticized Aestura listing, not the preferred unidentified Illiyoon alternative.",
+  "limitations": [
+    "Dryness/eye or skin discomfort are reported, not diagnosed or attributed to a filter class.",
+    "Comfort alone does not establish a common residual new-product specification; contexts, original products and protection requirements are unmatched.",
+    "Positive experiences and ordinary alternatives remain preserved; their matched adequacy is unknown, not contradicted.",
+    "No universal sunscreen, validated SPF/UVA efficacy, market absence, willingness to pay, formulation direction or useful-case acceptance follows.",
+    "No personal regimen, paid/GPU call, purchase, outreach, prototype, production change or later-stage release."
+  ],
+  "decision": {
+    "status": "reject",
+    "basis": "insufficient_common_requirement",
+    "reason": "Hold at the frozen common-context gate: two opposite switches have real remaining complaints, but original/replacement products, protection/use criteria and a shared residual requirement are unknown. Existing non-drying mineral and preferred mixed-filter reports counter a blanket filter dilemma. No source supports a shared prohibition on switching, a universal tolerated formula, or failure of matched actual alternatives.",
+    "falsifier": "A separately authorized case with matched source-bound desired outcome, original product/use context and actual inadequacy of relevant alternatives could justify a new comparison. No further lead/pass or technical successor is released."
+  }
+}
