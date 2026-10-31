@@ -1,0 +1,220 @@
+{
+  "version": "new-cohort-value-assessment-v1",
+  "inputs": {
+    "capture_snapshot_sha256": "1cfb47608f3ef1acc45118d78190767f5663e9c04a4462b18a399837e7df3ac0",
+    "sample_snapshot_sha256": "66ca453f9f1b346db23731097cf2b069512d00ff94353dc5a79fcf4aba65b519",
+    "review_sha256": "112997cbb91595b30d335981ec7b1296882005c23363905a542e68414840d2eb"
+  },
+  "criteria": [
+    "executed effort or recovery rather than an imagined inconvenience",
+    "desired result still compromised in actual use",
+    "explicitly retained benefits and rejected routines or products",
+    "plausible incremental benefit, with actual alternative adequacy still unverified"
+  ],
+  "reviewer": "worker:codex-02; independent semantic review required",
+  "historical_calibration": {
+    "stop_decision_url": "https://github.com/shk95-1/cosmai/issues/327#issuecomment-5851599252",
+    "retinoid_hold_issue": 351,
+    "sunscreen_hold_issue": 353,
+    "original_group_count": 37,
+    "prior_dispositions_preserved": true
+  },
+  "candidates": [
+    {
+      "candidate": "concealer-slip-without-insufficient-standalone-color",
+      "support_sha256": "ad36288ef9c9d46bf72cff4cda7c9367e3e89a9f3f3f228c6d2d0fb28254ca57",
+      "reviewed_support_doc_ids": [
+        "youtube_comment:Ugzhg5vzFPt_O-_L7VN4AaABAg"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "youtube_comment:Ugzhg5vzFPt_O-_L7VN4AaABAg",
+          "kind": "executed_action",
+          "span": "\uc11e\uc5b4\uc11c \ubc1c\ub9bc\uc131 \uc88b\uac8c \ud558\ub294 \uc6a9\ub3c4\ub85c \uc4f0\uace0\uc788\uc5b4\uc694",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "youtube_comment:Ugzhg5vzFPt_O-_L7VN4AaABAg",
+          "kind": "compromised_result",
+          "span": "\uc0c9\uc774 \ub108\ubb34 \uc57d\ud574\uc11c \ub2e8\ub3c5 \uc0ac\uc6a9 \ubabb \ud558\ub294",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    },
+    {
+      "candidate": "dry-skin-tinted-suncare-without-fluid-blending",
+      "support_sha256": "c433505ef506691edcb45b030b03de32398ab1e1ecf6c2804e1dac69a01a1c06",
+      "reviewed_support_doc_ids": [
+        "commerce_review:oliveyoung:66717181"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:oliveyoung:66717181",
+          "kind": "executed_action",
+          "span": "\ubb3d\uc740 \uc120\ud06c\ub9bc\uc774\ub791 \uc11e\uc5b4\uc11c",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:66717181",
+          "kind": "compromised_result",
+          "span": "\uad49\uc7a5\ud788 \ub9e4\ud2b8\ud558\uace0 \ube68\ub9ac \ud53d\uc2f1\ub418\uc11c",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    },
+    {
+      "candidate": "matte-tone-up-layering-without-whitecast",
+      "support_sha256": "5939674bad6654e6ab7f6d60713897e548c3cdd5724e0fec3bbbd606196f9d14",
+      "reviewed_support_doc_ids": [
+        "commerce_review:glowpick:7894825"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:glowpick:7894825",
+          "kind": "executed_action",
+          "span": "\uc591\uc744 \uc9c4\uc9dc \uc870\uae08\uc529 \ubd10\uac00\uba74\uc11c \uc62c\ub824\uc57c",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7894825",
+          "kind": "compromised_result",
+          "span": "\ube44\ube44\ub9cc \uc704\uc5d0 \ubc1c\ub77c\ub3c4 \ub108\ubb34 \ud558\uc560\uc838\uc11c \uc870\ud654\uac00 \uc548 \ub9de\ub294",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    },
+    {
+      "candidate": "rich-balm-application-without-residue-burden",
+      "support_sha256": "a1d5f04706398a2419eb15d75b6f5b71aacc56bea80782e71a5c1545c586993f",
+      "reviewed_support_doc_ids": [
+        "commerce_review:oliveyoung:56842583"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:oliveyoung:56842583",
+          "kind": "executed_action",
+          "span": "\ub85c\uc158\uc774\ub098 \uc570\ud50c \uc11e\uc5b4\uc11c \ubc1c\ub77c\uc8fc\uba74 \uad1c\ucc2e\uc544\uc694",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:oliveyoung:56842583",
+          "kind": "compromised_result",
+          "span": "\ubaa8\uacf5\uc5d0 \uaef4\uc11c \uc138\uc548\ud558\uae30 \uc5b4\ub835\uace0",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    },
+    {
+      "candidate": "scalp-comfort-without-uncertain-import-escalation",
+      "support_sha256": "74460cc46bc3e4d305f9ec53c35ce952520dc37bfa48139fa1e15e45476c9052",
+      "reviewed_support_doc_ids": [
+        "commerce_review:glowpick:7921517"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:glowpick:7921517",
+          "kind": "executed_action",
+          "span": "\uc880\ub354 \uc13c\ubc84\uc804\uc73c\ub85c \uc9c1\uad6c\ud574\uc11c \uc4f0\uace0\uc788\uc5b4\uc694",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7921517",
+          "kind": "compromised_result",
+          "span": "\ud6a8\uacfc\uc788\ub294\uc9c0\ub294 \uc798..\ubaa8\ub974\uaca0\uc5b4\uc11c",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    },
+    {
+      "candidate": "winter-lip-tint-without-unresolved-stock-search",
+      "support_sha256": "28b0f129c5c12a34681e35d276f211c56dfcef990c5ac8e34d078c8708e36d42",
+      "reviewed_support_doc_ids": [
+        "commerce_review:glowpick:7898671"
+      ],
+      "reviewed_counterevidence_doc_ids": [],
+      "status": "hold_uncorroborated_requirement",
+      "observations": [
+        {
+          "doc_id": "commerce_review:glowpick:7898671",
+          "kind": "executed_action",
+          "span": "\ucc3e\uc544\ubcf4\ub2c8 \uc7ac\uc785\uace0\uc608\uc815\uc774 \uc5b8\uc81c\uc778\uc9c0 \ubaa8\ub978\ub2e4\ub294",
+          "basis": "consumer_report"
+        },
+        {
+          "doc_id": "commerce_review:glowpick:7898671",
+          "kind": "compromised_result",
+          "span": "\ub354 \uc7c1\uc5ec\ub193\uace0 \uc2f6\uc5b4\ub3c4 \uc544\uc27d\uc2b5\ub2c8\ub2e4",
+          "basis": "consumer_report"
+        }
+      ],
+      "value_hypothesis": {
+        "basis": "agent_inference",
+        "incremental_gain": "A matched existing product/routine might remove the observed compromise; no new product is justified yet.",
+        "alternative_adequacy": "unverified",
+        "uncertainties": "One source-local person; benefit significance, comparable product/use requirements, actual alternatives and willingness to switch are unverified.",
+        "falsifier": "A matched existing alternative or incompatible requirements would defeat the new-product premise; any renewed evidence pass requires separate bounded authorization."
+      },
+      "disposition_reason": "Unchanged independence gate fails: fewer than two attributable source-local users. Do not waive it or reuse a held direction to manufacture a case."
+    }
+  ],
+  "status": "no_qualified_candidate",
+  "selected": null,
+  "release": "none",
+  "limitations": [
+    "One disjoint deterministic cue/source cohort, not a market survey or absence test.",
+    "All six provisional groups have one source-local user; two other apparent reports must not be invented or combined across mismatched contexts.",
+    "Old value.screen remains historical calibration, not this new-cohort validator.",
+    "No new-product value, causal/clinical claims, SPF equivalence, alternative failure or usefulness acceptance is established.",
+    "No further cohort or conditional comparison is released by the finite result."
+  ]
+}

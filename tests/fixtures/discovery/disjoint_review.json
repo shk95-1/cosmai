@@ -1,0 +1,604 @@
+{
+  "snapshot_sha256": "66ca453f9f1b346db23731097cf2b069512d00ff94353dc5a79fcf4aba65b519",
+  "reviewer": "worker:codex-02; source-bound agent interpretations pending independent review",
+  "interventions": [
+    {
+      "kind": "public_privacy_projection",
+      "capture_snapshot_sha256": "1cfb47608f3ef1acc45118d78190767f5663e9c04a4462b18a399837e7df3ac0",
+      "reason": "The complete 53 captured documents were reviewed; only an unrelated paid advertisement is excerpted to omit third-party handles/giveaway material. No support text or inclusion was changed."
+    }
+  ],
+  "observations": [
+    {
+      "doc_id": "commerce_review:daisomall:10354727",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "Seasonal mixing is actual, but the exact desired result and unresolved outcome are unspecified.",
+      "span": "\uac00\uc744\uc774 \ub418\ub2c8 \ub418\uc9c1\ud55c \ud06c\ub9bc \uc11e\uc5b4"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10503972",
+      "candidate": null,
+      "disposition": "off_topic",
+      "reason": "Household cleaning wipes are outside this cosmetics case; an existing product already resolves the described effort.",
+      "span": "\uac78\ub808\uc53b\ub294.\ud589\uc8fc\uc53b\ub294 \ubc88\uac70\ub85c\uc6c0"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10505914",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "General device recommendation and strong performance/safety claims lack a clear first-person unresolved workaround; do not validate those claims.",
+      "span": "\ucd94\ucc9c\ud569\ub2c8\ub2e4"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10507171",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Enthusiasm and a hypothetical discontinuation threat are not executed hunting or an unmet requirement.",
+      "span": "\ub2e4\uc774\uc18c\uc758 \uc5ed\uc791"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10604371",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "A reported stockpiling mother and the reviewer like an existing toner; no unresolved result.",
+      "span": "\uc9c4\uc9dc \uc88b\ub124\uc694"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10643618",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Hypothetical discontinuation concern for a liked product, not an executed workaround.",
+      "span": "\uc644\uc804 \uc88b\uc544\uc694"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:10911315",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Existing moisturizer is liked; intended stocking does not establish an unmet need.",
+      "span": "\ucd09\ucd09\ud558\uace0 \uac00\uc131\ube44"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:11033206",
+      "candidate": null,
+      "disposition": "off_topic",
+      "reason": "Facial-tissue stocking/pack volume is not an unmet cosmetics development case.",
+      "span": "\ubd80\ud53c\uac00 \ucee4\uc11c"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:11188209",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Designed capsule/gel handling is accepted use; no unresolved DIY need or endorsed mixing recipe.",
+      "span": "\ud55c\uc54c\uc529 \ub35c\uc5b4\uc4f0\uba74\ub418\uace0"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:11354479",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "A liked existing curler was stocked; no remaining compromised outcome.",
+      "span": "\ub450\uac1c \uc0ac\ub193\uc740"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:11572956",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Existing skin pack is convenient during the reported bath/gym routine; no unmet result.",
+      "span": "\uc0ac\uc6a9\ud558\uae30 \uc9c4\uc9dc \ud3b8\ud574\uc11c"
+    },
+    {
+      "doc_id": "commerce_review:daisomall:9802225",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Accepted mixing with an existing cream; no explicit remaining failure, diagnosis or validated efficacy.",
+      "span": "\uc11e\uc5b4\uc368\ub3c4 \uc88b\uc544\ub1e8"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7894825",
+      "candidate": "matte-tone-up-layering-without-whitecast",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": true,
+      "context": {
+        "span": "\ubbfc\uac10\uc9c0\uc131\ud53c\ubd80",
+        "summary": "Self-described skin context; not a diagnosis."
+      },
+      "requirement": {
+        "span": "\ubb49\uce68\uacfc \ubc31\ud0c1\uc744 \ud53c\ud560 \uc218",
+        "summary": "Avoid reported clumping/white cast in the desired appearance."
+      },
+      "behavior": {
+        "span": "\uc591\uc744 \uc9c4\uc9dc \uc870\uae08\uc529 \ubd10\uac00\uba74\uc11c \uc62c\ub824\uc57c",
+        "summary": "Reports careful amount adjustment; no safe application amount is inferred."
+      },
+      "burden": {
+        "span": "\ub2e4\ub8e8\uae30\uac00 \uaf64 \uc5b4\ub824\uc6b4",
+        "summary": "Handling difficulty is explicitly reported."
+      },
+      "trade_off": {
+        "span": "\ube44\ube44\ub9cc \uc704\uc5d0 \ubc1c\ub77c\ub3c4 \ub108\ubb34 \ud558\uc560\uc838\uc11c \uc870\ud654\uac00 \uc548 \ub9de\ub294",
+        "summary": "Layering outcome remains unsatisfactory; protection at that amount is unknown."
+      },
+      "recurrence_span": "\ub450 \ub2ec\uac04 \uc8fc 1-2\ud68c \uc368\ubd24\uc5b4\uc694"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7897299",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "Import purchase is actual but outcome is accepted/uncertain and alternatives are acknowledged; hair-loss benefit is not established or merged with itch care.",
+      "span": "\ub300\uccb4\ud15c\uc774 \ub9ce\uc740 \ub290\ub08c"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7897388",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "An existing cheek product already replaces the extra layering routine for this user.",
+      "span": "\uc59c \ud558\ub098\ub8e8 \ub3fc\uc11c"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7898671",
+      "candidate": "winter-lip-tint-without-unresolved-stock-search",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": false,
+      "context": {
+        "span": "\uc708\ud130\ubc45\uc1fc \uad6c\ub9e4\ud55c \uaca8\ucfe8",
+        "summary": "Specific purchased shade/context, not a population label."
+      },
+      "requirement": {
+        "span": "\uc0c9\ub3c4 \ub9c8\uc74c\uc5d0 \ub4e4\uc5b4",
+        "summary": "Preserve a liked shade/use experience."
+      },
+      "behavior": {
+        "span": "\ucc3e\uc544\ubcf4\ub2c8 \uc7ac\uc785\uace0\uc608\uc815\uc774 \uc5b8\uc81c\uc778\uc9c0 \ubaa8\ub978\ub2e4\ub294",
+        "summary": "Actually looked for replenishment information."
+      },
+      "burden": {
+        "span": "\uad6c\ud558\uae30\ub294 \uc27d\uc9c0\uc54a\ub124\uc694",
+        "summary": "Obtaining the preferred product is reported difficult."
+      },
+      "trade_off": {
+        "span": "\ub354 \uc7c1\uc5ec\ub193\uace0 \uc2f6\uc5b4\ub3c4 \uc544\uc27d\uc2b5\ub2c8\ub2e4",
+        "summary": "Desired extra stock remains unavailable/uncertain; no alternative inadequacy established."
+      }
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7898781",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Liked current tone-up cream; hypothetical protest does not establish actual unmet need.",
+      "span": "\uac00\ubccd\uac8c \ucd09\ucd09\ud558\ub2e4\uac00 \ub05d\ub0a8"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7899026",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Existing mask is accepted; no remaining effort/result compromise.",
+      "span": "\uc7ac\uad6c\ub9e4\uc608\uc815"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7899452",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Disclosed evaluator praises an existing wide-opening/tip solution; preserve favorable evidence without reviving the stopped lip-dose direction.",
+      "span": "\ub108\ubb34 \uc88b\uc740 \uc0dd\uac01"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7899975",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Existing preferred texture is praised; discontinuation lament reports no executed alternative-search outcome.",
+      "span": "\uba54\uc774\ud06c\uc5c5 \ubca0\uc774\uc2a4\ub85c \uc4f0\uae30 \uc88b\uc558\uc5b4\uc694"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7906457",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Figurative import comparison describes an available liked palette, not actual importing or market absence.",
+      "span": "\uc9c1\uad6c \ud55c \uac83\ub9cc \uac19\uc740"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7911202",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "Cap inconvenience is reported, but no executed workaround or significant forgoing is established.",
+      "span": "\ub69c\uaed1\uc744 \uc5f4\uace0 \ub2eb\uace0"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7916977",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Affordable current mask is accepted; prospective stocking is not an unmet new-product requirement.",
+      "span": "\uac00\uaca9\ub300\ube44 \ucd09\ucd09\ud558\uace0"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7921146",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Sale stocking preserves a liked existing mask; no source-defined residual product requirement.",
+      "span": "\ud560\uc778\uc2dc\uc5d0 \uc7c1\uc5ec\ub193\uc9c0\ub9cc"
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7921517",
+      "candidate": "scalp-comfort-without-uncertain-import-escalation",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": false,
+      "context": {
+        "span": "\uc9c0\ub8e8\uc131\ub450\ud53c\uc5fc",
+        "summary": "Consumer symptom/condition description, not a diagnosis."
+      },
+      "requirement": {
+        "span": "\ud6a8\uacfc\uc788\ub294\uc9c0\ub294",
+        "summary": "Desired benefit is vague; no medical efficacy target established."
+      },
+      "behavior": {
+        "span": "\uc880\ub354 \uc13c\ubc84\uc804\uc73c\ub85c \uc9c1\uad6c\ud574\uc11c \uc4f0\uace0\uc788\uc5b4\uc694",
+        "summary": "Actual import escalation/use, with exact replacement identity/strength unknown."
+      },
+      "burden": {
+        "span": "\uc9c1\uad6c\ud574\uc11c \uc4f0\uace0\uc788\uc5b4\uc694",
+        "summary": "Importing is executed effort; cost/delay is unmeasured."
+      },
+      "trade_off": {
+        "span": "\ud6a8\uacfc\uc788\ub294\uc9c0\ub294 \uc798..\ubaa8\ub974\uaca0\uc5b4\uc11c",
+        "summary": "Benefit remains uncertain; the reported causal reason is not verified."
+      }
+    },
+    {
+      "doc_id": "commerce_review:glowpick:7922911",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "Palette separation/color complaint does not establish an executed recovery workaround or common specification.",
+      "span": "\ubc1c\uc0c9\uc774 \uace0\ub974\uc9c0\uc54a\uc74c"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:56842583",
+      "candidate": "rich-balm-application-without-residue-burden",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": false,
+      "context": {
+        "span": "\uac74\uc131\ud53c\ubd80\uace0 \uc608\ubbfc\ud55c \ud53c\ubd80",
+        "summary": "Self-described context, not a medical diagnosis."
+      },
+      "requirement": {
+        "span": "\ubc1c\ub9bc\uc131\uc774 \uafb8\ub355\ud574\uc11c",
+        "summary": "Seeking more acceptable application flow is inferred from the actual blending."
+      },
+      "behavior": {
+        "span": "\ub85c\uc158\uc774\ub098 \uc570\ud50c \uc11e\uc5b4\uc11c \ubc1c\ub77c\uc8fc\uba74 \uad1c\ucc2e\uc544\uc694",
+        "summary": "Reports mixing with lotion/ampoule; no mixing recommendation follows."
+      },
+      "burden": {
+        "span": "\uc11e\uc5b4\uc11c \ubc1c\ub77c\uc8fc\uba74",
+        "summary": "Additional blending is actual effort, magnitude unknown."
+      },
+      "trade_off": {
+        "span": "\ubaa8\uacf5\uc5d0 \uaef4\uc11c \uc138\uc548\ud558\uae30 \uc5b4\ub835\uace0",
+        "summary": "Reports residue/removal difficulty after generous application; relation to mixing is unknown."
+      }
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:66717181",
+      "candidate": "dry-skin-tinted-suncare-without-fluid-blending",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": true,
+      "context": {
+        "span": "\uac74\uc131\uc778 \uc800",
+        "summary": "Self-described dry skin."
+      },
+      "requirement": {
+        "span": "\ub2e8\ub3c5\uc73c\ub85c \uc4f0\uae30 \ud798\ub4e4\uc5c8\ub294\ub370",
+        "summary": "Wanted use of the purchased tinted product remains difficult alone."
+      },
+      "behavior": {
+        "span": "\ubb3d\uc740 \uc120\ud06c\ub9bc\uc774\ub791 \uc11e\uc5b4\uc11c",
+        "summary": "Actual blending with another sunscreen."
+      },
+      "burden": {
+        "span": "\uc774\uac70+\ubb3d\uc740\uc81c\ud615\uc120\ud06c\ub9bc",
+        "summary": "The desired accepted routine depends on two products; inconvenience magnitude is unknown."
+      },
+      "trade_off": {
+        "span": "\uad49\uc7a5\ud788 \ub9e4\ud2b8\ud558\uace0 \ube68\ub9ac \ud53d\uc2f1\ub418\uc11c",
+        "summary": "Reported standalone texture remains problematic; accepted blending does not establish retained SPF/UVA performance."
+      },
+      "recurrence_span": "\uc694\uc998 \uc774\uac70+\ubb3d\uc740\uc81c\ud615\uc120\ud06c\ub9bc\uc73c\ub85c\ub9cc \uc0b4\uace0\uc788\uc5b4\uc694"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:66792195",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Current pads meet the stated routine/price preference.",
+      "span": "\ub370\uc77c\ub9ac\ub85c \uc4f0\uae30\uc5d0 \uac00\uaca9\ubd80\ub2f4\uc5c6\uace0"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:66794936",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Existing portioned brow-color product is accepted; suggestion to others is not a new personal unmet requirement.",
+      "span": "\uc9d1\uc5d0\uc11c \uac04\ud3b8\ud558\uac8c \uc0ac\uc6a9\ud560 \uc218 \uc788\uace0"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:66872692",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Regret about not stocking more of a liked mask is not an observed substitute or unmet technical requirement.",
+      "span": "\uc880 \ub354 \uc7c1\uc5ec\ub1a8\uc5b4\uc57c"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:67337601",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Mixing/current cream is praised; medical regeneration claims are not adopted.",
+      "span": "\uc11e\uc5b4 \ubc14\ub77c\ub3c4 \uc9f1\uc785\ub2e4"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68042384",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "Disliked reformulation and forgone prior texture/coverage are reported, but no actual workaround or matched formulation evidence is supplied.",
+      "span": "\uc548\uc7c1\uc5ec\ub193\uace0 \uc787\uc5c7\ub294\ub370"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68480368",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "A preferred current cushion was purchased for stocking; no new-product gap established.",
+      "span": "\uc798\uc4f0\uace0\uc78c"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68585565",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Repeated accepted existing lip care; hypothetical discontinuation concern is not an unmet result.",
+      "span": "\uba87\ud1b5\uc9f8 \uc4f0\ub294\uc9c0"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68762838",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Current pads are accepted; self-reported benefits do not establish medical efficacy or a new gap.",
+      "span": "\ud3c9\uc0dd \uc815\ucc29\ud15c"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68800366",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Generic positive convenience review; no source-defined workaround or unresolved result.",
+      "span": "\uac04\ud3b8\ud558\uac8c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc11c"
+    },
+    {
+      "doc_id": "commerce_review:oliveyoung:68855800",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Same normalized generic text as another sampled listing; preserve it but never count it as independent support.",
+      "span": "\uac04\ud3b8\ud558\uac8c \uc0ac\uc6a9\ud560 \uc218 \uc788\uc5b4\uc11c"
+    },
+    {
+      "doc_id": "youtube_comment:Ugw5XCZaZOacTUhFOOl4AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Future purchase and discontinuation worry, not an executed unmet-use workaround.",
+      "span": "\ub2e8\uc885\uc880 \uc548\uc2dc\ucf30\uc73c\uba74"
+    },
+    {
+      "doc_id": "youtube_comment:UgwGqF5mnr3Fl3GiXZp4AaABAg",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Already-stocked items/content enjoyment, with no unresolved requirement.",
+      "span": "\ubcf4\ub294 \uc7ac\ubbf8"
+    },
+    {
+      "doc_id": "youtube_comment:UgwV80kn_zjxH84IGat4AaABAg",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Liked existing sale offering and intended bulk purchase; no measured efficacy or unmet requirement.",
+      "span": "\ud53c\ubd80\uc815\ub9d0\uc88b\uc544\uc84c\uc5b4\uc694"
+    },
+    {
+      "doc_id": "youtube_comment:UgwgD5RsXskhC2S9ZV94AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "An import question is not an executed purchase or documented burden.",
+      "span": "\uc9c1\uad6c\ud574\uc57c\ub418\uc5ec"
+    },
+    {
+      "doc_id": "youtube_comment:Ugx6c59ahprg0OlVcPB4AaABAg",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "Accepted bargain purchase of a preferred existing product; no unresolved desired result.",
+      "span": "\ud61c\uc790\ub124\uc694"
+    },
+    {
+      "doc_id": "youtube_comment:UgxKVLXe87EE-6HG-4t4AaABAg",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "An available ampoule/mixing system is accepted; preserve it as an existing solution without endorsing recipes or efficacy.",
+      "span": "\uc11e\uc5b4\uc11c \uc4f8\uc218 \uc788\uc5b4\uc11c \uc88b\uc544\uc694"
+    },
+    {
+      "doc_id": "youtube_comment:UgxNjdNADSxpL-78Pyd4AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Symptoms after a purchase are reported, but the mixing action is only a question; no causal diagnosis or personal advice.",
+      "span": "\uc11e\uc5b4 \uc0ac\uc6a9\ud574\ub3c4 \uad1c\ucc2e\uc744\uae4c\uc694"
+    },
+    {
+      "doc_id": "youtube_comment:UgxUSFFju0qnKbgZRtl4AaABAg",
+      "candidate": null,
+      "disposition": "off_topic",
+      "reason": "Supplement hearsay is outside the cosmetics MVP and supplies no actual purchase/use workaround.",
+      "span": "\ub9c8\uadf8\ub124\uc298"
+    },
+    {
+      "doc_id": "youtube_comment:UgyRfi0Gyp8BgyFhM7l4AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Event-driven future purchase intent is not executed workaround evidence.",
+      "span": "\ubc14\ub85c \uc7c1\uc5ec\uc57c\uac8c\ub530"
+    },
+    {
+      "doc_id": "youtube_comment:UgymNr_5fQAZmjWJ3J14AaABAg",
+      "candidate": null,
+      "disposition": "ambiguous",
+      "reason": "An apparent quality/reformulation failure and stopped use are reported; no executed substitute or shared residual new-product specification. Do not merge it with another product complaint.",
+      "span": "\ub3c4\uc800\ud788 \ubabb\uc4f0\uace0"
+    },
+    {
+      "doc_id": "youtube_comment:UgytXKDRW50SfjgrwaN4AaABAg",
+      "candidate": null,
+      "disposition": "satisfied",
+      "reason": "An existing shampoo is worth its price to this user; symptoms and benefit are self-reports, not diagnosis/efficacy or adequacy for another user.",
+      "span": "\ubabb\ub04a\uaca0\uc2b5\ub2c8\ub2e4"
+    },
+    {
+      "doc_id": "youtube_comment:UgzBAewlodYoKtT882d4AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Sample liking and a forgone expensive purchase are real, but the exact desired result/product specification and executed substitute are unspecified.",
+      "span": "\uac00\uaca9\ub54c\ubb38\uc5d0 \ud3ec\uae30"
+    },
+    {
+      "doc_id": "youtube_comment:UgzEsDXZ5hLzesQZ4-N4AaABAg",
+      "candidate": null,
+      "disposition": "promotion",
+      "reason": "Explicit paid advertisement/giveaway; not independent consumer workaround evidence. Full original reviewed privately; public excerpt removes unrelated third-party personal material.",
+      "span": "\uc720\ub8cc\uad11\uace0"
+    },
+    {
+      "doc_id": "youtube_comment:UgzK32cielA5OthaZxB4AaABAg",
+      "candidate": null,
+      "disposition": "wish",
+      "reason": "Asks about another person's foundation use; no own executed action.",
+      "span": "2\uac1c\uc11e\uc5b4\uc11c \ubc14\ub974\uc2e0\uac78\uae4c\uc694"
+    },
+    {
+      "doc_id": "youtube_comment:Ugzhg5vzFPt_O-_L7VN4AaABAg",
+      "candidate": "concealer-slip-without-insufficient-standalone-color",
+      "disposition": "observed",
+      "reason": "Executed source-bound action and compromise justify a provisional group; corroboration, problem value and actual alternatives remain unverified.",
+      "recurring": false,
+      "context": {
+        "span": "\ubed1\ubed1\ud55c \ud31f\ud0c0\uc785 \ud53c\uce58\uc0c9 \ucee8\uc2e4\ub7ec",
+        "summary": "Observed pot-concealer context; original other product unidentified."
+      },
+      "requirement": {
+        "span": "\ubc1c\ub9bc\uc131 \uc88b\uac8c \ud558\ub294",
+        "summary": "Desired application flow is explicit."
+      },
+      "behavior": {
+        "span": "\uc11e\uc5b4\uc11c \ubc1c\ub9bc\uc131 \uc88b\uac8c \ud558\ub294 \uc6a9\ub3c4\ub85c \uc4f0\uace0\uc788\uc5b4\uc694",
+        "summary": "Actual mixture for slip; no recipe or performance guarantee."
+      },
+      "burden": {
+        "span": "\ucee8\uc2e4\ub7ec\ub791 \uc11e\uc5b4\uc11c",
+        "summary": "Additional blending is executed effort, importance unknown."
+      },
+      "trade_off": {
+        "span": "\uc0c9\uc774 \ub108\ubb34 \uc57d\ud574\uc11c \ub2e8\ub3c5 \uc0ac\uc6a9 \ubabb \ud558\ub294",
+        "summary": "Weak standalone color remains a compromise."
+      }
+    }
+  ],
+  "candidates": {
+    "matte-tone-up-layering-without-whitecast": {
+      "need": "Avoid reported clumping/white cast in the desired appearance.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    },
+    "winter-lip-tint-without-unresolved-stock-search": {
+      "need": "Preserve a liked shade/use experience.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    },
+    "scalp-comfort-without-uncertain-import-escalation": {
+      "need": "Desired benefit is vague; no medical efficacy target established.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    },
+    "rich-balm-application-without-residue-burden": {
+      "need": "Seeking more acceptable application flow is inferred from the actual blending.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    },
+    "dry-skin-tinted-suncare-without-fluid-blending": {
+      "need": "Wanted use of the purchased tinted product remains difficult alone.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    },
+    "concealer-slip-without-insufficient-standalone-color": {
+      "need": "Desired application flow is explicit.",
+      "limitations": [
+        "Single source-local report; no independently corroborated common requirement.",
+        "Agent interpretation, not measured severity, efficacy, willingness to pay or market absence."
+      ],
+      "technical": {
+        "status": "unassessed",
+        "references": [],
+        "reason": "No case-specific technical research released."
+      },
+      "feasibility": {
+        "status": "unassessed",
+        "reason": "No formulation/process performance has been measured."
+      }
+    }
+  }
+}
