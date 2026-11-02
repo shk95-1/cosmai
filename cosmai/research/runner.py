@@ -8,7 +8,7 @@ from functools import partial
 from uuid import uuid4
 
 from .state import ACTIONS, READ_ACTIONS, Proposal, validate_citations
-from .store import Conflict, Store
+from .store import Conflict, StaleRevision, Store
 from .tools import EvidenceSource, bounded_read
 from .workers import ProviderFailure
 
@@ -62,8 +62,10 @@ def transition(state: dict, action: str, args: dict, revision: int):
         }
         for task in args["dependent_tasks"]:
             state["tasks"][task]["status"] = "blocked"
-        if state["tasks"] and all(
-            t["status"] in {"blocked", "done", "superseded"} for t in state["tasks"].values()
+        if state["tasks"] and not any(
+            t["status"] == "ready"
+            and all(state["tasks"].get(dep, {}).get("status") == "done" for dep in t["dependencies"])
+            for t in state["tasks"].values()
         ):
             state.update(
                 status="blocked",
@@ -160,11 +162,16 @@ class Runner:
                 except ValueError as exc:
                     self.store.stop(sid, token, "resource_limit", str(exc))
                     break
-                reserved = self.store.reserve(sid, token, request_id, "manager", row["revision"], context)
+                try:
+                    reserved = self.store.reserve(
+                        sid, token, request_id, "manager", context["observed_revision"], context
+                    )
+                except StaleRevision:
+                    continue
                 if reserved is None:
                     break
                 timeout = min(
-                    row["state"]["mission"]["limits"]["call_seconds"], self.store.remaining_seconds(sid)
+                    context["state"]["mission"]["limits"]["call_seconds"], self.store.remaining_seconds(sid)
                 )
                 try:
                     value, usage = self.worker.decide(context, max(0.01, timeout))
@@ -183,24 +190,26 @@ class Runner:
                     proposal = Proposal.model_validate(value)
                     if (
                         proposal.request_id != request_id
-                        or proposal.observed_revision != row["revision"]
-                        or proposal.goal_revision != row["state"]["goal_revision"]
+                        or proposal.observed_revision != context["observed_revision"]
+                        or proposal.goal_revision != context["goal_revision"]
                     ):
                         raise ValueError("proposal identity or revision does not match request")
                     if proposal.action not in context["available_actions"]:
                         raise ValueError("capability unavailable; record a development request")
                     args = ACTIONS[proposal.action].model_validate(proposal.arguments).model_dump()
-                    validate_citations([e.model_dump() for e in proposal.evidence], row["state"]["evidence"])
+                    validate_citations(
+                        [e.model_dump() for e in proposal.evidence], context["state"]["evidence"]
+                    )
                     if proposal.task_id:
-                        task = row["state"]["tasks"].get(proposal.task_id)
+                        task = context["state"]["tasks"].get(proposal.task_id)
                         if not task or task["status"] != "ready":
                             raise ValueError("task unavailable or blocked")
                         if any(
-                            row["state"]["tasks"].get(dep, {}).get("status") != "done"
+                            context["state"]["tasks"].get(dep, {}).get("status") != "done"
                             for dep in task["dependencies"]
                         ):
                             raise ValueError("task dependency incomplete")
-                    elif any(d["status"] == "pending" for d in row["state"]["discussions"].values()):
+                    elif any(d["status"] == "pending" for d in context["state"]["discussions"].values()):
                         if proposal.action in READ_ACTIONS:
                             raise ValueError(
                                 "while a decision is pending, identify an independent ready task"
@@ -221,7 +230,7 @@ class Runner:
                         proposal.observed_revision,
                         proposal.model_dump(),
                     )
-                except Conflict:
+                except StaleRevision:
                     continue
                 if action is None:
                     break
@@ -236,7 +245,7 @@ class Runner:
                             args,
                             self.store.actions(sid),
                             min(
-                                row["state"]["mission"]["limits"]["call_seconds"],
+                                context["state"]["mission"]["limits"]["call_seconds"],
                                 self.store.remaining_seconds(sid),
                             ),
                         )

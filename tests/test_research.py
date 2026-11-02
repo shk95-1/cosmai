@@ -376,3 +376,35 @@ def test_manager_citations_are_not_treated_as_retrieved_evidence(source):
     ]
     result = source.execute("read_evidence", {"evidence_id": "limit"}, records)
     assert result["evidence"][0]["id"] == "limit"
+
+
+@pytest.mark.postgres
+def test_feedback_between_context_read_and_reservation_rebuilds_context(store, source):
+    sid = store.create(Mission(objective="Rebuild stale context", scope="controlled"))
+    schemas = source.schemas
+    pending = [True]
+
+    def racing_schemas():
+        if pending:
+            pending.pop()
+            store.feedback(sid, "A priority change during context construction")
+        return schemas()
+
+    source.schemas = racing_schemas
+    worker = ScriptedWorker(("pause", {"reason": "Current priority considered"}))
+    row = Runner(store, source, worker).run(sid)
+    assert worker.contexts[0]["goal_revision"] == 1
+    assert row["state"]["usage"]["manager_calls"] == 1
+    assert row["state"]["usage"]["failures"] == 0
+
+
+def test_discussion_blocks_transitively_dependent_agenda():
+    from cosmai.research.state import ACTIONS, initial_state
+
+    state = initial_state(Mission(objective="Respect dependency closure", scope="controlled"))
+    tasks = agenda()
+    tasks["tasks"][1]["dependencies"] = ["choice"]
+    transition(state, "assess", ACTIONS["assess"].model_validate(tasks).model_dump(), 0)
+    transition(state, "discuss", discussion(), 1)
+    assert state["status"] == "blocked"
+    assert state["outcome"] == "participant_input_required"

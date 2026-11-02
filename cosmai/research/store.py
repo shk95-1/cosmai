@@ -18,6 +18,10 @@ class Conflict(RuntimeError):
     pass
 
 
+class StaleRevision(Conflict):
+    pass
+
+
 class Store:
     def __init__(self, url: str):
         if not url:
@@ -140,7 +144,7 @@ class Store:
                     raise Conflict("duplicate decision has different inputs")
                 return previous
             if row["revision"] != revision:
-                raise Conflict("stale decision revision")
+                raise StaleRevision("stale decision revision")
             state = row["state"]
             if state["status"] != "running":
                 raise Conflict("session is no longer running")
