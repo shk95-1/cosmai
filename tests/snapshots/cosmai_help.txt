@@ -20,10 +20,10 @@ options:
   -h, --help            show this help message and exit
 
 $ cosmai research --help
-usage: cosmai research [-h] {create,run,status,feedback,pause,reconcile} ...
+usage: cosmai research [-h] {create,run,participate,status,feedback,pause,reconcile} ...
 
 positional arguments:
-  {create,run,status,feedback,pause,reconcile}
+  {create,run,participate,status,feedback,pause,reconcile}
 
 options:
   -h, --help            show this help message and exit
@@ -56,6 +56,26 @@ options:
   --source-profile SOURCE_PROFILE
                         Non-secret source identity.
   --steps STEPS
+
+$ cosmai research participate --help
+usage: cosmai research participate [-h] [--session-url-env SESSION_URL_ENV]
+                                   [--worker {codex,claude}] (--evidence-file EVIDENCE_FILE |
+                                   --evidence-url-env EVIDENCE_URL_ENV)
+                                   --source-profile SOURCE_PROFILE
+                                   session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --worker {codex,claude}
+  --evidence-file EVIDENCE_FILE
+  --evidence-url-env EVIDENCE_URL_ENV
+  --source-profile SOURCE_PROFILE
+                        Non-secret source identity.
 
 $ cosmai research status --help
 usage: cosmai research status [-h] [--session-url-env SESSION_URL_ENV] [--json] session_id

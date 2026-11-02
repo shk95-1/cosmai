@@ -15,6 +15,7 @@ COMMANDS = (
     ("research",),
     ("research", "create"),
     ("research", "run"),
+    ("research", "participate"),
     ("research", "status"),
     ("research", "feedback"),
     ("research", "pause"),

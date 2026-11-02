@@ -34,6 +34,26 @@ original goal revision. `pause <id>` prevents subsequent execution transitions.
 `reconcile <id> --execution <id> --disposition <text>` records an externally verified disposition of
 uncertain work, leaving its reservation consumed. It never retries an external effect.
 
+`participate <id> --worker codex --evidence-file <relative-file> --source-profile <name>`
+opens terminal participation using the same explicit source options as `run`. It continues a ready
+session, presents durable findings with exact citations and pending prepared packets, and accepts
+natural text. A saved contribution automatically invokes the existing runner; no separate `feedback`
+and `run` commands or technical input labels are needed. Blank input, EOF and interrupt at the prompt
+exit without supplying an answer or consent. No discussion is fabricated to require participation.
+The contribution transaction compares the displayed state revision with the current revision under
+the session lock. A changed display rejects the submission and asks the participant to review and
+re-enter it; it cannot silently answer a replacement question. Existing unbound `feedback` callers
+continue to observe the revision at submission. This conservative display check can require rereading
+after unrelated concurrent progress; independent discussions themselves remain intact.
+
+An active lease, uncertain execution, consumed allowance or expired deadline prevents automatic
+continuation and soliciting further input. A deadline that expires while reading does not discard a
+submitted contribution: it remains queued, and execution stops without renewing any resources.
+Input is committed before continuation, so a crash or failed execution cannot erase it. Restart uses
+the durable queue and original limits; uncertain actions still require explicit reconciliation.
+The terminal performs no background work while awaiting input and wall-clock limits include that
+waiting time. This interface does not establish human effort savings or replace matched observation.
+
 `state.py` defines version 1 records. Evidence includes source, locator, attribution (possibly unknown),
 capture time, immutable SHA-256, passage and access limitations. Interpretation, hypothesis, question,
 criteria revision and proposed validation are distinct fields. Exact-span validation checks attribution,

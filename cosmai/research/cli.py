@@ -10,7 +10,7 @@ from pathlib import Path
 def add_parser(subparsers):
     research = subparsers.add_parser("research", help="Manage durable research and prepared participation.")
     actions = research.add_subparsers(dest="research_action", required=True)
-    for name in ("create", "run", "status", "feedback", "pause", "reconcile"):
+    for name in ("create", "run", "participate", "status", "feedback", "pause", "reconcile"):
         parser = actions.add_parser(name)
         parser.add_argument(
             "--session-url-env",
@@ -21,13 +21,14 @@ def add_parser(subparsers):
             parser.add_argument("--mission-file", required=True)
         else:
             parser.add_argument("session_id")
-        if name == "run":
+        if name in ("run", "participate"):
             parser.add_argument("--worker", choices=["codex", "claude"], default="codex")
             source = parser.add_mutually_exclusive_group(required=True)
             source.add_argument("--evidence-file")
             source.add_argument("--evidence-url-env")
             parser.add_argument("--source-profile", required=True, help="Non-secret source identity.")
-            parser.add_argument("--steps", type=int)
+            if name == "run":
+                parser.add_argument("--steps", type=int)
         if name == "status":
             parser.add_argument("--json", action="store_true")
         if name == "feedback":
@@ -38,7 +39,7 @@ def add_parser(subparsers):
             parser.add_argument("--disposition", required=True)
 
 
-def status_text(row: dict) -> str:
+def status_text(row: dict, *, current_only: bool = False) -> str:
     state = row["state"]
     lines = [
         f"Session {row['id']} | {state['status']} | rev {row['revision']} / goal {state['goal_revision']}",
@@ -48,16 +49,20 @@ def status_text(row: dict) -> str:
         f"Resources: {json.dumps(state['usage'], sort_keys=True)}",
         f"Limits: {json.dumps(state['mission']['limits'], sort_keys=True)}",
     ]
-    for feedback in state["feedback"]:
+    feedback_items = [f for f in state["feedback"] if f.get("interpretation")]
+    for feedback in feedback_items[-1:] if current_only else feedback_items:
         interpretation = feedback.get("interpretation")
         if interpretation:
             lines.append("Participant response: " + interpretation["response"])
     for hypothesis in state["hypotheses"].values():
         lines.append(f"{hypothesis['id']} ({hypothesis['status']}): {hypothesis['problem']}")
         lines.append("Uncertainty: " + "; ".join(hypothesis["uncertainties"]))
-    for finding in state["findings"]:
+    for finding in state["findings"][-1:] if current_only else state["findings"]:
         lines.append("Uncertainty: " + "; ".join(finding["uncertainties"]))
         lines.append("Next validation: " + finding["next_validation"])
+        for citation in finding["evidence"]:
+            evidence = state["evidence"][citation["evidence_id"]]
+            lines.append(f"Source {evidence['locator']}: {citation['passage']}")
     for discussion in state["discussions"].values():
         if discussion["status"] != "pending":
             continue
@@ -83,6 +88,74 @@ def status_text(row: dict) -> str:
     return "\n".join(lines)
 
 
+def continuation_blocker(row):
+    state = row["state"]
+    if row["lease_until"] and row["lease_until"] > row["clock"]:
+        return "another runner is active"
+    if state["usage"]["uncertain"]:
+        return "an interrupted execution needs reconciliation"
+    if row["deadline"] and row["deadline"] <= row["clock"]:
+        return "the original deadline has expired"
+    for key in ("manager_calls", "tool_calls", "failures"):
+        if state["usage"][key] >= state["mission"]["limits"][key]:
+            return f"the original {key} allowance is exhausted"
+    if state["outcome"] == "resource_limit":
+        return state["reason"]
+    return None
+
+
+def participate(runner, sid, *, read=input, write=print):
+    """Use the displayed revision for natural input and continue inside the original envelope."""
+    from .store import Conflict, StaleRevision
+
+    store = runner.store
+    row = store.get(sid)
+    if row["state"].get("source") not in (None, runner.source.identity):
+        raise Conflict("evidence source changed")
+    if not continuation_blocker(row) and (
+        row["state"]["status"] in ("ready", "running") or row["state"]["outcome"] == "step_limit"
+    ):
+        write("Research is continuing within the original resource limits.")
+        row = runner.run(sid)
+    while True:
+        write(status_text(row, current_only=True))
+        write(f"Original deadline: {row['deadline'] or 'starts on first execution'}")
+        blocker = continuation_blocker(row)
+        if blocker:
+            write(f"Continuation unavailable: {blocker}. No resources were renewed.")
+            return row
+        try:
+            text = read("Your question, idea or response (empty input exits): ")
+        except (EOFError, KeyboardInterrupt):
+            text = ""
+        if not text.strip():
+            write("Participation ended. No answer or consent was supplied.")
+            return store.get(sid)
+        try:
+            store.feedback(sid, text, observed_revision=row["revision"])
+        except StaleRevision:
+            write(
+                "Research changed while you were reading; your text was not submitted. "
+                "Review and re-enter it."
+            )
+            row = store.get(sid)
+            continue
+        except ValueError:
+            write("Please enter 1–8000 characters; your text was not submitted.")
+            continue
+        write("Contribution saved. Continuing within the original resource limits.")
+        row = store.get(sid)
+        if continuation_blocker(row):
+            continue
+        try:
+            row = runner.run(sid)
+        except Conflict:
+            write(
+                "Contribution remains saved; another execution or changed source prevents this continuation."
+            )
+            return store.get(sid)
+
+
 def run(args) -> int:
     from .runner import Runner
     from .state import Mission
@@ -97,7 +170,7 @@ def run(args) -> int:
             mission = Mission.model_validate_json(Path(args.mission_file).read_text())
             print(store.create(mission))
             return 0
-        if action == "run":
+        if action in ("run", "participate"):
             source = (
                 EvidenceSource.from_file(args.evidence_file, args.source_profile)
                 if args.evidence_file
@@ -106,7 +179,11 @@ def run(args) -> int:
                 )
             )
             worker = CodexWorker() if args.worker == "codex" else ClaudeWorker()
-            Runner(store, source, worker).run(args.session_id, steps=args.steps)
+            runner = Runner(store, source, worker)
+            if action == "participate":
+                participate(runner, args.session_id)
+                return 0
+            runner.run(args.session_id, steps=args.steps)
         elif action == "feedback":
             store.feedback(args.session_id, args.text, args.discussion)
         elif action == "pause":
