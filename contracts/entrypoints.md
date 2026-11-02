@@ -1276,3 +1276,9 @@ requirement while withholding a residual-gap claim. It neither asserts the requi
 incoherent nor falsely certifies an existing product as sufficient. Closing this evidence
 gap requires the assessment's explicit falsifier; a brand's application claim alone does
 not establish dose accuracy or individual suitability.
+
+## Research participation
+
+`cosmai research create|run|status|feedback|pause|reconcile` manages durable sessions.
+Session and evidence connections are explicit and independent; see `research.md`.
+The run command resumes saved state and never renews earlier pilot authorizations.

@@ -294,6 +294,9 @@ def _add_discover(subparsers: argparse._SubParsersAction) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cosmai")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from cosmai.research.cli import add_parser
+
+    add_parser(subparsers)
     _add_collect(subparsers)
     _add_login(subparsers)
     _add_analyze(subparsers)
@@ -821,6 +824,10 @@ def _run_lexicon(args: argparse.Namespace) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "research":
+        from cosmai.research.cli import run
+
+        return run(args)
     if args.command == "collect":
         return _run_collect(args)
     if args.command == "login":

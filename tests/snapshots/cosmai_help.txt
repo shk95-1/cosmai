@@ -1,8 +1,10 @@
 $ cosmai --help
-usage: cosmai [-h] {collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon} ...
+usage: cosmai [-h]
+              {research,collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon} ...
 
 positional arguments:
-  {collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon}
+  {research,collect,login,analyze,retrieval,discover,trend,project,match,eval,lexicon}
+    research            Manage durable research and prepared participation.
     collect             Run one collector's dataset for one hour.
     login               Open a visible browser so a person can authorise one source's profile.
     analyze             Run one analysis stage over the needs schema.
@@ -16,6 +18,97 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+
+$ cosmai research --help
+usage: cosmai research [-h] {create,run,status,feedback,pause,reconcile} ...
+
+positional arguments:
+  {create,run,status,feedback,pause,reconcile}
+
+options:
+  -h, --help            show this help message and exit
+
+$ cosmai research create --help
+usage: cosmai research create [-h] [--session-url-env SESSION_URL_ENV] --mission-file MISSION_FILE
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --mission-file MISSION_FILE
+
+$ cosmai research run --help
+usage: cosmai research run [-h] [--session-url-env SESSION_URL_ENV] [--worker {codex,claude}]
+                           (--evidence-file EVIDENCE_FILE | --evidence-url-env EVIDENCE_URL_ENV)
+                           --source-profile SOURCE_PROFILE [--steps STEPS]
+                           session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --worker {codex,claude}
+  --evidence-file EVIDENCE_FILE
+  --evidence-url-env EVIDENCE_URL_ENV
+  --source-profile SOURCE_PROFILE
+                        Non-secret source identity.
+  --steps STEPS
+
+$ cosmai research status --help
+usage: cosmai research status [-h] [--session-url-env SESSION_URL_ENV] [--json] session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --json
+
+$ cosmai research feedback --help
+usage: cosmai research feedback [-h] [--session-url-env SESSION_URL_ENV] --text TEXT
+                                [--discussion DISCUSSION]
+                                session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --text TEXT
+  --discussion DISCUSSION
+
+$ cosmai research pause --help
+usage: cosmai research pause [-h] [--session-url-env SESSION_URL_ENV] session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+
+$ cosmai research reconcile --help
+usage: cosmai research reconcile [-h] [--session-url-env SESSION_URL_ENV] --execution EXECUTION
+                                 --disposition DISPOSITION
+                                 session_id
+
+positional arguments:
+  session_id
+
+options:
+  -h, --help            show this help message and exit
+  --session-url-env SESSION_URL_ENV
+                        Environment key containing the explicit session database URL.
+  --execution EXECUTION
+  --disposition DISPOSITION
 
 $ cosmai collect --help
 usage: cosmai collect [-h] --dataset DATASET [--board BOARD] [--since SINCE]

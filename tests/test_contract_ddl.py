@@ -33,7 +33,7 @@ def declared_tables() -> set[str]:
     return tables
 
 
-def test_the_ddl_declares_the_forty_two_contract_tables():
+def test_the_ddl_declares_the_forty_five_contract_tables():
     # 20 from 001/002 + 1 from 003_llm_usage.sql (issue #6) + 4 from 004_naver.sql (issue #9:
     # naver_run, naver_fetch_log, naver_datalab_point, naver_blog_post)
     # + 1 from 007_pipeline_stage.sql (upstream issue #138: declaring a pipeline stage's expected interval)
@@ -63,7 +63,8 @@ def test_the_ddl_declares_the_forty_two_contract_tables():
     # series the launch-onset axis reads. The same file widens needs.naver_run's dataset CHECK for
     # the third dataset, which adds no table and is registered in tests/test_ddl_additive_only.py).
     # The embeddings live in files for now, so there is no table for them yet.
-    assert len(declared_tables()) == 42
+    # 031 adds durable research sessions, events and actions.
+    assert len(declared_tables()) == 45
 
 
 def test_every_declared_table_exists_in_the_database():

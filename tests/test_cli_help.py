@@ -12,6 +12,13 @@ from pathlib import Path
 SNAPSHOT = Path(__file__).resolve().parent / "snapshots" / "cosmai_help.txt"
 COMMANDS = (
     (),
+    ("research",),
+    ("research", "create"),
+    ("research", "run"),
+    ("research", "status"),
+    ("research", "feedback"),
+    ("research", "pause"),
+    ("research", "reconcile"),
     ("collect",),
     ("login",),
     ("analyze",),

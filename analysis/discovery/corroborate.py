@@ -56,7 +56,9 @@ def validate_queries(sample: dict, review: dict, queries: dict, per_query: int) 
             raise ValueError("literal query terms must have 1–40 characters")
 
 
-def corroborate_local(sample: dict, review: dict, queries: dict, per_query: int = 3) -> dict:
+def corroborate_local(
+    sample: dict, review: dict, queries: dict, per_query: int = 3, *, database_url: str | None = None
+) -> dict:
     """Keep seed texts unchanged; exclude seed IDs and preserve all query/source outcomes."""
     validate_queries(sample, review, queries, per_query)
     documents = {d["doc_id"]: deepcopy(d) for d in sample["documents"]}
@@ -81,7 +83,7 @@ def corroborate_local(sample: dict, review: dict, queries: dict, per_query: int 
         ],
     }
     ledger = manifest["corroboration"]
-    with connect(runtime_url()) as conn:
+    with connect(database_url if database_url is not None else runtime_url()) as conn:
         conn.autocommit = True
         conn.execute("SET default_transaction_read_only = on")
         for source in (*COMMERCE, YOUTUBE):

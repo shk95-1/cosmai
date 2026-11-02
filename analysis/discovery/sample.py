@@ -37,7 +37,9 @@ ORDER BY source_item_id, d.collected_at DESC, snapshot_id DESC
 """
 
 
-def sample_local(per_cue: int = 3, *, exclude_sample: dict | None = None) -> dict:
+def sample_local(
+    per_cue: int = 3, *, exclude_sample: dict | None = None, database_url: str | None = None
+) -> dict:
     if not 1 <= per_cue <= 20:
         raise ValueError("per-cue limit must be between 1 and 20")
     excluded: dict[str, list[str]] = {}
@@ -78,7 +80,7 @@ def sample_local(per_cue: int = 3, *, exclude_sample: dict | None = None) -> dic
             "document_count": len(exclude_sample["documents"]),
             "document_ids_sha256": fingerprint(sorted(d["doc_id"] for d in exclude_sample["documents"])),
         }
-    with connect(runtime_url()) as conn:
+    with connect(database_url if database_url is not None else runtime_url()) as conn:
         conn.autocommit = True
         conn.execute("SET default_transaction_read_only = on")
         for source in (*COMMERCE, YOUTUBE):
