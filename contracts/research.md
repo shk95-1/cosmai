@@ -36,8 +36,19 @@ uncertain work, leaving its reservation consumed. It never retries an external e
 
 `participate <id> --worker codex --evidence-file <relative-file> --source-profile <name>`
 opens terminal participation using the same explicit source options as `run`. It continues a ready
-session, presents durable findings with exact citations and pending prepared packets, and accepts
-natural text. A saved contribution automatically invokes the existing runner; no separate `feedback`
+session, presents a participant brief with durable findings, uncertainty, next validation and all
+pending prepared packets, and accepts natural text. The default brief shows unique source links
+and explicit usage/limits/deadline without diagnostic IDs, evidence hashes or repeated quotation dumps.
+It does not truncate or rewrite substantive findings, caveats, questions, recommendations or objections.
+Earlier-objective findings and resource stops remain clearly identified. `status` and `status --json`
+retain the complete audit presentation.
+
+Within participation, `/sources` displays all original selected citation passages from the displayed
+revision (or inspected evidence when no citations have yet been prepared). Identical repeated passages
+are shown once. This local inspection does not invoke a worker, request sources, record feedback,
+change a revision/deadline or imply consent. Natural source questions remain ordinary contributions;
+the slash command is optional. Source inspection never changes which displayed revision protects
+the next submitted response. A saved contribution automatically invokes the existing runner; no separate `feedback`
 and `run` commands or technical input labels are needed. Blank input, EOF and interrupt at the prompt
 exit without supplying an answer or consent. No discussion is fabricated to require participation.
 The contribution transaction compares the displayed state revision with the current revision under

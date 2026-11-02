@@ -782,11 +782,11 @@ class TestTerminalParticipation:
             source,
             ScriptedWorker(("finish", {**finding(), "evidence": [], "outcome": "evidence_limit"})),
         ).run(sid)
-        answers = iter(["The old answer", ""])
+        answers = iter(["/sources", "The old answer", ""])
 
         def read(_):
             answer = next(answers)
-            if answer:
+            if answer == "The old answer":
                 store.feedback(sid, "An independent contribution arrived")
             return answer
 
@@ -899,7 +899,7 @@ class TestTerminalParticipation:
             ),
         ).run(sid)
         worker = ScriptedWorker(lambda c: interpreted(c), ("finish", finding(source)))
-        answers = iter(["Show the source", ""])
+        answers = iter(["Show the source", "/sources", ""])
         output = []
         row = participate(
             Runner(store, source, worker), sid, read=lambda _: next(answers), write=output.append
@@ -929,7 +929,7 @@ def test_participate_cli_runs_then_accepts_stdin_and_resumes(store, source, monk
     )
     monkeypatch.setattr(workers, "CodexWorker", lambda: worker)
     monkeypatch.setenv("COSMAI_RESEARCH_SESSION_URL", store.url)
-    monkeypatch.setattr("sys.stdin", io.StringIO("Show the source\n\n"))
+    monkeypatch.setattr("sys.stdin", io.StringIO("Show the source\n/sources\n\n"))
     assert (
         main(
             ["research", "participate", sid, "--evidence-file", str(path), "--source-profile", source.profile]
@@ -1262,3 +1262,95 @@ def test_full_passages_remain_available_when_duplicate_observations_would_overfl
     assert [a["result"]["evidence"][0] for a in raw] == items
     restored = Runner(Store(store.url), source, worker).context(sid, "offline-restart")
     assert restored["state"]["evidence"] == row["state"]["evidence"]
+
+
+def test_participant_brief_preserves_findings_questions_and_source_access(source):
+    from cosmai.research.cli import participation_sources, participation_text
+    from cosmai.research.state import initial_state
+
+    state = initial_state(Mission(objective="A useful research question", scope="controlled"))
+    citation = {"evidence_id": "trial", "span_id": "original", "passage": source.evidence["trial"]["passage"]}
+    state.update(
+        evidence=source.evidence,
+        summary="Qualified finding with a counterexample.",
+        summary_goal_revision=0,
+        findings=[{**finding(), "evidence": [citation, citation], "goal_revision": 0}],
+        discussions={
+            d["id"]: {**d, "status": "pending"}
+            for d in [
+                discussion(),
+                {**discussion(), "id": "independent", "question": "Independent question B?"},
+            ]
+        },
+    )
+    row = {"state": state, "revision": 42, "id": "internal-session-id", "deadline": None}
+    brief = participation_text(row)
+    assert state["summary"] in brief
+    assert all(u in brief for u in state["findings"][-1]["uncertainties"])
+    assert state["findings"][-1]["next_validation"] in brief
+    for packet in state["discussions"].values():
+        for key in (
+            "question",
+            "why_now",
+            "finding",
+            "uncertainty",
+            "recommendation",
+            "strongest_objection",
+            "contribution",
+            "independent_work",
+        ):
+            assert packet[key] in brief
+        assert all(option in brief for option in packet["options"])
+    assert "fixture:trial" in brief and "/sources" in brief
+    assert source.evidence["trial"]["passage"] not in brief
+    assert "internal-session-id" not in brief and source.evidence["trial"]["sha256"] not in brief
+    assert "12" in brief and "Deadline" in brief
+    passages = participation_sources(row)
+    assert passages.count(source.evidence["trial"]["passage"]) == 1
+
+
+def test_participant_brief_marks_stale_findings_and_honest_stop(source):
+    from cosmai.research.cli import participation_text
+    from cosmai.research.state import initial_state
+
+    state = initial_state(Mission(objective="New question", scope="controlled"))
+    state.update(
+        summary="Old finding",
+        summary_goal_revision=0,
+        goal_revision=1,
+        findings=[{**finding(), "evidence": [], "goal_revision": 0}],
+        status="paused",
+        outcome="resource_limit",
+        reason="Context limit reached before synthesis",
+    )
+    text = participation_text({"state": state, "deadline": None})
+    assert "earlier objective" in text.lower()
+    assert "Context limit reached before synthesis" in text
+    assert "Old finding" in text
+
+
+@pytest.mark.postgres
+def test_local_source_inspection_preserves_state_limits_and_consumes_no_calls(store, source):
+    from cosmai.research.cli import participate
+
+    sid = store.create(Mission(objective="Inspect citations without another worker", scope="controlled"))
+    Runner(
+        store,
+        source,
+        ScriptedWorker(
+            ("read_evidence", {"evidence_id": "trial"}),
+            ("read_evidence", {"evidence_id": "limit"}),
+            ("finish", finding(source)),
+        ),
+    ).run(sid)
+    before = store.get(sid)
+    actions = store.actions(sid)
+    output = []
+    answers = iter(["/sources", "/sources", ""])
+    row = participate(
+        Runner(store, source, ScriptedWorker()), sid, read=lambda _: next(answers), write=output.append
+    )
+    assert row["state"] == before["state"] and row["revision"] == before["revision"]
+    assert row["deadline"] == before["deadline"] and store.actions(sid) == actions
+    assert source.evidence["trial"]["passage"] in "\n".join(output)
+    assert "Source fixture:trial:" in "\n".join(output)
