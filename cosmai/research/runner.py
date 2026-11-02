@@ -7,7 +7,15 @@ import time
 from functools import partial
 from uuid import uuid4
 
-from .state import ACTIONS, READ_ACTIONS, Proposal, validate_citations
+from .participation import integrate, required_decisions
+from .state import (
+    ACTIONS,
+    READ_ACTIONS,
+    Proposal,
+    evidence_spans,
+    resolve_argument_citations,
+    validate_citations,
+)
 from .store import Conflict, StaleRevision, Store
 from .tools import EvidenceSource, bounded_read
 from .workers import ProviderFailure
@@ -22,7 +30,9 @@ def apply_result(state: dict, result: dict):
 
 
 def transition(state: dict, action: str, args: dict, revision: int):
-    if action == "assess":
+    if action == "integrate_feedback":
+        integrate(state, args)
+    elif action == "assess":
         for hypothesis in args["hypotheses"]:
             validate_citations(hypothesis["support"] + hypothesis["counterevidence"], state["evidence"])
             if hypothesis["status"] == "supported" and not hypothesis["support"]:
@@ -62,10 +72,14 @@ def transition(state: dict, action: str, args: dict, revision: int):
         }
         for task in args["dependent_tasks"]:
             state["tasks"][task]["status"] = "blocked"
-        if state["tasks"] and not any(
-            t["status"] == "ready"
-            and all(state["tasks"].get(dep, {}).get("status") == "done" for dep in t["dependencies"])
-            for t in state["tasks"].values()
+        if (
+            args["dependent_tasks"]
+            and state["tasks"]
+            and not any(
+                t["status"] == "ready"
+                and all(state["tasks"].get(dep, {}).get("status") == "done" for dep in t["dependencies"])
+                for t in state["tasks"].values()
+            )
         ):
             state.update(
                 status="blocked",
@@ -80,7 +94,7 @@ def transition(state: dict, action: str, args: dict, revision: int):
         validate_citations(args["evidence"], state["evidence"])
         if args["outcome"] == "findings" and not args["evidence"]:
             raise ValueError("findings need traceable source evidence")
-        if any(d["status"] == "pending" for d in state["discussions"].values()):
+        if required_decisions(state):
             if args["outcome"] != "participant_input_required":
                 raise ValueError("pending decisions must survive in the stopping reason")
         state["summary_goal_revision"] = state["goal_revision"]
@@ -101,6 +115,18 @@ def apply_transition(state, result, *, action, revision):
     transition(state, action, result["arguments"], revision)
 
 
+def validation_error(exc):
+    from pydantic import ValidationError
+
+    if isinstance(exc, ValidationError):
+        return [
+            {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"]}
+            for e in exc.errors(include_input=False, include_context=False, include_url=False)
+        ][:12]
+    # Only application validation messages are exposed, not provider/connection exception text.
+    return str(exc)[:1000] if isinstance(exc, ValueError) else type(exc).__name__
+
+
 class Runner:
     def __init__(self, store: Store, source: EvidenceSource, worker):
         self.store, self.source, self.worker = store, source, worker
@@ -117,6 +143,7 @@ class Runner:
             "goal_revision": state["goal_revision"],
             "state": state,
             "available_actions": self.source.schemas(),
+            "evidence_spans": {key: evidence_spans(e) for key, e in state["evidence"].items()},
             "evidence_index": [
                 {"id": e["id"], "source": e["source"], "locator": e["locator"]}
                 for e in self.source.evidence.values()
@@ -197,9 +224,14 @@ class Runner:
                     if proposal.action not in context["available_actions"]:
                         raise ValueError("capability unavailable; record a development request")
                     args = ACTIONS[proposal.action].model_validate(proposal.arguments).model_dump()
+                    if proposal.action not in READ_ACTIONS:
+                        args = resolve_argument_citations(args, context["state"]["evidence"])
                     validate_citations(
                         [e.model_dump() for e in proposal.evidence], context["state"]["evidence"]
                     )
+                    if any(f.get("status") == "pending" for f in context["state"]["feedback"]):
+                        if proposal.action != "integrate_feedback":
+                            raise ValueError("interpret pending feedback with integrate_feedback first")
                     if proposal.task_id:
                         task = context["state"]["tasks"].get(proposal.task_id)
                         if not task or task["status"] != "ready":
@@ -209,14 +241,23 @@ class Runner:
                             for dep in task["dependencies"]
                         ):
                             raise ValueError("task dependency incomplete")
-                    elif any(d["status"] == "pending" for d in context["state"]["discussions"].values()):
+                    elif required_decisions(context["state"]):
                         if proposal.action in READ_ACTIONS:
                             raise ValueError(
                                 "while a decision is pending, identify an independent ready task"
                             )
-                except ValueError:
+                except ValueError as exc:
                     self.store.complete(
-                        sid, token, reserved["id"], {"error": "invalid_decision"}, usage, failure=True
+                        sid,
+                        token,
+                        reserved["id"],
+                        {
+                            "error": "invalid_decision",
+                            "details": validation_error(exc),
+                            "hint": "Correct the named fields using available_actions and evidence_spans",
+                        },
+                        usage,
+                        failure=True,
                     )
                     continue
                 if not self.store.complete(sid, token, reserved["id"], proposal.model_dump(), usage):
@@ -278,6 +319,7 @@ class Runner:
                         {
                             "error_class": type(exc).__name__,
                             "meaning": "action failed; not negative evidence",
+                            "details": validation_error(exc),
                         },
                         {"elapsed_seconds": time.monotonic() - started},
                         failure=True,

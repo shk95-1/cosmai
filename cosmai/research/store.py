@@ -248,31 +248,23 @@ class Store:
             packet = state["discussions"].get(discussion) if discussion else None
             if discussion and packet is None:
                 raise ValueError("unknown discussion")
-            stale = bool(
-                packet
-                and (packet["goal_revision"] != state["goal_revision"] or packet["status"] != "pending")
-            )
+            stale = bool(packet and packet["status"] != "pending")
             response = {
+                "id": str(uuid4()),
                 "text": text,
                 "discussion": discussion,
+                "discussion_revision": packet["state_revision"] if packet else None,
                 "observed_revision": observed,
                 "goal_revision": state["goal_revision"],
-                "applied": not stale,
+                "status": "stale" if stale else "pending",
+                "applied": False,
             }
             state["feedback"].append(response)
             if not stale:
-                state["goal_revision"] += 1
-                for task in state["tasks"].values():
-                    task["status"] = "superseded"
-                for hypothesis in state["hypotheses"].values():
-                    hypothesis["needs_reconsideration"] = True
-                for old in state["discussions"].values():
-                    if old["status"] == "pending":
-                        old["status"] = "superseded"
-                if packet:
-                    packet.update(status="answered", response=response)
                 state.update(
-                    status="ready", outcome=None, reason="Participant input requires reconsideration"
+                    status="ready",
+                    outcome=None,
+                    reason="Participant contribution awaiting agent interpretation",
                 )
                 if row["lease_until"] and row["lease_until"] > row["clock"]:
                     state["status"] = "running"
