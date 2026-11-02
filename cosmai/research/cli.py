@@ -128,6 +128,13 @@ def participation_text(row):
     label = "Findings from an earlier objective" if stale else "Findings"
     lines.append(f"{label}: {state['summary']}")
     finding = state["findings"][-1] if state["findings"] else None
+    outcome_labels = {
+        "findings": "Qualified findings prepared.",
+        "evidence_limit": "Evidence limit reached; the investigation remains qualified.",
+        "participant_input_required": "Participant input is needed for dependent work.",
+    }
+    if state["outcome"] in outcome_labels:
+        lines.append(outcome_labels[state["outcome"]])
     if state["outcome"] not in (None, "findings", "evidence_limit", "participant_input_required"):
         lines.append("Research stopped: " + state["reason"])
     elif state["reason"] and (not finding or state["reason"] != finding["next_validation"]):

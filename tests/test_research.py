@@ -1327,6 +1327,10 @@ def test_participant_brief_marks_stale_findings_and_honest_stop(source):
     assert "earlier objective" in text.lower()
     assert "Context limit reached before synthesis" in text
     assert "Old finding" in text
+    state.update(outcome="evidence_limit", reason=state["findings"][-1]["next_validation"])
+    text = participation_text({"state": state, "deadline": None})
+    assert "Evidence limit reached" in text
+    assert text.count(state["reason"]) == 1
 
 
 @pytest.mark.postgres
