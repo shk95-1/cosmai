@@ -874,6 +874,17 @@ class TestTerminalParticipation:
         assert row["state"]["feedback"][0]["status"] == "pending"
         assert row["lease_until"] is None
 
+        def no_prompt(_):
+            pytest.fail("interrupted execution must reconcile before accepting more input")
+
+        recovered = participate(
+            Runner(Store(store.url), source, ScriptedWorker()), sid, read=no_prompt, write=lambda _: None
+        )
+        assert recovered["state"]["outcome"] == "reconciliation_required"
+        assert recovered["state"]["feedback"] == row["state"]["feedback"]
+        assert recovered["state"]["usage"]["manager_calls"] == row["state"]["usage"]["manager_calls"]
+        assert recovered["deadline"] == row["deadline"]
+
     def test_source_question_gets_exact_citation_in_terminal(self, store, source):
         from cosmai.research.cli import participate
 

@@ -113,7 +113,7 @@ def participate(runner, sid, *, read=input, write=print):
     if row["state"].get("source") not in (None, runner.source.identity):
         raise Conflict("evidence source changed")
     if not continuation_blocker(row) and (
-        row["state"]["status"] == "ready" or row["state"]["outcome"] == "step_limit"
+        row["state"]["status"] in ("ready", "running") or row["state"]["outcome"] == "step_limit"
     ):
         write("Research is continuing within the original resource limits.")
         row = runner.run(sid)
