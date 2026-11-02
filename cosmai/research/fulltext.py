@@ -168,11 +168,24 @@ def execute(action, args, records):
     }
 
 
-def context_result(action, result):
-    if action != "literature_fulltext" or not result or "document" not in result:
+def context_result(action, result, evidence=None):
+    if not result:
         return result
-    return {
-        **{k: v for k, v in result.items() if k != "document"},
-        "document_access": "Original XML is retained in this execution artifact. Use literature_section "
-        "with this execution_id as fulltext_action and a section_id from sections to read it.",
-    }
+    projected = dict(result)
+    if action == "literature_fulltext" and "document" in projected:
+        projected.pop("document")
+        projected["document_access"] = (
+            "Original XML is retained in this execution artifact. Use literature_section "
+            "with this execution_id as fulltext_action and a section_id from sections to read it."
+        )
+    observed = projected.get("evidence")
+    if observed and evidence is not None and all(evidence.get(e["id"]) == e for e in observed):
+        # Reference only byte-for-byte equal records already present in this very context.
+        # Unknown or different passages remain visible; durable action results are never mutated.
+        projected.pop("evidence")
+        projected["evidence_refs"] = [{"evidence_id": e["id"], "sha256": e["sha256"]} for e in observed]
+        projected["evidence_access"] = (
+            "Identical original passages and provenance are available in state.evidence by evidence_id; "
+            "select citation spans from evidence_spans. The durable observation retains the full records."
+        )
+    return projected

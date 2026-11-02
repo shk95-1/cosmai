@@ -176,7 +176,7 @@ class TestDurableResearch:
         row = Runner(Store(store.url), source, fresh).run(sid)
         assert row["state"]["status"] == "finished"
         assert fresh.contexts[0]["state"]["evidence"]["trial"]["passage"]
-        assert fresh.contexts[1]["observations"][-1]["result"]["evidence"][0]["id"] == "limit"
+        assert fresh.contexts[1]["observations"][-1]["result"]["evidence_refs"][0]["evidence_id"] == "limit"
         assert len(row["state"]["findings"]) == 1
         store.feedback(sid, "Prioritize transit reliability instead of dosing accuracy")
         row = store.get(sid)
@@ -1201,3 +1201,64 @@ def test_fulltext_tables_remain_inspectable_with_cell_structure(monkeypatch):
     )
     assert "<tr><td>Glycerol</td><td>3.0</td></tr>" in read["evidence"][0]["passage"]
     assert "<th>Percent</th>" in read["evidence"][0]["passage"]
+
+
+def test_observation_evidence_projection_is_lossless_and_keeps_unavailable_content(source):
+    from copy import deepcopy
+
+    from cosmai.research.fulltext import context_result
+
+    evidence = source.evidence["trial"]
+    result = {"evidence": [evidence], "limitations": ["Original limitation"]}
+    original = deepcopy(result)
+    projected = context_result("read_evidence", result, source.evidence)
+    assert "evidence" not in projected
+    assert projected["evidence_refs"] == [{"evidence_id": evidence["id"], "sha256": evidence["sha256"]}]
+    assert "state.evidence" in projected["evidence_access"]
+    assert projected["limitations"] == result["limitations"]
+    assert result == original
+    assert context_result("read_evidence", result, {}) == result
+    changed = deepcopy(evidence)
+    changed["passage"] = "Different evidence must not silently replace the observed passage."
+    assert context_result("read_evidence", result, {evidence["id"]: changed}) == result
+
+
+@pytest.mark.postgres
+def test_full_passages_remain_available_when_duplicate_observations_would_overflow(store):
+    import json
+
+    items = [
+        Evidence(
+            id=f"large-{i}",
+            source="Controlled",
+            locator=f"fixture:{i}",
+            captured_at="2026-11-02",
+            passage=("Controlled evidence " * 500)[:8000],
+        ).frozen()
+        for i in range(6)
+    ]
+    source = EvidenceSource(profile="context-regression", bundle={"evidence": items})
+    sid = store.create(Mission(objective="Preserve all inspected evidence", scope="controlled regression"))
+
+    def finish(context):
+        assert len(json.dumps(context)) < 150_000
+        for item in items:
+            assert context["state"]["evidence"][item["id"]] == item
+            assert context["evidence_spans"][item["id"]]
+        for observation in context["observations"]:
+            assert "evidence" not in observation["result"]
+            assert observation["result"]["evidence_refs"]
+        citation = context["evidence_spans"][items[0]["id"]][0]
+        return proposal(
+            context,
+            "finish",
+            {**finding(), "evidence": [{"evidence_id": items[0]["id"], "span_id": citation["id"]}]},
+        )
+
+    worker = ScriptedWorker(*[("read_evidence", {"evidence_id": item["id"]}) for item in items], finish)
+    row = Runner(store, source, worker).run(sid)
+    assert row["state"]["outcome"] == "findings"
+    raw = [a for a in Store(store.url).actions(sid) if a["kind"] == "read_evidence"]
+    assert [a["result"]["evidence"][0] for a in raw] == items
+    restored = Runner(Store(store.url), source, worker).context(sid, "offline-restart")
+    assert restored["state"]["evidence"] == row["state"]["evidence"]

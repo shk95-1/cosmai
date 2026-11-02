@@ -135,7 +135,9 @@ network requests from local cache/section reads; failed or uncertain attempts re
 reservations rather than a claim of known network usage.
 
 Manager context contains the full section index and explicit instructions for reading it instead of
-the raw XML document. Selected evidence and other observations retain their existing visibility;
+the raw XML document. Selected evidence remains fully visible in `state.evidence` and citation spans. Observation results
+replace only exactly identical evidence copies with explicit ID/hash references to that same context;
+unknown or differing evidence stays in the observation. No durable result is mutated or text dropped;
 the full XML remains in the durable action artifact. The 150,000-character context and 2 MB result
 bounds are unchanged, including after restart; overly large indexes or selected evidence stop
 explicitly. Exact extracted citations do not prove semantic support, formulation equivalence,

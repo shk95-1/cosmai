@@ -155,7 +155,7 @@ class Runner:
                     "execution_id": a["id"],
                     "action": a["kind"],
                     "status": a["status"],
-                    "result": context_result(a["kind"], a["result"]),
+                    "result": context_result(a["kind"], a["result"], state["evidence"]),
                     "input_revision": a["observed_revision"],
                 }
                 for a in actions
