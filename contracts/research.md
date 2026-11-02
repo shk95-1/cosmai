@@ -1,0 +1,102 @@
+# Research sessions
+
+Maintained system development follows issues, channel ownership, PR review and deployment rules.
+Runtime questions, hypotheses, tasks, decisions and discussions are application state in
+`needs.research_session`, `needs.research_event` and `needs.research_action` (031). Runtime state
+never authorizes changes to maintained code, production permissions or the mission's acceptance
+criteria. #321 adopts agent-managed research and prepared participation; #327's negative evaluation,
+#351/#353 holds and #355's finite no-qualified-candidate outcome remain historical results.
+
+## Interfaces and data
+
+`cosmai research create --mission-file <relative-file>` validates `state.Mission` and prints an ID.
+`run <id> --worker codex --evidence-file <relative-file> --source-profile <name>` also resumes.
+`--evidence-url-env <key>` instead explicitly selects a database evidence source. Session persistence
+uses the environment key `COSMAI_RESEARCH_SESSION_URL` or `--session-url-env <key>`. Neither
+connection falls back to `runtime_url()`. Source profiles are non-secret names. Frozen-pack hashes
+are pinned to the session. Runtime DB profiles must refer to the same configured source on resume;
+the controller does not infer identical databases from equal display names.
+
+`status <id>` shows findings, uncertainties, pending packets, evidence locators and resource position;
+`--json` exposes the full record. `feedback <id> --text <text>` always accepts spontaneous input.
+`--discussion <id>` resolves a named pending decision only if its goal revision remains current.
+All input records the observed revision; even stale input survives as an unapplied event. Applied
+input increments the goal revision and supersedes tasks/decisions for reconsideration. Earlier
+findings keep their original goal revision. `pause <id>` prevents subsequent execution transitions.
+`reconcile <id> --execution <id> --disposition <text>` records an externally verified disposition of
+uncertain work, leaving its reservation consumed. It never retries an external effect.
+
+`state.py` defines version 1 records. Evidence includes source, locator, attribution (possibly unknown),
+capture time, immutable SHA-256, passage and access limitations. Interpretation, hypothesis, question,
+criteria revision and proposed validation are distinct fields. Exact-span validation checks attribution,
+not semantic entailment: the latter requires the evaluation below. Current summaries derive from
+accepted assessments/findings; all previous assessments, decisions and feedback remain in the ledger.
+
+## Execution
+
+The runner acquires a renewable lease and monotonically increasing fence. Every manager request and
+accepted action is stored with a unique request/kind key and input digest before execution. Repeated
+identical delivery returns the same action; changed input conflicts. No transaction spans a provider
+or research call. Provider proposals must match request, state and goal revisions. Stale results remain
+observations of their old inputs and cannot update current hypotheses or conclusions.
+
+Calls, failed attempts and uncertain executions consume reservations. A crash changes unfinished
+reservations to uncertain; continuation blocks until explicit reconciliation, including manager calls.
+This conservative first slice does not auto-retry even safe interrupted reads. A resumed session retains
+its original deadline and resource envelope. Wall-clock limits include absence between invocations;
+resumption cannot reset the budget. Provider subprocess groups and read procedures have enforced
+wall-clock bounds. Context over 150,000 serialized characters stops explicitly; tool artifacts over
+2 MB fail. Long source texts expose only the first 8,000 characters with that limitation attached.
+Results and their state transition are committed atomically in PostgreSQL as execution-ID artifacts.
+
+The worker chooses actions; registered Pydantic argument schemas and executor effect classes enforce
+the capability boundary. Evidence/tool output is untrusted data. The initial public action set is
+frozen-pack search/read, explicit-datasource discovery sampling/corroboration, unchanged discovery
+selection, assessment/agenda revision, discussion, findings, pause and a structured development request.
+Sampling/corroboration are versioned historical procedures with their existing limitations and checks,
+not universal policy. No arbitrary SQL, code execution, crawling, maintained-code edit or production
+write is a research action. There is no paid retrieval or automatic fallback chain.
+
+Codex CLI's documented `exec` interface uses ChatGPT authentication, JSON-schema output, an isolated
+temporary working directory, ignored user configuration, read-only sandbox, disabled shell/apply-patch/
+multi-agent/web tools and bounded execution. Returned tool executions fail validation. Claude Code's
+alternative uses subscription authentication, disabled tools, empty MCP configuration and settings
+sources, structured print output and no persisted conversation. The live probe found expired Claude
+OAuth; an installed/auth-status-positive executable is not proof of availability. Environment API keys
+and paid-provider routing switches are not inherited. Token reports and reported equivalent costs are
+preserved; subscription billing is not an exact monetary guarantee. Zero paid budget remains binding.
+Interfaces: [Codex non-interactive](https://learn.chatgpt.com/docs/non-interactive-mode) and
+[Claude Code programmatic use](https://code.claude.com/docs/en/headless).
+
+## Participation and limits
+
+A packet supplies the question, why now, findings/evidence/uncertainty, options, recommendation,
+strongest objection, requested contribution, dependent tasks, continuing work and observed versions.
+The first slice permits no implicit authorized default. Only dependent tasks block; independent
+ready tasks can proceed. All-dependent agendas stop for participant input. No response is consent.
+A worker must not use a pending discussion to bypass blocked task IDs or remove their dependency.
+
+States are ready/running/paused/blocked/finished, with separate outcomes. Resource/context stops
+are not successful research. This CLI has no scheduler, web UI or arbitrary research-code sandbox.
+Historical frozen packs can calibrate behavior; repeat success on them is not independent validation.
+
+## Evaluation contract
+
+`tests/fixtures/research/controlled.json` is a synthetic, answerable/unresolved/misleading pack.
+The dosing question is answerable only for the measured lotion/setup: lower observed variation is
+supported. Transit leakage is decisive counterevidence. Skin tolerance, consumer demand, population
+failure rates and a deployable new-product opportunity are unresolved. Dosing cannot establish safety
+or demand. A usable result proposes a shipment-leakage test and demand/tolerance investigation where
+relevant. Universal abstention, invented efficacy/demand or ignoring transit leakage fails the rubric.
+This is fixed before live evaluation; fixture-scripted proposals verify protocol, not live semantics.
+
+Four integrated scenarios are covered by `tests/test_research.py`: grounded and invalid citations;
+selective participation/independent work/changed priorities/stale response; restart/duplicate/fence;
+source failure/finite resources/uncertain provider usage. Actual worker traces receive a separate
+claim-by-claim check against the pack and rubric. Calls/tokens/time/retries/source type are reported.
+Cosmetics pilot quality and participant burden are not inferred from this synthetic demonstration.
+A matched pilot needs observed human participation, comparable missions/evidence/intelligence/budgets,
+no unsupported decisive claims, preserved counterevidence and useful discriminating validation.
+Its burden target is fewer routing/context-reconstruction interventions without a quality-floor
+failure; voluntary ideas and consequential preferences are measured separately. Without the matched
+baseline and observation, the pilot assessment is inconclusive and #321 validation remains open.

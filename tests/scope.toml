@@ -93,6 +93,7 @@ none = [
 # one. A changed `tests/**/test_*.py` needs no entry -- the classifier runs the changed test file
 # itself.
 [map]
+"cosmai/research/" = ["tests/test_research.py"]
 "analysis/" = [
     "tests/test_baselines.py",
     "tests/test_metrics.py",
