@@ -40,15 +40,18 @@ class EvidenceSource:
         self.database_url = database_url
         self.bundle = bundle
         self.literature_limit = 0
+        self.fulltext_enabled = False
         if bundle is not None and "literature" in bundle:
             config = bundle["literature"]
             if (
-                set(config) != {"max_requests"}
+                not {"max_requests"} <= set(config) <= {"max_requests", "fulltext"}
                 or type(config["max_requests"]) is not int
                 or not 1 <= config["max_requests"] <= 12
+                or type(config.get("fulltext", False)) is not bool
             ):
                 raise ValueError("literature profile requires max_requests between 1 and 12")
             self.literature_limit = config["max_requests"]
+            self.fulltext_enabled = config.get("fulltext", False)
         if bundle is not None:
             if "snapshot_sha256" in bundle:
                 self.evidence = snapshot_evidence(bundle)
@@ -88,6 +91,7 @@ class EvidenceSource:
             )
             and (name != "corroborate" or self.database_url)
             and (name not in literature.ACTIONS or self.literature_limit)
+            and (name not in {"literature_fulltext", "literature_section"} or self.fulltext_enabled)
         }
 
     def execute(self, action: str, args: dict, records: list[dict]) -> dict:
