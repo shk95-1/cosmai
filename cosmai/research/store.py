@@ -238,11 +238,15 @@ class Store:
                 self._save(conn, row, "observation", {"execution_id": aid, "status": status})
             return not stale
 
-    def feedback(self, sid: str, text: str, discussion: str | None = None):
+    def feedback(
+        self, sid: str, text: str, discussion: str | None = None, *, observed_revision: int | None = None
+    ):
         if not text.strip() or len(text) > 8000:
             raise ValueError("feedback needs 1–8000 characters")
         with self.connection() as conn:
             row = self._row(conn, sid, True)
+            if observed_revision is not None and observed_revision != row["revision"]:
+                raise StaleRevision("displayed research state changed; review before submitting")
             state = row["state"]
             observed = row["revision"]
             packet = state["discussions"].get(discussion) if discussion else None

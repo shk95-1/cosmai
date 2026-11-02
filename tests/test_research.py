@@ -715,3 +715,217 @@ def test_repeated_literature_read_preserves_original_capture(monkeypatch):
     second = src.execute("literature_read", args, records)
     assert second["evidence"] == first["evidence"]
     assert len(calls) == 1
+
+
+@pytest.mark.postgres
+class TestTerminalParticipation:
+    def test_input_automatically_continues_and_preserves_other_question(self, store, source):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="Selective terminal participation", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(
+                ("assess", agenda()),
+                ("discuss", discussion()),
+                ("discuss", {**discussion(), "id": "other", "dependent_tasks": ["independent"]}),
+            ),
+        ).run(sid)
+        before = store.get(sid)
+        worker = ScriptedWorker(
+            lambda c: interpreted(c, "decision", discussion_id="strategy"),
+            ("finish", {**finding(), "evidence": [], "outcome": "participant_input_required"}),
+        )
+        answers = iter(["Favor differentiation", ""])
+        output = []
+        row = participate(
+            Runner(store, source, worker), sid, read=lambda _: next(answers), write=output.append
+        )
+        assert row["state"]["feedback"][0]["text"] == "Favor differentiation"
+        assert row["state"]["feedback"][0]["observed_revision"] == before["revision"]
+        assert row["state"]["discussions"]["strategy"]["status"] == "answered"
+        assert row["state"]["discussions"]["other"] == before["state"]["discussions"]["other"]
+        assert row["deadline"] == before["deadline"]
+        assert row["state"]["mission"]["limits"] == before["state"]["mission"]["limits"]
+        assert row["state"]["goal_revision"] == 0
+        assert "Recommendation:" in "\n".join(output)
+        assert "Input considered" in "\n".join(output)
+
+    @pytest.mark.parametrize("answer", ["", "   ", None])
+    def test_exit_does_not_supply_consent_or_start_a_finished_session(self, store, source, answer):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="No implicit consent", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(("finish", {**finding(), "evidence": [], "outcome": "evidence_limit"})),
+        ).run(sid)
+        before = store.get(sid)
+
+        def read(_):
+            if answer is None:
+                raise EOFError
+            return answer
+
+        row = participate(Runner(store, source, ScriptedWorker()), sid, read=read, write=lambda _: None)
+        assert row["revision"] == before["revision"]
+        assert row["state"] == before["state"]
+
+    def test_changed_display_requires_review_before_resubmission(self, store, source):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="Protect displayed state", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(("finish", {**finding(), "evidence": [], "outcome": "evidence_limit"})),
+        ).run(sid)
+        answers = iter(["The old answer", ""])
+
+        def read(_):
+            answer = next(answers)
+            if answer:
+                store.feedback(sid, "An independent contribution arrived")
+            return answer
+
+        output = []
+        row = participate(Runner(store, source, ScriptedWorker()), sid, read=read, write=output.append)
+        assert [f["text"] for f in row["state"]["feedback"]] == ["An independent contribution arrived"]
+        assert "not submitted" in "\n".join(output)
+
+    def test_delayed_input_is_saved_without_renewing_expired_deadline(self, store, source):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="Delayed participant", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(("finish", {**finding(), "evidence": [], "outcome": "evidence_limit"})),
+        ).run(sid)
+        before = store.get(sid)
+
+        def read(_):
+            with store.connection() as conn:
+                conn.execute(
+                    "UPDATE research_session SET deadline=clock_timestamp()-interval '1 second' WHERE id=%s",
+                    (sid,),
+                )
+            return "Show me the source"
+
+        output = []
+        row = participate(Runner(store, source, ScriptedWorker()), sid, read=read, write=output.append)
+        assert row["state"]["feedback"][0]["text"] == "Show me the source"
+        assert row["state"]["feedback"][0]["status"] == "pending"
+        assert row["state"]["usage"] == before["state"]["usage"]
+        assert row["deadline"] < before["deadline"]
+        assert "deadline" in "\n".join(output)
+
+    @pytest.mark.parametrize("blocker", ["lease", "uncertain", "budget"])
+    def test_unavailable_execution_does_not_prompt_or_call_worker(self, store, source, blocker):
+        from psycopg.types.json import Jsonb
+
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="No hidden allowance", scope="controlled"))
+        token = store.acquire(sid, "other-runner")
+        if blocker != "lease":
+            store.release(sid, token)
+            row = store.get(sid)
+            usage = row["state"]["usage"]
+            if blocker == "uncertain":
+                usage["uncertain"] = 1
+            else:
+                usage["manager_calls"] = row["state"]["mission"]["limits"]["manager_calls"]
+            with store.connection() as conn:
+                conn.execute("UPDATE research_session SET state=%s WHERE id=%s", (Jsonb(row["state"]), sid))
+        before = store.get(sid)
+
+        def read(_):
+            pytest.fail("unavailable execution should not solicit input")
+
+        row = participate(Runner(store, source, ScriptedWorker()), sid, read=read, write=lambda _: None)
+        assert row["revision"] == before["revision"]
+        assert row["state"] == before["state"]
+
+    def test_input_survives_continuation_failure(self, store, source):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="Durable input", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(("finish", {**finding(), "evidence": [], "outcome": "evidence_limit"})),
+        ).run(sid)
+
+        def failure(c):
+            raise RuntimeError("simulated interruption")
+
+        with pytest.raises(RuntimeError, match="simulated"):
+            participate(
+                Runner(store, source, ScriptedWorker(failure)),
+                sid,
+                read=lambda _: "A voluntary idea",
+                write=lambda _: None,
+            )
+        row = store.get(sid)
+        assert row["state"]["feedback"][0]["text"] == "A voluntary idea"
+        assert row["state"]["feedback"][0]["status"] == "pending"
+        assert row["lease_until"] is None
+
+    def test_source_question_gets_exact_citation_in_terminal(self, store, source):
+        from cosmai.research.cli import participate
+
+        sid = store.create(Mission(objective="Source visibility", scope="controlled"))
+        Runner(
+            store,
+            source,
+            ScriptedWorker(
+                ("read_evidence", {"evidence_id": "trial"}),
+                ("read_evidence", {"evidence_id": "limit"}),
+                ("finish", finding(source)),
+            ),
+        ).run(sid)
+        worker = ScriptedWorker(lambda c: interpreted(c), ("finish", finding(source)))
+        answers = iter(["Show the source", ""])
+        output = []
+        row = participate(
+            Runner(store, source, worker), sid, read=lambda _: next(answers), write=output.append
+        )
+        assert row["state"]["feedback"][0]["interpretation"]["kind"] == "information"
+        assert "Source fixture:trial:" in "\n".join(output)
+        assert source.evidence["trial"]["passage"] in "\n".join(output)
+
+
+@pytest.mark.postgres
+def test_participate_cli_runs_then_accepts_stdin_and_resumes(store, source, monkeypatch, tmp_path, capsys):
+    import io
+    import json
+
+    from cosmai.cli import main
+    from cosmai.research import workers
+
+    sid = store.create(Mission(objective="Terminal entry point", scope="controlled"))
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(source.bundle))
+    worker = ScriptedWorker(
+        ("read_evidence", {"evidence_id": "trial"}),
+        ("read_evidence", {"evidence_id": "limit"}),
+        ("finish", finding(source)),
+        lambda c: interpreted(c),
+        ("finish", finding(source)),
+    )
+    monkeypatch.setattr(workers, "CodexWorker", lambda: worker)
+    monkeypatch.setenv("COSMAI_RESEARCH_SESSION_URL", store.url)
+    monkeypatch.setattr("sys.stdin", io.StringIO("Show the source\n\n"))
+    assert (
+        main(
+            ["research", "participate", sid, "--evidence-file", str(path), "--source-profile", source.profile]
+        )
+        == 0
+    )
+    row = store.get(sid)
+    assert row["state"]["feedback"][0]["interpretation"]["kind"] == "information"
+    assert row["state"]["usage"]["manager_calls"] == 5
+    assert "Source fixture:trial:" in capsys.readouterr().out
