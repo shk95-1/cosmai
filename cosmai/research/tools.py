@@ -76,6 +76,8 @@ class EvidenceSource:
         args = ACTIONS[action].model_validate(args).model_dump()
         available = dict(self.evidence)
         for record in records:
+            if record["kind"] not in READ_ACTIONS or record["status"] not in {"done", "stale"}:
+                continue
             for evidence in (record.get("result") or {}).get("evidence", []):
                 available[evidence["id"]] = evidence
         provenance = {"procedure": f"{action}:v1", "source": self.identity, "inputs": args}

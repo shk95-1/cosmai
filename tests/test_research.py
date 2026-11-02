@@ -364,3 +364,15 @@ def test_deadline_and_summary_survive_resume(store, source):
     assert row["state"]["outcome"] == "resource_limit"
     assert row["state"]["usage"]["manager_calls"] == 1
     assert row["state"]["summary"] == "Two independent questions"
+
+
+def test_manager_citations_are_not_treated_as_retrieved_evidence(source):
+    records = [
+        {
+            "kind": "manager",
+            "status": "done",
+            "result": {"evidence": [{"evidence_id": "trial", "passage": "the pump delivered 0.2 g"}]},
+        }
+    ]
+    result = source.execute("read_evidence", {"evidence_id": "limit"}, records)
+    assert result["evidence"][0]["id"] == "limit"
