@@ -88,6 +88,115 @@ def status_text(row: dict, *, current_only: bool = False) -> str:
     return "\n".join(lines)
 
 
+def participation_citations(state):
+    citations = []
+    if state["findings"]:
+        citations.extend(state["findings"][-1]["evidence"])
+    else:
+        for hypothesis in state["hypotheses"].values():
+            citations.extend(hypothesis["support"] + hypothesis["counterevidence"])
+    for discussion in state["discussions"].values():
+        if discussion["status"] == "pending":
+            citations.extend(discussion["evidence"])
+    # An interrupted investigation can have inspected passages without prepared findings.
+    if not citations:
+        citations = [{"evidence_id": key, "passage": e["passage"]} for key, e in state["evidence"].items()]
+    return citations
+
+
+def participation_sources(row):
+    state = row["state"]
+    lines = ["Original source passages from the displayed research state:"]
+    seen = set()
+    for citation in participation_citations(state):
+        key = (citation["evidence_id"], citation["passage"])
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence = state["evidence"][citation["evidence_id"]]
+        lines.append(f"Source {evidence['locator']}: {citation['passage']}")
+    if not seen:
+        lines.append("No inspected source passages are available yet.")
+    return "\n".join(lines)
+
+
+def participation_text(row):
+    """Present substantive durable content without duplicate quotations or diagnostic bookkeeping."""
+    state = row["state"]
+    lines = ["Research update", state["mission"]["objective"]]
+    stale = state.get("summary_goal_revision") not in (None, state["goal_revision"])
+    label = "Findings from an earlier objective" if stale else "Findings"
+    lines.append(f"{label}: {state['summary']}")
+    finding = state["findings"][-1] if state["findings"] else None
+    outcome_labels = {
+        "findings": "Qualified findings prepared.",
+        "evidence_limit": "Evidence limit reached; the investigation remains qualified.",
+        "participant_input_required": "Participant input is needed for dependent work.",
+    }
+    if state["outcome"] in outcome_labels:
+        lines.append(outcome_labels[state["outcome"]])
+    if state["outcome"] not in (None, "findings", "evidence_limit", "participant_input_required"):
+        lines.append("Research stopped: " + state["reason"])
+    elif state["reason"] and (not finding or state["reason"] != finding["next_validation"]):
+        lines.append("Current position: " + state["reason"])
+    for feedback in [f for f in state["feedback"] if f.get("interpretation")][-1:]:
+        lines.append("Response to your contribution: " + feedback["interpretation"]["response"])
+    if finding:
+        if finding["goal_revision"] != state["goal_revision"]:
+            lines.append("The following uncertainty and proposed validation belong to the earlier objective.")
+        lines.extend(
+            [
+                "Uncertainty: " + "; ".join(finding["uncertainties"]),
+                "Next validation: " + finding["next_validation"],
+            ]
+        )
+    else:
+        for hypothesis in state["hypotheses"].values():
+            lines.extend(
+                [
+                    "Hypothesis: " + hypothesis["problem"],
+                    "Uncertainty: " + "; ".join(hypothesis["uncertainties"]),
+                ]
+            )
+    for discussion in state["discussions"].values():
+        if discussion["status"] != "pending":
+            continue
+        lines.extend(
+            [
+                "Your input: " + discussion["question"],
+                "Why now: " + discussion["why_now"],
+                "Evidence so far: " + discussion["finding"],
+                "Uncertainty: " + discussion["uncertainty"],
+                "Options: " + " | ".join(discussion["options"]),
+                "Recommendation: " + discussion["recommendation"],
+                "Strongest objection: " + discussion["strongest_objection"],
+                "Your contribution: " + discussion["contribution"],
+                "Continues while waiting: " + discussion["independent_work"],
+            ]
+        )
+    locators = dict.fromkeys(
+        state["evidence"][c["evidence_id"]]["locator"] for c in participation_citations(state)
+    )
+    if locators:
+        lines.append(
+            "Sources (original passages: /sources during participation, or research status; "
+            "no research calls used):"
+        )
+        lines.extend(locators)
+    usage, limits = state["usage"], state["mission"]["limits"]
+    lines.append(
+        f"Resources: decisions {usage['manager_calls']}/{limits['manager_calls']}; "
+        f"actions {usage['tool_calls']}/{limits['tool_calls']}; "
+        f"failures {usage['failures']}/{limits['failures']}; uncertain {usage['uncertain']}"
+    )
+    lines.append(
+        f"Deadline: {row['deadline'] or 'starts on first execution'}; "
+        f"original duration {limits['seconds']}s, per-call limit {limits['call_seconds']}s. "
+        "Waiting uses the original duration; limits are not renewed."
+    )
+    return "\n".join(lines)
+
+
 def continuation_blocker(row):
     state = row["state"]
     if row["lease_until"] and row["lease_until"] > row["clock"]:
@@ -118,14 +227,19 @@ def participate(runner, sid, *, read=input, write=print):
         write("Research is continuing within the original resource limits.")
         row = runner.run(sid)
     while True:
-        write(status_text(row, current_only=True))
-        write(f"Original deadline: {row['deadline'] or 'starts on first execution'}")
+        write(participation_text(row))
         blocker = continuation_blocker(row)
         if blocker:
             write(f"Continuation unavailable: {blocker}. No resources were renewed.")
             return row
         try:
-            text = read("Your question, idea or response (empty input exits): ")
+            while True:
+                text = read(
+                    "Your question, idea or response (/sources inspects sources; empty input exits): "
+                )
+                if text.strip() != "/sources":
+                    break
+                write(participation_sources(row))
         except (EOFError, KeyboardInterrupt):
             text = ""
         if not text.strip():
