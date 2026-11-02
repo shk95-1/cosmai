@@ -48,6 +48,10 @@ def status_text(row: dict) -> str:
         f"Resources: {json.dumps(state['usage'], sort_keys=True)}",
         f"Limits: {json.dumps(state['mission']['limits'], sort_keys=True)}",
     ]
+    for feedback in state["feedback"]:
+        interpretation = feedback.get("interpretation")
+        if interpretation:
+            lines.append("Participant response: " + interpretation["response"])
     for hypothesis in state["hypotheses"].values():
         lines.append(f"{hypothesis['id']} ({hypothesis['status']}): {hypothesis['problem']}")
         lines.append("Uncertainty: " + "; ".join(hypothesis["uncertainties"]))

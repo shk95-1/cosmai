@@ -19,17 +19,29 @@ the controller does not infer identical databases from equal display names.
 
 `status <id>` shows findings, uncertainties, pending packets, evidence locators and resource position;
 `--json` exposes the full record. `feedback <id> --text <text>` always accepts spontaneous input.
-`--discussion <id>` resolves a named pending decision only if its goal revision remains current.
-All input records the observed revision; even stale input survives as an unapplied event. Applied
-input increments the goal revision and supersedes tasks/decisions for reconsideration. Earlier
-findings keep their original goal revision. `pause <id>` prevents subsequent execution transitions.
+`--discussion <id>` optionally binds a reply to a specific packet version; natural unbound replies
+are also supported. Input is queued with an ID and observed revision, fencing in-flight old decisions.
+The worker must interpret pending input through `integrate_feedback` before other work: information,
+ideas, decision responses and genuine goal changes have separate effects. Information/ideas retain the
+agenda; a decision releases only its tasks not still blocked by other packets. Only a goal change
+increments goal_revision and supersedes explicitly affected tasks plus their dependency descendants,
+related discussions and named hypotheses. Unrelated pending discussions survive a scoped goal change.
+Permissions, resource limits and deadlines cannot be edited by interpretation. The worker supplies
+the interpretation and response; humans never need to name event types or dependency IDs.
+Replies to superseded/answered packet versions are retained unapplied. Queued replies made stale by
+an intervening scoped change cannot apply to a replacement packet. Earlier findings retain their
+original goal revision. `pause <id>` prevents subsequent execution transitions.
 `reconcile <id> --execution <id> --disposition <text>` records an externally verified disposition of
 uncertain work, leaving its reservation consumed. It never retries an external effect.
 
 `state.py` defines version 1 records. Evidence includes source, locator, attribution (possibly unknown),
 capture time, immutable SHA-256, passage and access limitations. Interpretation, hypothesis, question,
 criteria revision and proposed validation are distinct fields. Exact-span validation checks attribution,
-not semantic entailment: the latter requires the evaluation below. Current summaries derive from
+not semantic entailment: the latter requires the evaluation below. New worker citations contain
+`evidence_id` and `span_id`, never retyped quotations. Context supplies deterministic spans bound to
+an immutable evidence hash and original codepoint offsets; code extracts and stores the original
+passage without Unicode normalization. Missing IDs, modified evidence and fabricated spans fail.
+Historical exact-passage records remain inspectable and retain their original failed dispositions. Current summaries derive from
 accepted assessments/findings; all previous assessments, decisions and feedback remain in the ledger.
 
 ## Execution
@@ -57,6 +69,25 @@ Sampling/corroboration are versioned historical procedures with their existing l
 not universal policy. No arbitrary SQL, code execution, crawling, maintained-code edit or production
 write is a research action. There is no paid retrieval or automatic fallback chain.
 
+Capabilities are source-specific. A frozen discovery snapshot exposes `sample` as immutable snapshot
+import and `analyze` against that completed action; a plain evidence pack exposes neither. Database
+profiles retain sample/corroborate/analyze with explicit connections. Nested discovery review, candidate,
+claim, query and anchor schemas expose downstream requirements. Claim/anchor span IDs are extracted
+before calling unchanged discovery validators. Validation feedback names fields and bounded application
+errors, excluding input payloads and provider/connection errors; failed attempts still consume limits.
+
+An evidence-file profile may explicitly include `{"literature":{"max_requests":11}}` (allowed 1–12).
+It adds `literature_search` and `literature_read` against the fixed Europe PMC REST search endpoint,
+using lite metadata and core abstracts respectively. No redirects, hidden retries, arbitrary URLs,
+full-text access or credentials. Reads accept only MED/PMC IDs discovered in this session. Search
+results alone are not evidence. Original abstract text/markup, article metadata, retrieval timestamp,
+API response hash and limitations are stored. Repeated reads reuse the immutable captured result.
+Every reserved literature action, including failed/stale/uncertain actions and cached reads, consumes
+the conservative request quota. Each action sends at most one HTTP request; responses are bounded to
+1 MB and 20 seconds inside the outer action deadline. Abstracts alone cannot establish detailed
+manufacturing feasibility, consumer demand or clinical generalization. No-result/access failures
+cannot establish absence. Official interface: https://europepmc.org/RestfulWebService .
+
 Codex CLI's documented `exec` interface uses ChatGPT authentication, JSON-schema output, an isolated
 temporary working directory, ignored user configuration, read-only sandbox, disabled shell/apply-patch/
 multi-agent/web tools and bounded execution. Returned tool executions fail validation. Claude Code's
@@ -73,7 +104,8 @@ Interfaces: [Codex non-interactive](https://learn.chatgpt.com/docs/non-interacti
 A packet supplies the question, why now, findings/evidence/uncertainty, options, recommendation,
 strongest objection, requested contribution, dependent tasks, continuing work and observed versions.
 The first slice permits no implicit authorized default. Only dependent tasks block; independent
-ready tasks can proceed. All-dependent agendas stop for participant input. No response is consent.
+ready tasks can proceed. Optional packets with no dependent tasks do not block reads or findings;
+they remain visible after completion. All-dependent agendas stop for participant input. No response is consent.
 A worker must not use a pending discussion to bypass blocked task IDs or remove their dependency.
 
 States are ready/running/paused/blocked/finished, with separate outcomes. Resource/context stops

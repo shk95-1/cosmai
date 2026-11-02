@@ -9,7 +9,8 @@ from analysis.discovery.core import select, validate_snapshot
 from analysis.discovery.corroborate import corroborate_local
 from analysis.discovery.sample import sample_local
 
-from .state import ACTIONS, READ_ACTIONS, Evidence, fingerprint
+from . import literature
+from .state import ACTIONS, READ_ACTIONS, Evidence, fingerprint, resolve_citations
 
 
 def snapshot_evidence(snapshot: dict) -> dict:
@@ -38,11 +39,21 @@ class EvidenceSource:
         self.profile = profile
         self.database_url = database_url
         self.bundle = bundle
+        self.literature_limit = 0
+        if bundle is not None and "literature" in bundle:
+            config = bundle["literature"]
+            if (
+                set(config) != {"max_requests"}
+                or type(config["max_requests"]) is not int
+                or not 1 <= config["max_requests"] <= 12
+            ):
+                raise ValueError("literature profile requires max_requests between 1 and 12")
+            self.literature_limit = config["max_requests"]
         if bundle is not None:
             if "snapshot_sha256" in bundle:
                 self.evidence = snapshot_evidence(bundle)
             else:
-                records = [Evidence.model_validate(e).frozen() for e in bundle["evidence"]]
+                records = [Evidence.model_validate(e).frozen() for e in bundle.get("evidence", [])]
                 self.evidence = {e["id"]: e for e in records}
                 if len(records) != len(self.evidence):
                     raise ValueError("duplicate evidence IDs")
@@ -64,15 +75,24 @@ class EvidenceSource:
     def schemas(self) -> dict:
         return {
             name: {
-                "version": 1,
+                "version": 2,
                 "effect": "read" if name in READ_ACTIONS else "session_state",
                 "arguments": model.model_json_schema(),
             }
             for name, model in ACTIONS.items()
-            if self.database_url or name not in {"sample", "corroborate"}
+            if (
+                name not in {"sample", "analyze"}
+                or self.database_url
+                or self.bundle is not None
+                and "snapshot_sha256" in self.bundle
+            )
+            and (name != "corroborate" or self.database_url)
+            and (name not in literature.ACTIONS or self.literature_limit)
         }
 
     def execute(self, action: str, args: dict, records: list[dict]) -> dict:
+        if action not in self.schemas():
+            raise ValueError("capability unavailable for selected source profile")
         args = ACTIONS[action].model_validate(args).model_dump()
         available = dict(self.evidence)
         for record in records:
@@ -81,6 +101,8 @@ class EvidenceSource:
             for evidence in (record.get("result") or {}).get("evidence", []):
                 available[evidence["id"]] = evidence
         provenance = {"procedure": f"{action}:v1", "source": self.identity, "inputs": args}
+        if action in literature.ACTIONS:
+            return {**provenance, **literature.execute(action, args, records, self.literature_limit)}
         if action == "search":
             if self.bundle is None and not available:
                 raise ValueError("no captured evidence; use explicit sample first")
@@ -99,10 +121,14 @@ class EvidenceSource:
             if args["evidence_id"] not in available:
                 raise ValueError("evidence is unavailable in selected source")
             return {**provenance, "evidence": [available[args["evidence_id"]]]}
-        if action in {"sample", "corroborate"} and not self.database_url:
+        if action == "corroborate" and not self.database_url:
             raise ValueError("explicit database evidence datasource required")
         if action == "sample":
-            snapshot = sample_local(args["per_cue"], database_url=self.database_url)
+            snapshot = (
+                self.bundle
+                if self.bundle is not None and "snapshot_sha256" in self.bundle
+                else sample_local(args["per_cue"], database_url=self.database_url)
+            )
             return {
                 **provenance,
                 "snapshot": snapshot,
@@ -113,11 +139,19 @@ class EvidenceSource:
         )
         if not record or "snapshot" not in (record["result"] or {}):
             raise ValueError("completed sample execution required")
+        snapshot = record["result"]["snapshot"]
+        review = resolve_review(args["review"], snapshot, available)
         if action == "corroborate":
+            queries = args["queries"]
+            for group in queries["groups"].values():
+                for anchor in group["anchors"]:
+                    anchor["span"] = extract_span(
+                        anchor["doc_id"], anchor.pop("span_id"), snapshot_evidence(snapshot)
+                    )
             snapshot = corroborate_local(
                 record["result"]["snapshot"],
-                args["review"],
-                args["queries"],
+                review,
+                queries,
                 args["per_query"],
                 database_url=self.database_url,
             )
@@ -129,10 +163,38 @@ class EvidenceSource:
         if action == "analyze":
             return {
                 **provenance,
-                "selection": select(record["result"]["snapshot"], args["review"]),
+                "selection": select(snapshot, review),
                 "limitations": ["Historical discovery procedure, not universal research criteria"],
             }
         raise ValueError("unsupported research tool")
+
+
+def extract_span(doc_id, span_id, evidence):
+    return resolve_citations([{"evidence_id": doc_id, "span_id": span_id}], evidence)[0]["passage"]
+
+
+def resolve_review(review, snapshot, available):
+    import copy
+
+    review = copy.deepcopy(review)
+    evidence = snapshot_evidence(snapshot)
+    for observation in review["observations"]:
+        doc_id = observation["doc_id"]
+        for field in ("context", "requirement", "behavior", "burden", "trade_off"):
+            claim = observation.get(field)
+            if claim:
+                claim["span"] = extract_span(doc_id, claim.pop("span_id"), evidence)
+            else:
+                observation.pop(field, None)
+        for field in ("span", "recurrence_span"):
+            span_id = observation.pop(field + "_id", None)
+            if span_id:
+                observation[field] = extract_span(doc_id, span_id, evidence)
+    for candidate in review["candidates"].values():
+        candidate["technical"]["references"] = resolve_citations(
+            candidate["technical"]["references"], available
+        )
+    return review
 
 
 def _tool_child(pipe, source, action, args, records):
@@ -142,7 +204,9 @@ def _tool_child(pipe, source, action, args, records):
             raise ValueError("tool result exceeds artifact limit")
         pipe.send((True, result))
     except Exception as exc:
-        pipe.send((False, type(exc).__name__))
+        from .runner import validation_error
+
+        pipe.send((False, validation_error(exc)))
     finally:
         pipe.close()
 
@@ -161,7 +225,7 @@ def bounded_read(source, action, args, records, timeout):
             raise TimeoutError("read procedure exceeded its allowance")
         ok, value = parent.recv()
         if not ok:
-            raise RuntimeError(value)
+            raise ValueError(str(value))
         return value
     finally:
         parent.close()

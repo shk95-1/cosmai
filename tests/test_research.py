@@ -7,7 +7,7 @@ import pytest
 from psycopg.sql import SQL
 
 from cosmai.research.runner import Runner, transition
-from cosmai.research.state import Evidence, Limits, Mission
+from cosmai.research.state import Evidence, Limits, Mission, evidence_spans
 from cosmai.research.store import Conflict, Store
 from cosmai.research.tools import EvidenceSource, bounded_read
 from cosmai.research.workers import ProviderFailure
@@ -101,12 +101,18 @@ class ScriptedWorker:
         return proposal(context, *step), {"fixture": True}
 
 
-def finding():
+def finding(source=None):
     return {
         "summary": "Pump dosing is promising for validation; no tolerance or demand conclusion.",
         "evidence": [
-            {"evidence_id": "trial", "passage": "the pump delivered 0.2 g"},
-            {"evidence_id": "limit", "passage": "The pump leaked in transit."},
+            {
+                "evidence_id": "trial",
+                "span_id": evidence_spans(source.evidence["trial"])[0]["id"] if source else "unknown",
+            },
+            {
+                "evidence_id": "limit",
+                "span_id": evidence_spans(source.evidence["limit"])[-1]["id"] if source else "unknown",
+            },
         ],
         "uncertainties": ["Sensitive-skin suitability unknown", "Transit leakage unresolved"],
         "next_validation": "Measure shipment leakage before a qualified product decision",
@@ -166,7 +172,7 @@ class TestDurableResearch:
         first = ScriptedWorker(("read_evidence", {"evidence_id": "trial"}))
         row = Runner(store, source, first).run(sid, steps=1)
         assert row["state"]["outcome"] == "step_limit"
-        fresh = ScriptedWorker(("read_evidence", {"evidence_id": "limit"}), ("finish", finding()))
+        fresh = ScriptedWorker(("read_evidence", {"evidence_id": "limit"}), ("finish", finding(source)))
         row = Runner(Store(store.url), source, fresh).run(sid)
         assert row["state"]["status"] == "finished"
         assert fresh.contexts[0]["state"]["evidence"]["trial"]["passage"]
@@ -174,7 +180,7 @@ class TestDurableResearch:
         assert len(row["state"]["findings"]) == 1
         store.feedback(sid, "Prioritize transit reliability instead of dosing accuracy")
         row = store.get(sid)
-        assert row["state"]["goal_revision"] == 1
+        assert row["state"]["goal_revision"] == 0
         assert row["state"]["status"] == "ready"
         assert row["state"]["findings"][0]["goal_revision"] == 0
         assert row["state"]["usage"]["manager_calls"] == 3
@@ -191,11 +197,24 @@ class TestDurableResearch:
         assert "limit" in row["state"]["evidence"]
         assert row["state"]["discussions"]["strategy"]["status"] == "pending"
         store.feedback(sid, "Reliability is now the only priority")
+        Runner(
+            store,
+            source,
+            ScriptedWorker(
+                lambda c: interpreted(
+                    c,
+                    "goal_change",
+                    affected_tasks=["choice"],
+                    affected_discussions=["strategy"],
+                    preferences=["Reliability"],
+                )
+            ),
+        ).run(sid, steps=1)
         store.feedback(sid, "Choose speed", "strategy")
         state = store.get(sid)["state"]
         assert state["goal_revision"] == 1
         assert not state["feedback"][-1]["applied"]
-        assert state["tasks"]["independent"]["status"] == "superseded"
+        assert state["tasks"]["independent"]["status"] == "ready"
 
     def test_feedback_during_manager_rejects_old_decision(self, store, source):
         sid = store.create(Mission(objective="Test revision", scope="controlled"))
@@ -204,7 +223,7 @@ class TestDurableResearch:
             store.feedback(sid, "Prefer reliability")
             return proposal(context, "pause", {"reason": "Old plan must not apply"})
 
-        worker = ScriptedWorker(interrupted, ("pause", {"reason": "New goal considered"}))
+        worker = ScriptedWorker(interrupted, interpreted, ("pause", {"reason": "New goal considered"}))
         row = Runner(store, source, worker).run(sid)
         assert row["state"]["reason"] == "New goal considered"
         assert any(a["status"] == "stale" for a in store.actions(sid))
@@ -220,7 +239,9 @@ class TestDurableResearch:
 
         source.execute = interrupted
         worker = ScriptedWorker(
-            ("read_evidence", {"evidence_id": "trial"}), ("pause", {"reason": "Reconsidered old observation"})
+            ("read_evidence", {"evidence_id": "trial"}),
+            interpreted,
+            ("pause", {"reason": "Reconsidered old observation"}),
         )
         row = Runner(store, source, worker).run(sid)
         assert row["state"]["evidence"] == {}
@@ -285,7 +306,7 @@ class TestDurableResearch:
         sid = store.create(
             Mission(objective="No invented citations", scope="controlled", limits=Limits(failures=1))
         )
-        worker = ScriptedWorker(("finish", finding()))
+        worker = ScriptedWorker(("finish", finding(source)))
         row = Runner(store, source, worker).run(sid)
         assert row["state"]["findings"] == []
         assert row["state"]["usage"]["failures"] == 1
@@ -391,10 +412,11 @@ def test_feedback_between_context_read_and_reservation_rebuilds_context(store, s
         return schemas()
 
     source.schemas = racing_schemas
-    worker = ScriptedWorker(("pause", {"reason": "Current priority considered"}))
+    worker = ScriptedWorker(interpreted, ("pause", {"reason": "Current priority considered"}))
     row = Runner(store, source, worker).run(sid)
-    assert worker.contexts[0]["goal_revision"] == 1
-    assert row["state"]["usage"]["manager_calls"] == 1
+    assert worker.contexts[0]["goal_revision"] == 0
+    assert worker.contexts[0]["state"]["feedback"][-1]["status"] == "pending"
+    assert row["state"]["usage"]["manager_calls"] == 2
     assert row["state"]["usage"]["failures"] == 0
 
 
@@ -408,3 +430,288 @@ def test_discussion_blocks_transitively_dependent_agenda():
     transition(state, "discuss", discussion(), 1)
     assert state["status"] == "blocked"
     assert state["outcome"] == "participant_input_required"
+
+
+def test_span_selection_preserves_unicode_and_rejects_changed_source():
+    from cosmai.research.state import evidence_spans, resolve_citations
+
+    raw = Evidence(
+        id="unicode",
+        source="synthetic",
+        locator="fixture",
+        captured_at="now",
+        passage="Original \u110f\u110f\u110f is not \u314b\u314b\u314b.",
+    ).frozen()
+    ref = {"evidence_id": "unicode", "span_id": evidence_spans(raw)[0]["id"]}
+    resolved = resolve_citations([ref], {"unicode": raw})[0]
+    assert resolved["passage"] == raw["passage"]
+    changed = {**raw, "passage": "Changed text"}
+    with pytest.raises(ValueError):
+        resolve_citations([ref], {"unicode": changed})
+    with pytest.raises(ValueError):
+        resolve_citations([{**ref, "span_id": "fabricated"}], {"unicode": raw})
+
+
+def test_frozen_capabilities_have_executable_analysis_path():
+    from analysis.discovery.core import freeze
+
+    snapshot = freeze(
+        {"finished_at": "2026-11-02"},
+        [{"doc_id": "d1", "source": "fixture", "text": "No personal usage observed.", "published_at": None}],
+    )
+    source = EvidenceSource(profile="snapshot", bundle=snapshot)
+    assert "sample" in source.schemas() and "analyze" in source.schemas()
+    sampled = source.execute("sample", {}, [])
+    assert sampled["snapshot"] == snapshot
+    plain = EvidenceSource(profile="plain", bundle={"evidence": []})
+    assert "analyze" not in plain.schemas() and "corroborate" not in plain.schemas()
+
+
+def test_discovery_schemas_describe_nested_required_fields():
+    from cosmai.research.state import ACTIONS
+
+    schema = ACTIONS["corroborate"].model_json_schema()
+    assert "observations" in str(schema) and "all_of" in str(schema)
+    with pytest.raises(ValueError):
+        ACTIONS["analyze"].model_validate({"sample_action": "x", "review": {}})
+
+
+def interpreted(context, kind="information", **kwargs):
+    item = next(f for f in context["state"]["feedback"] if f.get("status") == "pending")
+    return proposal(
+        context,
+        "integrate_feedback",
+        {
+            "feedback_id": item["id"],
+            "kind": kind,
+            "interpretation": "Controlled interpretation",
+            "response": "Input considered",
+            **kwargs,
+        },
+    )
+
+
+@pytest.mark.postgres
+def test_answer_a_preserves_b_and_source_question_preserves_agenda(store, source):
+    sid = store.create(Mission(objective="Selective participation", scope="controlled"))
+    tasks = agenda()
+    a = discussion()
+    b = {**discussion(), "id": "audience", "dependent_tasks": ["independent"]}
+    Runner(store, source, ScriptedWorker(("assess", tasks), ("discuss", a), ("discuss", b))).run(sid)
+    before = store.get(sid)
+    store.feedback(sid, "Favor differentiation")  # no technical event label or discussion ID
+    worker = ScriptedWorker(lambda c: interpreted(c, "decision", discussion_id="strategy"))
+    row = Runner(store, source, worker).run(sid, steps=1)
+    assert row["state"]["discussions"]["strategy"]["status"] == "answered"
+    assert row["state"]["discussions"]["audience"]["status"] == "pending"
+    assert row["state"]["tasks"]["choice"]["status"] == "ready"
+    assert row["state"]["tasks"]["independent"]["status"] == "blocked"
+    assert row["state"]["goal_revision"] == 0
+    store.feedback(sid, "Where is that source?")
+    after = Runner(store, source, ScriptedWorker(interpreted)).run(sid, steps=1)
+    assert after["state"]["tasks"] == row["state"]["tasks"]
+    assert after["state"]["discussions"] == row["state"]["discussions"]
+    assert after["deadline"] == before["deadline"]
+    assert after["state"]["mission"]["limits"] == before["state"]["mission"]["limits"]
+
+
+@pytest.mark.postgres
+def test_optional_discussion_allows_unassigned_read_and_finish(store, source):
+    sid = store.create(Mission(objective="Optional ideas", scope="controlled"))
+    optional = {**discussion(), "dependent_tasks": []}
+    row = Runner(
+        store,
+        source,
+        ScriptedWorker(
+            ("discuss", optional),
+            ("read_evidence", {"evidence_id": "trial"}),
+            ("read_evidence", {"evidence_id": "limit"}),
+            ("finish", finding(source)),
+        ),
+    ).run(sid)
+    assert row["state"]["status"] == "finished"
+    assert row["state"]["discussions"]["strategy"]["status"] == "pending"
+    assert row["state"]["usage"]["failures"] == 0
+
+
+@pytest.mark.postgres
+def test_validation_feedback_names_missing_field_and_allows_bounded_correction(store, source):
+    sid = store.create(Mission(objective="Repair malformed action", scope="controlled"))
+    worker = ScriptedWorker(("read_evidence", {}), ("read_evidence", {"evidence_id": "trial"}))
+    row = Runner(store, source, worker).run(sid, steps=1)
+    error = worker.contexts[-1]["recent_provider_errors"][-1]
+    assert error["details"][0]["field"] == "evidence_id"
+    assert "input" not in error["details"][0]
+    assert "trial" in row["state"]["evidence"]
+    assert row["state"]["usage"]["manager_calls"] == 2
+    assert row["state"]["usage"]["failures"] == 1
+
+
+def test_frozen_snapshot_analyze_extracts_review_spans():
+    from analysis.discovery.core import freeze
+    from cosmai.research.tools import snapshot_evidence
+
+    snapshot = freeze(
+        {"finished_at": "2026-11-02"},
+        [{"doc_id": "d1", "source": "fixture", "text": "No personal usage observed.", "published_at": None}],
+    )
+    source = EvidenceSource(profile="snapshot", bundle=snapshot)
+    sampled = source.execute("sample", {}, [])
+    ref = evidence_spans(snapshot_evidence(snapshot)["d1"])[0]["id"]
+    args = {
+        "sample_action": "sample1",
+        "review": {
+            "snapshot_sha256": snapshot["snapshot_sha256"],
+            "reviewer": "fixture",
+            "interventions": [],
+            "candidates": {},
+            "observations": [
+                {"doc_id": "d1", "disposition": "off_topic", "reason": "No usage", "span_id": ref}
+            ],
+        },
+    }
+    records = [{"id": "sample1", "kind": "sample", "status": "done", "result": sampled}]
+    result = source.execute("analyze", args, records)
+    assert result["selection"]["status"] == "no_qualified_candidate"
+    args["review"]["observations"][0]["span_id"] = "fabricated"
+    with pytest.raises(ValueError, match="span_id"):
+        source.execute("analyze", args, records)
+
+
+def test_literature_access_is_scoped_counted_and_requires_discovered_ids(monkeypatch):
+    from cosmai.research import literature
+
+    calls = []
+
+    def fake(params):
+        calls.append(params)
+        return {
+            "response_sha256": "response",
+            "resultList": {
+                "result": [
+                    {"source": "MED", "id": "123", "title": "Trial", "abstractText": "Original result."}
+                ]
+            },
+        }
+
+    monkeypatch.setattr(literature, "fetch", fake)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 2}})
+    records = [{"id": "s", "kind": "literature_search", "status": "reserved", "result": None}]
+    result = src.execute("literature_search", {"query": "moisturizer"}, records)
+    records[0].update(status="done", result=result)
+    args = {"source": "MED", "article_id": "123"}
+    records.append({"id": "r", "kind": "literature_read", "status": "reserved", "result": None})
+    read = src.execute("literature_read", args, records)
+    assert read["evidence"][0]["passage"] == "Original result."
+    with pytest.raises(ValueError, match="discovered"):
+        src.execute("literature_read", {**args, "article_id": "456"}, records)
+    records.append({"kind": "literature_read", "status": "reserved"})
+    with pytest.raises(ValueError, match="allowance"):
+        src.execute("literature_read", args, records)
+    assert len(calls) == 2
+    assert "literature_search" not in EvidenceSource(profile="offline", bundle={"evidence": []}).schemas()
+
+
+def test_information_cannot_invalidate_work_and_stale_decision_cannot_apply():
+    from cosmai.research.participation import integrate
+    from cosmai.research.state import ACTIONS, initial_state
+
+    state = initial_state(Mission(objective="Keep local effects", scope="controlled"))
+    transition(state, "assess", ACTIONS["assess"].model_validate(agenda()).model_dump(), 0)
+    transition(state, "discuss", discussion(), 1)
+    state["feedback"] = [
+        {
+            "id": "f",
+            "status": "pending",
+            "discussion": "strategy",
+            "text": "Answer",
+            "observed_revision": 2,
+            "discussion_revision": 1,
+        }
+    ]
+    args = (
+        ACTIONS["integrate_feedback"]
+        .model_validate(
+            {
+                "feedback_id": "f",
+                "kind": "information",
+                "interpretation": "Source question",
+                "response": "A source",
+                "affected_tasks": ["choice"],
+            }
+        )
+        .model_dump()
+    )
+    with pytest.raises(ValueError, match="genuine"):
+        integrate(state, args)
+    args.update(kind="decision", affected_tasks=[])
+    state["discussions"]["strategy"]["status"] = "superseded"
+    with pytest.raises(ValueError, match="pending"):
+        integrate(state, args)
+
+
+@pytest.mark.postgres
+def test_scoped_goal_change_keeps_independent_old_goal_discussion_answerable(store, source):
+    sid = store.create(Mission(objective="Scoped change", scope="controlled"))
+    Runner(
+        store,
+        source,
+        ScriptedWorker(
+            ("assess", agenda()),
+            ("discuss", discussion()),
+            ("discuss", {**discussion(), "id": "other", "dependent_tasks": ["independent"]}),
+        ),
+    ).run(sid)
+    store.feedback(sid, "Change the strategy question, keep the other question")
+    Runner(
+        store,
+        source,
+        ScriptedWorker(
+            lambda c: interpreted(
+                c,
+                "goal_change",
+                affected_tasks=["choice"],
+                affected_discussions=["strategy"],
+                preferences=["Revisit strategy"],
+            )
+        ),
+    ).run(sid, steps=1)
+    store.feedback(sid, "Here is my independent answer", "other")
+    row = Runner(
+        store, source, ScriptedWorker(lambda c: interpreted(c, "decision", discussion_id="other"))
+    ).run(sid, steps=1)
+    assert row["state"]["goal_revision"] == 1
+    assert row["state"]["discussions"]["other"]["goal_revision"] == 0
+    assert row["state"]["discussions"]["other"]["status"] == "answered"
+    assert row["state"]["discussions"]["strategy"]["status"] == "superseded"
+
+
+def test_repeated_literature_read_preserves_original_capture(monkeypatch):
+    from cosmai.research import literature
+
+    calls = []
+
+    def fake(params):
+        calls.append(params)
+        return {
+            "response_sha256": "hash",
+            "resultList": {
+                "result": [{"id": "123", "source": "MED", "title": "Trial", "abstractText": "Original text."}]
+            },
+        }
+
+    monkeypatch.setattr(literature, "fetch", fake)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 4}})
+    records = [
+        {
+            "kind": "literature_search",
+            "status": "done",
+            "result": {"papers": [{"id": "123", "source": "MED"}]},
+        }
+    ]
+    args = {"source": "MED", "article_id": "123"}
+    first = src.execute("literature_read", args, records)
+    records.append({"kind": "literature_read", "status": "done", "result": first})
+    second = src.execute("literature_read", args, records)
+    assert second["evidence"] == first["evidence"]
+    assert len(calls) == 1
