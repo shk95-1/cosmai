@@ -940,3 +940,264 @@ def test_participate_cli_runs_then_accepts_stdin_and_resumes(store, source, monk
     assert row["state"]["feedback"][0]["interpretation"]["kind"] == "information"
     assert row["state"]["usage"]["manager_calls"] == 5
     assert "Source fixture:trial:" in capsys.readouterr().out
+
+
+def fulltext_unicode():
+    return Path("tests/fixtures/research_fulltext_unicode.txt").read_text(encoding="utf-8")
+
+
+def fulltext_xml(text=None):
+    if text is None:
+        text = f"Original method: {fulltext_unicode()} with glycerol."
+    return (
+        '<article><front><article-meta><article-id pub-id-type="pmcid">PMC123</article-id>'
+        '</article-meta></front><body><sec id="methods"><title>Methods</title><p>'
+        + text
+        + "</p></sec><sec><title>Results</title><p>No superiority established.</p>"
+        "</sec></body><back><sec><title>Conflicts</title><p>Industry funding.</p></sec></back></article>"
+    ).encode()
+
+
+def fulltext_records():
+    return [
+        {
+            "id": "search",
+            "kind": "literature_search",
+            "status": "done",
+            "result": {
+                "papers": [
+                    {"id": "456", "source": "MED", "pmcid": "PMC123", "isOpenAccess": "Y", "title": "Trial"}
+                ]
+            },
+        }
+    ]
+
+
+def test_fulltext_requires_discovery_and_reuses_immutable_capture(monkeypatch):
+    from cosmai.research import literature
+
+    calls = []
+
+    def fetch(pmcid):
+        calls.append(pmcid)
+        return fulltext_xml()
+
+    monkeypatch.setattr(literature, "fetch_xml", fetch, raising=False)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    with pytest.raises(ValueError, match="discovered"):
+        src.execute("literature_fulltext", {"pmcid": "PMC123"}, [])
+    records = fulltext_records()
+    first = src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    records.append({"id": "document", "kind": "literature_fulltext", "status": "done", "result": first})
+    again = src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    assert again["document"] == first["document"]
+    assert first["network_requests"] == 1 and again["network_requests"] == 0
+    assert calls == ["PMC123"]
+    part = src.execute(
+        "literature_section",
+        {"fulltext_action": "document", "section_id": first["sections"][0]["id"]},
+        records,
+    )
+    assert part["evidence"][0]["passage"] == f"MethodsOriginal method: {fulltext_unicode()} with glycerol."
+    assert part["document_sha256"] == first["document_sha256"]
+    assert part["network_requests"] == 0
+    assert first["sections"][-1]["title"] == "Conflicts"
+    assert "literature_fulltext" not in EvidenceSource(profile="offline", bundle={"evidence": []}).schemas()
+    assert (
+        "literature_fulltext"
+        not in EvidenceSource(profile="abstracts", bundle={"literature": {"max_requests": 12}}).schemas()
+    )
+
+
+def test_fulltext_rejects_fabricated_sections_and_changed_capture(monkeypatch):
+    from cosmai.research import literature
+
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: fulltext_xml(), raising=False)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    records = fulltext_records()
+    doc = src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    records.append({"id": "document", "kind": "literature_fulltext", "status": "done", "result": doc})
+    with pytest.raises(ValueError, match="section"):
+        src.execute("literature_section", {"fulltext_action": "document", "section_id": "invented"}, records)
+    with pytest.raises(ValueError, match="capture"):
+        src.execute(
+            "literature_section",
+            {"fulltext_action": "unknown", "section_id": doc["sections"][0]["id"]},
+            records,
+        )
+    doc["document"]["xml"] = doc["document"]["xml"].replace("glycerol", "ceramide")
+    with pytest.raises(ValueError, match="changed"):
+        src.execute(
+            "literature_section",
+            {"fulltext_action": "document", "section_id": doc["sections"][0]["id"]},
+            records,
+        )
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        fulltext_xml().replace(b"PMC123", b"PMC999"),
+        b'<!DOCTYPE article [<!ENTITY x "boom">]><article>&x;</article>',
+        b"<article>",
+    ],
+)
+def test_fulltext_rejects_article_mismatch_entities_and_malformed_xml(monkeypatch, xml):
+    from cosmai.research import literature
+
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: xml, raising=False)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    with pytest.raises(ValueError):
+        src.execute("literature_fulltext", {"pmcid": "PMC123"}, fulltext_records())
+
+
+def test_fulltext_long_sections_are_all_addressable_without_normalization(monkeypatch):
+    from cosmai.research import literature
+
+    text = f"A{fulltext_unicode()}<italic>B</italic>" * 2000
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: fulltext_xml(text), raising=False)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    records = fulltext_records()
+    doc = src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    records.append({"id": "document", "kind": "literature_fulltext", "status": "done", "result": doc})
+    methods = [p for p in doc["sections"] if p["title"] == "Methods"]
+    passages = [
+        src.execute("literature_section", {"fulltext_action": "document", "section_id": p["id"]}, records)[
+            "evidence"
+        ][0]["passage"]
+        for p in methods
+    ]
+    assert len(methods) > 1
+    assert all(len(p) <= 8000 for p in passages)
+    assert "".join(passages) == "Methods" + f"A{fulltext_unicode()}B" * 2000
+
+
+def test_fulltext_discovery_eligibility_and_conservative_quota_precede_http(monkeypatch):
+    from cosmai.research import literature
+
+    def no_http(_):
+        pytest.fail("request must not be sent")
+
+    monkeypatch.setattr(literature, "fetch_xml", no_http, raising=False)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 1, "fulltext": True}})
+    records = fulltext_records()
+    records[0]["result"]["papers"][0]["isOpenAccess"] = "N"
+    with pytest.raises(ValueError, match="eligible"):
+        src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    records.append({"kind": "literature_fulltext", "status": "uncertain"})
+    with pytest.raises(ValueError, match="allowance"):
+        src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+
+
+def test_literature_transport_fulltext_fixed_host_no_redirect_and_size_limit(monkeypatch):
+    import httpx
+
+    from cosmai.research import literature
+
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(302, headers={"Location": "https://other.invalid/"})
+
+    client = httpx.Client
+    monkeypatch.setattr(
+        literature.httpx, "Client", lambda **kw: client(transport=httpx.MockTransport(handle), **kw)
+    )
+    with pytest.raises(httpx.HTTPStatusError):
+        literature.fetch_xml("PMC123")
+    assert len(requests) == 1
+    assert requests[0].url.host == "www.ebi.ac.uk"
+    assert requests[0].url.path.endswith("/PMC123/fullTextXML")
+    with pytest.raises(ValueError):
+        literature.fetch_xml("../other")
+    assert len(requests) == 1
+    monkeypatch.setattr(
+        literature.httpx,
+        "Client",
+        lambda **kw: client(
+            transport=httpx.MockTransport(lambda _: httpx.Response(200, content=b"x" * 1_000_001)), **kw
+        ),
+    )
+    with pytest.raises(ValueError, match="1 MB"):
+        literature.fetch_xml("PMC123")
+
+
+@pytest.mark.postgres
+def test_worker_indexes_fulltext_then_reads_selected_section_with_bounded_context(store, monkeypatch):
+    import json
+
+    from cosmai.research import literature
+    from cosmai.research.state import evidence_spans
+
+    monkeypatch.setattr(
+        literature,
+        "fetch",
+        lambda _: {
+            "response_sha256": "search-hash",
+            "resultList": {"result": fulltext_records()[0]["result"]["papers"]},
+        },
+    )
+    monkeypatch.setattr(
+        literature, "fetch_xml", lambda _: fulltext_xml("Evidence text. " * 15000), raising=False
+    )
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    sid = store.create(Mission(objective="Inspect a useful full method", scope="controlled XML"))
+
+    def choose(context):
+        observation = context["observations"][-1]
+        assert context["remaining_resources"]["literature_actions"] == 10
+        assert "document" not in observation["result"]
+        assert "document_access" in observation["result"]
+        assert "Evidence text." not in json.dumps(context)
+        return proposal(
+            context,
+            "literature_section",
+            {
+                "fulltext_action": observation["execution_id"],
+                "section_id": observation["result"]["sections"][0]["id"],
+            },
+        )
+
+    def finish(context):
+        e = next(iter(context["state"]["evidence"].values()))
+        return proposal(
+            context,
+            "finish",
+            {**finding(), "evidence": [{"evidence_id": e["id"], "span_id": evidence_spans(e)[0]["id"]}]},
+        )
+
+    worker = ScriptedWorker(
+        ("literature_search", {"query": "method"}),
+        ("literature_fulltext", {"pmcid": "PMC123"}),
+        choose,
+        finish,
+    )
+    row = Runner(store, src, worker).run(sid)
+    assert row["state"]["outcome"] == "findings"
+    assert row["state"]["usage"]["manager_calls"] == 4
+    capture = next(a for a in Store(store.url).actions(sid) if a["kind"] == "literature_fulltext")
+    assert len(capture["result"]["document"]["xml"]) > 150000
+    assert len(json.dumps(worker.contexts[-1])) < 150000
+
+
+def test_fulltext_tables_remain_inspectable_with_cell_structure(monkeypatch):
+    from cosmai.research import literature
+
+    table = (
+        "<table-wrap><label>Table 1</label><caption><p>Composition</p></caption>"
+        "<table><tr><th>Ingredient</th><th>Percent</th></tr>"
+        "<tr><td>Glycerol</td><td>3.0</td></tr></table></table-wrap>"
+    )
+    xml = fulltext_xml().replace(b"</body>", table.encode() + b"</body>")
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: xml)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    records = fulltext_records()
+    doc = src.execute("literature_fulltext", {"pmcid": "PMC123"}, records)
+    records.append({"id": "document", "kind": "literature_fulltext", "status": "done", "result": doc})
+    part = next(p for p in doc["sections"] if p["representation"] == "table_xml")
+    read = src.execute(
+        "literature_section", {"fulltext_action": "document", "section_id": part["id"]}, records
+    )
+    assert "<tr><td>Glycerol</td><td>3.0</td></tr>" in read["evidence"][0]["passage"]
+    assert "<th>Percent</th>" in read["evidence"][0]["passage"]

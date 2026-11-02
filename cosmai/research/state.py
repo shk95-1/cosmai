@@ -227,6 +227,15 @@ class LiteratureRead(Record):
     article_id: Annotated[str, Field(pattern=r"^(?:PMC)?[0-9]{1,12}$")]
 
 
+class LiteratureFulltext(Record):
+    pmcid: Annotated[str, Field(pattern=r"^PMC[0-9]{1,12}$")]
+
+
+class LiteratureSection(Record):
+    fulltext_action: Key = Field(description="Execution ID of a captured literature_fulltext observation")
+    section_id: Key = Field(description="Exact ID from that capture's sections index")
+
+
 class Contribution(Record):
     feedback_id: Key
     kind: Literal["information", "idea", "decision", "goal_change"]
@@ -254,6 +263,8 @@ ACTIONS = {
     "search": Search,
     "literature_search": LiteratureSearch,
     "literature_read": LiteratureRead,
+    "literature_fulltext": LiteratureFulltext,
+    "literature_section": LiteratureSection,
     "integrate_feedback": Contribution,
     "read_evidence": ReadEvidence,
     "sample": Sample,
@@ -273,6 +284,8 @@ READ_ACTIONS = {
     "analyze",
     "literature_search",
     "literature_read",
+    "literature_fulltext",
+    "literature_section",
 }
 
 

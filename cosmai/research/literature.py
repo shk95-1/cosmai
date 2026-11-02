@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import UTC, datetime
 
 import httpx
@@ -10,15 +11,15 @@ import httpx
 from .state import Evidence
 
 ENDPOINT = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
-ACTIONS = {"literature_search", "literature_read"}
+ACTIONS = {"literature_search", "literature_read", "literature_fulltext", "literature_section"}
 
 
-def fetch(params: dict) -> dict:
+def fetch_bytes(url: str, params: dict | None = None) -> bytes:
     with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as client:
         with client.stream(
             "GET",
-            ENDPOINT,
-            params={**params, "format": "json"},
+            url,
+            params=params,
             headers={"User-Agent": "COSMAI-research/1.0 (bounded literature research)"},
         ) as response:
             response.raise_for_status()
@@ -27,11 +28,22 @@ def fetch(params: dict) -> dict:
                 data.extend(chunk)
                 if len(data) > 1_000_000:
                     raise ValueError("literature response exceeds 1 MB")
+    return bytes(data)
+
+
+def fetch(params: dict) -> dict:
     import json
 
+    data = fetch_bytes(ENDPOINT, {**params, "format": "json"})
     result = json.loads(data)
     result["response_sha256"] = hashlib.sha256(data).hexdigest()
     return result
+
+
+def fetch_xml(pmcid: str) -> bytes:
+    if not re.fullmatch(r"PMC[0-9]{1,12}", pmcid):
+        raise ValueError("invalid PMC identifier")
+    return fetch_bytes(ENDPOINT.removesuffix("search") + pmcid + "/fullTextXML")
 
 
 def execute(action: str, args: dict, records: list[dict], limit: int) -> dict:
@@ -39,14 +51,22 @@ def execute(action: str, args: dict, records: list[dict], limit: int) -> dict:
     used = sum(r["kind"] in ACTIONS for r in records)
     if used > limit:
         raise ValueError("literature request allowance exhausted; no request sent")
+    if action in {"literature_fulltext", "literature_section"}:
+        from . import fulltext
+
+        return fulltext.execute(action, args, records)
     if action == "literature_search":
         response = fetch({"query": args["query"], "resultType": "lite", "pageSize": args["limit"]})
         papers = [
-            {k: p.get(k) for k in ("id", "source", "title", "authorString", "pubYear", "doi")}
+            {
+                k: p.get(k)
+                for k in ("id", "source", "title", "authorString", "pubYear", "doi", "pmcid", "isOpenAccess")
+            }
             for p in response.get("resultList", {}).get("result", [])
             if p.get("source") in {"MED", "PMC"}
         ]
         return {
+            "network_requests": 1,
             "papers": papers,
             "hit_count": response.get("hitCount"),
             "response_sha256": response["response_sha256"],
@@ -70,7 +90,11 @@ def execute(action: str, args: dict, records: list[dict], limit: int) -> dict:
             article = result.get("article", {})
             if (article.get("source"), article.get("id")) == key:
                 return {
-                    k: result[k] for k in ("evidence", "article", "response_sha256", "abstract_characters")
+                    **{
+                        k: result[k]
+                        for k in ("evidence", "article", "response_sha256", "abstract_characters")
+                    },
+                    "network_requests": 0,
                 }
     response = fetch({"query": f"EXT_ID:{key[1]} AND SRC:{key[0]}", "resultType": "core", "pageSize": 1})
     papers = response.get("resultList", {}).get("result", [])
@@ -95,6 +119,7 @@ def execute(action: str, args: dict, records: list[dict], limit: int) -> dict:
         ],
     ).frozen()
     return {
+        "network_requests": 1,
         "evidence": [evidence],
         "article": {
             k: paper.get(k)

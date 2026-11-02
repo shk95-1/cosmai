@@ -7,6 +7,8 @@ import time
 from functools import partial
 from uuid import uuid4
 
+from . import literature
+from .fulltext import context_result
 from .participation import integrate, required_decisions
 from .state import (
     ACTIONS,
@@ -153,7 +155,7 @@ class Runner:
                     "execution_id": a["id"],
                     "action": a["kind"],
                     "status": a["status"],
-                    "result": a["result"],
+                    "result": context_result(a["kind"], a["result"]),
                     "input_revision": a["observed_revision"],
                 }
                 for a in actions
@@ -168,6 +170,10 @@ class Runner:
             },
         }
         context["remaining_resources"]["seconds"] = self.store.remaining_seconds(sid)
+        if self.source.literature_limit:
+            context["remaining_resources"]["literature_actions"] = max(
+                0, self.source.literature_limit - sum(a["kind"] in literature.ACTIONS for a in actions)
+            )
         if len(json.dumps(context)) > 150_000:
             raise ValueError("context_limit; narrow evidence pack or implement indexed context retrieval")
         return context

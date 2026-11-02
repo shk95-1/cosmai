@@ -108,6 +108,39 @@ the conservative request quota. Each action sends at most one HTTP request; resp
 manufacturing feasibility, consumer demand or clinical generalization. No-result/access failures
 cannot establish absence. Official interface: https://europepmc.org/RestfulWebService .
 
+Fulltext access additionally requires `"fulltext": true` in that literature configuration. Existing
+abstract-only profiles retain their capabilities; changing the configuration changes its pinned hash.
+Search results expose `pmcid` and `isOpenAccess`. `literature_fulltext` accepts only a PMC identifier
+discovered in this session and flagged open access; it uses the fixed
+`https://www.ebi.ac.uk/europepmc/webservices/rest/<PMCID>/fullTextXML` endpoint with the same response,
+timeout, redirect and retry bounds. Invalid/returned-mismatched article IDs, non-UTF-8 or malformed
+XML, and DTD/entity declarations fail. Fulltext failures are access limits, not negative research.
+
+The action stores original XML, response SHA-256, capture time, discovered article metadata and a
+capture hash in its durable result. It exposes a stable section index. Body/back text is extracted
+in document order with original Unicode text-node characters and no inserted whitespace. Tables
+also have separately indexed XML serialization preserving cells, headers and spanning attributes;
+linearized text alone cannot establish their relationships. Each representation is split into
+explicit chunks of at most 8000 characters, with all chunks indexed by XML response hash and offsets.
+No section is silently truncated. Figure images and supplementary files are not supported.
+
+`literature_section` selects a captured execution and exact section ID. Code verifies the capture,
+XML response hash and recomputed index before extracting evidence; changed/fabricated references
+fail. Evidence retains capture time and links to its original article, capture hash and section
+offsets. Repeated fulltext requests reuse the original capture. All four literature actions,
+including cached fulltext and local section reads, conservatively consume the configured literature
+allowance as well as their normal executor reservations; a section read sends no HTTP request.
+The worker sees the remaining literature-action allowance. Successful results distinguish actual
+network requests from local cache/section reads; failed or uncertain attempts remain conservative
+reservations rather than a claim of known network usage.
+
+Manager context contains the full section index and explicit instructions for reading it instead of
+the raw XML document. Selected evidence and other observations retain their existing visibility;
+the full XML remains in the durable action artifact. The 150,000-character context and 2 MB result
+bounds are unchanged, including after restart; overly large indexes or selected evidence stop
+explicitly. Exact extracted citations do not prove semantic support, formulation equivalence,
+manufacturing feasibility, consumer demand or independent replication.
+
 Codex CLI's documented `exec` interface uses ChatGPT authentication, JSON-schema output, an isolated
 temporary working directory, ignored user configuration, read-only sandbox, disabled shell/apply-patch/
 multi-agent/web tools and bounded execution. Returned tool executions fail validation. Claude Code's
