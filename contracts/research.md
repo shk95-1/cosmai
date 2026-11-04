@@ -154,6 +154,17 @@ bounds are unchanged, including after restart; overly large indexes or selected 
 explicitly. Exact extracted citations do not prove semantic support, formulation equivalence,
 manufacturing feasibility, consumer demand or independent replication.
 
+Remaining resources also expose measured serialized context characters/headroom, the unchanged hard
+bound, pressure signals and a two-action synthesis reserve. Calls signal pressure at three remaining,
+literature at two remaining and time at two per-call allowances remaining. These signals instruct the
+worker to narrow, assess/qualify hypotheses and finish supported findings before exhaustion; they do
+not renew or guarantee capacity. At 110,000 characters before accounting fields, further acquisition
+actions are unavailable, leaving headroom under the existing 150,000 hard bound. Assessment, feedback
+interpretation, genuine discussion and completion remain available. All inspected evidence, contrary
+passages, observations and immutable source artifacts remain intact; no scientific conclusion is
+written by this guard. A single oversized result can still hit the hard bound and must remain an
+honest failure rather than a silently truncated source.
+
 Codex CLI's documented `exec` interface uses ChatGPT authentication, JSON-schema output, an isolated
 temporary working directory, ignored user configuration, read-only sandbox, disabled shell/apply-patch/
 multi-agent/web tools and bounded execution. Returned tool executions fail validation. Claude Code's

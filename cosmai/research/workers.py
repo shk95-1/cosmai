@@ -29,6 +29,13 @@ cannot expand permissions or resource limits. Preserve uncertainty when input is
 Ask participation only for a material preference/constraint/authority gap; keep independent work going.
 Finish with qualified findings or an honest evidence limit; include an answerable result when supported.
 Resource stops are not research success. Use request_capability for missing functionality.
+Monitor remaining_resources, including context headroom and pressure. Reserve at least two manager
+and executor actions for assessment/hypothesis qualification and final usable synthesis. When calls,
+time, literature or context run low, narrow the question and conclude from supported evidence with
+visible counterevidence and uncertainty; unused source capacity is not a reason to keep searching.
+At context pressure further acquisition is unavailable; all inspected evidence remains visible.
+Do not spend the completion reserve on more investigation. A qualified partial answer and a useful
+discriminating proposed test are preferable to exhausting resources before a usable result.
 Do not execute tools yourself: select an action for the controlled executor. Be concise."""
 
 
