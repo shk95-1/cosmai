@@ -125,7 +125,13 @@ Search results expose `pmcid` and `isOpenAccess`. `literature_fulltext` accepts 
 discovered in this session and flagged open access; it uses the fixed
 `https://www.ebi.ac.uk/europepmc/webservices/rest/<PMCID>/fullTextXML` endpoint with the same response,
 timeout, redirect and retry bounds. Invalid/returned-mismatched article IDs, non-UTF-8 or malformed
-XML, and DTD/entity declarations fail. Fulltext failures are access limits, not negative research.
+XML, internal DTD subsets and entity declarations fail. Ordinary document declarations are accepted
+without loading their external DTD; external entity resolution and parameter-entity parsing are disabled.
+Fulltext failures are access limits, not negative research. Bounded UTF-8 XML rejected at parsing or
+article validation remains a hashed original execution artifact through the failed-action path, with
+its reservation/failure counted and no accepted evidence/index. Context exposes the rejection and
+capture metadata without dumping rejected XML. A rejected capture exceeding the unchanged 2 MB
+artifact ceiling is explicitly reported unavailable rather than silently clipped.
 
 The action stores original XML, response SHA-256, capture time, discovered article metadata and a
 capture hash in its durable result. It exposes a stable section index. Body/back text is extracted
@@ -153,6 +159,17 @@ the full XML remains in the durable action artifact. The 150,000-character conte
 bounds are unchanged, including after restart; overly large indexes or selected evidence stop
 explicitly. Exact extracted citations do not prove semantic support, formulation equivalence,
 manufacturing feasibility, consumer demand or independent replication.
+
+Remaining resources also expose measured serialized context characters/headroom, the unchanged hard
+bound, pressure signals and a two-action synthesis reserve. Calls signal pressure at three remaining,
+literature at two remaining and time at two per-call allowances remaining. These signals instruct the
+worker to narrow, assess/qualify hypotheses and finish supported findings before exhaustion; they do
+not renew or guarantee capacity. At 110,000 characters before accounting fields, further acquisition
+actions are unavailable, leaving headroom under the existing 150,000 hard bound. Assessment, feedback
+interpretation, genuine discussion and completion remain available. All inspected evidence, contrary
+passages, observations and immutable source artifacts remain intact; no scientific conclusion is
+written by this guard. A single oversized result can still hit the hard bound and must remain an
+honest failure rather than a silently truncated source.
 
 Codex CLI's documented `exec` interface uses ChatGPT authentication, JSON-schema output, an isolated
 temporary working directory, ignored user configuration, read-only sandbox, disabled shell/apply-patch/

@@ -8,7 +8,7 @@ from functools import partial
 from uuid import uuid4
 
 from . import literature
-from .fulltext import context_result
+from .fulltext import CaptureFailure, context_result
 from .participation import integrate, required_decisions
 from .state import (
     ACTIONS,
@@ -174,6 +174,32 @@ class Runner:
             context["remaining_resources"]["literature_actions"] = max(
                 0, self.source.literature_limit - sum(a["kind"] in literature.ACTIONS for a in actions)
             )
+        resources = context["remaining_resources"]
+        pressure = []
+        if min(resources["manager_calls"], resources["tool_calls"]) <= 3:
+            pressure.append("calls")
+        if resources["seconds"] <= 2 * state["mission"]["limits"]["call_seconds"]:
+            pressure.append("time")
+        if resources.get("literature_actions", 12) <= 2:
+            pressure.append("literature")
+        if len(json.dumps(context)) >= 110_000:
+            pressure.append("context")
+            # Preserve the complete evidence, including contrary passages. Reserve headroom by
+            # closing further acquisition, not by selecting which science the worker may see.
+            context["available_actions"] = {
+                key: value for key, value in context["available_actions"].items() if key not in READ_ACTIONS
+            }
+        resources.update(
+            pressure=pressure,
+            synthesis_reserve_actions=2,
+            context_limit_characters=150_000,
+            context_characters=0,
+            context_remaining_characters=0,
+        )
+        # Include the accounting fields themselves in the measurement (integer widths settle).
+        for _ in range(4):
+            size = len(json.dumps(context))
+            resources.update(context_characters=size, context_remaining_characters=150_000 - size)
         if len(json.dumps(context)) > 150_000:
             raise ValueError("context_limit; narrow evidence pack or implement indexed context retrieval")
         return context
@@ -326,6 +352,7 @@ class Runner:
                             "error_class": type(exc).__name__,
                             "meaning": "action failed; not negative evidence",
                             "details": validation_error(exc),
+                            **(exc.artifact if isinstance(exc, CaptureFailure) else {}),
                         },
                         {"elapsed_seconds": time.monotonic() - started},
                         failure=True,

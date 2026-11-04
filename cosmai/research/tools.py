@@ -208,9 +208,17 @@ def _tool_child(pipe, source, action, args, records):
             raise ValueError("tool result exceeds artifact limit")
         pipe.send((True, result))
     except Exception as exc:
+        from .fulltext import CaptureFailure
         from .runner import validation_error
 
-        pipe.send((False, validation_error(exc)))
+        if isinstance(exc, CaptureFailure):
+            payload = {"details": validation_error(exc), "artifact": exc.artifact}
+            if len(json.dumps(payload)) <= 2_000_000:
+                pipe.send((False, payload))
+            else:
+                pipe.send((False, "rejected capture exceeds artifact limit; body unavailable"))
+        else:
+            pipe.send((False, validation_error(exc)))
     finally:
         pipe.close()
 
@@ -229,6 +237,10 @@ def bounded_read(source, action, args, records, timeout):
             raise TimeoutError("read procedure exceeded its allowance")
         ok, value = parent.recv()
         if not ok:
+            if isinstance(value, dict) and "artifact" in value:
+                from .fulltext import CaptureFailure
+
+                raise CaptureFailure(value["details"], value["artifact"])
             raise ValueError(str(value))
         return value
     finally:
