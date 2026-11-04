@@ -8,7 +8,7 @@ from functools import partial
 from uuid import uuid4
 
 from . import literature
-from .fulltext import context_result
+from .fulltext import CaptureFailure, context_result
 from .participation import integrate, required_decisions
 from .state import (
     ACTIONS,
@@ -352,6 +352,7 @@ class Runner:
                             "error_class": type(exc).__name__,
                             "meaning": "action failed; not negative evidence",
                             "details": validation_error(exc),
+                            **(exc.artifact if isinstance(exc, CaptureFailure) else {}),
                         },
                         {"elapsed_seconds": time.monotonic() - started},
                         failure=True,

@@ -5,18 +5,45 @@ from __future__ import annotations
 import hashlib
 import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
+from xml.parsers import expat
 
 from .state import Evidence, fingerprint
 
 
+class CaptureFailure(ValueError):
+    """A rejected source is still an immutable, inspectable execution artifact."""
+
+    def __init__(self, message, artifact):
+        super().__init__(message)
+        self.artifact = artifact
+
+
+def xml_root(xml):
+    # Accept ordinary JATS document declarations without fetching their DTD. Reject internal
+    # subsets/entities before ElementTree can expand them; neither parser resolves external data.
+    parser = expat.ParserCreate()
+    parser.SetParamEntityParsing(expat.XML_PARAM_ENTITY_PARSING_NEVER)
+
+    def doctype(name, system_id, public_id, internal_subset):
+        if internal_subset:
+            raise ValueError("XML internal DTD subsets are unsupported")
+
+    def reject_entity(*args):
+        raise ValueError("XML entity declarations/resolution are unsupported")
+
+    parser.StartDoctypeDeclHandler = doctype
+    parser.EntityDeclHandler = reject_entity
+    parser.ExternalEntityRefHandler = reject_entity
+    try:
+        parser.Parse(xml, True)
+        return ET.fromstring(xml)
+    except (expat.ExpatError, ET.ParseError) as exc:
+        raise ValueError("invalid fulltext XML") from exc
+
+
 def sections(document):
     xml = document["xml"]
-    if "<!DOCTYPE" in xml or "<!ENTITY" in xml:
-        raise ValueError("XML DTD/entity declarations are unsupported")
-    try:
-        root = ET.fromstring(xml)
-    except ET.ParseError as exc:
-        raise ValueError("invalid fulltext XML") from exc
+    root = xml_root(xml)
     identifiers = {
         (n.text or "") if (n.text or "").startswith("PMC") else "PMC" + (n.text or "")
         for n in root.findall("./front/article-meta/article-id")
@@ -154,11 +181,18 @@ def execute(action, args, records):
         "captured_at": datetime.now(UTC).isoformat(),
         "article": eligible[0],
     }
-    return {
+    artifact = {
         "network_requests": 1,
         "document": document,
         "document_sha256": fingerprint(document),
-        "sections": index(sections(document)),
+    }
+    try:
+        parts = sections(document)
+    except ValueError as exc:
+        raise CaptureFailure(str(exc), artifact) from exc
+    return {
+        **artifact,
+        "sections": index(parts),
         "limitations": [
             "Index only: select literature_section to inspect content before making claims",
             "Body/back text indexed in original order; tables also indexed as structural XML fragments",
@@ -175,8 +209,15 @@ def context_result(action, result, evidence=None):
     if action == "literature_fulltext" and "document" in projected:
         projected.pop("document")
         projected["document_access"] = (
-            "Original XML is retained in this execution artifact. Use literature_section "
-            "with this execution_id as fulltext_action and a section_id from sections to read it."
+            (
+                "Rejected original XML is retained in this execution artifact; no section index or "
+                "research evidence was accepted. The access failure is not negative evidence."
+            )
+            if "sections" not in projected
+            else (
+                "Original XML is retained in this execution artifact. Use literature_section "
+                "with this execution_id as fulltext_action and a section_id from sections to read it."
+            )
         )
     observed = projected.get("evidence")
     if observed and evidence is not None and all(evidence.get(e["id"]) == e for e in observed):

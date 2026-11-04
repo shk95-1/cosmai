@@ -1434,3 +1434,51 @@ def test_call_and_source_pressure_are_visible_before_exhaustion(source):
     assert resources["synthesis_reserve_actions"] == 2
     assert set(resources["pressure"]) == {"calls", "time", "literature"}
     assert state["usage"]["manager_calls"] == 10
+
+
+def test_fulltext_accepts_external_doctype_without_resolution(monkeypatch):
+    from cosmai.research import literature
+    from cosmai.research.fulltext import checked_sections
+
+    xml = b'<!DOCTYPE article SYSTEM "https://invalid.example/jats.dtd">' + fulltext_xml()
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: xml)
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    captured = src.execute("literature_fulltext", {"pmcid": "PMC123"}, fulltext_records())
+    assert captured["document"]["xml"].encode() == xml
+    assert "Original method" in checked_sections(captured)[0]["passage"]
+
+
+@pytest.mark.postgres
+def test_rejected_fulltext_survives_bounded_failure_and_restart(store, monkeypatch):
+    import hashlib
+    import json
+
+    from cosmai.research import literature
+
+    xml = b'<!DOCTYPE article [<!ENTITY x SYSTEM "file:///unavailable">]>' + fulltext_xml()
+    monkeypatch.setattr(literature, "fetch_xml", lambda _: xml)
+    monkeypatch.setattr(
+        literature,
+        "fetch",
+        lambda _: {
+            "resultList": {"result": fulltext_records()[0]["result"]["papers"]},
+            "response_sha256": "controlled",
+        },
+    )
+    src = EvidenceSource(profile="public", bundle={"literature": {"max_requests": 12, "fulltext": True}})
+    sid = store.create(Mission(objective="Preserve failed source capture", scope="controlled"))
+    worker = ScriptedWorker(
+        ("literature_search", {"query": "controlled"}), ("literature_fulltext", {"pmcid": "PMC123"})
+    )
+    row = Runner(store, src, worker).run(sid, steps=2)
+    assert row["state"]["usage"]["failures"] == 1
+    assert row["state"]["usage"]["tool_calls"] == 2
+    assert row["state"]["evidence"] == {}
+    failed = next(a for a in Store(store.url).actions(sid) if a["kind"] == "literature_fulltext")
+    assert failed["status"] == "failed"
+    assert failed["result"]["document"]["xml"].encode() == xml
+    assert failed["result"]["document"]["response_sha256"] == hashlib.sha256(xml).hexdigest()
+    context = Runner(Store(store.url), src, None).context(sid, "restart")
+    assert context["remaining_resources"]["literature_actions"] == 10
+    assert "file:///unavailable" not in json.dumps(context)
+    assert "rejected" in context["observations"][-1]["result"]["document_access"].lower()

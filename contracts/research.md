@@ -125,7 +125,13 @@ Search results expose `pmcid` and `isOpenAccess`. `literature_fulltext` accepts 
 discovered in this session and flagged open access; it uses the fixed
 `https://www.ebi.ac.uk/europepmc/webservices/rest/<PMCID>/fullTextXML` endpoint with the same response,
 timeout, redirect and retry bounds. Invalid/returned-mismatched article IDs, non-UTF-8 or malformed
-XML, and DTD/entity declarations fail. Fulltext failures are access limits, not negative research.
+XML, internal DTD subsets and entity declarations fail. Ordinary document declarations are accepted
+without loading their external DTD; external entity resolution and parameter-entity parsing are disabled.
+Fulltext failures are access limits, not negative research. Bounded UTF-8 XML rejected at parsing or
+article validation remains a hashed original execution artifact through the failed-action path, with
+its reservation/failure counted and no accepted evidence/index. Context exposes the rejection and
+capture metadata without dumping rejected XML. A rejected capture exceeding the unchanged 2 MB
+artifact ceiling is explicitly reported unavailable rather than silently clipped.
 
 The action stores original XML, response SHA-256, capture time, discovered article metadata and a
 capture hash in its durable result. It exposes a stable section index. Body/back text is extracted
